@@ -13,7 +13,7 @@ if readme_file.exists():
 setup(
     name="mdb-runtime",
     version="0.1.5",
-    description="MongoDB Multi-Tenant Experiment Runtime Engine",
+    description="MongoDB Multi-Tenant Runtime Engine",
     long_description=long_description,
     long_description_content_type="text/markdown",
     author="Your Name",

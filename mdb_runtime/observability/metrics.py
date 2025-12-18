@@ -64,7 +64,7 @@ class MetricsCollector:
     Centralized metrics collector for MDB_RUNTIME.
     
     Collects and aggregates metrics for:
-    - Engine operations (initialization, experiment registration)
+    - Engine operations (initialization, app registration)
     - Database operations (queries, writes)
     - Index operations (creation, updates)
     - Performance metrics (latency, throughput)
@@ -91,7 +91,7 @@ class MetricsCollector:
             operation_name: Name of the operation (e.g., "engine.initialize")
             duration_ms: Duration in milliseconds
             success: Whether the operation succeeded
-            **tags: Additional tags for filtering (experiment_slug, collection_name, etc.)
+            **tags: Additional tags for filtering (app_slug, collection_name, etc.)
         """
         # Create a key that includes tags for more granular metrics
         key = operation_name

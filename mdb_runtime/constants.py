@@ -56,9 +56,9 @@ DEFAULT_MAX_IDLE_TIME_MS: Final[int] = 45000
 MAX_COLLECTION_NAME_LENGTH: Final[int] = 255
 """Maximum length for MongoDB collection names."""
 
-# Experiment slug constraints
-MAX_EXPERIMENT_SLUG_LENGTH: Final[int] = 100
-"""Maximum length for experiment slugs."""
+# App slug constraints
+MAX_APP_SLUG_LENGTH: Final[int] = 100
+"""Maximum length for app slugs."""
 
 # TTL index constraints
 MIN_TTL_SECONDS: Final[int] = 1
@@ -117,19 +117,19 @@ SUPPORTED_INDEX_TYPES: Final[tuple[str, ...]] = (
 )
 
 # ============================================================================
-# EXPERIMENT STATUS CONSTANTS
+# APP STATUS CONSTANTS
 # ============================================================================
 
-EXPERIMENT_STATUS_ACTIVE: Final[str] = "active"
-EXPERIMENT_STATUS_DRAFT: Final[str] = "draft"
-EXPERIMENT_STATUS_ARCHIVED: Final[str] = "archived"
-EXPERIMENT_STATUS_INACTIVE: Final[str] = "inactive"
+APP_STATUS_ACTIVE: Final[str] = "active"
+APP_STATUS_DRAFT: Final[str] = "draft"
+APP_STATUS_ARCHIVED: Final[str] = "archived"
+APP_STATUS_INACTIVE: Final[str] = "inactive"
 
-# Supported experiment statuses
-SUPPORTED_EXPERIMENT_STATUSES: Final[tuple[str, ...]] = (
-    EXPERIMENT_STATUS_ACTIVE,
-    EXPERIMENT_STATUS_DRAFT,
-    EXPERIMENT_STATUS_ARCHIVED,
-    EXPERIMENT_STATUS_INACTIVE,
+# Supported app statuses
+SUPPORTED_APP_STATUSES: Final[tuple[str, ...]] = (
+    APP_STATUS_ACTIVE,
+    APP_STATUS_DRAFT,
+    APP_STATUS_ARCHIVED,
+    APP_STATUS_INACTIVE,
 )
 

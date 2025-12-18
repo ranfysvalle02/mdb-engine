@@ -1,6 +1,6 @@
 # MDB_RUNTIME Package Documentation
 
-MongoDB Multi-Tenant Experiment Runtime Engine - Package-level documentation.
+MongoDB Multi-Tenant Runtime Engine - Package-level documentation.
 
 ## Package Overview
 
@@ -12,7 +12,7 @@ MDB_RUNTIME provides a complete runtime engine for building multi-tenant MongoDB
 
 **RuntimeEngine** (`core/engine.py`)
 - Central orchestration for all runtime components
-- Manages database connections, experiment registration, and lifecycle
+- Manages database connections, app registration, and lifecycle
 - Provides health checks and metrics
 
 **Manifest System** (`core/manifest.py`)
@@ -23,8 +23,8 @@ MDB_RUNTIME provides a complete runtime engine for building multi-tenant MongoDB
 ### `database` - Database Layer
 
 **ScopedMongoWrapper** (`database/scoped_wrapper.py`)
-- Automatic experiment isolation
-- Transparent query filtering by `experiment_id`
+- Automatic app isolation
+- Transparent query filtering by `app_id`
 - MongoDB-style API with automatic scoping
 
 **Connection Management** (`database/connection.py`)
@@ -61,7 +61,7 @@ MDB_RUNTIME provides a complete runtime engine for building multi-tenant MongoDB
 
 **Logging** (`observability/logging.py`)
 - Structured logging with correlation IDs
-- Experiment context tracking
+- App context tracking
 - Contextual logger adapter
 
 **Health Checks** (`observability/health.py`)
@@ -73,7 +73,7 @@ MDB_RUNTIME provides a complete runtime engine for building multi-tenant MongoDB
 
 **Validation** (`utils/validation.py`)
 - Collection name validation
-- Experiment slug validation
+- App slug validation
 - MongoDB URI validation
 
 **Constants** (`constants.py`)
@@ -93,7 +93,7 @@ engine = RuntimeEngine(
 )
 
 await engine.initialize()
-db = engine.get_scoped_db("my_experiment")
+db = engine.get_scoped_db("my_app")
 ```
 
 ### Manifest Validation
@@ -110,8 +110,8 @@ is_valid, error, paths = validator.validate(manifest)
 ```python
 from mdb_runtime.database import ScopedMongoWrapper
 
-# All queries automatically scoped to experiment
-db = engine.get_scoped_db("my_experiment")
+# All queries automatically scoped to app
+db = engine.get_scoped_db("my_app")
 docs = await db.collection.find({"status": "active"}).to_list(length=10)
 ```
 

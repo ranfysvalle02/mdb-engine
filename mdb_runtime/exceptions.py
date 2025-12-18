@@ -16,7 +16,7 @@ class RuntimeEngineError(RuntimeError):
     
     Attributes:
         message: Error message
-        context: Optional dictionary with additional context (experiment_slug, 
+        context: Optional dictionary with additional context (app_slug, 
                  collection_name, etc.)
     """
     
@@ -94,7 +94,7 @@ class ManifestValidationError(RuntimeEngineError):
     Attributes:
         message: Error message
         error_paths: List of JSON paths with validation errors
-        manifest_slug: Experiment slug from manifest (if available)
+        manifest_slug: App slug from manifest (if available)
         schema_version: Schema version used for validation (if available)
         context: Additional context information
     """
@@ -113,7 +113,7 @@ class ManifestValidationError(RuntimeEngineError):
         Args:
             message: Error message
             error_paths: List of JSON paths with validation errors
-            manifest_slug: Experiment slug from manifest (if available)
+            manifest_slug: App slug from manifest (if available)
             schema_version: Schema version used for validation (if available)
             context: Additional context information
         """

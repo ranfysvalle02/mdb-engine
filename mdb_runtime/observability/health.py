@@ -170,8 +170,8 @@ async def check_engine_health(engine: Optional[Any]) -> HealthCheckResult:
             message="RuntimeEngine not initialized",
         )
     
-    # Check registered experiments
-    experiment_count = len(engine._experiments)
+    # Check registered apps
+    app_count = len(engine._apps)
     
     return HealthCheckResult(
         name="engine",
@@ -179,7 +179,7 @@ async def check_engine_health(engine: Optional[Any]) -> HealthCheckResult:
         message="RuntimeEngine is healthy",
         details={
             "initialized": True,
-            "experiment_count": experiment_count,
+            "app_count": app_count,
         },
     )
 

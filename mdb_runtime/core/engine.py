@@ -37,7 +37,7 @@ from ..constants import (
 from ..observability import (
     record_operation,
     get_logger as get_contextual_logger,
-    set_experiment_context,
+    set_app_context,
     check_mongodb_health,
     check_engine_health,
     check_pool_health,
@@ -54,12 +54,12 @@ contextual_logger = get_contextual_logger(__name__)
 
 class RuntimeEngine:
     """
-    Core runtime engine for managing multi-tenant experiments.
+    Core runtime engine for managing multi-app applications.
     
     This class orchestrates all runtime components including:
     - Database connections and scoping
     - Manifest validation and parsing
-    - Experiment registration
+    - App registration
     - Index management
     - Authentication/authorization setup
     """
@@ -68,7 +68,7 @@ class RuntimeEngine:
         self,
         mongo_uri: str,
         db_name: str,
-        experiments_dir: Optional[Path] = None,
+        manifests_dir: Optional[Path] = None,
         authz_provider: Optional["AuthorizationProvider"] = None,
         max_pool_size: int = DEFAULT_MAX_POOL_SIZE,
         min_pool_size: int = DEFAULT_MIN_POOL_SIZE,
@@ -79,14 +79,14 @@ class RuntimeEngine:
         Args:
             mongo_uri: MongoDB connection URI
             db_name: Database name
-            experiments_dir: Path to experiments directory (optional)
+            manifests_dir: Path to manifests directory (optional)
             authz_provider: Authorization provider instance (optional, can be set later)
             max_pool_size: Maximum MongoDB connection pool size
             min_pool_size: Minimum MongoDB connection pool size
         """
         self.mongo_uri = mongo_uri
         self.db_name = db_name
-        self.experiments_dir = experiments_dir
+        self.manifests_dir = manifests_dir
         self.authz_provider = authz_provider
         self.max_pool_size = max_pool_size
         self.min_pool_size = min_pool_size
@@ -95,7 +95,7 @@ class RuntimeEngine:
         self._mongo_client: Optional[AsyncIOMotorClient] = None
         self._mongo_db: Optional[AsyncIOMotorDatabase] = None
         self._initialized: bool = False
-        self._experiments: Dict[str, Dict[str, Any]] = {}
+        self._apps: Dict[str, Dict[str, Any]] = {}
         
         # Validators
         self.manifest_validator = ManifestValidator()
@@ -243,26 +243,26 @@ class RuntimeEngine:
     
     def get_scoped_db(
         self,
-        experiment_slug: str,
+        app_slug: str,
         read_scopes: Optional[List[str]] = None,
         write_scope: Optional[str] = None,
         auto_index: bool = True
     ) -> ScopedMongoWrapper:
         """
-        Get a scoped database wrapper for an experiment.
+        Get a scoped database wrapper for an app.
         
-        The scoped database wrapper automatically filters queries by experiment_id
-        to ensure data isolation between experiments. All read operations are
+        The scoped database wrapper automatically filters queries by app_id
+        to ensure data isolation between apps. All read operations are
         scoped to the specified read_scopes, and all write operations are
         tagged with the write_scope.
         
         Args:
-            experiment_slug: Experiment slug (used as default for both read and write scopes)
-            read_scopes: List of experiment slugs to read from. If None, defaults to
-                [experiment_slug]. Allows cross-experiment data access when needed.
-            write_scope: Experiment slug to write to. If None, defaults to experiment_slug.
+            app_slug: App slug (used as default for both read and write scopes)
+            read_scopes: List of app slugs to read from. If None, defaults to
+                [app_slug]. Allows cross-app data access when needed.
+            write_scope: App slug to write to. If None, defaults to app_slug.
                 All documents inserted through this wrapper will have this as their
-                experiment_id.
+                app_id.
             auto_index: Whether to enable automatic index creation based on query
                 patterns. Defaults to True. Set to False to disable automatic indexing.
         
@@ -273,17 +273,17 @@ class RuntimeEngine:
             RuntimeError: If engine is not initialized.
         
         Example:
-            >>> db = engine.get_scoped_db("my_experiment")
-            >>> # All queries are automatically scoped to "my_experiment"
+            >>> db = engine.get_scoped_db("my_app")
+            >>> # All queries are automatically scoped to "my_app"
             >>> doc = await db.my_collection.find_one({"name": "test"})
         """
         if not self._initialized:
             raise RuntimeError("RuntimeEngine not initialized. Call initialize() first.")
         
         if read_scopes is None:
-            read_scopes = [experiment_slug]
+            read_scopes = [app_slug]
         if write_scope is None:
-            write_scope = experiment_slug
+            write_scope = app_slug
         
         return ScopedMongoWrapper(
             real_db=self._mongo_db,
@@ -347,19 +347,19 @@ class RuntimeEngine:
         """
         return await self.manifest_parser.load_from_file(path, validate=True)
     
-    async def register_experiment(
+    async def register_app(
         self,
         manifest: Dict[str, Any],
         create_indexes: bool = True
     ) -> bool:
         """
-        Register an experiment from its manifest.
+        Register an app from its manifest.
         
-        This method validates the manifest, stores the experiment configuration,
+        This method validates the manifest, stores the app configuration,
         and optionally creates managed indexes defined in the manifest.
         
         Args:
-            manifest: Validated manifest dictionary containing experiment
+            manifest: Validated manifest dictionary containing app
                 configuration. Must include 'slug' field.
             create_indexes: Whether to create managed indexes defined in
                 the manifest. Defaults to True.
@@ -380,13 +380,13 @@ class RuntimeEngine:
         slug: Optional[str] = manifest.get("slug")
         if not slug:
             contextual_logger.error(
-                "Cannot register experiment: missing 'slug' in manifest",
-                extra={"operation": "register_experiment"}
+                "Cannot register app: missing 'slug' in manifest",
+                extra={"operation": "register_app"}
             )
             return False
         
-        # Set experiment context for logging
-        set_experiment_context(experiment_slug=slug)
+        # Set app context for logging
+        set_app_context(app_slug=slug)
         
         try:
             # Validate manifest
@@ -406,38 +406,38 @@ class RuntimeEngine:
                 )
                 return False
             
-            # Store experiment config
-            self._experiments[slug] = manifest
+            # Store app config
+            self._apps[slug] = manifest
             
             # Create indexes if requested
             if create_indexes and "managed_indexes" in manifest:
-                await self._create_experiment_indexes(slug, manifest)
+                await self._create_app_indexes(slug, manifest)
             
             duration_ms = (time.time() - start_time) * 1000
-            record_operation("engine.register_experiment", duration_ms, success=True, experiment_slug=slug)
+            record_operation("engine.register_app", duration_ms, success=True, app_slug=slug)
             contextual_logger.info(
-                "Experiment registered successfully",
+                "App registered successfully",
                 extra={
-                    "experiment_slug": slug,
+                    "app_slug": slug,
                     "create_indexes": create_indexes,
                     "duration_ms": round(duration_ms, 2),
                 }
             )
             return True
         finally:
-            clear_experiment_context()
+            clear_app_context()
     
-    async def _create_experiment_indexes(
+    async def _create_app_indexes(
         self,
         slug: str,
         manifest: Dict[str, Any]
     ) -> None:
         """
-        Create managed indexes for an experiment.
+        Create managed indexes for an app.
         
         Args:
-            slug: Experiment slug
-            manifest: Experiment manifest
+            slug: App slug
+            manifest: App manifest
         """
         try:
             from ..indexes import validate_managed_indexes
@@ -493,16 +493,16 @@ class RuntimeEngine:
                     exc_info=True
                 )
     
-    async def reload_experiments(self) -> int:
+    async def reload_apps(self) -> int:
         """
-        Reload all active experiments from the database.
+        Reload all active apps from the database.
         
-        This method fetches all experiments with status "active" from the
-        experiments_config collection and registers them. Existing
-        experiment registrations are cleared before reloading.
+        This method fetches all apps with status "active" from the
+        apps_config collection and registers them. Existing
+        app registrations are cleared before reloading.
         
         Returns:
-            Number of experiments successfully registered.
+            Number of apps successfully registered.
             Returns 0 if an error occurs during reload.
         
         Raises:
@@ -511,52 +511,52 @@ class RuntimeEngine:
         if not self._initialized:
             raise RuntimeError("RuntimeEngine not initialized. Call initialize() first.")
         
-        logger.info("Reloading active experiments from database...")
+        logger.info("Reloading active apps from database...")
         
         try:
-            # Fetch active experiments
-            active_cfgs = await self._mongo_db.experiments_config.find(
+            # Fetch active apps
+            active_cfgs = await self._mongo_db.apps_config.find(
                 {"status": "active"}
             ).limit(500).to_list(None)
             
-            logger.info(f"Found {len(active_cfgs)} active experiment(s).")
+            logger.info(f"Found {len(active_cfgs)} active app(s).")
             
             # Clear existing registrations
-            self._experiments.clear()
+            self._apps.clear()
             
-            # Register each experiment
+            # Register each app
             registered_count = 0
             for cfg in active_cfgs:
-                success = await self.register_experiment(cfg, create_indexes=True)
+                success = await self.register_app(cfg, create_indexes=True)
                 if success:
                     registered_count += 1
             
-            logger.info(f"✔️ Experiment reload complete. {registered_count} experiment(s) registered.")
+            logger.info(f"✔️ App reload complete. {registered_count} app(s) registered.")
             return registered_count
         except Exception as e:
-            logger.error(f"❌ Error reloading experiments: {e}", exc_info=True)
+            logger.error(f"❌ Error reloading apps: {e}", exc_info=True)
             return 0
     
-    def get_experiment(self, slug: str) -> Optional[Dict[str, Any]]:
+    def get_app(self, slug: str) -> Optional[Dict[str, Any]]:
         """
-        Get experiment configuration by slug.
+        Get app configuration by slug.
         
         Args:
-            slug: Experiment slug
+            slug: App slug
         
         Returns:
-            Experiment manifest dict or None if not found
+            App manifest dict or None if not found
         """
-        return self._experiments.get(slug)
+        return self._apps.get(slug)
     
-    def list_experiments(self) -> List[str]:
+    def list_apps(self) -> List[str]:
         """
-        List all registered experiment slugs.
+        List all registered app slugs.
         
         Returns:
-            List of experiment slugs
+            List of app slugs
         """
-        return list(self._experiments.keys())
+        return list(self._apps.keys())
     
     async def shutdown(self) -> None:
         """
@@ -564,7 +564,7 @@ class RuntimeEngine:
         
         This method:
         1. Closes MongoDB connections
-        2. Clears experiment registrations
+        2. Clears app registrations
         3. Resets initialization state
         
         This method is idempotent - it's safe to call multiple times.
@@ -583,15 +583,15 @@ class RuntimeEngine:
             contextual_logger.info("MongoDB connection closed.")
         
         self._initialized = False
-        experiment_count = len(self._experiments)
-        self._experiments.clear()
+        app_count = len(self._apps)
+        self._apps.clear()
         
         duration_ms = (time.time() - start_time) * 1000
         record_operation("engine.shutdown", duration_ms, success=True)
         contextual_logger.info(
             "RuntimeEngine shutdown complete",
             extra={
-                "experiment_count": experiment_count,
+                "app_count": app_count,
                 "duration_ms": round(duration_ms, 2),
             }
         )

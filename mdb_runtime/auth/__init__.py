@@ -25,10 +25,10 @@ from .dependencies import (
     _validate_next_url,
 )
 from .sub_auth import (
-    get_experiment_sub_user,
-    create_experiment_session,
-    authenticate_experiment_user,
-    create_experiment_user,
+    get_app_sub_user,
+    create_app_session,
+    authenticate_app_user,
+    create_app_user,
     get_or_create_anonymous_user,
     ensure_demo_users_exist,
     get_or_create_demo_user_for_request,
@@ -63,10 +63,10 @@ __all__ = [
     "_validate_next_url",
     
     # Sub-authentication
-    "get_experiment_sub_user",
-    "create_experiment_session",
-    "authenticate_experiment_user",
-    "create_experiment_user",
+    "get_app_sub_user",
+    "create_app_session",
+    "authenticate_app_user",
+    "create_app_user",
     "get_or_create_anonymous_user",
     "ensure_demo_users_exist",
     "get_or_create_demo_user_for_request",

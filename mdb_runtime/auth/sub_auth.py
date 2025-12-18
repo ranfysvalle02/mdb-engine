@@ -1,9 +1,9 @@
 """
 Sub-Authentication Helper Module
 
-Provides utilities for experiment-specific authentication (sub-authentication).
+Provides utilities for app-specific authentication (sub-authentication).
 
-This module allows experiments to manage their own users and sessions
+This module allows apps to manage their own users and sessions
 separate from platform-level authentication, while maintaining integration
 with the platform's auth system.
 
@@ -27,47 +27,47 @@ logger = logging.getLogger(__name__)
 from .dependencies import SECRET_KEY
 
 
-async def get_experiment_sub_user(
+async def get_app_sub_user(
     request: Request,
     slug_id: str,
     db,
     config: Optional[Dict[str, Any]] = None,
     allow_demo_fallback: bool = False,
-    get_experiment_config_func: Optional[Callable[[Request, str, Dict], Awaitable[Dict]]] = None
+    get_app_config_func: Optional[Callable[[Request, str, Dict], Awaitable[Dict]]] = None
 ) -> Optional[Dict[str, Any]]:
     """
-    Get experiment-specific user from session cookie.
+    Get app-specific user from session cookie.
     
     This function handles sub-authentication by:
-    1. Checking for experiment-specific session cookie
+    1. Checking for app-specific session cookie
     2. Validating session token
-    3. Returning experiment user data if authenticated
+    3. Returning app user data if authenticated
     4. If allow_demo_fallback is True and no session, tries demo mode (for allow_demo_access)
     
     SECURITY: Demo mode is BLOCKED for authentication routes (login, register, auth).
     Demo users must remain trapped in demo mode - they cannot attempt to login as other users
     or register new accounts. This is a security restriction to prevent privilege escalation.
-    Demo users are marked with is_demo=True flag so experiments can detect and restrict them.
+    Demo users are marked with is_demo=True flag so apps can detect and restrict them.
     
     Args:
         request: FastAPI Request object
-        slug_id: Experiment slug
-        db: Experiment database wrapper (ScopedMongoWrapper or ExperimentDB)
-        config: Optional experiment config (if not provided, fetches from request)
+        slug_id: Tenant slug
+        db: Tenant database wrapper (ScopedMongoWrapper or AppDB)
+        config: Optional app config (if not provided, fetches from request)
         allow_demo_fallback: If True and no session found, try demo mode for seamless demo access
         (SECURITY: Only works on non-auth routes - demo users cannot access login/registration)
     
     Returns:
-        Dict with experiment user data (with is_demo=True flag if demo user), or None if not authenticated
+        Dict with app user data (with is_demo=True flag if demo user), or None if not authenticated
     """
-    # Get sub_auth config from experiment config
+    # Get sub_auth config from app config
     if config is None:
-        if not get_experiment_config_func:
+        if not get_app_config_func:
             raise ValueError(
-                "config or get_experiment_config_func must be provided. "
+                "config or get_app_config_func must be provided. "
                 "Provide either the config dict directly or a callable that returns it."
             )
-        config = await get_experiment_config_func(request, slug_id, {"sub_auth": 1})
+        config = await get_app_config_func(request, slug_id, {"sub_auth": 1})
     
     if not config:
         return None
@@ -84,7 +84,7 @@ async def get_experiment_sub_user(
     is_auth_route = any(pattern in request_path for pattern in auth_route_patterns)
     
     # Get session cookie name
-    session_cookie_name = sub_auth.get("session_cookie_name", "experiment_session")
+    session_cookie_name = sub_auth.get("session_cookie_name", "app_session")
     cookie_name = f"{session_cookie_name}_{slug_id}"
     
     # Get session token from cookie
@@ -101,13 +101,13 @@ async def get_experiment_sub_user(
         from .jwt import decode_jwt_token
         payload = decode_jwt_token(session_token, SECRET_KEY)
         
-        # Verify it's for this experiment
-        if payload.get("experiment_slug") != slug_id:
-            logger.warning(f"Session token for wrong experiment: expected {slug_id}, got {payload.get('experiment_slug')}")
+        # Verify it's for this app
+        if payload.get("app_slug") != slug_id:
+            logger.warning(f"Session token for wrong app: expected {slug_id}, got {payload.get('app_slug')}")
             return None
         
         # Get user ID from token
-        user_id = payload.get("experiment_user_id")
+        user_id = payload.get("app_user_id")
         if not user_id:
             return None
         
@@ -115,7 +115,7 @@ async def get_experiment_sub_user(
         collection_name = sub_auth.get("collection_name", "users")
         
         # Convert user_id to ObjectId only if it's a valid ObjectId string
-        # Some experiments use string IDs (like event_zero with usr_buyer) which aren't ObjectIds
+        # Some apps use string IDs (like event_zero with usr_buyer) which aren't ObjectIds
         from bson.objectid import ObjectId
         if isinstance(user_id, str):
             # Check if it's a valid ObjectId string (24 hex characters)
@@ -134,21 +134,21 @@ async def get_experiment_sub_user(
                 logger.warning(f"Invalid user_id format: {user_id}: {e}")
                 return None
         
-        # Fetch user from experiment-specific users collection
-        # Use getattr for attribute access (works with both ExperimentDB and ScopedMongoWrapper)
-        # ExperimentDB and ScopedMongoWrapper both support attribute access via getattr
+        # Fetch user from app-specific users collection
+        # Use getattr for attribute access (works with both AppDB and ScopedMongoWrapper)
+        # AppDB and ScopedMongoWrapper both support attribute access via getattr
         collection = getattr(db, collection_name)
         user = await collection.find_one({"_id": user_id})
         if not user:
-            logger.warning(f"Experiment user {user_id} not found in collection {collection_name}")
+            logger.warning(f"Tenant user {user_id} not found in collection {collection_name}")
             return None
         
-        # Add experiment user ID to user dict
-        user["experiment_user_id"] = str(user["_id"])
+        # Add app user ID to user dict
+        user["app_user_id"] = str(user["_id"])
         return user
         
     except jwt.ExpiredSignatureError:
-        logger.debug(f"Session token expired for experiment {slug_id}")
+        logger.debug(f"Session token expired for app {slug_id}")
         # SECURITY: If demo fallback enabled, try demo mode ONLY for non-auth routes
         # Demo users cannot access login/registration routes
         if allow_demo_fallback:
@@ -160,7 +160,7 @@ async def get_experiment_sub_user(
                 return await _try_demo_mode(request, slug_id, db, config)
         return None
     except jwt.InvalidTokenError as e:
-        logger.warning(f"Invalid session token for experiment {slug_id}: {e}")
+        logger.warning(f"Invalid session token for app {slug_id}: {e}")
         # SECURITY: If demo fallback enabled, try demo mode ONLY for non-auth routes
         # Demo users cannot access login/registration routes
         if allow_demo_fallback:
@@ -172,7 +172,7 @@ async def get_experiment_sub_user(
                 return await _try_demo_mode(request, slug_id, db, config)
         return None
     except Exception as e:
-        logger.error(f"Error getting experiment sub user: {e}", exc_info=True)
+        logger.error(f"Error getting app sub user: {e}", exc_info=True)
         # SECURITY: If demo fallback enabled, try demo mode ONLY for non-auth routes
         # Demo users cannot access login/registration routes
         if allow_demo_fallback:
@@ -199,9 +199,9 @@ async def _try_demo_mode(
     
     Args:
         request: FastAPI Request object
-        slug_id: Experiment slug
-        db: Experiment database wrapper
-        config: Experiment config (must contain sub_auth block)
+        slug_id: Tenant slug
+        db: Tenant database wrapper
+        config: Tenant config (must contain sub_auth block)
     
     Returns:
         Demo user dict if demo mode is enabled and demo user is available, None otherwise
@@ -244,7 +244,7 @@ async def _try_demo_mode(
         
         logger.info(
             f"Demo mode: Auto-authenticating user '{demo_user.get('email')}' "
-            f"for experiment '{slug_id}' (via intelligent demo auto-linking)"
+            f"for app '{slug_id}' (via intelligent demo auto-linking)"
         )
         
         # Mark in request state that this was demo mode (for potential session creation)
@@ -263,22 +263,22 @@ async def _try_demo_mode(
         return None
 
 
-async def create_experiment_session(
+async def create_app_session(
     request: Request,
     slug_id: str,
     user_id: str,
     config: Optional[Dict[str, Any]] = None,
     response: Optional[Response] = None,
-    get_experiment_config_func: Optional[Callable[[Request, str, Dict], Awaitable[Dict]]] = None
+    get_app_config_func: Optional[Callable[[Request, str, Dict], Awaitable[Dict]]] = None
 ) -> str:
     """
-    Create an experiment-specific session token and set cookie.
+    Create a app-specific session token and set cookie.
     
     Args:
         request: FastAPI Request object
-        slug_id: Experiment slug
-        user_id: Experiment user ID (from experiment's users collection)
-        config: Optional experiment config
+        slug_id: Tenant slug
+        user_id: Tenant user ID (from app's users collection)
+        config: Optional app config
         response: Optional Response object to set cookie on (creates new if None)
     
     Returns:
@@ -286,27 +286,27 @@ async def create_experiment_session(
     """
     # Get sub_auth config
     if config is None:
-        if not get_experiment_config_func:
+        if not get_app_config_func:
             raise ValueError(
-                "config or get_experiment_config_func must be provided. "
+                "config or get_app_config_func must be provided. "
                 "Provide either the config dict directly or a callable that returns it."
             )
-        config = await get_experiment_config_func(request, slug_id, {"sub_auth": 1})
+        config = await get_app_config_func(request, slug_id, {"sub_auth": 1})
     
     if not config:
-        raise ValueError(f"Experiment config not found for {slug_id}")
+        raise ValueError(f"Tenant config not found for {slug_id}")
     
     sub_auth = config.get("sub_auth", {})
     if not sub_auth.get("enabled", False):
-        raise ValueError(f"Sub-authentication not enabled for experiment {slug_id}")
+        raise ValueError(f"Sub-authentication not enabled for app {slug_id}")
     
     # Get session TTL
     session_ttl = sub_auth.get("session_ttl_seconds", 86400)
     
     # Create JWT payload
     payload = {
-        "experiment_slug": slug_id,
-        "experiment_user_id": str(user_id),
+        "app_slug": slug_id,
+        "app_user_id": str(user_id),
         "exp": datetime.utcnow() + timedelta(seconds=session_ttl),
         "iat": datetime.utcnow()
     }
@@ -328,7 +328,7 @@ async def create_experiment_session(
     
     # Set cookie if response provided
     if response:
-        session_cookie_name = sub_auth.get("session_cookie_name", "experiment_session")
+        session_cookie_name = sub_auth.get("session_cookie_name", "app_session")
         cookie_name = f"{session_cookie_name}_{slug_id}"
         
         # Determine secure cookie setting
@@ -346,7 +346,7 @@ async def create_experiment_session(
     return token
 
 
-async def authenticate_experiment_user(
+async def authenticate_app_user(
     db,
     email: str,
     password: str,
@@ -354,10 +354,10 @@ async def authenticate_experiment_user(
     collection_name: str = "users"
 ) -> Optional[Dict[str, Any]]:
     """
-    Authenticate a user against experiment-specific users collection.
+    Authenticate a user against app-specific users collection.
     
     Args:
-        db: Experiment database wrapper
+        db: Tenant database wrapper
         email: User email
         password: Plain text password
         store_id: Optional store ID filter (for store_factory multi-store scenario)
@@ -383,7 +383,7 @@ async def authenticate_experiment_user(
                 return None
         
         # Find user
-        # Use getattr to access collection (works with ScopedMongoWrapper and ExperimentDB)
+        # Use getattr to access collection (works with ScopedMongoWrapper and AppDB)
         collection = getattr(db, collection_name)
         user = await collection.find_one(query)
         if not user:
@@ -413,11 +413,11 @@ async def authenticate_experiment_user(
         return None
         
     except Exception as e:
-        logger.error(f"Error authenticating experiment user: {e}", exc_info=True)
+        logger.error(f"Error authenticating app user: {e}", exc_info=True)
         return None
 
 
-async def create_experiment_user(
+async def create_app_user(
     db,
     email: str,
     password: str,
@@ -427,10 +427,10 @@ async def create_experiment_user(
     hash_password: bool = True
 ) -> Optional[Dict[str, Any]]:
     """
-    Create a new user in experiment-specific users collection.
+    Create a new user in app-specific users collection.
     
     Args:
-        db: Experiment database wrapper
+        db: Tenant database wrapper
         email: User email
         password: Plain text password
         role: User role (default: "user")
@@ -464,7 +464,7 @@ async def create_experiment_user(
                 logger.warning(f"Invalid store_id format: {store_id}: {e}")
                 return None
         
-        # Use getattr for attribute access (works with both ExperimentDB and ScopedMongoWrapper)
+        # Use getattr for attribute access (works with both AppDB and ScopedMongoWrapper)
         collection = getattr(db, collection_name)
         existing = await collection.find_one(query)
         if existing:
@@ -492,16 +492,16 @@ async def create_experiment_user(
             user_doc["store_id"] = ObjectId(store_id)
         
         # Insert user
-        # Use getattr for attribute access (works with both ExperimentDB and ScopedMongoWrapper)
+        # Use getattr for attribute access (works with both AppDB and ScopedMongoWrapper)
         collection = getattr(db, collection_name)
         result = await collection.insert_one(user_doc)
         user_doc["_id"] = result.inserted_id
-        user_doc["experiment_user_id"] = str(result.inserted_id)
+        user_doc["app_user_id"] = str(result.inserted_id)
         
         return user_doc
         
     except Exception as e:
-        logger.error(f"Error creating experiment user: {e}", exc_info=True)
+        logger.error(f"Error creating app user: {e}", exc_info=True)
         return None
 
 
@@ -510,28 +510,28 @@ async def get_or_create_anonymous_user(
     slug_id: str,
     db,
     config: Optional[Dict[str, Any]] = None,
-    get_experiment_config_func: Optional[Callable[[Request, str, Dict], Awaitable[Dict]]] = None
+    get_app_config_func: Optional[Callable[[Request, str, Dict], Awaitable[Dict]]] = None
 ) -> Optional[Dict[str, Any]]:
     """
     Get or create an anonymous user for anonymous_session strategy.
     
     Args:
         request: FastAPI Request object
-        slug_id: Experiment slug
-        db: Experiment database wrapper
-        config: Optional experiment config
+        slug_id: Tenant slug
+        db: Tenant database wrapper
+        config: Optional app config
     
     Returns:
         Anonymous user dict
     """
     # Get sub_auth config
     if config is None:
-        if not get_experiment_config_func:
+        if not get_app_config_func:
             raise ValueError(
-                "config or get_experiment_config_func must be provided. "
+                "config or get_app_config_func must be provided. "
                 "Provide either the config dict directly or a callable that returns it."
             )
-        config = await get_experiment_config_func(request, slug_id, {"sub_auth": 1})
+        config = await get_app_config_func(request, slug_id, {"sub_auth": 1})
     
     if not config:
         return None
@@ -541,7 +541,7 @@ async def get_or_create_anonymous_user(
         return None
     
     # Get or create anonymous user ID from session
-    session_cookie_name = sub_auth.get("session_cookie_name", "experiment_session")
+    session_cookie_name = sub_auth.get("session_cookie_name", "app_session")
     cookie_name = f"{session_cookie_name}_{slug_id}"
     
     anonymous_id = request.cookies.get(cookie_name)
@@ -564,13 +564,13 @@ async def get_or_create_anonymous_user(
             "is_anonymous": True,
             "date_created": datetime.datetime.utcnow()
         }
-        # Use getattr to access collection (works with ScopedMongoWrapper and ExperimentDB)
+        # Use getattr to access collection (works with ScopedMongoWrapper and AppDB)
         collection = getattr(db, collection_name)
         result = await collection.insert_one(user_doc)
         user_doc["_id"] = result.inserted_id
         user = user_doc
     
-    user["experiment_user_id"] = str(user["_id"])
+    user["app_user_id"] = str(user["_id"])
     return user
 
 
@@ -623,18 +623,18 @@ async def ensure_demo_users_exist(
     db_name: Optional[str] = None
 ) -> List[Dict[str, Any]]:
     """
-    Intelligently ensure demo users exist for an experiment based on manifest configuration.
+    Intelligently ensure demo users exist for a app based on manifest configuration.
     
     This function:
     1. Checks manifest sub_auth.demo_users configuration
     2. If demo_users array is empty, automatically uses platform demo user if available
-    3. Creates experiment-specific demo users as needed
+    3. Creates app-specific demo users as needed
     4. Links to platform demo user if configured
     
     Args:
-        db: Experiment database wrapper
-        slug_id: Experiment slug
-        config: Optional experiment config (fetches if not provided)
+        db: Tenant database wrapper
+        slug_id: Tenant slug
+        config: Optional app config (fetches if not provided)
         mongo_uri: Optional MongoDB URI for accessing platform demo user
         db_name: Optional database name for accessing platform demo user
     
@@ -679,8 +679,8 @@ async def ensure_demo_users_exist(
                 )
                 platform_demo = await get_platform_demo_user(mongo_uri, db_name)
                 if platform_demo:
-                    # Check if experiment demo user already exists for platform demo
-                    # Use getattr to access collection (works with ScopedMongoWrapper and ExperimentDB)
+                    # Check if app demo user already exists for platform demo
+                    # Use getattr to access collection (works with ScopedMongoWrapper and AppDB)
                     collection = getattr(db, collection_name)
                     existing = await collection.find_one({
                         "email": platform_demo["email"]
@@ -689,7 +689,7 @@ async def ensure_demo_users_exist(
                     if existing:
                         created_users.append(existing)
                     else:
-                        # Create experiment demo user linked to platform demo
+                        # Create app demo user linked to platform demo
                         user_doc = {
                             "email": platform_demo["email"],
                             "password": platform_demo["password"],  # Plain text for demo
@@ -698,14 +698,14 @@ async def ensure_demo_users_exist(
                             "is_demo": True,
                             "date_created": datetime.datetime.utcnow()
                         }
-                        # Use getattr to access collection (works with ScopedMongoWrapper and ExperimentDB)
+                        # Use getattr to access collection (works with ScopedMongoWrapper and AppDB)
                         collection = getattr(db, collection_name)
                         result = await collection.insert_one(user_doc)
                         user_doc["_id"] = result.inserted_id
-                        user_doc["experiment_user_id"] = str(result.inserted_id)
+                        user_doc["app_user_id"] = str(result.inserted_id)
                         created_users.append(user_doc)
                         logger.info(
-                            f"ensure_demo_users_exist: Created experiment demo user "
+                            f"ensure_demo_users_exist: Created app demo user "
                             f"'{platform_demo['email']}' for '{slug_id}'"
                         )
                 else:
@@ -778,7 +778,7 @@ async def ensure_demo_users_exist(
             
             # Check if user already exists
             query = {"email": email}
-            # Use getattr to access collection (works with ScopedMongoWrapper and ExperimentDB)
+            # Use getattr to access collection (works with ScopedMongoWrapper and AppDB)
             collection = getattr(db, collection_name)
             existing = await collection.find_one(query)
             
@@ -815,7 +815,7 @@ async def ensure_demo_users_exist(
             
             # Insert user
             try:
-                # Use getattr to access collection (works with ScopedMongoWrapper and ExperimentDB)
+                # Use getattr to access collection (works with ScopedMongoWrapper and AppDB)
                 collection = getattr(db, collection_name)
                 
                 # If custom _id is provided, use it (MongoDB allows setting _id during insert)
@@ -837,7 +837,7 @@ async def ensure_demo_users_exist(
                     result = await collection.insert_one(user_doc)
                 
                 user_doc["_id"] = result.inserted_id if not custom_id else custom_id
-                user_doc["experiment_user_id"] = str(user_doc["_id"])
+                user_doc["app_user_id"] = str(user_doc["_id"])
                 created_users.append(user_doc)
                 logger.info(f"Created demo user {email} for {slug_id} with _id={user_doc['_id']}")
             except Exception as e:
@@ -855,22 +855,22 @@ async def get_or_create_demo_user_for_request(
     slug_id: str,
     db,
     config: Optional[Dict[str, Any]] = None,
-    get_experiment_config_func: Optional[Callable[[Request, str, Dict], Awaitable[Dict]]] = None
+    get_app_config_func: Optional[Callable[[Request, str, Dict], Awaitable[Dict]]] = None
 ) -> Optional[Dict[str, Any]]:
     """
     Get or create a demo user for the current request context.
     
     This is a convenience function that intelligently:
-    1. Checks if platform demo user is accessing the experiment
-    2. Creates/links experiment demo user if needed
-    3. Returns the experiment demo user
+    1. Checks if platform demo user is accessing the app
+    2. Creates/links app demo user if needed
+    3. Returns the app demo user
     
     Args:
         request: FastAPI Request object
-        slug_id: Experiment slug
-        db: Experiment database wrapper
-        config: Optional experiment config
-        get_experiment_config_func: Optional callable to get experiment config
+        slug_id: Tenant slug
+        db: Tenant database wrapper
+        config: Optional app config
+        get_app_config_func: Optional callable to get app config
     
     Returns:
         Demo user dict if available, None otherwise
@@ -883,43 +883,43 @@ async def get_or_create_demo_user_for_request(
         if platform_user:
             from config import DEMO_EMAIL_DEFAULT
             if platform_user.get("email") == DEMO_EMAIL_DEFAULT:
-                # Platform demo user accessing experiment - ensure experiment demo exists
+                # Platform demo user accessing app - ensure app demo exists
                 if config is None:
-                    if not get_experiment_config_func:
+                    if not get_app_config_func:
                         raise ValueError(
-                            "config or get_experiment_config_func must be provided. "
+                            "config or get_app_config_func must be provided. "
                             "Provide either the config dict directly or a callable that returns it."
                         )
-                    config = await get_experiment_config_func(request, slug_id, {"sub_auth": 1})
+                    config = await get_app_config_func(request, slug_id, {"sub_auth": 1})
                 
                 if config:
                     sub_auth = config.get("sub_auth", {})
                     if sub_auth.get("enabled", False):
                         collection_name = sub_auth.get("collection_name", "users")
                         
-                        # Check if experiment demo user exists
-                        # Use getattr to access collection (works with ScopedMongoWrapper and ExperimentDB)
+                        # Check if app demo user exists
+                        # Use getattr to access collection (works with ScopedMongoWrapper and AppDB)
                         collection = getattr(db, collection_name)
-                        experiment_demo = await collection.find_one({
+                        app_demo = await collection.find_one({
                             "email": DEMO_EMAIL_DEFAULT
                         })
                         
-                        if experiment_demo:
-                            experiment_demo["experiment_user_id"] = str(experiment_demo["_id"])
-                            return experiment_demo
+                        if app_demo:
+                            app_demo["app_user_id"] = str(app_demo["_id"])
+                            return app_demo
                         
                         # Try to create it
                         try:
                             from config import MONGO_URI, DB_NAME
                             await ensure_demo_users_exist(db, slug_id, config, MONGO_URI, DB_NAME)
-                            # Use getattr to access collection (works with ScopedMongoWrapper and ExperimentDB)
+                            # Use getattr to access collection (works with ScopedMongoWrapper and AppDB)
                             collection = getattr(db, collection_name)
-                            experiment_demo = await collection.find_one({
+                            app_demo = await collection.find_one({
                                 "email": DEMO_EMAIL_DEFAULT
                             })
-                            if experiment_demo:
-                                experiment_demo["experiment_user_id"] = str(experiment_demo["_id"])
-                                return experiment_demo
+                            if app_demo:
+                                app_demo["app_user_id"] = str(app_demo["_id"])
+                                return app_demo
                         except Exception as e:
                             logger.warning(f"Could not auto-create demo user: {e}")
     except Exception as e:
@@ -936,7 +936,7 @@ async def get_or_create_demo_user(
     db_name: Optional[str] = None
 ) -> Optional[Dict[str, Any]]:
     """
-    Get or create a demo user for an experiment.
+    Get or create a demo user for an app.
     
     This function intelligently finds or creates a demo user based on sub_auth configuration:
     1. Checks demo_users array for configured demo users
@@ -944,8 +944,8 @@ async def get_or_create_demo_user(
     3. Creates the demo user if it doesn't exist
     
     Args:
-        db: Experiment database wrapper
-        slug_id: Experiment slug
+        db: Tenant database wrapper
+        slug_id: Tenant slug
         config: Experiment config (must contain sub_auth block)
         mongo_uri: Optional MongoDB URI for accessing platform demo user
         db_name: Optional database name for accessing platform demo user
@@ -973,7 +973,7 @@ async def get_or_create_demo_user(
             # Return the first demo user (usually the primary one)
             demo_user = demo_users[0]
             if isinstance(demo_user, dict):
-                demo_user["experiment_user_id"] = str(demo_user.get("_id"))
+                demo_user["app_user_id"] = str(demo_user.get("_id"))
             logger.info(
                 f"get_or_create_demo_user: Found/created {len(demo_users)} demo user(s) for '{slug_id}'"
             )
@@ -992,7 +992,7 @@ async def get_or_create_demo_user(
     # Look for users with "demo" in email or role
     try:
         from config import DEMO_EMAIL_DEFAULT
-        # Use getattr to access collection (works with ScopedMongoWrapper and ExperimentDB)
+        # Use getattr to access collection (works with ScopedMongoWrapper and AppDB)
         collection = getattr(db, collection_name)
         demo_user = await collection.find_one({
             "$or": [
@@ -1003,7 +1003,7 @@ async def get_or_create_demo_user(
         })
         
         if demo_user:
-            demo_user["experiment_user_id"] = str(demo_user.get("_id"))
+            demo_user["app_user_id"] = str(demo_user.get("_id"))
             return demo_user
     except Exception as e:
         logger.debug(f"Could not find demo user: {e}")
@@ -1020,7 +1020,7 @@ async def ensure_demo_users_for_actor(
     """
     Convenience function for actors to ensure demo users exist.
     
-    This function reads manifest.json from the experiment directory and automatically
+    This function reads manifest.json from the app directory and automatically
     ensures demo users are created based on sub_auth configuration.
     
     This is the recommended way for actors to call ensure_demo_users_exist during
@@ -1043,8 +1043,8 @@ async def ensure_demo_users_for_actor(
             logger.info(f"Ensured {len(demo_users)} demo user(s) exist")
     
     Args:
-        db: Experiment database wrapper
-        slug_id: Experiment slug
+        db: Tenant database wrapper
+        slug_id: Tenant slug
         mongo_uri: MongoDB connection URI
         db_name: Database name
     
@@ -1058,15 +1058,15 @@ async def ensure_demo_users_for_actor(
         # Try to load manifest.json from multiple possible locations
         # First try: relative to sub_auth.py location
         base_dir = Path(__file__).resolve().parent.parent
-        experiments_dir = base_dir / "experiments" / slug_id
-        manifest_path = experiments_dir / "manifest.json"
+        apps_dir = base_dir / "apps" / slug_id
+        manifest_path = apps_dir / "manifest.json"
         
         # Alternative: try current working directory
         if not manifest_path.exists():
             try:
                 from pathlib import Path
                 cwd = Path.cwd()
-                alt_path = cwd / "experiments" / slug_id / "manifest.json"
+                alt_path = cwd / "apps" / slug_id / "manifest.json"
                 if alt_path.exists():
                     manifest_path = alt_path
                     logger.debug(f"Using manifest from alternative path: {alt_path}")

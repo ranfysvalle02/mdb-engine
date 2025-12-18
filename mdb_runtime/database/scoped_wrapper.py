@@ -1,7 +1,7 @@
 """
 Asynchronous MongoDB Scoped Wrapper
 
-Provides an asynchronous, experiment-scoped proxy wrapper around Motor's
+Provides an asynchronous, app-scoped proxy wrapper around Motor's
 `AsyncIOMotorDatabase` and `AsyncIOMotorCollection` objects.
 
 This module is part of MDB_RUNTIME - MongoDB Multi-Tenant Runtime Engine.
@@ -10,17 +10,17 @@ Core Features:
 - `ScopedMongoWrapper`: Proxies a database. When a collection is
   accessed (e.g., `db.my_collection`), it returns a `ScopedCollectionWrapper`.
 - `ScopedCollectionWrapper`: Proxies a collection, automatically injecting
-  `experiment_id` filters into all read operations (find, aggregate, count)
-  and adding the `experiment_id` to all write operations (insert).
+  `app_id` filters into all read operations (find, aggregate, count)
+  and adding the `app_id` to all write operations (insert).
 - `AsyncAtlasIndexManager`: Provides an async-native interface for managing
   both standard MongoDB indexes and Atlas Search/Vector indexes. This
   manager is available via `collection_wrapper.index_manager` and
   operates on the *unscoped* collection for administrative purposes.
 - `AutoIndexManager`: Automatic index management! Automatically
   creates indexes based on query patterns, making it easy to use collections
-  without manual index configuration. Enabled by default for all experiments.
+  without manual index configuration. Enabled by default for all apps.
 
-This design ensures data isolation between experiments while providing
+This design ensures data isolation between apps while providing
 a familiar (Motor-like) developer experience with automatic index optimization.
 """
 import time
@@ -530,7 +530,7 @@ class AutoIndexManager:
     Magical index manager that automatically creates indexes based on query patterns.
     
     This class analyzes query filters and automatically creates appropriate indexes
-    for frequently used fields, making it easy for experiments to use collections
+    for frequently used fields, making it easy for apps to use collections
     without manually defining indexes.
     
     Features:
@@ -712,15 +712,15 @@ class AutoIndexManager:
 
 class ScopedCollectionWrapper:
     """
-    Wraps an `AsyncIOMotorCollection` to enforce experiment data scoping.
+    Wraps an `AsyncIOMotorCollection` to enforce app data scoping.
 
     This class intercepts all data access methods (find, insert, update, etc.)
-    to automatically inject `experiment_id` filters and data.
+    to automatically inject `app_id` filters and data.
 
     - Read operations (`find`, `find_one`, `count_documents`, `aggregate`) are
       filtered to only include documents matching the `read_scopes`.
     - Write operations (`insert_one`, `insert_many`) automatically add the
-      `write_scope` as the document's `experiment_id`.
+      `write_scope` as the document's `app_id`.
     
     Administrative methods (e.g., `drop_index`) are not proxied directly
     but are available via the `.index_manager` property.
@@ -729,7 +729,7 @@ class ScopedCollectionWrapper:
     - Automatically creates indexes based on query patterns
     - Analyzes filter and sort specifications to determine needed indexes
     - Creates indexes in the background without blocking queries
-    - Enables experiments to use collections without manual index configuration
+    - Enables apps to use collections without manual index configuration
     - Can be disabled by setting `auto_index=False` in constructor
     """
     
@@ -759,13 +759,13 @@ class ScopedCollectionWrapper:
         It is lazily-instantiated and cached on first access.
         
         Note: Index operations are administrative and are NOT
-        scoped by 'experiment_id'. They apply to the
+        scoped by 'app_id'. They apply to the
         entire underlying collection.
         """
         if self._index_manager is None:
             # Create and cache it.
             # Pass the *real* collection, not 'self', as indexes
-            # are not scoped by experiment_id.
+            # are not scoped by app_id.
             self._index_manager = AsyncAtlasIndexManager(self._collection)
         return self._index_manager
 
@@ -794,7 +794,7 @@ class ScopedCollectionWrapper:
         Optimization: If the user filter is empty, just return the scope filter.
         Otherwise, combine them robustly with $and.
         """
-        scope_filter = {"experiment_id": {"$in": self._read_scopes}}
+        scope_filter = {"app_id": {"$in": self._read_scopes}}
         
         # If filter is None or {}, just return the scope filter
         if not filter:
@@ -810,7 +810,7 @@ class ScopedCollectionWrapper:
         **kwargs
     ) -> InsertOneResult:
         """
-        Injects the experiment_id before writing.
+        Injects the app_id before writing.
         
         Safety: Creates a copy of the document to avoid mutating the caller's data.
         """
@@ -820,7 +820,7 @@ class ScopedCollectionWrapper:
         
         try:
             # Use dictionary spread to create a non-mutating copy
-            doc_to_insert = {**document, 'experiment_id': self._write_scope}
+            doc_to_insert = {**document, 'app_id': self._write_scope}
             result = await self._collection.insert_one(doc_to_insert, *args, **kwargs)
             duration_ms = (time.time() - start_time) * 1000
             record_operation(
@@ -828,7 +828,7 @@ class ScopedCollectionWrapper:
                 duration_ms,
                 success=True,
                 collection=collection_name,
-                experiment_slug=self._write_scope
+                app_slug=self._write_scope
             )
             return result
         except Exception as e:
@@ -838,7 +838,7 @@ class ScopedCollectionWrapper:
                 duration_ms,
                 success=False,
                 collection=collection_name,
-                experiment_slug=self._write_scope
+                app_slug=self._write_scope
             )
             raise
 
@@ -849,13 +849,13 @@ class ScopedCollectionWrapper:
         **kwargs
     ) -> InsertManyResult:
         """
-        Injects the experiment_id into all documents before writing.
+        Injects the app_id into all documents before writing.
         
         Safety: Uses a list comprehension to create copies of all documents,
         avoiding in-place mutation of the original list.
         """
         docs_to_insert = [
-            {**doc, 'experiment_id': self._write_scope} for doc in documents
+            {**doc, 'app_id': self._write_scope} for doc in documents
         ]
         return await self._collection.insert_many(docs_to_insert, *args, **kwargs)
 
@@ -876,7 +876,7 @@ class ScopedCollectionWrapper:
         try:
             # Magical auto-indexing: ensure indexes exist before querying
             # Note: We analyze the user's filter, not the scoped filter, since
-            # experiment_id index is always ensured separately
+            # app_id index is always ensured separately
             if self.auto_index_manager:
                 sort = kwargs.get('sort')
                 await self.auto_index_manager.ensure_index_for_query(filter=filter, sort=sort)
@@ -889,7 +889,7 @@ class ScopedCollectionWrapper:
                 duration_ms,
                 success=True,
                 collection=collection_name,
-                experiment_slug=self._write_scope
+                app_slug=self._write_scope
             )
             return result
         except Exception as e:
@@ -899,7 +899,7 @@ class ScopedCollectionWrapper:
                 duration_ms,
                 success=False,
                 collection=collection_name,
-                experiment_slug=self._write_scope
+                app_slug=self._write_scope
             )
             raise
 
@@ -1009,7 +1009,7 @@ class ScopedCollectionWrapper:
         if not pipeline:  
             # No stages given, just prepend our $match  
             scope_match_stage = {  
-                "$match": {"experiment_id": {"$in": self._read_scopes}}  
+                "$match": {"app_id": {"$in": self._read_scopes}}  
             }  
             pipeline = [scope_match_stage]  
             return self._collection.aggregate(pipeline, *args, **kwargs)  
@@ -1023,7 +1023,7 @@ class ScopedCollectionWrapper:
             # Instead, embed our scope in the 'filter' of $vectorSearch.  
             vs_stage = first_stage["$vectorSearch"]  
             existing_filter = vs_stage.get("filter", {})  
-            scope_filter = {"experiment_id": {"$in": self._read_scopes}}  
+            scope_filter = {"app_id": {"$in": self._read_scopes}}  
     
             if existing_filter:  
                 # Combine the user's existing filter with our scope filter via $and  
@@ -1038,7 +1038,7 @@ class ScopedCollectionWrapper:
             # Normal case: pipeline doesn't start with $vectorSearch,   
             # so we can safely prepend a $match stage for scoping.  
             scope_match_stage = {  
-                "$match": {"experiment_id": {"$in": self._read_scopes}}  
+                "$match": {"app_id": {"$in": self._read_scopes}}  
             }  
             scoped_pipeline = [scope_match_stage] + pipeline  
             return self._collection.aggregate(scoped_pipeline, *args, **kwargs)  
@@ -1060,11 +1060,11 @@ class ScopedMongoWrapper:
       index configuration. This "magical" feature is enabled by default.
     """
     
-    # Class-level cache for collections that have experiment_id index checked
+    # Class-level cache for collections that have app_id index checked
     # Key: collection name, Value: boolean (True if index exists, False if check is pending)
-    _experiment_id_index_cache: ClassVar[Dict[str, bool]] = {}
+    _app_id_index_cache: ClassVar[Dict[str, bool]] = {}
     # Lock to prevent race conditions when multiple requests try to create the same index
-    _experiment_id_index_lock: ClassVar[asyncio.Lock] = asyncio.Lock()
+    _app_id_index_lock: ClassVar[asyncio.Lock] = asyncio.Lock()
     
     __slots__ = ('_db', '_read_scopes', '_write_scope', '_wrapper_cache', '_auto_index')
 
@@ -1144,39 +1144,39 @@ class ScopedMongoWrapper:
             auto_index=self._auto_index
         )
         
-        # Magically ensure experiment_id index exists (it's always used in queries)
+        # Magically ensure app_id index exists (it's always used in queries)
         # This is fire-and-forget, runs in background
         # Use class-level cache and lock to avoid race conditions
         if self._auto_index:
             collection_name = real_collection.name
             
             # Thread-safe check: use lock to prevent race conditions
-            async def _safe_experiment_id_index_check():
+            async def _safe_app_id_index_check():
                 # Check cache inside lock to prevent duplicate tasks
-                async with ScopedMongoWrapper._experiment_id_index_lock:
+                async with ScopedMongoWrapper._app_id_index_lock:
                     # Double-check pattern: another coroutine may have already added it
-                    if collection_name in ScopedMongoWrapper._experiment_id_index_cache:
+                    if collection_name in ScopedMongoWrapper._app_id_index_cache:
                         return  # Already checking or checked
                     
                     # Mark as checking to prevent duplicate tasks
-                    ScopedMongoWrapper._experiment_id_index_cache[collection_name] = False
+                    ScopedMongoWrapper._app_id_index_cache[collection_name] = False
                 
                 # Perform index check outside lock (async operation)
                 try:
-                    has_index = await self._ensure_experiment_id_index(real_collection)
+                    has_index = await self._ensure_app_id_index(real_collection)
                     # Update cache with result (inside lock for thread-safety)
-                    async with ScopedMongoWrapper._experiment_id_index_lock:
-                        ScopedMongoWrapper._experiment_id_index_cache[collection_name] = has_index
+                    async with ScopedMongoWrapper._app_id_index_lock:
+                        ScopedMongoWrapper._app_id_index_cache[collection_name] = has_index
                 except Exception as e:
-                    logger.debug(f"Experiment_id index creation failed (non-critical): {e}")
+                    logger.debug(f"App_id index creation failed (non-critical): {e}")
                     # Remove from cache on error so we can retry later
-                    async with ScopedMongoWrapper._experiment_id_index_lock:
-                        ScopedMongoWrapper._experiment_id_index_cache.pop(collection_name, None)
+                    async with ScopedMongoWrapper._app_id_index_lock:
+                        ScopedMongoWrapper._app_id_index_cache.pop(collection_name, None)
             
             # Check cache first (quick check before lock)
-            if collection_name not in ScopedMongoWrapper._experiment_id_index_cache:
+            if collection_name not in ScopedMongoWrapper._app_id_index_cache:
                 # Fire and forget - task will check lock internally (managed to prevent accumulation)
-                _create_managed_task(_safe_experiment_id_index_check(), task_name="experiment_id_index_check")
+                _create_managed_task(_safe_app_id_index_check(), task_name="app_id_index_check")
         
         # Store it in the cache for this instance using the *prefixed_name*
         self._wrapper_cache[prefixed_name] = wrapper
@@ -1187,7 +1187,7 @@ class ScopedMongoWrapper:
         Get a collection by name (Motor-like API).
         
         This method allows accessing collections by their fully prefixed name,
-        which is useful for cross-experiment access. For same-experiment access,
+        which is useful for cross-app access. For same-app access,
         you can use attribute access (e.g., `db.my_collection`) which automatically
         prefixes the name.
         
@@ -1199,17 +1199,17 @@ class ScopedMongoWrapper:
             ScopedCollectionWrapper instance
         
         Example:
-            # Same-experiment collection (base name)
+            # Same-app collection (base name)
             collection = db.get_collection("my_collection")
             
-            # Cross-experiment collection (fully prefixed)
+            # Cross-app collection (fully prefixed)
             collection = db.get_collection("click_tracker_clicks")
         """
         # Check if name is already fully prefixed (contains underscore and is longer)
         # We use a heuristic: if name contains underscore and doesn't start with write_scope,
         # assume it's already fully prefixed
         if '_' in name and not name.startswith(f"{self._write_scope}_"):
-            # Assume it's already fully prefixed (cross-experiment access)
+            # Assume it's already fully prefixed (cross-app access)
             prefixed_name = name
         else:
             # Standard case: prefix with write_scope
@@ -1237,39 +1237,39 @@ class ScopedMongoWrapper:
             auto_index=self._auto_index
         )
         
-        # Magically ensure experiment_id index exists (background task)
+        # Magically ensure app_id index exists (background task)
         # Uses same race-condition-safe approach as __getattr__
         if self._auto_index:
             collection_name = real_collection.name
             
-            async def _safe_experiment_id_index_check():
+            async def _safe_app_id_index_check():
                 # Check cache inside lock to prevent duplicate tasks
-                async with ScopedMongoWrapper._experiment_id_index_lock:
-                    if collection_name in ScopedMongoWrapper._experiment_id_index_cache:
+                async with ScopedMongoWrapper._app_id_index_lock:
+                    if collection_name in ScopedMongoWrapper._app_id_index_cache:
                         return  # Already checking or checked
-                    ScopedMongoWrapper._experiment_id_index_cache[collection_name] = False
+                    ScopedMongoWrapper._app_id_index_cache[collection_name] = False
                 
                 try:
-                    has_index = await self._ensure_experiment_id_index(real_collection)
-                    async with ScopedMongoWrapper._experiment_id_index_lock:
-                        ScopedMongoWrapper._experiment_id_index_cache[collection_name] = has_index
+                    has_index = await self._ensure_app_id_index(real_collection)
+                    async with ScopedMongoWrapper._app_id_index_lock:
+                        ScopedMongoWrapper._app_id_index_cache[collection_name] = has_index
                 except Exception as e:
-                    logger.debug(f"Experiment_id index creation failed (non-critical): {e}")
-                    async with ScopedMongoWrapper._experiment_id_index_lock:
-                        ScopedMongoWrapper._experiment_id_index_cache.pop(collection_name, None)
+                    logger.debug(f"App_id index creation failed (non-critical): {e}")
+                    async with ScopedMongoWrapper._app_id_index_lock:
+                        ScopedMongoWrapper._app_id_index_cache.pop(collection_name, None)
             
-            if collection_name not in ScopedMongoWrapper._experiment_id_index_cache:
+            if collection_name not in ScopedMongoWrapper._app_id_index_cache:
                 # Use managed task creation to prevent accumulation
-                _create_managed_task(_safe_experiment_id_index_check(), task_name="experiment_id_index_check")
+                _create_managed_task(_safe_app_id_index_check(), task_name="app_id_index_check")
         
         # Store it in the cache
         self._wrapper_cache[prefixed_name] = wrapper
         return wrapper
     
-    async def _ensure_experiment_id_index(self, collection: AsyncIOMotorCollection) -> bool:
+    async def _ensure_app_id_index(self, collection: AsyncIOMotorCollection) -> bool:
         """
-        Ensures experiment_id index exists on collection.
-        This index is always needed since all queries filter by experiment_id.
+        Ensures app_id index exists on collection.
+        This index is always needed since all queries filter by app_id.
         
         Returns:
             True if index exists (or was created), False otherwise
@@ -1278,26 +1278,26 @@ class ScopedMongoWrapper:
             index_manager = AsyncAtlasIndexManager(collection)
             existing_indexes = await index_manager.list_indexes()
             
-            # Check if experiment_id index already exists
-            experiment_id_index_exists = False
+            # Check if app_id index already exists
+            app_id_index_exists = False
             for idx in existing_indexes:
                 keys = idx.get("key", {})
-                # Check if experiment_id is indexed (could be single field or part of compound)
-                if "experiment_id" in keys:
-                    experiment_id_index_exists = True
+                # Check if app_id is indexed (could be single field or part of compound)
+                if "app_id" in keys:
+                    app_id_index_exists = True
                     break
             
-            if not experiment_id_index_exists:
-                # Create experiment_id index
+            if not app_id_index_exists:
+                # Create app_id index
                 await index_manager.create_index(
-                    [("experiment_id", ASCENDING)],
-                    name="auto_experiment_id_asc",
+                    [("app_id", ASCENDING)],
+                    name="auto_app_id_asc",
                     background=True
                 )
-                logger.info(f"✨ Auto-created experiment_id index on {collection.name}")
+                logger.info(f"✨ Auto-created app_id index on {collection.name}")
                 return True
             return True
         except Exception as e:
             # Don't fail if index creation fails, just log
-            logger.debug(f"Could not ensure experiment_id index on {collection.name}: {e}")
+            logger.debug(f"Could not ensure app_id index on {collection.name}: {e}")
             return False

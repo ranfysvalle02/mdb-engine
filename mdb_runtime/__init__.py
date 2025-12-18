@@ -11,7 +11,7 @@ from .core import RuntimeEngine, ManifestValidator, ManifestParser
 # Database layer
 from .database import (
     ScopedMongoWrapper,
-    ExperimentDB,
+    AppDB,
     get_shared_mongo_client,
 )
 
@@ -39,7 +39,7 @@ __all__ = [
     
     # Database
     "ScopedMongoWrapper",
-    "ExperimentDB",
+    "AppDB",
     "get_shared_mongo_client",
     
     # Auth

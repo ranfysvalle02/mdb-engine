@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "mdb-runtime"
 version = "0.1.5"
-description = "MongoDB Multi-Tenant Experiment Runtime Engine"
+description = "MongoDB Multi-Tenant Runtime Engine"
 readme = "mdb_runtime/README.md"
 requires-python = ">=3.8"
 license = {text = "MIT"}

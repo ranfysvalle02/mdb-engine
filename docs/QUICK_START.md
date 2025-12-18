@@ -24,7 +24,7 @@ from pathlib import Path
 engine = RuntimeEngine(
     mongo_uri="mongodb://localhost:27017",
     db_name="my_database",
-    experiments_dir=Path("experiments")
+    manifests_dir=Path("manifests")
 )
 
 # Initialize (async)
@@ -34,8 +34,8 @@ await engine.initialize()
 ### 2. Get Scoped Database Access
 
 ```python
-# Get experiment-scoped database
-db = engine.get_scoped_db("my_experiment")
+# Get app-scoped database
+db = engine.get_scoped_db("my_app")
 
 # Use MongoDB-style API
 doc = await db.my_collection.find_one({"name": "test"})
@@ -43,24 +43,24 @@ docs = await db.my_collection.find({"status": "active"}).to_list(length=10)
 await db.my_collection.insert_one({"name": "New Doc"})
 ```
 
-### 3. Register Experiments
+### 3. Register Apps
 
 ```python
 # Load and validate manifest
-manifest = await engine.load_manifest(Path("experiments/my_exp/manifest.json"))
+manifest = await engine.load_manifest(Path("manifests/my_app/manifest.json"))
 
-# Register experiment (automatically creates indexes)
-await engine.register_experiment(manifest)
+# Register app (automatically creates indexes)
+await engine.register_app(manifest)
 
-# Or reload all active experiments from database
-count = await engine.reload_experiments()
+# Or reload all active apps from database
+count = await engine.reload_apps()
 ```
 
 ### 4. Use Individual Components
 
 ```python
 # Database scoping
-from mdb_runtime.database import ScopedMongoWrapper, ExperimentDB
+from mdb_runtime.database import ScopedMongoWrapper, AppDB
 
 # Authentication
 from mdb_runtime.auth import get_current_user, require_admin
@@ -80,8 +80,8 @@ from mdb_runtime.indexes import AsyncAtlasIndexManager
 ```python
 # Automatic cleanup
 async with RuntimeEngine(mongo_uri, db_name) as engine:
-    await engine.reload_experiments()
-    db = engine.get_scoped_db("my_experiment")
+    await engine.reload_apps()
+    db = engine.get_scoped_db("my_app")
     # ... use engine
     # Automatic cleanup on exit
 ```
@@ -126,7 +126,7 @@ pytest --cov=mdb_runtime --cov-report=html
 ```
 mdb_runtime/
 ├── core/              # RuntimeEngine, Manifest validation
-├── database/          # Scoped wrappers, ExperimentDB, connection pooling
+├── database/          # Scoped wrappers, AppDB, connection pooling
 ├── auth/              # Authentication, authorization
 ├── indexes/           # Index management
 ├── observability/     # Metrics, logging, health checks
@@ -136,7 +136,7 @@ mdb_runtime/
 
 ## Features
 
-- ✅ **Automatic Experiment Isolation** - All queries automatically scoped
+- ✅ **Automatic App Isolation** - All queries automatically scoped
 - ✅ **Manifest Validation** - JSON schema validation with versioning
 - ✅ **Index Management** - Automatic index creation and management
 - ✅ **Observability** - Built-in metrics, logging, and health checks

@@ -2,7 +2,7 @@
 Core runtime engine components.
 
 This module contains the main RuntimeEngine class and core
-orchestration logic for managing experiments.
+orchestration logic for managing apps.
 """
 
 from .engine import RuntimeEngine

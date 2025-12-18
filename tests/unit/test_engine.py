@@ -3,7 +3,7 @@ Unit tests for RuntimeEngine.
 
 Tests the core orchestration engine functionality including:
 - Initialization and shutdown
-- Experiment registration
+- App registration
 - Manifest validation
 - Database scoping
 """
@@ -63,7 +63,7 @@ class TestRuntimeEngineInitialization:
         await runtime_engine.shutdown()
         
         assert runtime_engine._initialized is False
-        assert len(runtime_engine._experiments) == 0
+        assert len(runtime_engine._apps) == 0
     
     @pytest.mark.asyncio
     async def test_engine_shutdown_idempotent(self, runtime_engine):
@@ -117,34 +117,34 @@ class TestRuntimeEngineScopedDatabase:
     @pytest.mark.asyncio
     async def test_get_scoped_db_success(self, runtime_engine):
         """Test successful scoped database creation."""
-        scoped_db = runtime_engine.get_scoped_db("test_experiment")
+        scoped_db = runtime_engine.get_scoped_db("test_app")
         
         assert scoped_db is not None
-        assert scoped_db._read_scopes == ["test_experiment"]
-        assert scoped_db._write_scope == "test_experiment"
+        assert scoped_db._read_scopes == ["test_app"]
+        assert scoped_db._write_scope == "test_app"
     
     @pytest.mark.asyncio
     async def test_get_scoped_db_custom_scopes(self, runtime_engine):
         """Test scoped database with custom read/write scopes."""
         scoped_db = runtime_engine.get_scoped_db(
-            experiment_slug="test_experiment",
-            read_scopes=["exp1", "exp2"],
-            write_scope="exp1"
+            app_slug="test_app",
+            read_scopes=["app1", "app2"],
+            write_scope="app1"
         )
         
-        assert scoped_db._read_scopes == ["exp1", "exp2"]
-        assert scoped_db._write_scope == "exp1"
+        assert scoped_db._read_scopes == ["app1", "app2"]
+        assert scoped_db._write_scope == "app1"
     
     @pytest.mark.asyncio
     async def test_get_scoped_db_uninitialized(self, uninitialized_runtime_engine):
         """Test getting scoped db before initialization raises error."""
         with pytest.raises(RuntimeError, match="not initialized"):
-            uninitialized_runtime_engine.get_scoped_db("test_experiment")
+            uninitialized_runtime_engine.get_scoped_db("test_app")
     
     @pytest.mark.asyncio
     async def test_get_scoped_db_auto_index_disabled(self, runtime_engine):
         """Test scoped database with auto_index disabled."""
-        scoped_db = runtime_engine.get_scoped_db("test_experiment", auto_index=False)
+        scoped_db = runtime_engine.get_scoped_db("test_app", auto_index=False)
         
         assert scoped_db._auto_index is False
 
@@ -193,65 +193,65 @@ class TestRuntimeEngineManifestValidation:
             await runtime_engine.load_manifest(manifest_file)
 
 
-class TestRuntimeEngineExperimentRegistration:
-    """Test experiment registration functionality."""
+class TestRuntimeEngineTenantRegistration:
+    """Test app registration functionality."""
     
     @pytest.mark.asyncio
-    async def test_register_experiment_success(self, runtime_engine, sample_manifest):
-        """Test successful experiment registration."""
-        result = await runtime_engine.register_experiment(sample_manifest, create_indexes=False)
+    async def test_register_app_success(self, runtime_engine, sample_manifest):
+        """Test successful app registration."""
+        result = await runtime_engine.register_app(sample_manifest, create_indexes=False)
         
         assert result is True
-        assert sample_manifest["slug"] in runtime_engine._experiments
-        assert runtime_engine.get_experiment(sample_manifest["slug"]) == sample_manifest
+        assert sample_manifest["slug"] in runtime_engine._apps
+        assert runtime_engine.get_app(sample_manifest["slug"]) == sample_manifest
     
     @pytest.mark.asyncio
-    async def test_register_experiment_missing_slug(self, runtime_engine, sample_manifest):
+    async def test_register_app_missing_slug(self, runtime_engine, sample_manifest):
         """Test registration with missing slug."""
         manifest_no_slug = {k: v for k, v in sample_manifest.items() if k != "slug"}
         
-        result = await runtime_engine.register_experiment(manifest_no_slug)
+        result = await runtime_engine.register_app(manifest_no_slug)
         
         assert result is False
-        assert len(runtime_engine._experiments) == 0
+        assert len(runtime_engine._apps) == 0
     
     @pytest.mark.asyncio
-    async def test_register_experiment_invalid_manifest(self, runtime_engine, invalid_manifest):
+    async def test_register_app_invalid_manifest(self, runtime_engine, invalid_manifest):
         """Test registration with invalid manifest."""
-        result = await runtime_engine.register_experiment(invalid_manifest)
+        result = await runtime_engine.register_app(invalid_manifest)
         
         assert result is False
-        assert len(runtime_engine._experiments) == 0
+        assert len(runtime_engine._apps) == 0
     
     @pytest.mark.asyncio
-    async def test_register_experiment_uninitialized(self, uninitialized_runtime_engine, sample_manifest):
+    async def test_register_app_uninitialized(self, uninitialized_runtime_engine, sample_manifest):
         """Test registration before initialization raises error."""
         with pytest.raises(RuntimeError, match="not initialized"):
-            await uninitialized_runtime_engine.register_experiment(sample_manifest)
+            await uninitialized_runtime_engine.register_app(sample_manifest)
     
     @pytest.mark.asyncio
-    async def test_get_experiment(self, runtime_engine, sample_manifest):
-        """Test getting registered experiment."""
-        await runtime_engine.register_experiment(sample_manifest, create_indexes=False)
+    async def test_get_app(self, runtime_engine, sample_manifest):
+        """Test getting registered app."""
+        await runtime_engine.register_app(sample_manifest, create_indexes=False)
         
-        experiment = runtime_engine.get_experiment(sample_manifest["slug"])
-        assert experiment is not None
-        assert experiment["slug"] == sample_manifest["slug"]
+        app = runtime_engine.get_app(sample_manifest["slug"])
+        assert app is not None
+        assert app["slug"] == sample_manifest["slug"]
     
     @pytest.mark.asyncio
-    async def test_get_experiment_not_found(self, runtime_engine):
-        """Test getting non-existent experiment."""
-        experiment = runtime_engine.get_experiment("nonexistent")
-        assert experiment is None
+    async def test_get_app_not_found(self, runtime_engine):
+        """Test getting non-existent app."""
+        app = runtime_engine.get_app("nonexistent")
+        assert app is None
     
     @pytest.mark.asyncio
-    async def test_list_experiments(self, runtime_engine, sample_manifest):
-        """Test listing all experiments."""
-        assert len(runtime_engine.list_experiments()) == 0
+    async def test_list_apps(self, runtime_engine, sample_manifest):
+        """Test listing all apps."""
+        assert len(runtime_engine.list_apps()) == 0
         
-        await runtime_engine.register_experiment(sample_manifest, create_indexes=False)
+        await runtime_engine.register_app(sample_manifest, create_indexes=False)
         
-        experiments = runtime_engine.list_experiments()
-        assert len(experiments) == 1
-        assert sample_manifest["slug"] in experiments
+        apps = runtime_engine.list_apps()
+        assert len(apps) == 1
+        assert sample_manifest["slug"] in apps
 

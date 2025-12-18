@@ -42,15 +42,15 @@ def validate_collection_name(name: str) -> str:
     return name
 
 
-def validate_experiment_slug(slug: str) -> str:
+def validate_app_slug(slug: str) -> str:
     """
-    Validate experiment slug format.
+    Validate app slug format.
     
     This is a private helper function for internal validation.
     It doesn't change the public API contract.
     
     Args:
-        slug: Experiment slug to validate
+        slug: App slug to validate
         
     Returns:
         Validated slug
@@ -59,16 +59,16 @@ def validate_experiment_slug(slug: str) -> str:
         ValueError: If slug is invalid
     """
     if not slug or not isinstance(slug, str):
-        raise ValueError("Experiment slug must be a non-empty string")
+        raise ValueError("App slug must be a non-empty string")
     
     if not re.match(r'^[a-z0-9_-]+$', slug):
         raise ValueError(
-            f"Invalid experiment slug: {slug}. "
+            f"Invalid app slug: {slug}. "
             f"Slug must contain only lowercase letters, numbers, underscores, and hyphens."
         )
     
     if len(slug) > 100:
-        raise ValueError(f"Experiment slug too long: {slug} (max 100 characters)")
+        raise ValueError(f"App slug too long: {slug} (max 100 characters)")
     
     return slug
 

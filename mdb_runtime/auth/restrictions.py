@@ -1,8 +1,8 @@
 """
-Experiment Authentication Restrictions
+App Authentication Restrictions
 
 This module provides reusable decorators and dependencies for restricting
-demo users from certain endpoints across experiments.
+demo users from certain endpoints across apps.
 
 Pattern:
 - Demo users are "trapped" in their demo role for security
@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 from config import DEMO_EMAIL_DEFAULT
 
 # Import user detection utility
-from .sub_auth import get_experiment_sub_user
+from .sub_auth import get_app_sub_user
 from .dependencies import get_current_user_from_request
 from typing import Optional, Callable, Awaitable, Dict, Any
 
@@ -61,13 +61,13 @@ def is_demo_user(user: Optional[Dict[str, Any]] = None, email: Optional[str] = N
 
 async def require_non_demo_user(
     request: Request,
-    get_experiment_config_func: Optional[Callable[[Request, str, Dict], Awaitable[Dict]]] = None,
-    get_experiment_db_func: Optional[Callable[[Request], Awaitable[Any]]] = None
+    get_app_config_func: Optional[Callable[[Request, str, Dict], Awaitable[Dict]]] = None,
+    get_app_db_func: Optional[Callable[[Request], Awaitable[Any]]] = None
 ) -> Dict[str, Any]:
     """
     FastAPI dependency that blocks demo users from accessing an endpoint.
     
-    This is a reusable dependency that experiments can use to restrict
+    This is a reusable dependency that apps can use to restrict
     certain endpoints from demo users (e.g., login, register, logout, create).
     
     Usage:
@@ -90,7 +90,7 @@ async def require_non_demo_user(
     if not slug_id:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Experiment slug_id not found in request state"
+            detail="Tenant slug_id not found in request state"
         )
     
     # Try to get user from request
@@ -112,26 +112,26 @@ async def require_non_demo_user(
             # Get database wrapper
             if not get_experiment_db_func:
                 raise ValueError(
-                    "get_experiment_db_func must be provided. "
-                    "Provide a callable that takes a Request and returns ExperimentDB or ScopedMongoWrapper."
+                    "get_app_db_func must be provided. "
+                    "Provide a callable that takes a Request and returns AppDB or ScopedMongoWrapper."
                 )
-            db = await get_experiment_db_func(request)
+            db = await get_app_db_func(request)
             
             # Get config
             if not get_experiment_config_func:
                 raise ValueError(
-                    "get_experiment_config_func must be provided. "
+                    "get_app_config_func must be provided. "
                     "Provide a callable that takes (Request, slug_id, options) and returns config dict."
                 )
-            config = await get_experiment_config_func(request, slug_id, {"sub_auth": 1})
+            config = await get_app_config_func(request, slug_id, {"sub_auth": 1})
             
             if config and config.get("sub_auth", {}).get("enabled", False):
-                sub_auth_user = await get_experiment_sub_user(request, slug_id, db, config, allow_demo_fallback=False)
+                sub_auth_user = await get_app_sub_user(request, slug_id, db, config, allow_demo_fallback=False)
                 if sub_auth_user:
                     user = {
                         "user_id": str(sub_auth_user.get("_id")),
                         "email": sub_auth_user.get("email"),
-                        "experiment_user_id": str(sub_auth_user.get("_id")),
+                        "app_user_id": str(sub_auth_user.get("_id")),
                         "is_demo": sub_auth_user.get("is_demo", False),
                         "demo_mode": sub_auth_user.get("demo_mode", False)
                     }
@@ -160,8 +160,8 @@ async def require_non_demo_user(
 
 async def block_demo_users(
     request: Request,
-    get_experiment_config_func: Optional[Callable[[Request, str, Dict], Awaitable[Dict]]] = None,
-    get_experiment_db_func: Optional[Callable[[Request], Awaitable[Any]]] = None
+    get_app_config_func: Optional[Callable[[Request, str, Dict], Awaitable[Dict]]] = None,
+    get_app_db_func: Optional[Callable[[Request], Awaitable[Any]]] = None
 ):
     """
     FastAPI dependency that blocks demo users and returns an error response.
@@ -212,16 +212,16 @@ async def block_demo_users(
             if not get_experiment_db_func or not get_experiment_config_func:
                 return None
             
-            db = await get_experiment_db_func(request)
-            config = await get_experiment_config_func(request, slug_id, {"sub_auth": 1})
+            db = await get_app_db_func(request)
+            config = await get_app_config_func(request, slug_id, {"sub_auth": 1})
             
             if config and config.get("sub_auth", {}).get("enabled", False):
-                sub_auth_user = await get_experiment_sub_user(request, slug_id, db, config, allow_demo_fallback=False)
+                sub_auth_user = await get_app_sub_user(request, slug_id, db, config, allow_demo_fallback=False)
                 if sub_auth_user:
                     user = {
                         "user_id": str(sub_auth_user.get("_id")),
                         "email": sub_auth_user.get("email"),
-                        "experiment_user_id": str(sub_auth_user.get("_id")),
+                        "app_user_id": str(sub_auth_user.get("_id")),
                         "is_demo": sub_auth_user.get("is_demo", False),
                         "demo_mode": sub_auth_user.get("demo_mode", False)
                     }

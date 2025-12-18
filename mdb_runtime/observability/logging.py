@@ -14,9 +14,9 @@ _correlation_id: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
     'correlation_id', default=None
 )
 
-# Context variable for experiment context
-_experiment_context: contextvars.ContextVar[Optional[Dict[str, Any]]] = contextvars.ContextVar(
-    'experiment_context', default=None
+# Context variable for app context
+_app_context: contextvars.ContextVar[Optional[Dict[str, Any]]] = contextvars.ContextVar(
+    'app_context', default=None
 )
 
 
@@ -46,26 +46,26 @@ def clear_correlation_id() -> None:
     _correlation_id.set(None)
 
 
-def set_experiment_context(experiment_slug: Optional[str] = None, **kwargs: Any) -> None:
+def set_app_context(app_slug: Optional[str] = None, **kwargs: Any) -> None:
     """
-    Set experiment context for logging.
+    Set app context for logging.
     
     Args:
-        experiment_slug: Experiment slug
+        app_slug: App slug
         **kwargs: Additional context (collection_name, user_id, etc.)
     """
-    context = {"experiment_slug": experiment_slug, **kwargs}
-    _experiment_context.set(context)
+    context = {"app_slug": app_slug, **kwargs}
+    _app_context.set(context)
 
 
-def clear_experiment_context() -> None:
-    """Clear experiment context."""
-    _experiment_context.set(None)
+def clear_app_context() -> None:
+    """Clear app context."""
+    _app_context.set(None)
 
 
 def get_logging_context() -> Dict[str, Any]:
     """
-    Get current logging context (correlation ID and experiment context).
+    Get current logging context (correlation ID and app context).
     
     Returns:
         Dictionary with context information
@@ -78,9 +78,9 @@ def get_logging_context() -> Dict[str, Any]:
     if correlation_id:
         context["correlation_id"] = correlation_id
     
-    experiment_context = _experiment_context.get()
-    if experiment_context:
-        context.update(experiment_context)
+    app_context = _app_context.get()
+    if app_context:
+        context.update(app_context)
     
     return context
 

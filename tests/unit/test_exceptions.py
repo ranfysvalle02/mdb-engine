@@ -53,10 +53,10 @@ class TestExceptionMessages:
     def test_runtime_engine_error_with_context(self):
         """Test RuntimeEngineError message with context."""
         message = "Something went wrong"
-        context = {"experiment_slug": "test", "collection": "users"}
+        context = {"app_slug": "test", "collection": "users"}
         error = RuntimeEngineError(message, context=context)
         assert "context:" in str(error)
-        assert "experiment_slug=test" in str(error)
+        assert "app_slug=test" in str(error)
         assert error.context == context
     
     def test_initialization_error_message(self):

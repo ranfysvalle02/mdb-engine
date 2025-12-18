@@ -167,12 +167,12 @@ async def require_admin_or_developer(
 ) -> Dict[str, Any]:
     """
     FastAPI Dependency: Enforces admin OR developer privileges.
-    Developers can upload experiments, admins can upload any experiment.
+    Developers can upload apps, admins can upload any app.
     """
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication required to upload experiments.",
+            detail="Authentication required to upload apps.",
         )
     
     user_email = user.get("email")
@@ -192,11 +192,11 @@ async def require_admin_or_developer(
     
     if is_admin:
         logger.debug(
-            f"require_admin_or_developer: Admin '{user_email}' granted access to upload experiments"
+            f"require_admin_or_developer: Admin '{user_email}' granted access to upload apps"
         )
         return dict(user)
     
-    # Check if user is a developer (has experiments:manage_own permission)
+    # Check if user is a developer (has apps:manage_own permission)
     is_developer = await authz.check(
         subject=user_email,
         resource="experiments",

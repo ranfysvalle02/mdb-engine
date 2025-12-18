@@ -1,21 +1,21 @@
 """
-Experiment Database Wrapper
+App Database Wrapper
 
-A MongoDB-style database abstraction layer for experiments.
+A MongoDB-style database abstraction layer for apps.
 Follows MongoDB API conventions for familiarity and ease of use.
 
 This module provides an easy-to-use API that matches MongoDB's API closely,
-so experiments can use familiar MongoDB methods. All operations automatically
-handle experiment scoping and indexing behind the scenes.
+so apps can use familiar MongoDB methods. All operations automatically
+handle app scoping and indexing behind the scenes.
 
 This module is part of MDB_RUNTIME - MongoDB Multi-Tenant Runtime Engine.
 
 Usage:
-    from mdb_runtime.database import ExperimentDB, Collection
+    from mdb_runtime.database import AppDB, Collection
     
     # In FastAPI route
     @bp.get("/")
-    async def my_route(db: ExperimentDB = Depends(get_experiment_db)):
+    async def my_route(db: AppDB = Depends(get_app_db)):
         # MongoDB-style operations - familiar API!
         doc = await db.my_collection.find_one({"_id": "doc_123"})
         docs = await db.my_collection.find({"status": "active"}).to_list(length=10)
@@ -48,7 +48,7 @@ class Collection:
     
     This class wraps a ScopedCollectionWrapper and provides MongoDB-style methods
     that match the familiar Motor/pymongo API. All operations automatically handle
-    experiment scoping and indexing.
+    app scoping and indexing.
     
     Example:
         collection = Collection(scoped_wrapper.my_collection)
@@ -284,7 +284,7 @@ class Collection:
         try:
             # The underlying _collection is a ScopedCollectionWrapper
             # It doesn't have replace_one, so we use delete + insert for true replacement
-            # This ensures proper experiment_id scoping
+            # This ensures proper app_id scoping
             upsert = kwargs.get('upsert', False)
             
             # Try to delete first (if document exists)
@@ -292,7 +292,7 @@ class Collection:
             
             # If document was deleted or upsert is True, insert the replacement
             if delete_result.deleted_count > 0 or upsert:
-                # Insert the replacement document (experiment_id will be auto-injected)
+                # Insert the replacement document (app_id will be auto-injected)
                 insert_result = await self._collection.insert_one(replacement)
                 # Return an UpdateResult-like object
                 from pymongo.results import UpdateResult
@@ -439,20 +439,20 @@ class Collection:
         return self._collection.aggregate(pipeline, *args, **kwargs)
 
 
-class ExperimentDB:
+class AppDB:
     """
-    A MongoDB-style database interface for experiments.
+    A MongoDB-style database interface for apps.
     
     This class wraps ScopedMongoWrapper and provides MongoDB-style methods
     that match the familiar Motor/pymongo API. All operations automatically
-    handle experiment scoping and indexing.
+    handle app scoping and indexing.
     
     Example:
-        from mdb_runtime.database import ExperimentDB
-        from mdb_runtime.database import get_experiment_db
+        from mdb_runtime.database import AppDB
+        from mdb_runtime.database import get_app_db
         
         @bp.get("/")
-        async def my_route(db: ExperimentDB = Depends(get_experiment_db)):
+        async def my_route(db: AppDB = Depends(get_app_db)):
             # MongoDB-style operations - familiar API!
             doc = await db.users.find_one({"_id": "user_123"})
             docs = await db.users.find({"status": "active"}).to_list(length=10)
@@ -462,7 +462,7 @@ class ExperimentDB:
     
     def __init__(self, scoped_wrapper: ScopedMongoWrapper):
         """
-        Initialize ExperimentDB with a ScopedMongoWrapper.
+        Initialize AppDB with a ScopedMongoWrapper.
         
         Args:
             scoped_wrapper: A ScopedMongoWrapper instance (typically from application layer)
@@ -478,7 +478,7 @@ class ExperimentDB:
         Get a Collection wrapper for a collection by name.
         
         Args:
-            name: The collection name (base name, without experiment prefix)
+            name: The collection name (base name, without app prefix)
                  Example: "users", "products", "orders"
         
         Returns:
@@ -549,39 +549,39 @@ class ExperimentDB:
 
 
 # FastAPI dependency helper
-async def get_experiment_db(
+async def get_app_db(
     request,
     get_scoped_db_func: Callable
-) -> ExperimentDB:
+) -> AppDB:
     """
-    FastAPI Dependency: Provides an ExperimentDB instance.
+    FastAPI Dependency: Provides an AppDB instance.
     
     This is a convenience wrapper around get_scoped_db that returns
-    an ExperimentDB instance instead of ScopedMongoWrapper.
+    an AppDB instance instead of ScopedMongoWrapper.
     
     Args:
         request: FastAPI Request object
         get_scoped_db_func: Required callable that takes a request and returns ScopedMongoWrapper.
     
     Usage:
-        from mdb_runtime.database import get_experiment_db
+        from mdb_runtime.database import get_app_db
         from my_app import get_scoped_db  # Your application layer
         
         @bp.get("/")
         async def my_route(
             request: Request,
-            db: ExperimentDB = Depends(lambda r: get_experiment_db(r, get_scoped_db_func=get_scoped_db))
+            db: AppDB = Depends(lambda r: get_app_db(r, get_scoped_db_func=get_scoped_db))
         ):
             doc = await db.users.get("user_123")
     """
     if not get_scoped_db_func:
         raise ValueError(
-            "get_experiment_db requires get_scoped_db_func parameter. "
+            "get_app_db requires get_scoped_db_func parameter. "
             "Provide a callable that takes a Request and returns ScopedMongoWrapper."
         )
     
     scoped_db = await get_scoped_db_func(request)
-    return ExperimentDB(scoped_db)
+    return AppDB(scoped_db)
 
 
 # ============================================================================
@@ -596,37 +596,37 @@ def create_actor_database(
     max_pool_size: int = 10,
     min_pool_size: int = 1,
     server_selection_timeout_ms: int = 5000,
-) -> ExperimentDB:
+) -> AppDB:
     """
     Factory function that creates a Motor-like database interface for Ray actors.
     
     This function abstracts away all the complexity of:
     - Connection pool management
     - Scoped wrapper setup
-    - ExperimentDB initialization
+    - AppDB initialization
     
     Actors can simply call this function and get back a database object that
     works exactly like Motor's AsyncIOMotorDatabase API, with automatic:
-    - Experiment scoping (read/write isolation)
+    - App scoping (read/write isolation)
     - Index management (automatic index creation)
     - Collection access via attribute access
     
     Args:
         mongo_uri: MongoDB connection URI
         db_name: Database name
-        write_scope: Experiment slug for write operations (documents get this experiment_id)
-        read_scopes: List of experiment slugs for read operations (can read from these experiments)
+        write_scope: App slug for write operations (documents get this app_id)
+        read_scopes: List of app slugs for read operations (can read from these apps)
         max_pool_size: Maximum connection pool size (default: 10 for actors)
         min_pool_size: Minimum connection pool size (default: 1)
         server_selection_timeout_ms: Server selection timeout in milliseconds
     
     Returns:
-        ExperimentDB instance that mimics Motor's API
+        AppDB instance that mimics Motor's API
         
     Example:
         from mdb_runtime.database import create_actor_database
         
-        class ExperimentActor:
+        class AppActor:
             def __init__(self, mongo_uri: str, db_name: str, write_scope: str, read_scopes: List[str]):
                 # One line to get a Motor-like database interface!
                 self.db = create_actor_database(mongo_uri, db_name, write_scope, read_scopes)
@@ -658,15 +658,15 @@ def create_actor_database(
         # Get the database
         real_db = client[db_name]
         
-        # Create scoped wrapper (handles experiment isolation automatically)
+        # Create scoped wrapper (handles app isolation automatically)
         scoped_wrapper = ScopedMongoWrapper(
             real_db=real_db,
             read_scopes=read_scopes,
             write_scope=write_scope
         )
         
-        # Create ExperimentDB (provides Motor-like API)
-        db = ExperimentDB(scoped_wrapper)
+        # Create AppDB (provides Motor-like API)
+        db = AppDB(scoped_wrapper)
         
         logger.debug(
             f"Created actor database for write_scope='{write_scope}', "

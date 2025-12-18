@@ -20,12 +20,12 @@ Migration Strategy:
 - Automatically detects schema version from manifest
 - Migrates older versions to current schema if needed
 - Maintains backward compatibility
-- Allows experiments to specify target schema version
+- Allows apps to specify target schema version
 
 For Scale:
 - Schema validation results are cached
 - Supports parallel manifest processing
-- Lazy schema loading for multiple experiments
+- Lazy schema loading for multiple apps
 - Optimized validation paths for common cases
 """
 import logging
@@ -78,27 +78,27 @@ MANIFEST_SCHEMA_V2 = {
         "slug": {
             "type": "string",
             "pattern": "^[a-z0-9_-]+$",
-            "description": "Experiment slug (lowercase alphanumeric, underscores, hyphens)"
+            "description": "App slug (lowercase alphanumeric, underscores, hyphens)"
         },
         "name": {
             "type": "string",
             "minLength": 1,
-            "description": "Human-readable experiment name"
+            "description": "Human-readable app name"
         },
         "description": {
             "type": "string",
-            "description": "Experiment description"
+            "description": "App description"
         },
         "status": {
             "type": "string",
             "enum": ["active", "draft", "archived", "inactive"],
             "default": "draft",
-            "description": "Experiment status"
+            "description": "App status"
         },
         "auth_required": {
             "type": "boolean",
             "default": False,
-            "description": "Whether authentication is required for this experiment (backward compatibility). If auth_policy is provided, this is ignored."
+            "description": "Whether authentication is required for this app (backward compatibility). If auth_policy is provided, this is ignored."
         },
         "auth_policy": {
             "type": "object",
@@ -113,7 +113,7 @@ MANIFEST_SCHEMA_V2 = {
                     "items": {
                         "type": "string"
                     },
-                    "description": "List of roles that can access this experiment (e.g., ['admin', 'developer']). Users must have at least one of these roles."
+                    "description": "List of roles that can access this app (e.g., ['admin', 'developer']). Users must have at least one of these roles."
                 },
                 "allowed_users": {
                     "type": "array",
@@ -121,7 +121,7 @@ MANIFEST_SCHEMA_V2 = {
                         "type": "string",
                         "format": "email"
                     },
-                    "description": "List of specific user emails that can access this experiment (whitelist). If provided, only these users can access regardless of roles."
+                    "description": "List of specific user emails that can access this app (whitelist). If provided, only these users can access regardless of roles."
                 },
                 "denied_users": {
                     "type": "array",
@@ -136,12 +136,12 @@ MANIFEST_SCHEMA_V2 = {
                     "items": {
                         "type": "string"
                     },
-                    "description": "List of required permissions (format: 'resource:action', e.g., ['experiments:view', 'experiments:manage_own']). User must have all listed permissions."
+                    "description": "List of required permissions (format: 'resource:action', e.g., ['apps:view', 'apps:manage_own']). User must have all listed permissions."
                 },
                 "custom_resource": {
                     "type": "string",
                     "pattern": "^[a-z0-9_:]+$",
-                    "description": "Custom Casbin resource name (e.g., 'experiment:storyweaver'). If not provided, defaults to 'experiment:{slug}'."
+                    "description": "Custom Casbin resource name (e.g., 'app:storyweaver'). If not provided, defaults to 'app:{slug}'."
                 },
                 "custom_actions": {
                     "type": "array",
@@ -159,11 +159,11 @@ MANIFEST_SCHEMA_V2 = {
                 "owner_can_access": {
                     "type": "boolean",
                     "default": True,
-                    "description": "If true (default), the experiment owner (developer_id) can always access the experiment."
+                    "description": "If true (default), the app owner (developer_id) can always access the app."
                 }
             },
             "additionalProperties": False,
-            "description": "Intelligent authorization policy for experiment-level access control. Supports role-based, user-based, and permission-based access. Takes precedence over auth_required."
+            "description": "Intelligent authorization policy for app-level access control. Supports role-based, user-based, and permission-based access. Takes precedence over auth_required."
         },
         "sub_auth": {
             "type": "object",
@@ -171,41 +171,41 @@ MANIFEST_SCHEMA_V2 = {
                 "enabled": {
                     "type": "boolean",
                     "default": False,
-                    "description": "Enable experiment-specific authentication (sub-authentication). When enabled, experiment manages its own users separate from platform users."
+                    "description": "Enable app-specific authentication (sub-authentication). When enabled, app manages its own users separate from platform users."
                 },
                 "strategy": {
                     "type": "string",
-                    "enum": ["experiment_users", "anonymous_session", "oauth", "hybrid"],
-                    "default": "experiment_users",
-                    "description": "Sub-authentication strategy. 'experiment_users' = experiment-specific user accounts, 'anonymous_session' = session-based anonymous users, 'oauth' = OAuth integration, 'hybrid' = combine platform auth with experiment-specific identities"
+                    "enum": ["app_users", "anonymous_session", "oauth", "hybrid"],
+                    "default": "app_users",
+                    "description": "Sub-authentication strategy. 'app_users' = app-specific user accounts, 'anonymous_session' = session-based anonymous users, 'oauth' = OAuth integration, 'hybrid' = combine platform auth with app-specific identities"
                 },
                 "collection_name": {
                     "type": "string",
                     "pattern": "^[a-zA-Z0-9_]+$",
                     "default": "users",
-                    "description": "Collection name for experiment-specific users (default: 'users'). Will be prefixed with experiment slug."
+                    "description": "Collection name for app-specific users (default: 'users'). Will be prefixed with app slug."
                 },
                 "session_cookie_name": {
                     "type": "string",
                     "pattern": "^[a-z0-9_-]+$",
-                    "default": "experiment_session",
-                    "description": "Cookie name for experiment-specific session (default: 'experiment_session'). Will be suffixed with experiment slug."
+                    "default": "app_session",
+                    "description": "Cookie name for app-specific session (default: 'app_session'). Will be suffixed with app slug."
                 },
                 "session_ttl_seconds": {
                     "type": "integer",
                     "minimum": 60,
                     "default": 86400,
-                    "description": "Session TTL in seconds (default: 86400 = 24 hours). Used for experiment-specific sessions."
+                    "description": "Session TTL in seconds (default: 86400 = 24 hours). Used for app-specific sessions."
                 },
                 "allow_registration": {
                     "type": "boolean",
                     "default": False,
-                    "description": "Allow users to self-register in the experiment (when strategy is 'experiment_users')."
+                    "description": "Allow users to self-register in the app (when strategy is 'app_users')."
                 },
                 "link_platform_users": {
                     "type": "boolean",
                     "default": True,
-                    "description": "Link experiment users to platform users (when strategy is 'hybrid'). Allows platform users to have experiment-specific profiles."
+                    "description": "Link app users to platform users (when strategy is 'hybrid'). Allows platform users to have app-specific profiles."
                 },
                 "oauth_providers": {
                     "type": "array",
@@ -227,7 +227,7 @@ MANIFEST_SCHEMA_V2 = {
                             "redirect_uri": {
                                 "type": "string",
                                 "format": "uri",
-                                "description": "OAuth redirect URI (defaults to experiment OAuth callback)"
+                                "description": "OAuth redirect URI (defaults to app OAuth callback)"
                             }
                         },
                         "required": ["name"]
@@ -241,8 +241,8 @@ MANIFEST_SCHEMA_V2 = {
                 },
                 "user_id_field": {
                     "type": "string",
-                    "default": "experiment_user_id",
-                    "description": "Field name in platform user JWT for storing experiment user ID (default: 'experiment_user_id'). Used for linking."
+                    "default": "app_user_id",
+                    "description": "Field name in platform user JWT for storing app user ID (default: 'app_user_id'). Used for linking."
                 },
                 "demo_users": {
                     "type": "array",
@@ -261,7 +261,7 @@ MANIFEST_SCHEMA_V2 = {
                             "role": {
                                 "type": "string",
                                 "default": "user",
-                                "description": "Role for demo user in experiment (default: 'user')"
+                                "description": "Role for demo user in app (default: 'user')"
                             },
                             "auto_create": {
                                 "type": "boolean",
@@ -280,7 +280,7 @@ MANIFEST_SCHEMA_V2 = {
                         },
                         "required": []
                     },
-                    "description": "Array of demo users to automatically create/link for this experiment. If empty, automatically uses platform demo user if available."
+                    "description": "Array of demo users to automatically create/link for this app. If empty, automatically uses platform demo user if available."
                 },
                 "auto_link_platform_demo": {
                     "type": "boolean",
@@ -300,7 +300,7 @@ MANIFEST_SCHEMA_V2 = {
                 }
             },
             "additionalProperties": False,
-            "description": "Sub-authentication configuration for experiment-specific user management. Enables experiments to have their own user accounts and sessions independent of platform authentication."
+            "description": "Sub-authentication configuration for app-specific user management. Enables apps to have their own user accounts and sessions independent of platform authentication."
         },
         "data_scope": {
             "type": "array",
@@ -309,7 +309,7 @@ MANIFEST_SCHEMA_V2 = {
             },
             "minItems": 1,
             "default": ["self"],
-            "description": "List of experiment slugs whose data this experiment can access"
+            "description": "List of app slugs whose data this app can access"
         },
         "runtime_s3_uri": {
             "type": "string",
@@ -348,7 +348,7 @@ MANIFEST_SCHEMA_V2 = {
         "developer_id": {
             "type": "string",
             "format": "email",
-            "description": "Email of the developer who owns this experiment"
+            "description": "Email of the developer who owns this app"
         }
     },
     "required": [],
@@ -646,27 +646,27 @@ MANIFEST_SCHEMA_V1 = {
         "slug": {
             "type": "string",
             "pattern": "^[a-z0-9_-]+$",
-            "description": "Experiment slug (lowercase alphanumeric, underscores, hyphens)"
+            "description": "App slug (lowercase alphanumeric, underscores, hyphens)"
         },
         "name": {
             "type": "string",
             "minLength": 1,
-            "description": "Human-readable experiment name"
+            "description": "Human-readable app name"
         },
         "description": {
             "type": "string",
-            "description": "Experiment description"
+            "description": "App description"
         },
         "status": {
             "type": "string",
             "enum": ["active", "draft", "archived", "inactive"],
             "default": "draft",
-            "description": "Experiment status"
+            "description": "App status"
         },
         "auth_required": {
             "type": "boolean",
             "default": False,
-            "description": "Whether authentication is required for this experiment"
+            "description": "Whether authentication is required for this app"
         },
         "data_scope": {
             "type": "array",
@@ -675,7 +675,7 @@ MANIFEST_SCHEMA_V1 = {
             },
             "minItems": 1,
             "default": ["self"],
-            "description": "List of experiment slugs whose data this experiment can access"
+            "description": "List of app slugs whose data this app can access"
         },
         "runtime_s3_uri": {
             "type": "string",
@@ -705,7 +705,7 @@ MANIFEST_SCHEMA_V1 = {
         "developer_id": {
             "type": "string",
             "format": "email",
-            "description": "Email of the developer who owns this experiment"
+            "description": "Email of the developer who owns this app"
         }
     },
     "required": [],

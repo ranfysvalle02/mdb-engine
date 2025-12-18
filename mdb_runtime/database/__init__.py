@@ -1,7 +1,7 @@
 """
 Database abstraction layer.
 
-Provides scoped database access with automatic experiment isolation
+Provides scoped database access with automatic app isolation
 and MongoDB-style API for familiarity.
 """
 
@@ -12,9 +12,9 @@ from .scoped_wrapper import (
     AutoIndexManager,
 )
 from .abstraction import (
-    ExperimentDB,
+    AppDB,
     Collection,
-    get_experiment_db,
+    get_app_db,
     create_actor_database,
 )
 from .connection import (
@@ -32,9 +32,9 @@ __all__ = [
     "AutoIndexManager",
     
     # Database abstraction
-    "ExperimentDB",
+    "AppDB",
     "Collection",
-    "get_experiment_db",
+    "get_app_db",
     "create_actor_database",
     
     # Connection pooling
