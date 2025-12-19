@@ -6,29 +6,28 @@ version: '3.8'
 # ============================================================================
 
 services:
-  # Hello World Application
+  # Vector Hacking Application
   app:
     build:
       context: ../..
-      dockerfile: examples/hello_world/Dockerfile
+      dockerfile: examples/vector_hacking/Dockerfile
       args:
         APP_USER: appuser
         APP_UID: 1000
         APP_GID: 1000
-    container_name: hello_world_app
+    container_name: vector_hacking_app
     restart: unless-stopped
     ports:
       - "${APP_PORT:-8000}:8000"
     environment:
       - MONGO_URI=${MONGO_URI:-mongodb://admin:password@mongodb:27017/?authSource=admin}
-      - MONGO_DB_NAME=${MONGO_DB_NAME:-hello_world_db}
-      - APP_SLUG=${APP_SLUG:-hello_world}
+      - MONGO_DB_NAME=${MONGO_DB_NAME:-vector_hacking_db}
+      - APP_SLUG=${APP_SLUG:-vector_hacking}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - PYTHONUNBUFFERED=${PYTHONUNBUFFERED:-1}
-      - FLASK_SECRET_KEY=${FLASK_SECRET_KEY:-hello_world_demo_secret_key_change_in_production}
-      - DEMO_ENABLED=${DEMO_ENABLED:-true}
-      - DEMO_EMAIL_DEFAULT=${DEMO_EMAIL_DEFAULT:-demo@demo.com}
-      - DEMO_PASSWORD_DEFAULT=${DEMO_PASSWORD_DEFAULT:-password123}
+      # Vector hacking API keys (set these in production)
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - VOYAGE_API_KEY=${VOYAGE_API_KEY:-}
     depends_on:
       mongodb:
         condition: service_healthy
@@ -44,11 +43,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '1.0'
-          memory: 512M
+          cpus: '2.0'
+          memory: 2G
         reservations:
-          cpus: '0.25'
-          memory: 128M
+          cpus: '0.5'
+          memory: 512M
     # Security: tmpfs for temporary files
     tmpfs:
       - /tmp:noexec,nosuid,size=100m
@@ -56,14 +55,14 @@ services:
   # MongoDB Database
   mongodb:
     image: mongo:7.0
-    container_name: hello_world_mongodb
+    container_name: vector_hacking_mongodb
     restart: unless-stopped
     ports:
       - "${MONGO_PORT:-27017}:27017"
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME:-admin}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD:-password}
-      MONGO_INITDB_DATABASE: ${MONGO_INITDB_DATABASE:-hello_world_db}
+      MONGO_INITDB_DATABASE: ${MONGO_INITDB_DATABASE:-vector_hacking_db}
     volumes:
       - mongodb_data:/data/db
       - mongodb_config:/data/configdb
@@ -91,7 +90,7 @@ services:
   # MongoDB Express (Optional - Web UI for MongoDB)
   mongo-express:
     image: mongo-express:latest
-    container_name: hello_world_mongo_express
+    container_name: vector_hacking_mongo_express
     restart: unless-stopped
     ports:
       - "${MONGO_EXPRESS_PORT:-8081}:8081"
@@ -131,3 +130,4 @@ networks:
     ipam:
       config:
         - subnet: 172.28.0.0/16
+

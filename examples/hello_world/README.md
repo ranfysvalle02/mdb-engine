@@ -278,15 +278,27 @@ The `docker-compose.yml` file includes:
 
 ### Environment Variables
 
-Environment variables are set in `docker-compose.yml`. You can override them:
+Docker Compose automatically loads environment variables from a `.env` file in the same directory. All configuration values in `docker-compose.yml` use environment variable substitution with sensible defaults.
+
+**To customize configuration, create a `.env` file:**
 
 ```bash
-# In docker-compose.yml or via command line
-MONGO_URI=mongodb://admin:password@mongodb:27017/?authSource=admin
-MONGO_DB_NAME=hello_world_db
+# Create .env file from example (if available)
+cp .env.example .env
+
+# Or create your own .env file with:
+APP_PORT=8000
 APP_SLUG=hello_world
 LOG_LEVEL=INFO
+MONGO_URI=mongodb://admin:password@mongodb:27017/?authSource=admin
+MONGO_DB_NAME=hello_world_db
+MONGO_PORT=27017
+MONGO_INITDB_ROOT_USERNAME=admin
+MONGO_INITDB_ROOT_PASSWORD=password
+FLASK_SECRET_KEY=your-secret-key-here
 ```
+
+**All environment variables are optional** - the docker-compose.yml file provides defaults for all values. You only need to set variables you want to override.
 
 ### Customizing the Setup
 

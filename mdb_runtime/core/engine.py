@@ -97,6 +97,7 @@ class RuntimeEngine:
         self._mongo_db: Optional[AsyncIOMotorDatabase] = None
         self._initialized: bool = False
         self._apps: Dict[str, Dict[str, Any]] = {}
+        self._llm_services: Dict[str, Any] = {}  # App slug -> LLMService instance
         
         # Validators
         self.manifest_validator = ManifestValidator()
@@ -421,6 +422,11 @@ class RuntimeEngine:
             if create_indexes and "managed_indexes" in manifest:
                 await self._create_app_indexes(slug, manifest)
             
+            # Initialize LLM service if configured
+            llm_config = manifest.get("llm_config")
+            if llm_config and llm_config.get("enabled", False):
+                await self._initialize_llm_service(slug, llm_config)
+            
             duration_ms = (time.time() - start_time) * 1000
             # Register WebSocket endpoints if configured
             websockets_config = manifest.get("websockets")
@@ -433,6 +439,7 @@ class RuntimeEngine:
                 extra={
                     "app_slug": slug,
                     "create_indexes": create_indexes,
+                    "llm_enabled": bool(llm_config and llm_config.get("enabled", False)),
                     "websockets_configured": bool(websockets_config),
                     "duration_ms": round(duration_ms, 2),
                 }
@@ -440,6 +447,68 @@ class RuntimeEngine:
             return True
         finally:
             clear_app_context()
+    
+    async def _initialize_llm_service(
+        self,
+        slug: str,
+        llm_config: Dict[str, Any]
+    ) -> None:
+        """
+        Initialize LLM service for an app.
+        
+        LLM support is OPTIONAL - only processes if dependencies are available.
+        
+        Args:
+            slug: App slug
+            llm_config: LLM configuration from manifest
+        """
+        # Try to import LLM service (optional dependency)
+        try:
+            from ..llm import LLMService, LLMServiceError
+        except ImportError as e:
+            contextual_logger.warning(
+                f"LLM configuration found for app '{slug}' but dependencies are not available: {e}. "
+                f"LLM support will be disabled for this app. Install with: "
+                f"pip install litellm instructor pydantic pydantic-settings tenacity"
+            )
+            return
+        
+        contextual_logger.info(
+            f"Initializing LLM service for app '{slug}'",
+            extra={
+                "app_slug": slug,
+                "default_chat_model": llm_config.get("default_chat_model", "gpt-4o"),
+                "default_embedding_model": llm_config.get("default_embedding_model", "voyage/voyage-2")
+            }
+        )
+        
+        try:
+            # Create LLM service with app-specific configuration
+            # Extract only the config fields we want to pass (exclude 'enabled')
+            service_config = {
+                k: v for k, v in llm_config.items() 
+                if k != "enabled" and k in ["default_chat_model", "default_embedding_model", "default_temperature", "max_retries"]
+            }
+            
+            llm_service = LLMService(config=service_config)
+            self._llm_services[slug] = llm_service
+            
+            contextual_logger.info(
+                f"LLM service initialized for app '{slug}'",
+                extra={"app_slug": slug}
+            )
+        except LLMServiceError as e:
+            contextual_logger.error(
+                f"Failed to initialize LLM service for app '{slug}': {e}",
+                extra={"app_slug": slug, "error": str(e)},
+                exc_info=True
+            )
+        except Exception as e:
+            contextual_logger.error(
+                f"Unexpected error initializing LLM service for app '{slug}': {e}",
+                extra={"app_slug": slug, "error": str(e)},
+                exc_info=True
+            )
     
     async def _register_websockets(
         self,
@@ -732,6 +801,25 @@ class RuntimeEngine:
         """
         return self._apps.get(slug)
     
+    def get_llm_service(self, slug: str) -> Optional[Any]:
+        """
+        Get LLM service for an app.
+        
+        Args:
+            slug: App slug
+        
+        Returns:
+            LLMService instance if LLM is enabled for this app, None otherwise
+            
+        Example:
+            ```python
+            llm_service = engine.get_llm_service("my_app")
+            if llm_service:
+                response = await llm_service.chat("Hello, world!")
+            ```
+        """
+        return self._llm_services.get(slug)
+    
     def list_apps(self) -> List[str]:
         """
         List all registered app slugs.
@@ -768,6 +856,7 @@ class RuntimeEngine:
         self._initialized = False
         app_count = len(self._apps)
         self._apps.clear()
+        self._llm_services.clear()
         
         duration_ms = (time.time() - start_time) * 1000
         record_operation("engine.shutdown", duration_ms, success=True)

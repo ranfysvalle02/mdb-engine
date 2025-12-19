@@ -392,6 +392,42 @@ MANIFEST_SCHEMA_V2 = {
             },
             "description": "WebSocket endpoints configuration. Super simple setup - just specify the path! Each endpoint is automatically scoped and isolated to this app. Key is the endpoint name (e.g., 'realtime', 'events'), value contains path and optional settings. Routes are automatically registered with FastAPI during app registration."
         },
+        "llm_config": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Enable LLM service for this app. When enabled, LLM service will be initialized and available via dependency injection."
+                },
+                "default_chat_model": {
+                    "type": "string",
+                    "default": "gpt-4o",
+                    "description": "Default chat/completion model (e.g., 'gpt-4o', 'claude-3-opus-20240229', 'gemini/gemini-pro'). Uses LiteLLM model routing."
+                },
+                "default_embedding_model": {
+                    "type": "string",
+                    "default": "voyage/voyage-2",
+                    "description": "Default embedding model (e.g., 'voyage/voyage-2', 'text-embedding-3-small', 'cohere/embed-english-v3.0'). Uses LiteLLM model routing."
+                },
+                "default_temperature": {
+                    "type": "number",
+                    "minimum": 0.0,
+                    "maximum": 2.0,
+                    "default": 0.0,
+                    "description": "Default temperature for chat completions (0.0 = deterministic, 2.0 = creative)"
+                },
+                "max_retries": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 10,
+                    "default": 4,
+                    "description": "Maximum number of retries for transient errors (rate limits, 5xx errors)"
+                }
+            },
+            "additionalProperties": False,
+            "description": "LLM service configuration. Enables app-level LLM access with provider-agnostic interface (OpenAI, Anthropic, Gemini, VoyageAI via LiteLLM). When enabled, LLM service is available via dependency injection in FastAPI routes."
+        },
         "developer_id": {
             "type": "string",
             "format": "email",

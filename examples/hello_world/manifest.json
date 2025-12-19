@@ -30,6 +30,13 @@
       "path": "/ws",
       "description": "Real-time updates for dashboard metrics and CRUD operations"
     }
+  },
+  "llm_config": {
+    "enabled": false,
+    "default_chat_model": "gpt-4o",
+    "default_embedding_model": "voyage/voyage-2",
+    "default_temperature": 0.0,
+    "max_retries": 4
   }
 }
 

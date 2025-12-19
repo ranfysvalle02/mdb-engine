@@ -1,0 +1,42 @@
+{
+  "version": "2.0",
+  "slug": "vector_hacking",
+  "name": "Vector Hacking Demo",
+  "description": "A demonstration of vector inversion/hacking using LLMs with MDB_RUNTIME",
+  "status": "active",
+  "developer_id": "developer@example.com",
+  "auth_required": false,
+  "auth_policy": {
+    "required": false,
+    "allow_anonymous": true
+  },
+  "sub_auth": {
+    "enabled": false
+  },
+  "managed_indexes": {
+    "experiments": [
+      {
+        "type": "regular",
+        "keys": {"status": 1, "created_at": -1},
+        "name": "status_created_idx",
+        "options": {
+          "background": true
+        }
+      }
+    ]
+  },
+  "websockets": {
+    "realtime": {
+      "path": "/ws",
+      "description": "Real-time updates for vector hacking progress"
+    }
+  },
+  "llm_config": {
+    "enabled": true,
+    "default_chat_model": "gpt-3.5-turbo",
+    "default_embedding_model": "voyage/voyage-2",
+    "default_temperature": 0.8,
+    "max_retries": 4
+  }
+}
+

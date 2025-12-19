@@ -1,0 +1,20 @@
+# Requirements for Vector Hacking Example
+# Install MDB_RUNTIME first: pip install mdb-runtime
+# Or install from source: pip install -e ../..
+
+mdb-runtime>=0.1.0
+
+# Web framework
+uvicorn[standard]
+jinja2
+python-multipart
+websockets
+
+# Vector hacking dependencies
+numpy
+voyageai  # Required for VoyageAI embeddings (default embedding model)
+
+# Optional: for standalone demo
+ollama
+langchain-ollama
+
