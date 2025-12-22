@@ -84,7 +84,7 @@ async def get_auth_config(slug_id: str, engine) -> Dict[str, Any]:
         engine: MongoDBEngine instance
     
     Returns:
-        Dictionary with token_management, auth_policy, and sub_auth configs
+        Dictionary with token_management and auth (containing policy and users) configs
     """
     # Check cache first
     if slug_id in _auth_config_cache:
@@ -97,11 +97,19 @@ async def get_auth_config(slug_id: str, engine) -> Dict[str, Any]:
             logger.warning(f"Manifest not found for {slug_id}")
             return {}
         
-        # Extract auth configs
+        # Extract auth configs - support both old and new format for backward compatibility
+        auth_config = manifest.get("auth", {})
+        
+        # Migrate old format if present
+        if "auth_policy" in manifest or "sub_auth" in manifest:
+            if "policy" not in auth_config and "auth_policy" in manifest:
+                auth_config["policy"] = manifest.get("auth_policy", {})
+            if "users" not in auth_config and "sub_auth" in manifest:
+                auth_config["users"] = manifest.get("sub_auth", {})
+        
         config = {
             "token_management": manifest.get("token_management", {}),
-            "auth_policy": manifest.get("auth_policy", {}),
-            "sub_auth": manifest.get("sub_auth", {}),
+            "auth": auth_config,
         }
         
         # Cache it
@@ -118,11 +126,11 @@ async def setup_auth_from_manifest(app: FastAPI, engine, slug_id: str) -> bool:
     Set up authentication features from manifest configuration.
     
     This function:
-    1. Reads auth_policy and token_management config from manifest
+    1. Reads auth.policy and token_management config from manifest
     2. Auto-creates authorization provider (default: Casbin) if configured
     3. Initializes TokenBlacklist and SessionManager if enabled
     4. Sets up security middleware if configured
-    5. Links sub_auth to authorization if enabled
+    5. Links auth.users to authorization if enabled
     6. Stores config in app.state for easy access
     
     Args:
@@ -137,10 +145,11 @@ async def setup_auth_from_manifest(app: FastAPI, engine, slug_id: str) -> bool:
         # Get auth config
         config = await get_auth_config(slug_id, engine)
         token_management = config.get("token_management", {})
-        auth_policy = config.get("auth_policy", {})
+        auth = config.get("auth", {})
+        auth_policy = auth.get("policy", {})
         
         # Auto-create authorization provider from manifest
-        # Default to Casbin if auth_policy exists but no provider specified
+        # Default to Casbin if auth.policy exists but no provider specified
         provider = auth_policy.get("provider", "casbin" if auth_policy else None)
         
         if provider == "casbin" or (provider is None and auth_policy):
@@ -177,22 +186,23 @@ async def setup_auth_from_manifest(app: FastAPI, engine, slug_id: str) -> bool:
         elif provider == "custom":
             logger.info(f"Custom provider specified for {slug_id} - manual setup required")
         
-        # Auto-create demo users if sub_auth is enabled and demo_user_seed_strategy is "auto"
-        sub_auth = config.get("sub_auth", {})
+        # Auto-create demo users if auth.users is enabled and demo_user_seed_strategy is "auto"
+        auth = config.get("auth", {})
+        users_config = auth.get("users", {})
         demo_users = []
-        if sub_auth.get("enabled", False):
-            seed_strategy = sub_auth.get("demo_user_seed_strategy", "auto")
-            demo_users_config = sub_auth.get("demo_users", [])
+        if users_config.get("enabled", False):
+            seed_strategy = users_config.get("demo_user_seed_strategy", "auto")
+            demo_users_config = users_config.get("demo_users", [])
             
             # Only auto-create if strategy is explicitly "auto" or default (when not specified)
             if seed_strategy == "auto":
                 # Check if demo_users is explicitly configured or using defaults
                 has_explicit_demo_users = len(demo_users_config) > 0
-                auto_link_platform = sub_auth.get("auto_link_platform_demo", True)
+                auto_link_platform = users_config.get("auto_link_platform_demo", True)
                 
                 if has_explicit_demo_users or auto_link_platform:
                     try:
-                        from .sub_auth import ensure_demo_users_exist
+                        from .users import ensure_demo_users_exist
                         db = engine.get_scoped_db(slug_id)
                         
                         logger.info(
@@ -232,7 +242,8 @@ async def setup_auth_from_manifest(app: FastAPI, engine, slug_id: str) -> bool:
         # Link demo users with OSO initial_roles if auth provider is OSO
         if hasattr(app.state, "authz_provider") and demo_users:
             try:
-                auth_policy = config.get("auth_policy", {})
+                auth = config.get("auth", {})
+                auth_policy = auth.get("policy", {})
                 authorization = auth_policy.get("authorization", {})
                 initial_roles = authorization.get("initial_roles", [])
                 
@@ -384,8 +395,10 @@ async def setup_auth_from_manifest(app: FastAPI, engine, slug_id: str) -> bool:
             except Exception as e:
                 logger.warning(f"Could not set up CORS middleware for {slug_id}: {e}")
         
-        # Add stale session cleanup middleware if sub_auth is enabled
-        if sub_auth.get("enabled", False):
+        # Add stale session cleanup middleware if auth.users is enabled
+        auth = config.get("auth", {})
+        users_config = auth.get("users", {})
+        if users_config.get("enabled", False):
             try:
                 from .middleware import StaleSessionMiddleware
                 try:

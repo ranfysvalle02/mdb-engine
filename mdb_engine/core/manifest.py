@@ -14,7 +14,7 @@ SCHEMA VERSIONING STRATEGY
 
 Versions:
 - 1.0: Initial schema (default for manifests without version field)
-- 2.0: Current schema with all features (auth_policy, sub_auth, managed_indexes, etc.)
+- 2.0: Current schema with all features (auth.policy, auth.users, managed_indexes, etc.)
 
 Migration Strategy:
 - Automatically detects schema version from manifest
@@ -97,25 +97,28 @@ MANIFEST_SCHEMA_V2 = {
         "auth_required": {
             "type": "boolean",
             "default": False,
-            "description": "Whether authentication is required for this app (backward compatibility). If auth_policy is provided, this is ignored."
+            "description": "Whether authentication is required for this app (backward compatibility). If auth.policy is provided, this is ignored."
         },
-        "auth_policy": {
+        "auth": {
             "type": "object",
             "properties": {
-                "required": {
+                "policy": {
+                    "type": "object",
+                    "properties": {
+                        "required": {
                     "type": "boolean",
                     "default": True,
                     "description": "Whether authentication is required (default: true). If false, allows anonymous access but still checks other policies."
                 },
-                "provider": {
+                        "provider": {
                     "type": "string",
                     "enum": ["casbin", "oso", "custom"],
                     "default": "casbin",
                     "description": "Authorization provider to use. 'casbin' (default) auto-creates Casbin with MongoDB adapter, 'oso' uses OSO/Polar, 'custom' expects manual provider setup."
                 },
-                "authorization": {
-                    "type": "object",
-                    "properties": {
+                        "authorization": {
+                            "type": "object",
+                            "properties": {
                         # Casbin-specific properties
                         "model": {
                             "type": "string",
@@ -128,10 +131,10 @@ MANIFEST_SCHEMA_V2 = {
                             "default": "casbin_policies",
                             "description": "MongoDB collection name for storing Casbin policies (default: 'casbin_policies'). Only used when provider is 'casbin'."
                         },
-                        "link_sub_auth_roles": {
+                        "link_users_roles": {
                             "type": "boolean",
                             "default": True,
-                            "description": "If true, automatically assign Casbin roles to sub_auth users when they are created or updated. Only used when provider is 'casbin'."
+                            "description": "If true, automatically assign Casbin roles to app-level users when they are created or updated. Only used when provider is 'casbin'."
                         },
                         "default_roles": {
                             "type": "array",
@@ -191,204 +194,208 @@ MANIFEST_SCHEMA_V2 = {
                                 "additionalProperties": False
                             },
                             "description": "Initial permission policies to set up in OSO Cloud on startup. Only used when provider is 'oso'. Example: [{\"role\": \"admin\", \"resource\": \"documents\", \"action\": \"read\"}]"
+                            }
+                        },
+                        "additionalProperties": False,
+                        "description": "Authorization configuration. For Casbin provider: use 'model', 'policies_collection', 'default_roles'. For OSO Cloud provider: use 'api_key' (or env var), 'url' (or env var), 'initial_roles', 'initial_policies'."
+                    },
+                    "allowed_roles": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "List of roles that can access this app (e.g., ['admin', 'developer']). Users must have at least one of these roles."
+                    },
+                    "allowed_users": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "format": "email"
+                        },
+                        "description": "List of specific user emails that can access this app (whitelist). If provided, only these users can access regardless of roles."
+                    },
+                    "denied_users": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "format": "email"
+                        },
+                        "description": "List of user emails that are explicitly denied access (blacklist). Takes precedence over allowed_users and allowed_roles."
+                    },
+                    "required_permissions": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "List of required permissions (format: 'resource:action', e.g., ['apps:view', 'apps:manage_own']). User must have all listed permissions."
+                    },
+                    "custom_resource": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9_:]+$",
+                        "description": "Custom Casbin resource name (e.g., 'app:storyweaver'). If not provided, defaults to 'app:{slug}'."
+                    },
+                    "custom_actions": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": ["access", "read", "write", "admin"]
+                        },
+                        "description": "Custom actions to check (defaults to ['access']). Used with custom_resource for fine-grained permission checks."
+                    },
+                    "allow_anonymous": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "If true, allows anonymous (unauthenticated) access. Only applies if required is false or not specified."
+                    },
+                    "owner_can_access": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "If true (default), the app owner (developer_id) can always access the app."
+                    }
+                },
+                "additionalProperties": False,
+                "description": "Intelligent authorization policy for app-level access control. Supports role-based, user-based, and permission-based access. Takes precedence over auth_required."
+            },
+                "users": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": "Enable app-level user management. When enabled, app manages its own users separate from platform users."
+                        },
+                        "strategy": {
+                            "type": "string",
+                            "enum": ["app_users", "anonymous_session", "oauth", "hybrid"],
+                            "default": "app_users",
+                            "description": "User management strategy. 'app_users' = app-specific user accounts, 'anonymous_session' = session-based anonymous users, 'oauth' = OAuth integration, 'hybrid' = combine platform auth with app-specific identities"
+                        },
+                        "collection_name": {
+                            "type": "string",
+                            "pattern": "^[a-zA-Z0-9_]+$",
+                            "default": "users",
+                            "description": "Collection name for app-specific users (default: 'users'). Will be prefixed with app slug."
+                        },
+                        "session_cookie_name": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9_-]+$",
+                            "default": "app_session",
+                            "description": "Cookie name for app-specific session (default: 'app_session'). Will be suffixed with app slug."
+                        },
+                        "session_ttl_seconds": {
+                            "type": "integer",
+                            "minimum": 60,
+                            "default": 86400,
+                            "description": "Session TTL in seconds (default: 86400 = 24 hours). Used for app-specific sessions."
+                        },
+                        "allow_registration": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": "Allow users to self-register in the app (when strategy is 'app_users')."
+                        },
+                        "link_platform_users": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "Link app users to platform users (when strategy is 'hybrid'). Allows platform users to have app-specific profiles."
+                        },
+                        "oauth_providers": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "name": {
+                                        "type": "string",
+                                        "enum": ["google", "github", "microsoft", "custom"]
+                                    },
+                                    "client_id": {
+                                        "type": "string",
+                                        "description": "OAuth client ID (environment variable name or direct value)"
+                                    },
+                                    "client_secret": {
+                                        "type": "string",
+                                        "description": "OAuth client secret (environment variable name or direct value)"
+                                    },
+                                    "redirect_uri": {
+                                        "type": "string",
+                                        "format": "uri",
+                                        "description": "OAuth redirect URI (defaults to app OAuth callback)"
+                                    }
+                                },
+                                "required": ["name"]
+                            },
+                            "description": "OAuth providers for app-level user management (when strategy is 'oauth' or 'hybrid')."
+                        },
+                        "anonymous_user_prefix": {
+                            "type": "string",
+                            "default": "guest",
+                            "description": "Prefix for anonymous user IDs (default: 'guest'). Used for anonymous_session strategy."
+                        },
+                        "user_id_field": {
+                            "type": "string",
+                            "default": "app_user_id",
+                            "description": "Field name in platform user JWT for storing app user ID (default: 'app_user_id'). Used for linking."
+                        },
+                        "demo_users": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "email": {
+                                        "type": "string",
+                                        "format": "email",
+                                        "description": "Email address for demo user (defaults to platform demo email if not specified)"
+                                    },
+                                    "password": {
+                                        "type": "string",
+                                        "description": "Password for demo user (defaults to platform demo password if not specified, or plain text for demo purposes)"
+                                    },
+                                    "role": {
+                                        "type": "string",
+                                        "default": "user",
+                                        "description": "Role for demo user in app (default: 'user')"
+                                    },
+                                    "auto_create": {
+                                        "type": "boolean",
+                                        "default": True,
+                                        "description": "Automatically create this demo user if it doesn't exist (default: true)"
+                                    },
+                                    "link_to_platform": {
+                                        "type": "boolean",
+                                        "default": False,
+                                        "description": "Link this demo user to platform demo user (if platform demo exists, default: false)"
+                                    },
+                                    "extra_data": {
+                                        "type": "object",
+                                        "description": "Additional data to store with demo user (e.g., store_id, preferences, etc.)"
+                                    }
+                                },
+                                "required": []
+                            },
+                            "description": "Array of demo users to automatically create/link for this app. If empty, automatically uses platform demo user if available."
+                        },
+                        "auto_link_platform_demo": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "Automatically link platform demo user to experiment demo user if platform demo exists (default: true). Works in combination with link_platform_users and demo_users."
+                        },
+                        "demo_user_seed_strategy": {
+                            "type": "string",
+                            "enum": ["auto", "manual", "disabled"],
+                            "default": "auto",
+                            "description": "Strategy for demo user seeding: 'auto' = automatically create/link on first access or actor init, 'manual' = require explicit creation via API, 'disabled' = no automatic demo user handling (default: 'auto')"
+                        },
+                        "allow_demo_access": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": "Enable automatic demo user access. When enabled, unauthenticated users are automatically logged in as demo user, providing seamless demo experience. Requires demo users to be configured via demo_users or auto_link_platform_demo. (default: false)"
                         }
                     },
                     "additionalProperties": False,
-                    "description": "Authorization configuration. For Casbin provider: use 'model', 'policies_collection', 'default_roles'. For OSO Cloud provider: use 'api_key' (or env var), 'url' (or env var), 'initial_roles', 'initial_policies'."
-                },
-                "allowed_roles": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    },
-                    "description": "List of roles that can access this app (e.g., ['admin', 'developer']). Users must have at least one of these roles."
-                },
-                "allowed_users": {
-                    "type": "array",
-                    "items": {
-                        "type": "string",
-                        "format": "email"
-                    },
-                    "description": "List of specific user emails that can access this app (whitelist). If provided, only these users can access regardless of roles."
-                },
-                "denied_users": {
-                    "type": "array",
-                    "items": {
-                        "type": "string",
-                        "format": "email"
-                    },
-                    "description": "List of user emails that are explicitly denied access (blacklist). Takes precedence over allowed_users and allowed_roles."
-                },
-                "required_permissions": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    },
-                    "description": "List of required permissions (format: 'resource:action', e.g., ['apps:view', 'apps:manage_own']). User must have all listed permissions."
-                },
-                "custom_resource": {
-                    "type": "string",
-                    "pattern": "^[a-z0-9_:]+$",
-                    "description": "Custom Casbin resource name (e.g., 'app:storyweaver'). If not provided, defaults to 'app:{slug}'."
-                },
-                "custom_actions": {
-                    "type": "array",
-                    "items": {
-                        "type": "string",
-                        "enum": ["access", "read", "write", "admin"]
-                    },
-                    "description": "Custom actions to check (defaults to ['access']). Used with custom_resource for fine-grained permission checks."
-                },
-                "allow_anonymous": {
-                    "type": "boolean",
-                    "default": False,
-                    "description": "If true, allows anonymous (unauthenticated) access. Only applies if required is false or not specified."
-                },
-                "owner_can_access": {
-                    "type": "boolean",
-                    "default": True,
-                    "description": "If true (default), the app owner (developer_id) can always access the app."
+                    "description": "App-level user management configuration. Enables apps to have their own user accounts and sessions independent of platform authentication."
                 }
             },
             "additionalProperties": False,
-            "description": "Intelligent authorization policy for app-level access control. Supports role-based, user-based, and permission-based access. Takes precedence over auth_required."
-        },
-        "sub_auth": {
-            "type": "object",
-            "properties": {
-                "enabled": {
-                    "type": "boolean",
-                    "default": False,
-                    "description": "Enable app-specific authentication (sub-authentication). When enabled, app manages its own users separate from platform users."
-                },
-                "strategy": {
-                    "type": "string",
-                    "enum": ["app_users", "anonymous_session", "oauth", "hybrid"],
-                    "default": "app_users",
-                    "description": "Sub-authentication strategy. 'app_users' = app-specific user accounts, 'anonymous_session' = session-based anonymous users, 'oauth' = OAuth integration, 'hybrid' = combine platform auth with app-specific identities"
-                },
-                "collection_name": {
-                    "type": "string",
-                    "pattern": "^[a-zA-Z0-9_]+$",
-                    "default": "users",
-                    "description": "Collection name for app-specific users (default: 'users'). Will be prefixed with app slug."
-                },
-                "session_cookie_name": {
-                    "type": "string",
-                    "pattern": "^[a-z0-9_-]+$",
-                    "default": "app_session",
-                    "description": "Cookie name for app-specific session (default: 'app_session'). Will be suffixed with app slug."
-                },
-                "session_ttl_seconds": {
-                    "type": "integer",
-                    "minimum": 60,
-                    "default": 86400,
-                    "description": "Session TTL in seconds (default: 86400 = 24 hours). Used for app-specific sessions."
-                },
-                "allow_registration": {
-                    "type": "boolean",
-                    "default": False,
-                    "description": "Allow users to self-register in the app (when strategy is 'app_users')."
-                },
-                "link_platform_users": {
-                    "type": "boolean",
-                    "default": True,
-                    "description": "Link app users to platform users (when strategy is 'hybrid'). Allows platform users to have app-specific profiles."
-                },
-                "oauth_providers": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "name": {
-                                "type": "string",
-                                "enum": ["google", "github", "microsoft", "custom"]
-                            },
-                            "client_id": {
-                                "type": "string",
-                                "description": "OAuth client ID (environment variable name or direct value)"
-                            },
-                            "client_secret": {
-                                "type": "string",
-                                "description": "OAuth client secret (environment variable name or direct value)"
-                            },
-                            "redirect_uri": {
-                                "type": "string",
-                                "format": "uri",
-                                "description": "OAuth redirect URI (defaults to app OAuth callback)"
-                            }
-                        },
-                        "required": ["name"]
-                    },
-                    "description": "OAuth providers for sub-authentication (when strategy is 'oauth' or 'hybrid')."
-                },
-                "anonymous_user_prefix": {
-                    "type": "string",
-                    "default": "guest",
-                    "description": "Prefix for anonymous user IDs (default: 'guest'). Used for anonymous_session strategy."
-                },
-                "user_id_field": {
-                    "type": "string",
-                    "default": "app_user_id",
-                    "description": "Field name in platform user JWT for storing app user ID (default: 'app_user_id'). Used for linking."
-                },
-                "demo_users": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "email": {
-                                "type": "string",
-                                "format": "email",
-                                "description": "Email address for demo user (defaults to platform demo email if not specified)"
-                            },
-                            "password": {
-                                "type": "string",
-                                "description": "Password for demo user (defaults to platform demo password if not specified, or plain text for demo purposes)"
-                            },
-                            "role": {
-                                "type": "string",
-                                "default": "user",
-                                "description": "Role for demo user in app (default: 'user')"
-                            },
-                            "auto_create": {
-                                "type": "boolean",
-                                "default": True,
-                                "description": "Automatically create this demo user if it doesn't exist (default: true)"
-                            },
-                            "link_to_platform": {
-                                "type": "boolean",
-                                "default": False,
-                                "description": "Link this demo user to platform demo user (if platform demo exists, default: false)"
-                            },
-                            "extra_data": {
-                                "type": "object",
-                                "description": "Additional data to store with demo user (e.g., store_id, preferences, etc.)"
-                            }
-                        },
-                        "required": []
-                    },
-                    "description": "Array of demo users to automatically create/link for this app. If empty, automatically uses platform demo user if available."
-                },
-                "auto_link_platform_demo": {
-                    "type": "boolean",
-                    "default": True,
-                    "description": "Automatically link platform demo user to experiment demo user if platform demo exists (default: true). Works in combination with link_platform_users and demo_users."
-                },
-                "demo_user_seed_strategy": {
-                    "type": "string",
-                    "enum": ["auto", "manual", "disabled"],
-                    "default": "auto",
-                    "description": "Strategy for demo user seeding: 'auto' = automatically create/link on first access or actor init, 'manual' = require explicit creation via API, 'disabled' = no automatic demo user handling (default: 'auto')"
-                },
-                "allow_demo_access": {
-                    "type": "boolean",
-                    "default": False,
-                    "description": "Enable automatic demo user access. When enabled, unauthenticated users are automatically logged in as demo user, providing seamless demo experience. Requires demo users to be configured via demo_users or auto_link_platform_demo. (default: false)"
-                }
-            },
-            "additionalProperties": False,
-            "description": "Sub-authentication configuration for app-specific user management. Enables apps to have their own user accounts and sessions independent of platform authentication."
+            "description": "Authentication and authorization configuration. Combines authorization policy (who can access) and user management (user accounts and sessions)."
         },
         "token_management": {
             "type": "object",
@@ -694,7 +701,7 @@ MANIFEST_SCHEMA_V2 = {
                                 "required": {
                                     "type": "boolean",
                                     "default": True,
-                                    "description": "Whether authentication is required (default: true). Uses app's auth_policy if not specified."
+                                    "description": "Whether authentication is required (default: true). Uses app's auth.policy if not specified."
                                 },
                                 "allow_anonymous": {
                                     "type": "boolean",
@@ -703,7 +710,7 @@ MANIFEST_SCHEMA_V2 = {
                                 }
                             },
                             "additionalProperties": False,
-                            "description": "Authentication configuration. If not specified, uses app's auth_policy settings."
+                            "description": "Authentication configuration. If not specified, uses app's auth.policy settings."
                         },
                         "description": {
                             "type": "string",
@@ -1356,8 +1363,10 @@ def get_schema_version(manifest_data: Dict[str, Any]) -> str:
         return str(version)
     
     # Heuristic: If manifest has new fields, assume 2.0, otherwise 1.0
-    v2_fields = ["auth_policy", "sub_auth", "collection_settings"]
-    if any(field in manifest_data for field in v2_fields):
+    v2_fields = ["auth", "collection_settings"]
+    # Also check for old format for backward compatibility
+    old_v2_fields = ["auth_policy", "sub_auth"]
+    if any(field in manifest_data for field in v2_fields) or any(field in manifest_data for field in old_v2_fields):
         return "2.0"
     
     return DEFAULT_SCHEMA_VERSION
@@ -1387,8 +1396,21 @@ def migrate_manifest(manifest_data: Dict[str, Any], target_version: str = CURREN
         if "schema_version" not in migrated:
             migrated["schema_version"] = "2.0"
         
+        # Migrate old auth_policy/sub_auth format to new auth.policy/auth.users format
+        if "auth_policy" in migrated or "sub_auth" in migrated:
+            logger.warning(
+                f"Manifest {migrated.get('slug', 'unknown')} uses deprecated 'auth_policy'/'sub_auth' format. "
+                f"Consider migrating to 'auth.policy'/'auth.users' format."
+            )
+            if "auth" not in migrated:
+                migrated["auth"] = {}
+            if "auth_policy" in migrated:
+                migrated["auth"]["policy"] = migrated.pop("auth_policy")
+            if "sub_auth" in migrated:
+                migrated["auth"]["users"] = migrated.pop("sub_auth")
+        
         # No data transformation needed - V2.0 is backward compatible
-        # New fields (auth_policy, sub_auth, etc.) are optional
+        # New fields (auth, etc.) are optional
         logger.debug(f"Migrated manifest from 1.0 to 2.0: {migrated.get('slug', 'unknown')}")
     
     # Future: Add more migration paths as needed

@@ -459,15 +459,17 @@ Authorization is configured in your app's `manifest.json`:
 ```json
 {
   "slug": "my_app",
-  "auth_policy": {
-    "provider": "casbin",
-    "required": true,
-    "allow_anonymous": false,
-    "authorization": {
-      "model": "rbac",
-      "policies_collection": "casbin_policies",
-      "default_roles": ["user", "admin", "editor"],
-      "link_sub_auth_roles": true
+  "auth": {
+    "policy": {
+      "provider": "casbin",
+      "required": true,
+      "allow_anonymous": false,
+      "authorization": {
+        "model": "rbac",
+        "policies_collection": "casbin_policies",
+        "default_roles": ["user", "admin", "editor"],
+        "link_users_roles": true
+      }
     }
   }
 }

@@ -4,7 +4,7 @@ Tenant Management for Multi-Tenant Applications
 Provides comprehensive tenant lifecycle management including:
 - Automatic tenant creation and validation
 - Tenant metadata management
-- Integration with sub_auth for seamless provisioning
+- Integration with auth.users for seamless provisioning
 - Tenant lifecycle hooks for customization
 - Tenant existence validation
 

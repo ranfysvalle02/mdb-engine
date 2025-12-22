@@ -6,24 +6,26 @@
   "status": "active",
   "developer_id": "developer@example.com",
   "auth_required": false,
-  "auth_policy": {
-    "provider": "casbin",
-    "required": false,
-    "allow_anonymous": true,
-    "authorization": {
-      "model": "rbac",
-      "policies_collection": "casbin_policies",
-      "link_sub_auth_roles": true,
-      "default_roles": ["user", "admin"]
+  "auth": {
+    "policy": {
+      "provider": "casbin",
+      "required": false,
+      "allow_anonymous": true,
+      "authorization": {
+        "model": "rbac",
+        "policies_collection": "casbin_policies",
+        "link_users_roles": true,
+        "default_roles": ["user", "admin"]
+      }
+    },
+    "users": {
+      "enabled": true,
+      "strategy": "app_users",
+      "collection_name": "users",
+      "session_cookie_name": "conversations_session",
+      "session_ttl_seconds": 86400,
+      "allow_registration": true
     }
-  },
-  "sub_auth": {
-    "enabled": true,
-    "strategy": "app_users",
-    "collection_name": "users",
-    "session_cookie_name": "conversations_session",
-    "session_ttl_seconds": 86400,
-    "allow_registration": true
   },
   "token_management": {
     "enabled": true,

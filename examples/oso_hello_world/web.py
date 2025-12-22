@@ -21,7 +21,7 @@ from mdb_engine import MongoDBEngine
 from mdb_engine.auth import (
     get_authz_provider,
     setup_auth_from_manifest,
-    get_app_sub_user,
+    get_app_user,
     authenticate_app_user,
     create_app_session,
     logout_user,
@@ -86,11 +86,12 @@ def get_db():
     if not engine: raise HTTPException(503, "Engine not initialized")
     return engine.get_scoped_db("oso_hello_world")
 
-async def get_app_user(request: Request):
+async def get_current_app_user(request: Request):
+    """Helper to get current app user for oso_hello_world app."""
     db = get_db()
     app_config = engine.get_app("oso_hello_world") if engine else None
     
-    app_user = await get_app_sub_user(
+    app_user = await get_app_user(
         request=request,
         slug_id="oso_hello_world",
         db=db,
@@ -100,8 +101,9 @@ async def get_app_user(request: Request):
     
     if not app_user:
         # Check for stale cookie
-        sub_auth = app_config.get("sub_auth", {}) if app_config else {}
-        cookie_name = f"{sub_auth.get('session_cookie_name', 'app_session')}_oso_hello_world"
+        auth = app_config.get("auth", {}) if app_config else {}
+        users_config = auth.get("users", {})
+        cookie_name = f"{users_config.get('session_cookie_name', 'app_session')}_oso_hello_world"
         if request.cookies.get(cookie_name):
             request.state.clear_stale_session = True
             
@@ -173,8 +175,9 @@ async def logout(request: Request):
     if engine:
         app_config = engine.get_app("oso_hello_world")
         if app_config:
-            sub_auth = app_config.get("sub_auth", {})
-            session_cookie_name = sub_auth.get("session_cookie_name", "app_session")
+            auth = app_config.get("auth", {})
+            users_config = auth.get("users", {})
+            session_cookie_name = users_config.get("session_cookie_name", "app_session")
             cookie_name = f"{session_cookie_name}_oso_hello_world"
             cookie_names_to_clear.append(cookie_name)
     
@@ -201,7 +204,7 @@ async def get_current_user_info(
     request: Request,
     authz: AuthorizationProvider = Depends(get_authz_provider)
 ):
-    user = await get_app_user(request)
+    user = await get_current_app_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
     
@@ -236,7 +239,7 @@ async def list_documents(
     request: Request,
     authz: AuthorizationProvider = Depends(get_authz_provider)
 ):
-    user = await get_app_user(request)
+    user = await get_current_app_user(request)
     if not user: raise HTTPException(401)
     
     if not await authz.check(user.get("email"), "documents", "read"):
@@ -262,7 +265,7 @@ async def create_document(
     request: Request,
     authz: AuthorizationProvider = Depends(get_authz_provider)
 ):
-    user = await get_app_user(request)
+    user = await get_current_app_user(request)
     if not user: raise HTTPException(401)
     
     if not await authz.check(user.get("email"), "documents", "write"):

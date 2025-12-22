@@ -7,6 +7,8 @@
 
 ---
 
+![](mdb_engine.png)
+
 ## The "Prototype Graveyard" Problem
 
 If you are a builder, you know the feeling. You have a "digital garden" of scripts, tools, and prototypes. It's the data-entry tool for a friend, the internal dashboard, the AI chatbot.
@@ -84,13 +86,15 @@ Create `manifest.json` in your project root.
   "slug": "my_app",
   "name": "My First App",
   "status": "active",
-  "auth_policy": {
-    "provider": "casbin",
-    "required": false,
-    "allow_anonymous": true,
-    "authorization": {
-      "model": "rbac",
-      "link_sub_auth_roles": true
+  "auth": {
+    "policy": {
+      "provider": "casbin",
+      "required": false,
+      "allow_anonymous": true,
+      "authorization": {
+        "model": "rbac",
+        "link_users_roles": true
+      }
     }
   },
   "managed_indexes": {
@@ -148,25 +152,27 @@ Stop rewriting auth. The engine provides a unified authentication and authorizat
 **Unified Auth Stack:**
 * **Auto-created Provider:** Casbin authorization provider is automatically created from manifest (default)
 * **MongoDB-backed Policies:** Policies stored in MongoDB with zero configuration
-* **Sub-Auth Integration:** App-level users automatically get Casbin roles assigned
+* **App-Level User Management:** App-level users automatically get Casbin roles assigned
 * **Zero Boilerplate:** Just configure in manifest, everything works automatically
 
 **Manifest Configuration:**
 ```json
 {
-  "auth_policy": {
-    "provider": "casbin",
-    "required": true,
-    "authorization": {
-      "model": "rbac",
-      "policies_collection": "casbin_policies",
-      "link_sub_auth_roles": true,
-      "default_roles": ["user", "admin"]
+  "auth": {
+    "policy": {
+      "provider": "casbin",
+      "required": true,
+      "authorization": {
+        "model": "rbac",
+        "policies_collection": "casbin_policies",
+        "link_users_roles": true,
+        "default_roles": ["user", "admin"]
+      }
+    },
+    "users": {
+      "enabled": true,
+      "strategy": "app_users"
     }
-  },
-  "sub_auth": {
-    "enabled": true,
-    "strategy": "app_users"
   }
 }
 ```

@@ -109,7 +109,7 @@ class StaleSessionMiddleware(BaseHTTPMiddleware):
     """
     Middleware for cleaning up stale session cookies.
     
-    When get_app_sub_user() detects a stale/invalid session cookie,
+        When get_app_user() detects a stale/invalid session cookie,
     it sets request.state.clear_stale_session = True. This middleware
     then removes the cookie from the response.
     """
@@ -132,16 +132,16 @@ class StaleSessionMiddleware(BaseHTTPMiddleware):
         Process request and clean up stale session cookies if needed.
         
         This middleware only acts when request.state.clear_stale_session is set to True
-        by get_app_sub_user() when it detects an invalid/stale session cookie.
+        by get_app_user() when it detects an invalid/stale session cookie.
         It gracefully handles missing config and only processes requests for apps
-        that use sub_auth.
+        that use auth.users.
         """
         # Process request first
         response = await call_next(request)
         
         # Check if we need to clear a stale session cookie
         # Only act if explicitly flagged - this ensures we don't interfere with
-        # apps that don't use get_app_sub_user()
+        # apps that don't use get_app_user()
         if hasattr(request.state, "clear_stale_session") and request.state.clear_stale_session:
             try:
                 # Get cookie name from app config
@@ -151,9 +151,10 @@ class StaleSessionMiddleware(BaseHTTPMiddleware):
                 if hasattr(request.app.state, "auth_config"):
                     try:
                         auth_config = request.app.state.auth_config
-                        sub_auth = auth_config.get("sub_auth", {})
-                        if sub_auth.get("enabled", False):
-                            session_cookie_name = sub_auth.get("session_cookie_name", "app_session")
+                        auth = auth_config.get("auth", {})
+                        users_config = auth.get("users", {})
+                        if users_config.get("enabled", False):
+                            session_cookie_name = users_config.get("session_cookie_name", "app_session")
                             cookie_name = f"{session_cookie_name}_{self.slug_id}"
                     except (AttributeError, KeyError, TypeError):
                         pass
@@ -163,9 +164,10 @@ class StaleSessionMiddleware(BaseHTTPMiddleware):
                     try:
                         app_config = self.engine.get_app(self.slug_id)
                         if app_config:
-                            sub_auth = app_config.get("sub_auth", {})
-                            if sub_auth.get("enabled", False):
-                                session_cookie_name = sub_auth.get("session_cookie_name", "app_session")
+                            auth = app_config.get("auth", {})
+                            users_config = auth.get("users", {})
+                            if users_config.get("enabled", False):
+                                session_cookie_name = users_config.get("session_cookie_name", "app_session")
                                 cookie_name = f"{session_cookie_name}_{self.slug_id}"
                     except (AttributeError, KeyError, TypeError, Exception):
                         pass

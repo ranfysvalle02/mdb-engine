@@ -1,5 +1,7 @@
 # MDB_ENGINE: The Missing Engine That Turns Your Prototype Graveyard Into a Production Platform
 
+![](mdb_engine.png)
+
 *How a "WordPress-like" engine for Python and MongoDB eliminates 70% of your scaffolding code and lets you focus on what matters: building features.*
 
 ---

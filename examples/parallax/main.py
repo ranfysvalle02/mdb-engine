@@ -23,7 +23,7 @@ async def main():
     # Get MongoDB connection from environment
     mongo_uri = os.getenv(
         "MONGO_URI", 
-        "mongodb://admin:password@mongodb:27017/?authSource=admin"
+        "mongodb://admin:password@mongodb:27017/?authSource=admin&directConnection=true"
     )
     db_name = os.getenv("MONGO_DB_NAME", "parallax_db")
     

@@ -152,7 +152,9 @@ async def initialize_oso_from_manifest(
     try:
         from .provider import OsoAdapter
         
-        auth_policy = auth_config.get("auth_policy", {})
+        # Support both old (auth_policy) and new (auth.policy) structures
+        auth = auth_config.get("auth", {})
+        auth_policy = auth.get("policy", {}) or auth_config.get("auth_policy", {})
         provider = auth_policy.get("provider", "casbin")
         
         # Only proceed if provider is oso

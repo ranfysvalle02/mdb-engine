@@ -33,8 +33,8 @@ from .dependencies import (
     get_refresh_token,
     refresh_access_token,
 )
-from .sub_auth import (
-    get_app_sub_user,
+from .users import (
+    get_app_user,
     create_app_session,
     authenticate_app_user,
     create_app_user,
@@ -43,8 +43,8 @@ from .sub_auth import (
     get_or_create_demo_user_for_request,
     get_or_create_demo_user,
     ensure_demo_users_for_actor,
-    sync_sub_auth_user_to_casbin,
-    get_sub_auth_user_role,
+    sync_app_user_to_casbin,
+    get_app_user_role,
 )
 from .restrictions import (
     is_demo_user,
@@ -138,8 +138,8 @@ __all__ = [
     "get_refresh_token",
     "refresh_access_token",
     
-    # Sub-authentication
-    "get_app_sub_user",
+    # App-level user management
+    "get_app_user",
     "create_app_session",
     "authenticate_app_user",
     "create_app_user",
@@ -148,8 +148,8 @@ __all__ = [
     "get_or_create_demo_user_for_request",
     "get_or_create_demo_user",
     "ensure_demo_users_for_actor",
-    "sync_sub_auth_user_to_casbin",
-    "get_sub_auth_user_role",
+    "sync_app_user_to_casbin",
+    "get_app_user_role",
     
     # Restrictions
     "is_demo_user",

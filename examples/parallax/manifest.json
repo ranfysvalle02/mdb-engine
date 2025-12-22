@@ -6,12 +6,14 @@
   "status": "active",
   "developer_id": "developer@example.com",
   "auth_required": false,
-  "auth_policy": {
-    "required": false,
-    "allow_anonymous": true
-  },
-  "sub_auth": {
-    "enabled": false
+  "auth": {
+    "policy": {
+      "required": false,
+      "allow_anonymous": true
+    },
+    "users": {
+      "enabled": false
+    }
   },
   "managed_indexes": {
     "parallax_reports": [

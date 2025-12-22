@@ -17,8 +17,8 @@ from fastapi import FastAPI, Request, HTTPException, status, Form, WebSocket, We
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from mdb_engine import MongoDBEngine
-from mdb_engine.auth.sub_auth import (
-    get_app_sub_user,
+from mdb_engine.auth.users import (
+    get_app_user,
     create_app_session,
 )
 from mdb_engine.auth.utils import (
@@ -194,14 +194,14 @@ def get_db():
     return engine.get_scoped_db("conversations")
 
 
-async def get_app_user(request: Request):
-    """Helper to get app user."""
+async def get_current_app_user(request: Request):
+    """Helper to get current app user for conversations app."""
     db = get_db()
     
-    # Get app config for sub_auth
+    # Get app config for auth.users
     app_config = engine.get_app("conversations") if engine else None
     
-    app_user = await get_app_sub_user(
+    app_user = await get_app_user(
         request=request,
         slug_id="conversations",
         db=db,
@@ -226,7 +226,7 @@ async def get_app_user(request: Request):
 @app.get("/", response_class=HTMLResponse)
 async def root(request: Request):
     """Home page - redirects to conversations or login"""
-    app_user = await get_app_user(request)
+    app_user = await get_current_app_user(request)
     
     if app_user:
         return RedirectResponse(url="/conversations", status_code=status.HTTP_302_FOUND)
@@ -240,7 +240,7 @@ async def root(request: Request):
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
     """Login page"""
-    app_user = await get_app_user(request)
+    app_user = await get_current_app_user(request)
     
     if app_user:
         return RedirectResponse(url="/conversations", status_code=status.HTTP_302_FOUND)
@@ -306,7 +306,7 @@ async def login(
 @app.get("/register", response_class=HTMLResponse)
 async def register_page(request: Request):
     """Registration page"""
-    app_user = await get_app_user(request)
+    app_user = await get_current_app_user(request)
     
     if app_user:
         return RedirectResponse(url="/conversations", status_code=status.HTTP_302_FOUND)
@@ -396,7 +396,7 @@ async def logout(request: Request):
 @require_auth()
 async def conversations_list(request: Request):
     """List all conversations for the user"""
-    app_user = await get_app_user(request)
+    app_user = await get_current_app_user(request)
     
     if not app_user:
         return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
@@ -419,7 +419,7 @@ async def conversations_list(request: Request):
 @require_auth()
 async def conversation_view(request: Request, conversation_id: str):
     """View a specific conversation"""
-    app_user = await get_app_user(request)
+    app_user = await get_current_app_user(request)
     
     if not app_user:
         return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
@@ -459,7 +459,7 @@ async def conversation_view(request: Request, conversation_id: str):
 @require_auth()
 async def create_conversation(request: Request):
     """Create a new conversation"""
-    app_user = await get_app_user(request)
+    app_user = await get_current_app_user(request)
     
     if not app_user:
         raise HTTPException(status_code=401, detail="Authentication required")
@@ -492,7 +492,7 @@ async def create_conversation(request: Request):
 @require_auth()
 async def send_message(request: Request, conversation_id: str, message: str = Form(...)):
     """Send a message in a conversation"""
-    app_user = await get_app_user(request)
+    app_user = await get_current_app_user(request)
     
     if not app_user:
         raise HTTPException(status_code=401, detail="Authentication required")
@@ -867,7 +867,7 @@ async def send_message(request: Request, conversation_id: str, message: str = Fo
 @require_auth()
 async def delete_conversation(request: Request, conversation_id: str):
     """Delete a conversation"""
-    app_user = await get_app_user(request)
+    app_user = await get_current_app_user(request)
     
     if not app_user:
         raise HTTPException(status_code=401, detail="Authentication required")
@@ -902,7 +902,7 @@ async def delete_conversation(request: Request, conversation_id: str):
 @require_auth()
 async def get_all_memories(request: Request, limit: int = 20):
     """Get all memories for the current user"""
-    app_user = await get_app_user(request)
+    app_user = await get_current_app_user(request)
     
     if not app_user:
         # Clear invalid session cookie if marked
@@ -1001,7 +1001,7 @@ async def get_all_memories(request: Request, limit: int = 20):
 @require_auth()
 async def search_memories(request: Request, query: str, limit: int = 5, metadata: Optional[str] = None):
     """Search memories for the current user with optional metadata filtering"""
-    app_user = await get_app_user(request)
+    app_user = await get_current_app_user(request)
     
     if not app_user:
         raise HTTPException(status_code=401, detail="Authentication required")
@@ -1077,7 +1077,7 @@ async def search_memories(request: Request, query: str, limit: int = 5, metadata
 @require_auth()
 async def get_memory(request: Request, memory_id: str):
     """Get a single memory by ID"""
-    app_user = await get_app_user(request)
+    app_user = await get_current_app_user(request)
     
     if not app_user:
         raise HTTPException(status_code=401, detail="Authentication required")
@@ -1127,7 +1127,7 @@ async def get_memory(request: Request, memory_id: str):
 @require_auth()
 async def update_memory(request: Request, memory_id: str):
     """Update a memory by ID"""
-    app_user = await get_app_user(request)
+    app_user = await get_current_app_user(request)
     
     if not app_user:
         raise HTTPException(status_code=401, detail="Authentication required")
@@ -1193,7 +1193,7 @@ async def update_memory(request: Request, memory_id: str):
 @require_auth()
 async def delete_memory(request: Request, memory_id: str):
     """Delete a single memory by ID"""
-    app_user = await get_app_user(request)
+    app_user = await get_current_app_user(request)
     
     if not app_user:
         raise HTTPException(status_code=401, detail="Authentication required")
@@ -1226,7 +1226,7 @@ async def delete_memory(request: Request, memory_id: str):
 @require_auth()
 async def delete_all_memories(request: Request):
     """Delete all memories for the current user"""
-    app_user = await get_app_user(request)
+    app_user = await get_current_app_user(request)
     
     if not app_user:
         raise HTTPException(status_code=401, detail="Authentication required")
@@ -1288,7 +1288,7 @@ async def get_memory_stats(request: Request):
         
         # Get app user - wrap in try-except in case get_app_user fails
         try:
-            app_user = await get_app_user(request)
+            app_user = await get_current_app_user(request)
         except Exception as user_error:
             logger.warning(f"Failed to get app user in stats: {user_error}")
             return JSONResponse(default_stats, status_code=200)

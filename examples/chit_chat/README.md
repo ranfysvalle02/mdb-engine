@@ -181,7 +181,7 @@ Configuration in `manifest.json`:
 
 The application configuration is in `manifest.json`:
 
-- `sub_auth`: User authentication configuration
+- `auth.users`: App-level user management configuration
 - `token_management`: JWT token and session management
 - `memory_config`: Mem0 memory service configuration
 - `managed_indexes`: Automatic index creation

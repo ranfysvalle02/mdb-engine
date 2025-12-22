@@ -46,20 +46,22 @@ Configure authentication and authorization in your `manifest.json`. The system a
 {
   "slug": "my_app",
   "auth_required": true,
-  "auth_policy": {
-    "provider": "casbin",
-    "required": true,
-    "allow_anonymous": false,
-    "authorization": {
-      "model": "rbac",
-      "policies_collection": "casbin_policies",
-      "link_sub_auth_roles": true,
-      "default_roles": ["user", "admin"]
+  "auth": {
+    "policy": {
+      "provider": "casbin",
+      "required": true,
+      "allow_anonymous": false,
+      "authorization": {
+        "model": "rbac",
+        "policies_collection": "casbin_policies",
+        "link_users_roles": true,
+        "default_roles": ["user", "admin"]
+      }
+    },
+    "users": {
+      "enabled": true,
+      "strategy": "app_users"
     }
-  },
-  "sub_auth": {
-    "enabled": true,
-    "strategy": "app_users"
   }
 }
 ```
@@ -67,7 +69,7 @@ Configure authentication and authorization in your `manifest.json`. The system a
 **Key Features:**
 - **Auto-created provider**: Casbin provider is automatically created from manifest (default)
 - **MongoDB-backed**: Policies stored in MongoDB collection (default: `casbin_policies`)
-- **Sub-auth integration**: Sub-auth users automatically get Casbin roles assigned
+- **App-level user management**: App-level users automatically get Casbin roles assigned
 - **Zero boilerplate**: Just configure in manifest, everything works automatically
 
 ## Usage
@@ -87,7 +89,7 @@ async def startup():
     # This automatically:
     # - Creates Casbin provider with MongoDB adapter
     # - Sets up token management
-    # - Links sub_auth users to Casbin roles
+    # - Links app-level users to Casbin roles
     # - Configures security middleware
     await setup_auth_from_manifest(app, engine, "my_app")
 ```
@@ -357,7 +359,7 @@ if should_refresh_token(refresh_token_payload):
 from mdb_engine.auth import (
     create_app_user,
     authenticate_app_user,
-    get_app_sub_user,
+    get_app_user,
     get_or_create_anonymous_user
 )
 
@@ -491,7 +493,7 @@ async def logout(response: Response):
 
 - `create_app_user(db, app_slug, email, password, **kwargs)` - Create app user
 - `authenticate_app_user(db, app_slug, email, password)` - Authenticate app user
-- `get_app_sub_user(db, app_slug, user_id)` - Get app sub-user
+- `get_app_user(db, app_slug, user_id)` - Get app-level user
 - `get_or_create_anonymous_user(db, app_slug, device_id)` - Get/create anonymous user
 - `get_or_create_demo_user(db, app_slug, device_id)` - Get/create demo user
 

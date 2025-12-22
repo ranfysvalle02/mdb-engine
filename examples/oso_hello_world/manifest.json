@@ -6,10 +6,11 @@
   "status": "active",
   "developer_id": "developer@example.com",
   "auth_required": true,
-  "auth_policy": {
-    "provider": "oso",
-    "required": true,
-    "allow_anonymous": false,
+  "auth": {
+    "policy": {
+      "provider": "oso",
+      "required": true,
+      "allow_anonymous": false,
       "authorization": {
         "api_key": null,
         "url": null,
@@ -25,27 +26,28 @@
         ],
         "initial_policies": []
       }
-  },
-  "sub_auth": {
-    "enabled": true,
-    "strategy": "app_users",
-    "collection_name": "users",
-    "session_cookie_name": "oso_hello_world_session",
-    "session_ttl_seconds": 86400,
-    "allow_registration": true,
-    "demo_users": [
-      {
-        "email": "alice@example.com",
-        "password": "password123",
-        "role": "editor"
-      },
-      {
-        "email": "bob@example.com",
-        "password": "password123",
-        "role": "viewer"
-      }
-    ],
-    "demo_user_seed_strategy": "auto"
+    },
+    "users": {
+      "enabled": true,
+      "strategy": "app_users",
+      "collection_name": "users",
+      "session_cookie_name": "oso_hello_world_session",
+      "session_ttl_seconds": 86400,
+      "allow_registration": true,
+      "demo_users": [
+        {
+          "email": "alice@example.com",
+          "password": "password123",
+          "role": "editor"
+        },
+        {
+          "email": "bob@example.com",
+          "password": "password123",
+          "role": "viewer"
+        }
+      ],
+      "demo_user_seed_strategy": "auto"
+    }
   },
   "token_management": {
     "enabled": true,

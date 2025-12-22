@@ -123,7 +123,7 @@ The manifest system provides JSON schema validation, versioning, and migration.
 ### Manifest Schema Versions
 
 - **v1.0**: Initial schema (default for manifests without version field)
-- **v2.0**: Current schema with all features (auth_policy, sub_auth, managed_indexes, etc.)
+- **v2.0**: Current schema with all features (auth.policy, auth.users, managed_indexes, etc.)
 
 ### Manifest Structure
 
@@ -392,7 +392,7 @@ Configure unified authentication and authorization:
     "authorization": {
       "model": "rbac",
       "policies_collection": "casbin_policies",
-      "link_sub_auth_roles": true,
+      "link_users_roles": true,
       "default_roles": ["user", "admin"]
     }
   }
@@ -402,7 +402,7 @@ Configure unified authentication and authorization:
 **Key Features:**
 - **Auto-created Provider:** Casbin provider automatically created from manifest (default)
 - **MongoDB-backed:** Policies stored in MongoDB collection
-- **Sub-Auth Integration:** Sub-auth users automatically get Casbin roles
+- **App-Level User Management:** App-level users automatically get Casbin roles
 - **Extensible:** Supports custom providers, models, and manual setup
 
 **Extensibility:**
@@ -411,22 +411,24 @@ Configure unified authentication and authorization:
 - Provide custom Casbin model files via `authorization.model` path
 - Implement `AuthorizationProvider` protocol for fully custom authorization logic
 
-### Sub-Authentication
+### App-Level User Management
 
 Configure app-level user management:
 
 ```json
 {
-  "sub_auth": {
-    "strategy": "app_users",
-    "allow_registration": true,
-    "demo_users": [
-      {
-        "email": "demo@example.com",
-        "password": "demo123",
-        "role": "user"
-      }
-    ]
+  "auth": {
+    "users": {
+      "strategy": "app_users",
+      "allow_registration": true,
+      "demo_users": [
+        {
+          "email": "demo@example.com",
+          "password": "demo123",
+          "role": "user"
+        }
+      ]
+    }
   }
 }
 ```

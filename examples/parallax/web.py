@@ -77,43 +77,6 @@ manager = ConnectionManager()
 
 # CORS is now handled automatically by setup_auth_from_manifest() based on manifest.json
 
-# WebSocket connection manager for real-time updates
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: list[WebSocket] = []
-    
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
-        logger.info(f"WebSocket connected. Total connections: {len(self.active_connections)}")
-    
-    def disconnect(self, websocket: WebSocket):
-        if websocket in self.active_connections:
-            self.active_connections.remove(websocket)
-        logger.info(f"WebSocket disconnected. Total connections: {len(self.active_connections)}")
-    
-    async def send_personal_message(self, message: dict, websocket: WebSocket):
-        try:
-            await websocket.send_json(message)
-        except Exception as e:
-            logger.error(f"Error sending WebSocket message: {e}")
-            self.disconnect(websocket)
-    
-    async def broadcast(self, message: dict):
-        disconnected = []
-        for connection in self.active_connections:
-            try:
-                await connection.send_json(message)
-            except Exception as e:
-                logger.error(f"Error broadcasting to WebSocket: {e}")
-                disconnected.append(connection)
-        
-        # Remove disconnected connections
-        for conn in disconnected:
-            self.disconnect(conn)
-
-manager = ConnectionManager()
-
 # Templates directory
 templates = Jinja2Templates(directory="/app/templates")
 
@@ -148,7 +111,7 @@ async def startup_event():
     # Get MongoDB connection from environment
     mongo_uri = os.getenv(
         "MONGO_URI", 
-        "mongodb://admin:password@mongodb:27017/?authSource=admin"
+        "mongodb://admin:password@mongodb:27017/?authSource=admin&directConnection=true"
     )
     db_name = os.getenv("MONGO_DB_NAME", "parallax_db")
     

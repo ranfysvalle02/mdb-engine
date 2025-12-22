@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 from ..config import DEMO_EMAIL_DEFAULT
 
 # Import user detection utility
-from .sub_auth import get_app_sub_user
+from .users import get_app_user
 from .dependencies import get_current_user_from_request
 from typing import Optional, Callable, Awaitable, Dict, Any
 
@@ -123,10 +123,12 @@ async def require_non_demo_user(
                     "get_app_config_func must be provided. "
                     "Provide a callable that takes (Request, slug_id, options) and returns config dict."
                 )
-            config = await get_app_config_func(request, slug_id, {"sub_auth": 1})
+            config = await get_app_config_func(request, slug_id, {"auth": 1})
             
-            if config and config.get("sub_auth", {}).get("enabled", False):
-                sub_auth_user = await get_app_sub_user(request, slug_id, db, config, allow_demo_fallback=False)
+            auth = config.get("auth", {}) if config else {}
+            users_config = auth.get("users", {})
+            if config and users_config.get("enabled", False):
+                app_user = await get_app_user(request, slug_id, db, config, allow_demo_fallback=False)
                 if sub_auth_user:
                     user = {
                         "user_id": str(sub_auth_user.get("_id")),
@@ -213,10 +215,12 @@ async def block_demo_users(
                 return None
             
             db = await get_app_db_func(request)
-            config = await get_app_config_func(request, slug_id, {"sub_auth": 1})
+            config = await get_app_config_func(request, slug_id, {"auth": 1})
             
-            if config and config.get("sub_auth", {}).get("enabled", False):
-                sub_auth_user = await get_app_sub_user(request, slug_id, db, config, allow_demo_fallback=False)
+            auth = config.get("auth", {}) if config else {}
+            users_config = auth.get("users", {})
+            if config and users_config.get("enabled", False):
+                app_user = await get_app_user(request, slug_id, db, config, allow_demo_fallback=False)
                 if sub_auth_user:
                     user = {
                         "user_id": str(sub_auth_user.get("_id")),

@@ -46,7 +46,7 @@ mdb-engine/
 │   │   ├── jwt.py              # JWT handling
 │   │   ├── dependencies.py     # FastAPI dependencies
 │   │   ├── restrictions.py     # Access restrictions
-│   │   └── sub_auth.py         # Sub-authentication
+│   │   └── users.py            # App-level user management
 │   │
 │   ├── indexes/                # Index management
 │   │   └── manager.py          # Index creation & management

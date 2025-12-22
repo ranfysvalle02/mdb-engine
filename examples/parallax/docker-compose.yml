@@ -18,7 +18,7 @@ services:
     ports:
       - "${APP_PORT:-8000}:8000"
     environment:
-      - MONGO_URI=${MONGO_URI:-mongodb://admin:password@mongodb:27017/?authSource=admin}
+      - MONGO_URI=${MONGO_URI:-mongodb://admin:password@mongodb:27017/?authSource=admin&directConnection=true}
       - MONGO_DB_NAME=${MONGO_DB_NAME:-parallax_db}
       - APP_SLUG=${APP_SLUG:-parallax}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}

@@ -100,19 +100,21 @@ Configure authentication and authorization in your `manifest.json`:
 
 ```json
 {
-  "auth_policy": {
-    "provider": "casbin",
-    "required": true,
-    "authorization": {
-      "model": "rbac",
-      "policies_collection": "casbin_policies",
-      "link_sub_auth_roles": true,
-      "default_roles": ["user", "admin"]
+  "auth": {
+    "policy": {
+      "provider": "casbin",
+      "required": true,
+      "authorization": {
+        "model": "rbac",
+        "policies_collection": "casbin_policies",
+        "link_users_roles": true,
+        "default_roles": ["user", "admin"]
+      }
+    },
+    "users": {
+      "enabled": true,
+      "strategy": "app_users"
     }
-  },
-  "sub_auth": {
-    "enabled": true,
-    "strategy": "app_users"
   }
 }
 ```
