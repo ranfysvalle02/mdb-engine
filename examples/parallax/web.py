@@ -19,7 +19,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 import json
 
-from mdb_runtime import RuntimeEngine
+from mdb_engine import RuntimeEngine
 from parallax import ParallaxEngine, WATCHLIST
 from schema_generator import get_default_lens_configs
 from openai import AzureOpenAI
@@ -189,12 +189,12 @@ async def startup_event():
     db = engine.get_scoped_db("parallax")
     
     # Set global engine for embedding dependency injection
-    from mdb_runtime.embeddings.dependencies import set_global_engine
+    from mdb_engine.embeddings.dependencies import set_global_engine
     set_global_engine(engine, app_slug="parallax")
     
     # Initialize embedding service if configured in manifest.json
     try:
-        from mdb_runtime.embeddings import get_embedding_service
+        from mdb_engine.embeddings import get_embedding_service
         app_config = engine.get_app("parallax")
         embedding_config = app_config.get("embedding_config", {}) if app_config else {}
         if embedding_config:

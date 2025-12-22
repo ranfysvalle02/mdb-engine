@@ -25,10 +25,10 @@ ENV PATH="/opt/venv/bin:$PATH"
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 
 # Copy source code
-COPY mdb_runtime ./mdb_runtime
+COPY mdb_engine ./mdb_engine
 
-# Install mdb_runtime with all dependencies
-RUN     echo "=== Installing mdb-runtime ===" && \
+# Install mdb_engine with all dependencies
+RUN     echo "=== Installing mdb-engine ===" && \
     pip install --no-cache-dir .[llm] && \
     echo "=== Installing web dependencies ===" && \
     pip install --no-cache-dir uvicorn[standard] jinja2 python-multipart websockets && \
@@ -37,13 +37,13 @@ RUN     echo "=== Installing mdb-runtime ===" && \
     echo "=== Installing RAG dependencies ===" && \
     pip install --no-cache-dir ddgs docling requests && \
     echo "=== Installation complete ===" && \
-    pip show mdb-runtime
+    pip show mdb-engine
 
 # Verify installation worked in builder stage
 RUN echo "=== Verifying installation in builder ===" && \
-    python -c "import mdb_runtime; print(f'✓ mdb_runtime {mdb_runtime.__version__} imported successfully')" && \
-    python -c "from mdb_runtime import RuntimeEngine; print('✓ RuntimeEngine imported successfully')" && \
-    python -c "from mdb_runtime.embeddings import EmbeddingService; print('✓ EmbeddingService imported successfully')" && \
+    python -c "import mdb_engine; print(f'✓ mdb_engine {mdb_engine.__version__} imported successfully')" && \
+    python -c "from mdb_engine import RuntimeEngine; print('✓ RuntimeEngine imported successfully')" && \
+    python -c "from mdb_engine.embeddings import EmbeddingService; print('✓ EmbeddingService imported successfully')" && \
     echo "=== Verification complete ==="
 
 # Stage 2: Runtime - Minimal production image
@@ -90,12 +90,12 @@ ENV PATH="/opt/venv/bin:$PATH" \
     TRANSFORMERS_CACHE=/app/.cache/huggingface \
     HF_DATASETS_CACHE=/app/.cache/huggingface
 
-# Verify mdb_runtime is installed and importable before switching user
+# Verify mdb_engine is installed and importable before switching user
 RUN echo "=== Verifying installation in runtime stage ===" && \
-    pip show mdb-runtime || (echo "ERROR: mdb-runtime package not found" && exit 1) && \
-    python -c "import mdb_runtime; print(f'✓ mdb_runtime {mdb_runtime.__version__} imported successfully')" && \
-    python -c "from mdb_runtime import RuntimeEngine; print('✓ RuntimeEngine imported successfully')" && \
-    python -c "from mdb_runtime.embeddings import EmbeddingService; print('✓ EmbeddingService imported successfully')" && \
+    pip show mdb-engine || (echo "ERROR: mdb-engine package not found" && exit 1) && \
+    python -c "import mdb_engine; print(f'✓ mdb_engine {mdb_engine.__version__} imported successfully')" && \
+    python -c "from mdb_engine import RuntimeEngine; print('✓ RuntimeEngine imported successfully')" && \
+    python -c "from mdb_engine.embeddings import EmbeddingService; print('✓ EmbeddingService imported successfully')" && \
     echo "=== Verification complete ==="
 
 # Switch to non-root user

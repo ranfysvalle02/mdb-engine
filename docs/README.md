@@ -1,11 +1,11 @@
-# MDB_RUNTIME Documentation
+# MDB_ENGINE Documentation
 
-This directory contains documentation for the MDB_RUNTIME project.
+This directory contains documentation for the MDB_ENGINE project.
 
 ## Documentation Files
 
 ### Getting Started
-- **[Quick Start Guide](QUICK_START.md)** - Quick start guide for getting started with MDB_RUNTIME
+- **[Quick Start Guide](QUICK_START.md)** - Quick start guide for getting started with MDB_ENGINE
 
 ### Project Information
 - **[Project Structure](../PROJECT_STRUCTURE.md)** - Detailed project organization and structure

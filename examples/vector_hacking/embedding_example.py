@@ -14,8 +14,8 @@ import asyncio
 import os
 from pathlib import Path
 
-from mdb_runtime import RuntimeEngine
-from mdb_runtime.embeddings import EmbeddingService
+from mdb_engine import RuntimeEngine
+from mdb_engine.embeddings import EmbeddingService
 
 
 async def main():
@@ -79,7 +79,7 @@ async def main():
         
         # Initialize Embedding Service (uses mem0 from memory service)
         print("🔧 Initializing Embedding Service...")
-        from mdb_runtime.embeddings import get_embedding_service
+        from mdb_engine.embeddings import get_embedding_service
         embedding_service = get_embedding_service()
         print("✅ Embedding Service initialized\n")
         

@@ -46,9 +46,9 @@ from jinja2 import Template
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from mdb_runtime import RuntimeEngine
-from mdb_runtime.embeddings import EmbeddingService, get_embedding_service
-from mdb_runtime.embeddings.dependencies import get_embedding_service_dep
+from mdb_engine import RuntimeEngine
+from mdb_engine.embeddings import EmbeddingService, get_embedding_service
+from mdb_engine.embeddings.dependencies import get_embedding_service_dep
 from openai import AzureOpenAI
 from dotenv import load_dotenv
 import os
@@ -357,7 +357,7 @@ async def startup_event():
         app_status["components"]["rapidocr"]["message"] = "Will initialize on first use"
         
         # Set global engine for dependency injection
-        from mdb_runtime.embeddings.dependencies import set_global_engine
+        from mdb_engine.embeddings.dependencies import set_global_engine
         set_global_engine(engine, app_slug=APP_SLUG)
         
         # Initialize global embedding service for tools
@@ -416,8 +416,8 @@ def get_embedding_service_dependency() -> EmbeddingService:
     if not _global_embedding_service:
         # Try to get it from global engine if available
         try:
-            from mdb_runtime.embeddings.dependencies import _global_engine, _global_app_slug
-            from mdb_runtime.embeddings import get_embedding_service
+            from mdb_engine.embeddings.dependencies import _global_engine, _global_app_slug
+            from mdb_engine.embeddings import get_embedding_service
             if _global_engine and _global_app_slug:
                 app_config = _global_engine.get_app(_global_app_slug)
                 embedding_config = app_config.get("embedding_config", {}) if app_config else {}
@@ -442,8 +442,8 @@ async def _get_vector_search_results_async(query: str, session_id: str, embeddin
     # Get embedding service if not set (manifest.json magic - works with or without memory_config)
     if not _global_embedding_service:
         try:
-            from mdb_runtime.embeddings.dependencies import _global_engine, _global_app_slug
-            from mdb_runtime.embeddings import get_embedding_service
+            from mdb_engine.embeddings.dependencies import _global_engine, _global_app_slug
+            from mdb_engine.embeddings import get_embedding_service
             if _global_engine:
                 # Initialize standalone using manifest.json
                 app_config = _global_engine.get_app(_global_app_slug)
@@ -1198,8 +1198,8 @@ async def _direct_rag_chat(
     global _global_embedding_service
     if not _global_embedding_service:
         try:
-            from mdb_runtime.embeddings.dependencies import _global_engine, _global_app_slug
-            from mdb_runtime.embeddings import get_embedding_service
+            from mdb_engine.embeddings.dependencies import _global_engine, _global_app_slug
+            from mdb_engine.embeddings import get_embedding_service
             if _global_engine:
                 # Initialize standalone using manifest.json
                 app_config = _global_engine.get_app(_global_app_slug)

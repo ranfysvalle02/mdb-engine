@@ -35,7 +35,7 @@ services:
       mongodb:
         condition: service_healthy
     networks:
-      - mdb_runtime_network
+      - mdb_engine_network
     healthcheck:
       test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
       interval: 30s
@@ -72,7 +72,7 @@ services:
       - mongodb_data:/data/db
       - mongodb_config:/data/configdb
     networks:
-      - mdb_runtime_network
+      - mdb_engine_network
     healthcheck:
       test: echo 'db.runCommand("ping").ok' | mongosh "mongodb://localhost:27017/?directConnection=true" --quiet
       interval: 10s
@@ -106,7 +106,7 @@ services:
       mongodb:
         condition: service_healthy
     networks:
-      - mdb_runtime_network
+      - mdb_engine_network
     # Resource limits
     deploy:
       resources:
@@ -127,7 +127,7 @@ volumes:
     driver: local
 
 networks:
-  mdb_runtime_network:
+  mdb_engine_network:
     driver: bridge
     ipam:
       config:

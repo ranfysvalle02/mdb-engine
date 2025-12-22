@@ -1,6 +1,6 @@
-# MDB_RUNTIME Examples
+# MDB_ENGINE Examples
 
-This directory contains example applications demonstrating how to use MDB_RUNTIME. **All examples follow best practices and use mdb-runtime abstractions consistently.**
+This directory contains example applications demonstrating how to use MDB_ENGINE. **All examples follow best practices and use mdb-engine abstractions consistently.**
 
 ## Available Examples
 
@@ -16,7 +16,7 @@ A simple, beginner-friendly example that demonstrates:
 - WebSocket support with real-time updates
 - Health checks and metrics
 
-**Perfect for:** Getting started with MDB_RUNTIME
+**Perfect for:** Getting started with MDB_ENGINE
 
 **Run it:**
 ```bash
@@ -87,7 +87,7 @@ When Docker Compose is running:
 - Docker Desktop: https://www.docker.com/products/docker-desktop
 - Or install separately: https://docs.docker.com/compose/install/
 
-No need to install Python, MongoDB, or MDB_RUNTIME - everything runs in containers.
+No need to install Python, MongoDB, or MDB_ENGINE - everything runs in containers.
 
 ### Quick Start
 
@@ -97,7 +97,7 @@ docker-compose up
 ```
 
 The example will:
-1. Build the application (installs MDB_RUNTIME automatically)
+1. Build the application (installs MDB_ENGINE automatically)
 2. Start MongoDB
 3. Start MongoDB Express (Web UI)
 4. Run the example automatically
@@ -123,7 +123,7 @@ Environment variables are set in `docker-compose.yml`. Common variables:
 ### How the Dockerfile Works
 
 The Dockerfile:
-1. Copies `mdb_runtime` source code from the project root
+1. Copies `mdb_engine` source code from the project root
 2. Installs it with `pip install -e` (editable mode)
 3. Installs all dependencies from `pyproject.toml`
 4. Copies the example files
@@ -179,14 +179,14 @@ services:
    docker-compose ps
    ```
 
-## Best Practices: Using MDB_RUNTIME Abstractions
+## Best Practices: Using MDB_ENGINE Abstractions
 
-**All examples in this directory follow these best practices.** When building your own applications, always use mdb-runtime abstractions:
+**All examples in this directory follow these best practices.** When building your own applications, always use mdb-engine abstractions:
 
 ### ✅ DO: Use Runtime Engine Abstractions
 
 ```python
-from mdb_runtime import RuntimeEngine
+from mdb_engine import RuntimeEngine
 
 # Initialize engine
 engine = RuntimeEngine(mongo_uri=mongo_uri, db_name=db_name)
@@ -260,7 +260,7 @@ response = client.chat.completions.create(
 )
 
 # Use EmbeddingService for embeddings
-from mdb_runtime.embeddings import EmbeddingService
+from mdb_engine.embeddings import EmbeddingService
 embedding_service = EmbeddingService(...)
 embeddings = await embedding_service.embed_chunks(["text to embed"])
 ```
@@ -281,9 +281,9 @@ async def get_items(db = Depends(get_db)):
 
 ## Contributing Examples
 
-If you've built something cool with MDB_RUNTIME, consider contributing an example! Examples should:
+If you've built something cool with MDB_ENGINE, consider contributing an example! Examples should:
 
-- **Use mdb-runtime abstractions exclusively** - Never create direct MongoDB clients
+- **Use mdb-engine abstractions exclusively** - Never create direct MongoDB clients
 - Use `engine.mongo_db` for top-level database access (not `AsyncIOMotorClient`)
 - Use `engine.get_scoped_db()` for app-scoped operations
 - Use OpenAI SDK directly for LLM operations

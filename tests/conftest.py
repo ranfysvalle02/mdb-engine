@@ -1,5 +1,5 @@
 """
-Pytest configuration and shared fixtures for MDB_RUNTIME tests.
+Pytest configuration and shared fixtures for MDB_ENGINE tests.
 
 This module provides:
 - Async test fixtures
@@ -14,8 +14,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from pathlib import Path
 
 # Import runtime components for testing
-from mdb_runtime.core.engine import RuntimeEngine
-from mdb_runtime.database.scoped_wrapper import ScopedMongoWrapper, ScopedCollectionWrapper
+from mdb_engine.core.engine import RuntimeEngine
+from mdb_engine.database.scoped_wrapper import ScopedMongoWrapper, ScopedCollectionWrapper
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase, AsyncIOMotorCollection
 
 
@@ -125,7 +125,7 @@ def runtime_engine_config() -> Dict[str, Any]:
 @pytest.fixture
 async def runtime_engine(mock_mongo_client: MagicMock, runtime_engine_config: Dict[str, Any]) -> AsyncGenerator[RuntimeEngine, None]:
     """Create a RuntimeEngine instance with mocked MongoDB client."""
-    with patch('mdb_runtime.core.engine.AsyncIOMotorClient', return_value=mock_mongo_client):
+    with patch('mdb_engine.core.engine.AsyncIOMotorClient', return_value=mock_mongo_client):
         engine = RuntimeEngine(**runtime_engine_config)
         await engine.initialize()
         yield engine

@@ -1,8 +1,8 @@
 # Requirements for Vector Hacking Example
-# Install MDB_RUNTIME first: pip install mdb-runtime
+# Install MDB_ENGINE first: pip install mdb-engine
 # Or install from source: pip install -e ../..
 
-mdb-runtime>=0.1.0
+mdb-engine>=0.1.0
 
 # Web framework
 uvicorn[standard]
@@ -11,7 +11,7 @@ python-multipart
 websockets
 
 # LLM and Embedding dependencies
-# Install with: pip install mdb-runtime[llm]
+# Install with: pip install mdb-engine[llm]
 # Or manually:
 instructor>=0.4.0
 pydantic>=2.0.0

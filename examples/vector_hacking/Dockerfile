@@ -25,29 +25,29 @@ ENV PATH="/opt/venv/bin:$PATH"
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 
 # Copy source code
-COPY mdb_runtime ./mdb_runtime
+COPY mdb_engine ./mdb_engine
 
 # Verify package structure before installation
 RUN echo "=== Package structure ===" && \
     ls -la && \
-    echo "=== mdb_runtime directory ===" && \
-    ls -la mdb_runtime/ && \
+    echo "=== mdb_engine directory ===" && \
+    ls -la mdb_engine/ && \
     echo "=== Checking for __init__.py ===" && \
-    test -f mdb_runtime/__init__.py && echo "✓ __init__.py found" || echo "✗ __init__.py missing"
+    test -f mdb_engine/__init__.py && echo "✓ __init__.py found" || echo "✗ __init__.py missing"
 
-# Install mdb_runtime with all dependencies
+# Install mdb_engine with all dependencies
 # Using regular install (not editable) since we're copying venv to runtime stage
-RUN echo "=== Installing mdb-runtime ===" && \
+RUN echo "=== Installing mdb-engine ===" && \
     pip install --no-cache-dir . && \
     echo "=== Installing web dependencies ===" && \
         pip install --no-cache-dir uvicorn[standard] jinja2 python-multipart websockets && \
     echo "=== Installation complete ===" && \
-    pip show mdb-runtime
+    pip show mdb-engine
 
 # Verify installation worked in builder stage
 RUN echo "=== Verifying installation in builder ===" && \
-    python -c "import mdb_runtime; print(f'✓ mdb_runtime {mdb_runtime.__version__} imported successfully')" && \
-    python -c "from mdb_runtime import RuntimeEngine; print('✓ RuntimeEngine imported successfully')" && \
+    python -c "import mdb_engine; print(f'✓ mdb_engine {mdb_engine.__version__} imported successfully')" && \
+    python -c "from mdb_engine import RuntimeEngine; print('✓ RuntimeEngine imported successfully')" && \
     echo "=== Checking installed packages ===" && \
     pip list | grep -i mdb
 
@@ -83,16 +83,16 @@ ENV PATH="/opt/venv/bin:$PATH" \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Verify mdb_runtime is installed and importable before switching user
+# Verify mdb_engine is installed and importable before switching user
 # (run as root so we can debug if needed)
 RUN echo "=== Verifying installation in runtime stage ===" && \
     echo "Python path: $(which python)" && \
     echo "Python version: $(python --version)" && \
-    echo "=== Checking if mdb-runtime is installed ===" && \
-    pip show mdb-runtime || (echo "ERROR: mdb-runtime package not found" && echo "=== Installed packages ===" && pip list && exit 1) && \
+    echo "=== Checking if mdb-engine is installed ===" && \
+    pip show mdb-engine || (echo "ERROR: mdb-engine package not found" && echo "=== Installed packages ===" && pip list && exit 1) && \
     echo "=== Testing import ===" && \
-    python -c "import mdb_runtime; print(f'✓ mdb_runtime {mdb_runtime.__version__} imported successfully')" && \
-    python -c "from mdb_runtime import RuntimeEngine; print('✓ RuntimeEngine imported successfully')" && \
+    python -c "import mdb_engine; print(f'✓ mdb_engine {mdb_engine.__version__} imported successfully')" && \
+    python -c "from mdb_engine import RuntimeEngine; print('✓ RuntimeEngine imported successfully')" && \
     echo "=== Verification complete ==="
 
 # Install vector hacking dependencies

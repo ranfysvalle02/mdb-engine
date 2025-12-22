@@ -1,6 +1,6 @@
-# MDB_RUNTIME Test Suite
+# MDB_ENGINE Test Suite
 
-This directory contains the test suite for MDB_RUNTIME - MongoDB Multi-Tenant Runtime Engine.
+This directory contains the test suite for MDB_ENGINE - MongoDB Multi-Tenant Runtime Engine.
 
 ## Test Structure
 
@@ -47,7 +47,7 @@ pytest tests/integration/ -m integration
 ### Run with Coverage
 
 ```bash
-pytest --cov=mdb_runtime --cov-report=html
+pytest --cov=mdb_engine --cov-report=html
 ```
 
 ### Run Specific Test File
@@ -90,7 +90,7 @@ Common fixtures are defined in `conftest.py`:
 
 ```python
 import pytest
-from mdb_runtime.core.engine import RuntimeEngine
+from mdb_engine.core.engine import RuntimeEngine
 
 class TestRuntimeEngine:
     @pytest.mark.asyncio
@@ -119,7 +119,7 @@ Tests should be run in CI/CD pipelines:
 - name: Run tests
   run: |
     pip install -e ".[test]"
-    pytest --cov=mdb_runtime --cov-report=xml
+    pytest --cov=mdb_engine --cov-report=xml
 ```
 
 ## Test Coverage Goals

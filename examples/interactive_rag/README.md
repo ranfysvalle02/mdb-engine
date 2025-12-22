@@ -1,6 +1,6 @@
 # Interactive RAG Example
 
-An interactive RAG (Retrieval Augmented Generation) system demonstrating MDB_RUNTIME with:
+An interactive RAG (Retrieval Augmented Generation) system demonstrating MDB_ENGINE with:
 - **EmbeddingService** for semantic text splitting and embeddings
 - **OpenAI SDK** for chat completions
 - **Vector search** with MongoDB Atlas Vector Search
@@ -44,7 +44,7 @@ An interactive RAG (Retrieval Augmented Generation) system demonstrating MDB_RUN
 - Python 3.8+
 - Docker and Docker Compose (for containerized setup)
 - OR MongoDB running locally (for local setup)
-- MDB_RUNTIME installed
+- MDB_ENGINE installed
 - LLM API keys (Azure OpenAI or OpenAI)
 
 ## Environment Variables
@@ -361,12 +361,12 @@ Supported chat models:
 
 ## Related Examples
 
-- **hello_world** - Basic MDB_RUNTIME usage
+- **hello_world** - Basic MDB_ENGINE usage
 - **vector_hacking** - Vector operations and embeddings
 
 ## Resources
 
-- [MDB_RUNTIME Documentation](../../README.md)
-- [EmbeddingService Documentation](../../mdb_runtime/embeddings/README.md)
+- [MDB_ENGINE Documentation](../../README.md)
+- [EmbeddingService Documentation](../../mdb_engine/embeddings/README.md)
 - [MongoDB Atlas Vector Search](https://www.mongodb.com/docs/atlas/atlas-vector-search/)
 

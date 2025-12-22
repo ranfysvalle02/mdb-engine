@@ -1,6 +1,6 @@
 # ChitChat - AI Chat with Memory
 
-A beautiful AI chat application with persistent memory capabilities, demonstrating MDB_RUNTIME's powerful features. This example showcases how easy it is to build a production-ready conversational AI application with intelligent memory management using Mem0.
+A beautiful AI chat application with persistent memory capabilities, demonstrating MDB_ENGINE's powerful features. This example showcases how easy it is to build a production-ready conversational AI application with intelligent memory management using Mem0.
 
 ## Features
 
@@ -144,7 +144,7 @@ curl "http://localhost:8000/api/memories/stats" \
 
 ## Architecture
 
-The application uses MDB_RUNTIME's core features:
+The application uses MDB_ENGINE's core features:
 
 1. **App Registration**: RuntimeEngine automatically registers the app from manifest.json
 2. **Database Scoping**: `get_scoped_db()` creates app-scoped database wrapper

@@ -4,7 +4,7 @@ Unit tests for custom exceptions.
 Tests exception hierarchy and error messages.
 """
 import pytest
-from mdb_runtime.exceptions import (
+from mdb_engine.exceptions import (
     RuntimeEngineError,
     InitializationError,
     ManifestValidationError,

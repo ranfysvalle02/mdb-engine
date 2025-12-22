@@ -9,8 +9,8 @@ Tests the core orchestration engine functionality including:
 """
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from mdb_runtime.core.engine import RuntimeEngine
-from mdb_runtime.exceptions import InitializationError, RuntimeEngineError
+from mdb_engine.core.engine import RuntimeEngine
+from mdb_engine.exceptions import InitializationError, RuntimeEngineError
 
 
 class TestRuntimeEngineInitialization:
@@ -19,7 +19,7 @@ class TestRuntimeEngineInitialization:
     @pytest.mark.asyncio
     async def test_engine_initialization_success(self, mock_mongo_client, runtime_engine_config):
         """Test successful engine initialization."""
-        with patch('mdb_runtime.core.engine.AsyncIOMotorClient', return_value=mock_mongo_client):
+        with patch('mdb_engine.core.engine.AsyncIOMotorClient', return_value=mock_mongo_client):
             engine = RuntimeEngine(**runtime_engine_config)
             await engine.initialize()
             
@@ -36,7 +36,7 @@ class TestRuntimeEngineInitialization:
         mock_client = MagicMock()
         mock_client.admin.command = AsyncMock(side_effect=Exception("Connection failed"))
         
-        with patch('mdb_runtime.core.engine.AsyncIOMotorClient', return_value=mock_client):
+        with patch('mdb_engine.core.engine.AsyncIOMotorClient', return_value=mock_client):
             engine = RuntimeEngine(**runtime_engine_config)
             
             with pytest.raises(InitializationError) as exc_info:
@@ -74,7 +74,7 @@ class TestRuntimeEngineInitialization:
     @pytest.mark.asyncio
     async def test_engine_context_manager(self, mock_mongo_client, runtime_engine_config):
         """Test engine as async context manager."""
-        with patch('mdb_runtime.core.engine.AsyncIOMotorClient', return_value=mock_mongo_client):
+        with patch('mdb_engine.core.engine.AsyncIOMotorClient', return_value=mock_mongo_client):
             async with RuntimeEngine(**runtime_engine_config) as engine:
                 assert engine._initialized is True
             

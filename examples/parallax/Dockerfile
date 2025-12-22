@@ -25,9 +25,9 @@ ENV PATH="/opt/venv/bin:$PATH"
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 
 # Copy source code
-COPY mdb_runtime ./mdb_runtime
+COPY mdb_engine ./mdb_engine
 
-# Install mdb_runtime with LLM dependencies
+# Install mdb_engine with LLM dependencies
 RUN pip install --no-cache-dir .[llm] && \
     pip install --no-cache-dir uvicorn[standard] jinja2 python-multipart websockets && \
     pip install --no-cache-dir requests httpx

@@ -1,24 +1,24 @@
 """
-Setup configuration for MDB_RUNTIME package.
+Setup configuration for MDB_ENGINE package.
 """
 from setuptools import setup, find_packages
 from pathlib import Path
 
 # Read README for long description
-readme_file = Path(__file__).parent / "mdb_runtime" / "README.md"
+readme_file = Path(__file__).parent / "mdb_engine" / "README.md"
 long_description = ""
 if readme_file.exists():
     long_description = readme_file.read_text(encoding="utf-8")
 
 setup(
-    name="mdb-runtime",
+    name="mdb-engine",
     version="0.1.5",
-    description="MongoDB Runtime Engine",
+    description="MongoDB Engine",
     long_description=long_description,
     long_description_content_type="text/markdown",
     author="Your Name",
     author_email="your.email@example.com",
-    url="https://github.com/yourusername/mdb-runtime",
+    url="https://github.com/yourusername/mdb-engine",
     packages=find_packages(exclude=["tests", "tests.*"]),
     python_requires=">=3.8",
     install_requires=[

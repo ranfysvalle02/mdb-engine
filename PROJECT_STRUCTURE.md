@@ -1,11 +1,11 @@
-# MDB_RUNTIME Project Structure
+# MDB_ENGINE Project Structure
 
-This document describes the organization of the MDB_RUNTIME project.
+This document describes the organization of the MDB_ENGINE project.
 
 ## Directory Structure
 
 ```
-mdb-runtime/
+mdb-engine/
 ├── docs/                      # Documentation
 │   ├── README.md              # Documentation index
 │   ├── QUICK_START.md          # Quick start guide
@@ -26,7 +26,7 @@ mdb-runtime/
 │   └── integration/            # Integration tests
 │       └── (to be added)
 │
-├── mdb_runtime/                # Main package
+├── mdb_engine/                # Main package
 │   ├── __init__.py             # Package exports
 │   ├── README.md               # Package documentation
 │   ├── exceptions.py           # Custom exceptions
@@ -84,10 +84,10 @@ mdb-runtime/
 - **docs/**: All documentation files
 - **scripts/**: Utility and helper scripts
 - **tests/**: Test suite organized by type (unit/integration)
-- **mdb_runtime/**: Source code organized by feature domain
+- **mdb_engine/**: Source code organized by feature domain
 
 ### 2. **Documentation Location**
-- Package-level docs: `mdb_runtime/README.md`
+- Package-level docs: `mdb_engine/README.md`
 - Project-level docs: `docs/`
 - Test docs: `tests/README.md`
 - Script docs: `scripts/README.md`
@@ -112,9 +112,9 @@ mdb-runtime/
 ## Adding New Files
 
 ### Adding a New Module
-1. Create directory in `mdb_runtime/`
+1. Create directory in `mdb_engine/`
 2. Add `__init__.py` with appropriate exports
-3. Update `mdb_runtime/__init__.py` if needed
+3. Update `mdb_engine/__init__.py` if needed
 4. Add tests in `tests/unit/`
 
 ### Adding Documentation

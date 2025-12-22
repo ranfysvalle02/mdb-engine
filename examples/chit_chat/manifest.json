@@ -7,8 +7,15 @@
   "developer_id": "developer@example.com",
   "auth_required": false,
   "auth_policy": {
+    "provider": "casbin",
     "required": false,
-    "allow_anonymous": true
+    "allow_anonymous": true,
+    "authorization": {
+      "model": "rbac",
+      "policies_collection": "casbin_policies",
+      "link_sub_auth_roles": true,
+      "default_roles": ["user", "admin"]
+    }
   },
   "sub_auth": {
     "enabled": true,

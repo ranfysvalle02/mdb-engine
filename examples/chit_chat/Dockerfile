@@ -25,17 +25,17 @@ ENV PATH="/opt/venv/bin:$PATH"
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 
 # Copy source code
-COPY mdb_runtime ./mdb_runtime
+COPY mdb_engine ./mdb_engine
 
-# Install mdb_runtime with all dependencies
-RUN     echo "=== Installing mdb-runtime ===" && \
+# Install mdb_engine with all dependencies
+RUN     echo "=== Installing mdb-engine ===" && \
     pip install --no-cache-dir .[llm] && \
     echo "=== Installing web dependencies ===" && \
     pip install --no-cache-dir uvicorn[standard] jinja2 python-multipart websockets && \
     echo "=== Installing LLM dependencies ===" && \
     pip install --no-cache-dir instructor pydantic pydantic-settings tenacity semantic-text-splitter && \
     echo "=== Installation complete ===" && \
-    pip show mdb-runtime
+    pip show mdb-engine
 
 # Stage 2: Runtime - Minimal production image
 FROM python:3.11-slim

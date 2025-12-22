@@ -1,4 +1,4 @@
-# MDB_RUNTIME
+# MDB_ENGINE
 
 **The Missing Engine for Your Python and MongoDB Projects.**
 
@@ -20,17 +20,17 @@ Each one was a great idea. Each one lives in its own isolated folder. And each o
 * Building another login page and JWT handler.
 * Worrying about data leaks between your "dev" and "prod" logic.
 
-**MDB_RUNTIME** is the engine that solves this. It is a "WordPress-like" platform for the modern Python/MongoDB stack, designed to minimize the friction between an idea and a live application.
+**MDB_ENGINE** is the engine that solves this. It is a "WordPress-like" platform for the modern Python/MongoDB stack, designed to minimize the friction between an idea and a live application.
 
 ---
 
 ## How It Works
 
-**MDB_RUNTIME** acts as a hyper-intelligent proxy between your code and MongoDB. It handles the "boring" stuff so you can focus on the differentiation.
+**MDB_ENGINE** acts as a hyper-intelligent proxy between your code and MongoDB. It handles the "boring" stuff so you can focus on the differentiation.
 
 ### 1. The Magic: Automatic Data Sandboxing 🛡️
 
-The biggest pain point in multi-app (or even single-app) development is data isolation. MDB_RUNTIME solves this via a **two-layer scoping system** that requires zero effort from you.
+The biggest pain point in multi-app (or even single-app) development is data isolation. MDB_ENGINE solves this via a **two-layer scoping system** that requires zero effort from you.
 
 * **Layer 1 (Physical Scoping):** All collection access is prefixed. When your app writes to `db.users`, the engine actually writes to `db.my_app_users`.
 * **Layer 2 (Logical Scoping):** All writes are automatically tagged with `{"app_id": "my_app"}`. All reads are automatically filtered by this ID.
@@ -51,15 +51,18 @@ Your application's configuration lives in a simple `manifest.json`. This is the 
 
 ### 3. Automatic Index Management ⚙️
 
-Stop manually running `createIndex` in the Mongo shell. Define your indexes in your manifest, and MDB_RUNTIME ensures they exist on startup.
+Stop manually running `createIndex` in the Mongo shell. Define your indexes in your manifest, and MDB_ENGINE ensures they exist on startup.
 
 ```json
 "managed_indexes": {
   "tasks": [
-    { "keys": {"status": 1, "created_at": -1}, "name": "status_sort" }
+    {
+      "type": "regular",
+      "keys": {"status": 1, "created_at": -1},
+      "name": "status_sort"
+    }
   ]
 }
-
 ```
 
 ---
@@ -67,7 +70,7 @@ Stop manually running `createIndex` in the Mongo shell. Define your indexes in y
 ## Quick Start
 
 ```bash
-pip install mdb-runtime
+pip install mdb-engine
 
 ```
 
@@ -77,14 +80,29 @@ Create `manifest.json` in your project root.
 
 ```json
 {
-  "slug": "conversations",
-  "name": "My Chat App",
-  "auth_required": true,
+  "schema_version": "2.0",
+  "slug": "my_app",
+  "name": "My First App",
+  "status": "active",
+  "auth_policy": {
+    "provider": "casbin",
+    "required": false,
+    "allow_anonymous": true,
+    "authorization": {
+      "model": "rbac",
+      "link_sub_auth_roles": true
+    }
+  },
   "managed_indexes": {
-    "tasks": [{ "keys": {"priority": -1}, "name": "priority_idx" }]
+    "tasks": [
+      {
+        "type": "regular",
+        "keys": {"priority": -1},
+        "name": "priority_idx"
+      }
+    ]
   }
 }
-
 ```
 
 ### 2. Initialize the Engine
@@ -92,29 +110,31 @@ Create `manifest.json` in your project root.
 In your `main.py` (FastAPI example):
 
 ```python
-from fastapi import FastAPI, Depends
-from mdb_runtime import RuntimeEngine
-from mdb_runtime.database import AppDB
+from pathlib import Path
+from fastapi import FastAPI
+from mdb_engine import RuntimeEngine
 
 app = FastAPI()
-engine = RuntimeEngine(mongo_uri="mongodb://localhost:27017", db_name="cluster0")
+engine = RuntimeEngine(mongo_uri="mongodb://localhost:27017", db_name="my_database")
 
 @app.on_event("startup")
 async def startup():
     await engine.initialize()
-    # Auto-discovers manifest, creates indexes, sets up auth
-    await engine.register_app("manifest.json")
+    
+    # Load and register app from manifest
+    manifest_path = Path("manifest.json")
+    manifest = await engine.load_manifest(manifest_path)
+    await engine.register_app(manifest, create_indexes=True)
 
 # 3. Use the Scoped Database
 @app.post("/tasks")
 async def create_task(task: dict):
-    # This DB instance is physically and logically sandboxed to 'conversations'
-    db = engine.get_scoped_db("conversations")
+    # This DB instance is physically and logically sandboxed to 'my_app'
+    db = engine.get_scoped_db("my_app")
     
     # Auto-tagged with app_id; indexes auto-managed
     result = await db.tasks.insert_one(task)
     return {"id": str(result.inserted_id)}
-
 ```
 
 ---
@@ -123,17 +143,67 @@ async def create_task(task: dict):
 
 ### 🔐 Authentication & Authorization
 
-Stop rewriting auth. The engine provides built-in support for multiple strategies (JWT, Session) and Role-Based Access Control (RBAC).
+Stop rewriting auth. The engine provides a unified authentication and authorization system with automatic Casbin provider setup.
 
-* **Manifest Config:** Set `"auth_required": true` and define roles in JSON.
-* **Runtime Check:** `await get_app_sub_user(request, "app_slug", db)` handles the validation.
+**Unified Auth Stack:**
+* **Auto-created Provider:** Casbin authorization provider is automatically created from manifest (default)
+* **MongoDB-backed Policies:** Policies stored in MongoDB with zero configuration
+* **Sub-Auth Integration:** App-level users automatically get Casbin roles assigned
+* **Zero Boilerplate:** Just configure in manifest, everything works automatically
+
+**Manifest Configuration:**
+```json
+{
+  "auth_policy": {
+    "provider": "casbin",
+    "required": true,
+    "authorization": {
+      "model": "rbac",
+      "policies_collection": "casbin_policies",
+      "link_sub_auth_roles": true,
+      "default_roles": ["user", "admin"]
+    }
+  },
+  "sub_auth": {
+    "enabled": true,
+    "strategy": "app_users"
+  }
+}
+```
+
+**Runtime Usage:**
+```python
+from mdb_engine.auth import setup_auth_from_manifest, get_authz_provider, get_current_user
+
+# Auto-setup (in startup)
+await setup_auth_from_manifest(app, engine, "my_app")
+
+# Use in routes
+@app.get("/protected")
+async def protected_route(
+    user: dict = Depends(get_current_user),
+    authz: AuthorizationProvider = Depends(get_authz_provider)
+):
+    has_access = await authz.check(
+        subject=user.get("email"),
+        resource="my_app",
+        action="access"
+    )
+    return {"user_id": user["user_id"]}
+```
+
+**Extensibility:**
+* **Custom Providers:** Implement `AuthorizationProvider` protocol for custom auth logic
+* **OSO Support:** Use `"provider": "oso"` for OSO/Polar-based authorization
+* **Custom Models:** Provide custom Casbin model files or use built-in RBAC/ACL
+* **Manual Setup:** Override auto-creation by setting `app.state.authz_provider` manually
 
 ### 📡 Built-in WebSockets
 
-Real-time features usually require a lot of setup. MDB_RUNTIME makes it configuration-based.
+Real-time features usually require a lot of setup. MDB_ENGINE makes it configuration-based.
 
 1. **Define:** Add `"websockets": {"realtime": {"path": "/ws"}}` to your manifest.
-2. **Register:** `engine.register_websocket_routes(app, "my_app")`.
+2. **Register:** WebSocket routes are automatically registered when you register your app with the engine.
 3. **Broadcast:** `await broadcast_to_app("my_app", {"type": "update", "data": ...})`.
 
 ### 📊 Observability (The "Black Box" Recorder)
@@ -148,7 +218,7 @@ You shouldn't have to add logging manually to every function.
 
 ## No Lock-In: The Graduation Path 🎓
 
-MDB_RUNTIME is an incubator, not a cage. Because all data is tagged with `app_id`, "graduating" an app to its own dedicated infrastructure is a simple database operation.
+MDB_ENGINE is an incubator, not a cage. Because all data is tagged with `app_id`, "graduating" an app to its own dedicated infrastructure is a simple database operation.
 
 **To export your app:**
 
@@ -170,11 +240,31 @@ mongodump --query='{"app_id":"conversations"}' --out=./export
 .
 ├── main.py                  # Your FastAPI entry point
 ├── manifest.json            # The DNA of your app
-└── mdb_runtime/             # The Engine
+└── mdb_engine/             # The Engine
     ├── core/                # Manifest validation & registration
     ├── database/            # ScopedMongoWrapper (The Proxy)
     ├── auth/                # JWT & RBAC logic
-    └── indexes/             # Auto-index management
-
+    ├── indexes/             # Auto-index management
+    ├── embeddings/          # EmbeddingService for semantic text splitting
+    ├── memory/              # Mem0MemoryService for intelligent memory
+    ├── routing/             # WebSocket routing and management
+    └── observability/       # Logging, metrics, and health checks
 ```
+
+---
+
+## Examples
+
+Check out the examples in the repository to see MDB_ENGINE in action:
+
+- **[`chit_chat`](examples/chit_chat/)**: AI chat application with persistent memory using Mem0 — demonstrates authentication, WebSockets, and memory management
+- **[`interactive_rag`](examples/interactive_rag/)**: Full RAG application — semantic search with vector indexes and embedding service
+- **[`vector_hacking`](examples/vector_hacking/)**: Advanced LLM usage — vector inversion attacks with real-time updates
+- **[`parallax`](examples/parallax/)**: Schema generation and management — demonstrates dynamic schema handling
+
+Each example includes a complete `manifest.json`, Docker setup, and working code you can run immediately.
+
+---
+
+**Stop building scaffolding. Start building features.**
 

@@ -22,8 +22,8 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 
-from mdb_runtime import RuntimeEngine
-from mdb_runtime.embeddings import EmbeddingService
+from mdb_engine import RuntimeEngine
+from mdb_engine.embeddings import EmbeddingService
 from openai import AzureOpenAI
 from dotenv import load_dotenv
 
@@ -170,7 +170,7 @@ async def startup_event():
             try:
                 # Note: EmbeddingService doesn't use memory_service - it's standalone
                 # Use get_embedding_service helper instead
-                from mdb_runtime.embeddings import get_embedding_service
+                from mdb_engine.embeddings import get_embedding_service
                 embedding_service = get_embedding_service(config={})
                 logger.info("EmbeddingService initialized with mem0 (via memory service)")
             except Exception as e:
@@ -185,7 +185,7 @@ async def startup_event():
             # Use the embedding_model we determined above (which already handles Azure compatibility)
             config["default_embedding_model"] = embedding_model
             
-            from mdb_runtime.embeddings import get_embedding_service
+            from mdb_engine.embeddings import get_embedding_service
             embedding_service = get_embedding_service(config=config)
             logger.info(f"EmbeddingService initialized standalone (from manifest.json, model: {embedding_model})")
         

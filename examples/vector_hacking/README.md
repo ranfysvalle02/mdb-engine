@@ -1,6 +1,6 @@
 # Vector Hacking Example
 
-A demonstration of vector inversion/hacking using LLMs with MDB_RUNTIME.
+A demonstration of vector inversion/hacking using LLMs with MDB_ENGINE.
 
 This example shows:
 - How to initialize the runtime engine
@@ -14,7 +14,7 @@ This example shows:
 - Python 3.8+
 - Docker and Docker Compose (for containerized setup)
 - OR MongoDB running locally (for local setup)
-- MDB_RUNTIME installed
+- MDB_ENGINE installed
 - **API Keys** (for vector hacking features):
   - `OPENAI_API_KEY` or `AZURE_OPENAI_API_KEY` - For LLM-based guessing and embeddings
 
@@ -30,7 +30,7 @@ docker-compose up
 ```
 
 That's it! The Docker Compose setup will:
-1. Build the application Docker image using multi-stage build (installs MDB_RUNTIME automatically)
+1. Build the application Docker image using multi-stage build (installs MDB_ENGINE automatically)
 2. Start MongoDB with authentication and health checks
 3. Start the **web application** on http://localhost:8000
 4. Start MongoDB Express (Web UI) - optional, use `--profile ui`
@@ -245,7 +245,7 @@ The vector_hacking example includes a **full-featured web application** with:
 ## Expected Output
 
 ```
-🚀 Initializing MDB_RUNTIME for Vector Hacking Demo...
+🚀 Initializing MDB_ENGINE for Vector Hacking Demo...
 ✅ Engine initialized successfully
 ✅ App 'vector_hacking' registered successfully
 
@@ -288,13 +288,13 @@ The manifest defines your app configuration:
 
 ### App Scoping
 
-Notice that when you insert documents, you don't specify `app_id`. MDB_RUNTIME automatically adds it:
+Notice that when you insert documents, you don't specify `app_id`. MDB_ENGINE automatically adds it:
 
 ```python
 # You write:
 await db.experiments.insert_one({"name": "Test", "status": "pending"})
 
-# MDB_RUNTIME stores:
+# MDB_ENGINE stores:
 {
   "name": "Test",
   "status": "pending",
@@ -304,13 +304,13 @@ await db.experiments.insert_one({"name": "Test", "status": "pending"})
 
 ### Automatic Filtering
 
-When you query, MDB_RUNTIME automatically filters by `app_id`:
+When you query, MDB_ENGINE automatically filters by `app_id`:
 
 ```python
 # You write:
 experiments = await db.experiments.find({"status": "pending"}).to_list(length=10)
 
-# MDB_RUNTIME executes:
+# MDB_ENGINE executes:
 db.experiments.find({
   "$and": [
     {"app_id": {"$in": ["vector_hacking"]}},  # ← Added automatically
@@ -364,7 +364,7 @@ This generates text guesses for the vector inversion attack.
 
 ```python
 # Uses EmbeddingService which uses mem0 for embeddings
-from mdb_runtime.embeddings import EmbeddingService
+from mdb_engine.embeddings import EmbeddingService
 
 embedding_service = EmbeddingService(...)
 embeddings = await embedding_service.embed_chunks([text])
@@ -473,7 +473,7 @@ MONGO_INITDB_ROOT_PASSWORD=password
 
 ## Troubleshooting
 
-### ModuleNotFoundError: No module named 'mdb_runtime'
+### ModuleNotFoundError: No module named 'mdb_engine'
 
 If you see this error, the package wasn't installed correctly during the Docker build. Fix it by:
 
@@ -562,7 +562,7 @@ Then update `MONGO_URI` in the app service to use the new port if accessing from
 
 ### Rebuild After Code Changes
 
-If you modify `mdb_runtime` or the example code:
+If you modify `mdb_engine` or the example code:
 
 ```bash
 docker-compose up --build
@@ -586,7 +586,7 @@ Vector inversion is a security demonstration showing how embeddings can potentia
 - **OpenAI SDK** for direct LLM access (Azure OpenAI or standard OpenAI)
 - **OpenAI/AzureOpenAI** for generating embeddings (via EmbeddingService, auto-detected from env vars)
 - **OpenAI GPT-3.5-turbo** for generating guesses (default, configurable)
-- **MDB_RUNTIME** for data persistence and app scoping
+- **MDB_ENGINE** for data persistence and app scoping
 - **Asyncio** for concurrent processing
 
 The attack works by:

@@ -1,9 +1,9 @@
-# MDB_RUNTIME Quick Start Guide
+# MDB_ENGINE Quick Start Guide
 
 ## Installation
 
 ```bash
-pip install mdb-runtime
+pip install mdb-engine
 ```
 
 Or install from source:
@@ -17,7 +17,7 @@ pip install -e .
 ### 1. Initialize the Runtime Engine
 
 ```python
-from mdb_runtime import RuntimeEngine
+from mdb_engine import RuntimeEngine
 from pathlib import Path
 
 # Create engine instance
@@ -60,19 +60,24 @@ count = await engine.reload_apps()
 
 ```python
 # Database scoping
-from mdb_runtime.database import ScopedMongoWrapper, AppDB
+from mdb_engine.database import ScopedMongoWrapper, AppDB
 
-# Authentication
-from mdb_runtime.auth import get_current_user, require_admin
+# Authentication & Authorization
+from mdb_engine.auth import (
+    setup_auth_from_manifest,
+    get_current_user,
+    get_authz_provider,
+    require_admin
+)
 
 # Manifest validation
-from mdb_runtime.core import ManifestValidator
+from mdb_engine.core import ManifestValidator
 
 validator = ManifestValidator()
 is_valid, error, paths = validator.validate(manifest)
 
 # Index management
-from mdb_runtime.indexes import AsyncAtlasIndexManager
+from mdb_engine.indexes import AsyncAtlasIndexManager
 ```
 
 ## Context Manager Usage
@@ -87,6 +92,102 @@ async with RuntimeEngine(mongo_uri, db_name) as engine:
 ```
 
 
+## Authentication & Authorization
+
+### Unified Auth Setup
+
+Configure authentication and authorization in your `manifest.json`:
+
+```json
+{
+  "auth_policy": {
+    "provider": "casbin",
+    "required": true,
+    "authorization": {
+      "model": "rbac",
+      "policies_collection": "casbin_policies",
+      "link_sub_auth_roles": true,
+      "default_roles": ["user", "admin"]
+    }
+  },
+  "sub_auth": {
+    "enabled": true,
+    "strategy": "app_users"
+  }
+}
+```
+
+Then in your FastAPI app startup:
+
+```python
+from mdb_engine.auth import setup_auth_from_manifest
+
+@app.on_event("startup")
+async def startup():
+    await engine.initialize()
+    await engine.register_app(manifest)
+    
+    # Auto-creates Casbin provider from manifest
+    await setup_auth_from_manifest(app, engine, "my_app")
+```
+
+### Using Authorization
+
+```python
+from mdb_engine.auth import get_authz_provider, get_current_user
+from fastapi import Depends
+
+@app.get("/protected")
+async def protected_route(
+    user: dict = Depends(get_current_user),
+    authz: AuthorizationProvider = Depends(get_authz_provider)
+):
+    # Check permission using auto-created provider
+    has_access = await authz.check(
+        subject=user.get("email"),
+        resource="my_app",
+        action="access"
+    )
+    if not has_access:
+        raise HTTPException(status_code=403, detail="Access denied")
+    return {"user_id": user["user_id"]}
+```
+
+### Extensibility
+
+**Custom Provider:**
+```python
+from mdb_engine.auth import AuthorizationProvider
+
+class CustomProvider:
+    async def check(self, subject, resource, action, user_object=None):
+        # Your custom logic
+        return True
+
+app.state.authz_provider = CustomProvider()
+```
+
+**OSO Provider:**
+```json
+{
+  "auth_policy": {
+    "provider": "oso"
+  }
+}
+```
+
+**Custom Casbin Model:**
+```json
+{
+  "auth_policy": {
+    "provider": "casbin",
+    "authorization": {
+      "model": "/path/to/custom_model.conf"
+    }
+  }
+}
+```
+
 ## Observability
 
 ```python
@@ -99,7 +200,7 @@ metrics = engine.get_metrics()
 print(metrics["summary"])
 
 # Structured logging with correlation IDs
-from mdb_runtime.observability import get_logger, set_correlation_id
+from mdb_engine.observability import get_logger, set_correlation_id
 
 correlation_id = set_correlation_id()
 logger = get_logger(__name__)
@@ -118,13 +219,13 @@ pip install -e ".[test]"
 pytest
 
 # Run with coverage
-pytest --cov=mdb_runtime --cov-report=html
+pytest --cov=mdb_engine --cov-report=html
 ```
 
 ## Package Structure
 
 ```
-mdb_runtime/
+mdb_engine/
 ├── core/              # RuntimeEngine, Manifest validation
 ├── database/          # Scoped wrappers, AppDB, connection pooling
 ├── auth/              # Authentication, authorization

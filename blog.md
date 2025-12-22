@@ -1,4 +1,4 @@
-# MDB_RUNTIME: The Missing Engine That Turns Your Prototype Graveyard Into a Production Platform
+# MDB_ENGINE: The Missing Engine That Turns Your Prototype Graveyard Into a Production Platform
 
 *How a "WordPress-like" runtime for Python and MongoDB eliminates 70% of your scaffolding code and lets you focus on what matters: building features.*
 
@@ -18,13 +18,13 @@ If you're a builder, you know the feeling. Your "digital garden" is full of scri
 - Configuring LLM services and embedding pipelines
 - Adding observability and health checks
 
-**MDB_RUNTIME** is the engine that solves this. It's a "WordPress-like" platform for the modern Python/MongoDB stack, designed to minimize the friction between an idea and a live application.
+**MDB_ENGINE** is the engine that solves this. It's a "WordPress-like" platform for the modern Python/MongoDB stack, designed to minimize the friction between an idea and a live application.
 
 ---
 
 ## The Magic: Automatic Data Sandboxing
 
-The biggest pain point in multi-app (or even single-app) development is data isolation. MDB_RUNTIME solves this via a **two-layer scoping system** that requires zero effort from you.
+The biggest pain point in multi-app (or even single-app) development is data isolation. MDB_ENGINE solves this via a **two-layer scoping system** that requires zero effort from you.
 
 ### Layer 1: Physical Scoping
 All collection access is automatically prefixed. When your app writes to `db.users`, the engine actually writes to `db.my_app_users`. This prevents naming collisions and provides physical isolation.
@@ -96,22 +96,21 @@ Here's a real manifest from the `interactive_rag` example that demonstrates the 
 
 That's it. With this manifest, you get:
 - ✅ Vector search indexes (automatically created and managed)
-- ✅ LLM service (initialized and ready via dependency injection)
-- ✅ Embedding service (semantic text splitting and chunking)
+- ✅ Embedding service configuration (ready for semantic text splitting and chunking)
 - ✅ WebSocket endpoint (automatically registered and isolated)
 - ✅ Data isolation (all queries scoped to `interactive_rag`)
 
-**No code required.** Just configuration.
+**Note:** For LLM operations, use the OpenAI SDK directly. The runtime doesn't include an LLM abstraction layer—you implement your own LLM clients using your preferred SDK.
 
 ---
 
 ## Automatic Index Management: The "Magical" Feature
 
-Stop manually running `createIndex` in the Mongo shell. MDB_RUNTIME has two levels of index management:
+Stop manually running `createIndex` in the Mongo shell. MDB_ENGINE has two levels of index management:
 
 ### 1. Declarative Indexes (Manifest-Driven)
 
-Define your indexes in your manifest, and MDB_RUNTIME ensures they exist on startup:
+Define your indexes in your manifest, and MDB_ENGINE ensures they exist on startup:
 
 ```json
 "managed_indexes": {
@@ -148,7 +147,7 @@ The engine supports:
 
 ### 2. Automatic Index Creation (Query-Driven)
 
-But here's where it gets magical: **MDB_RUNTIME automatically creates indexes based on your query patterns.**
+But here's where it gets magical: **MDB_ENGINE automatically creates indexes based on your query patterns.**
 
 ```python
 # You write this query:
@@ -167,7 +166,7 @@ The `AutoIndexManager` tracks query patterns and automatically creates indexes w
 
 ## LLM Integration: Use Your Preferred Provider
 
-MDB_RUNTIME doesn't include an LLM abstraction layer—developers implement their own LLM clients using their preferred SDK. This keeps the runtime focused on data management while giving you full control over LLM integration.
+MDB_ENGINE doesn't include an LLM abstraction layer—developers implement their own LLM clients using their preferred SDK. This keeps the runtime focused on data management while giving you full control over LLM integration.
 
 ```python
 # Example: Using Azure OpenAI directly
@@ -189,21 +188,35 @@ completion = client.chat.completions.create(
 )
 ```
 
-For embeddings, MDB_RUNTIME provides `EmbeddingService` which uses mem0 for provider-agnostic embedding generation.
+For embeddings, MDB_ENGINE provides `EmbeddingService` which handles semantic text splitting. You provide your own embedding function (using OpenAI, Azure OpenAI, or any other provider) to generate embeddings.
 
 ---
 
 ## Semantic Text Splitting & Embeddings
 
-For RAG applications, MDB_RUNTIME includes an `EmbeddingService` that handles intelligent text chunking:
+For RAG applications, MDB_ENGINE includes an `EmbeddingService` that handles intelligent text chunking:
 
 ```python
-from mdb_runtime.embeddings import EmbeddingService
+from typing import List
+from mdb_engine.embeddings import EmbeddingService
+from openai import AzureOpenAI
+
+# Initialize your embedding client
+embedding_client = AzureOpenAI(...)
+
+# Create embedding service with your embed function
+async def embed_function(texts: List[str]) -> List[List[float]]:
+    """Your custom embedding function."""
+    response = embedding_client.embeddings.create(
+        model="text-embedding-3-small",
+        input=texts
+    )
+    return [item.embedding for item in response.data]
 
 embedding_service = EmbeddingService(
     max_tokens_per_chunk=1000,
     tokenizer_model="gpt-3.5-turbo",
-    default_embedding_model="text-embedding-3-small"
+    embed_function=embed_function
 )
 
 # Intelligent chunking with semantic boundaries
@@ -222,7 +235,7 @@ The service uses Rust-based `semantic-text-splitter` for fast, intelligent chunk
 
 ## Built-in WebSockets: Real-Time Made Simple
 
-Real-time features usually require a lot of setup. MDB_RUNTIME makes it configuration-based:
+Real-time features usually require a lot of setup. MDB_ENGINE makes it configuration-based:
 
 ### 1. Define in Manifest
 
@@ -242,14 +255,14 @@ Real-time features usually require a lot of setup. MDB_RUNTIME makes it configur
 ### 2. Register Routes
 
 ```python
-# Automatically registered during app registration
-engine.register_websocket_routes(app, "my_app")
+# WebSocket routes are automatically registered when you register your app
+# No additional code needed - just define in manifest and register the app
 ```
 
 ### 3. Broadcast Messages
 
 ```python
-from mdb_runtime.routing.websockets import broadcast_to_app
+from mdb_engine.routing.websockets import broadcast_to_app
 
 # Broadcast to all connected clients for this app
 await broadcast_to_app("my_app", {
@@ -269,18 +282,31 @@ That's it. The engine handles:
 
 ## Authentication & Authorization: Stop Rewriting Auth
 
-MDB_RUNTIME provides built-in support for multiple authentication strategies and Role-Based Access Control (RBAC).
+MDB_ENGINE provides a unified authentication and authorization system that auto-configures from your manifest. No more manual provider setup—just declare what you need, and it works.
+
+### Unified Auth Stack
+
+The engine automatically creates a complete auth stack from manifest configuration:
+
+1. **Auto-created Casbin Provider** (default) with MongoDB-backed policies
+2. **Sub-Auth Integration** - App users automatically get Casbin roles
+3. **Platform + Sub-Auth** - Unified authentication flow
+4. **Zero Boilerplate** - Everything configured declaratively
 
 ### Manifest Configuration
 
 ```json
 {
   "auth_policy": {
+    "provider": "casbin",
     "required": true,
-    "allowed_roles": ["admin", "developer"],
-    "allowed_users": ["user@example.com"],
-    "denied_users": ["blocked@example.com"],
-    "required_permissions": ["apps:view", "apps:manage_own"]
+    "allow_anonymous": false,
+    "authorization": {
+      "model": "rbac",
+      "policies_collection": "casbin_policies",
+      "link_sub_auth_roles": true,
+      "default_roles": ["user", "admin"]
+    }
   },
   "sub_auth": {
     "enabled": true,
@@ -292,39 +318,136 @@ MDB_RUNTIME provides built-in support for multiple authentication strategies and
 }
 ```
 
+That's it. This single configuration:
+- Creates Casbin provider with MongoDB adapter
+- Sets up policies collection
+- Links sub_auth users to Casbin roles automatically
+- Makes provider available via `get_authz_provider` dependency
+
 ### Runtime Usage
 
 ```python
-from mdb_runtime.auth.dependencies import get_app_sub_user
+from mdb_engine.auth import setup_auth_from_manifest, get_authz_provider, get_current_user
+
+@app.on_event("startup")
+async def startup():
+    # Auto-creates entire auth stack from manifest
+    await setup_auth_from_manifest(app, engine, "my_app")
 
 @app.get("/protected")
 async def protected_route(
-    request: Request,
-    user = Depends(get_app_sub_user("my_app", db))
+    user: dict = Depends(get_current_user),
+    authz: AuthorizationProvider = Depends(get_authz_provider)
 ):
-    # User is automatically validated and injected
-    return {"user_id": user["user_id"], "email": user["email"]}
+    # Check permission using auto-created Casbin provider
+    has_access = await authz.check(
+        subject=user.get("email"),
+        resource="my_app",
+        action="access"
+    )
+    if not has_access:
+        raise HTTPException(status_code=403, detail="Access denied")
+    return {"user_id": user["user_id"]}
 ```
 
-The engine supports:
+### Supported Authentication Strategies
+
 - **Platform authentication** (JWT-based, shared across apps)
-- **Sub-authentication** (app-specific user accounts)
+- **Sub-authentication** (app-specific user accounts with auto-role assignment)
 - **OAuth integration** (Google, GitHub, Microsoft, custom)
 - **Anonymous sessions** (for public apps)
 - **Hybrid auth** (combine platform + app-specific identities)
+
+### Extensibility: Custom Authorization Providers
+
+The auth system is built on a pluggable `AuthorizationProvider` protocol, making it easy to extend:
+
+**1. Custom Provider Implementation**
+
+```python
+from mdb_engine.auth import AuthorizationProvider
+from typing import Dict, Any, Optional
+
+class CustomAuthProvider:
+    """Custom authorization provider implementing the protocol."""
+    
+    async def check(
+        self,
+        subject: str,
+        resource: str,
+        action: str,
+        user_object: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        # Your custom authorization logic
+        return your_custom_check(subject, resource, action)
+
+# Set on app state
+app.state.authz_provider = CustomAuthProvider()
+```
+
+**2. Using OSO Provider**
+
+```json
+{
+  "auth_policy": {
+    "provider": "oso"
+  }
+}
+```
+
+Then manually set up OSO (OSO setup is manual for now):
+
+```python
+from mdb_engine.auth import OsoAdapter
+from oso import Oso
+
+oso = Oso()
+# Configure OSO policies...
+authz_provider = OsoAdapter(oso)
+app.state.authz_provider = authz_provider
+```
+
+**3. Custom Casbin Model**
+
+```json
+{
+  "auth_policy": {
+    "provider": "casbin",
+    "authorization": {
+      "model": "/path/to/custom_model.conf"
+    }
+  }
+}
+```
+
+**4. Manual Provider Override**
+
+```python
+# Override auto-creation by setting provider manually
+from mdb_engine.auth import CasbinAdapter, create_casbin_enforcer
+
+enforcer = await create_casbin_enforcer(
+    db=engine.get_database(),
+    model="custom_rbac",
+    policies_collection="my_policies"
+)
+app.state.authz_provider = CasbinAdapter(enforcer)
+```
+
+The system is designed to work out-of-the-box with sensible defaults, but remains fully extensible for custom requirements.
 
 ---
 
 ## Observability: The "Black Box" Recorder
 
-You shouldn't have to add logging manually to every function. MDB_RUNTIME provides automatic observability:
+You shouldn't have to add logging manually to every function. MDB_ENGINE provides automatic observability:
 
 ### Contextual Logging
 
 Every log entry is automatically tagged with the active `app_id`:
 
 ```python
-from mdb_runtime.observability import get_logger
+from mdb_engine.observability import get_logger
 
 logger = get_logger(__name__)
 logger.info("Processing task")  # Automatically tagged with app_id
@@ -335,7 +458,7 @@ logger.info("Processing task")  # Automatically tagged with app_id
 Operation durations and success rates are recorded automatically:
 
 ```python
-from mdb_runtime.observability import record_operation
+from mdb_engine.observability import record_operation
 
 # Automatically recorded for all database operations
 result = await db.tasks.insert_one(task)  # Metrics recorded internally
@@ -366,44 +489,53 @@ health = await engine.get_health_status()
 
 Let's look at three real examples from the codebase that demonstrate the platform's power:
 
-### Example 1: Hello World — The Simplest Possible App
+### Example 1: Chit Chat — AI Chat with Persistent Memory
 
-The `hello_world` example shows the absolute basics. Here's the entire journey from idea to working app:
+The `chit_chat` example demonstrates a complete AI chat application with persistent memory using Mem0. Here's what makes it remarkable: you're building a production-ready chat system with intelligent memory management, and the infrastructure is already solved.
 
-**Step 1:** Create a manifest.json (30 seconds of copy-paste)
+**The Journey:**
 
-**Step 2:** Write this code:
+You define your manifest with memory configuration, authentication, and WebSocket support. The engine handles the rest:
 
 ```python
-from mdb_runtime import RuntimeEngine
+from pathlib import Path
+from mdb_engine import RuntimeEngine
 
+# Initialize engine
 engine = RuntimeEngine(mongo_uri="...", db_name="...")
 await engine.initialize()
 
-# Register app from manifest
-manifest = await engine.load_manifest("manifest.json")
+# Load and register app
+manifest_path = Path("manifest.json")
+manifest = await engine.load_manifest(manifest_path)
 await engine.register_app(manifest, create_indexes=True)
 
 # Get scoped database
-db = engine.get_scoped_db("hello_world")
+db = engine.get_scoped_db("conversations")
 
-# Use it - that's it!
-await db.greetings.insert_one({"message": "Hello, World!"})
-greetings = await db.greetings.find({}).to_list(10)
+# Get memory service (automatically initialized from manifest)
+memory_service = engine.get_memory_service("conversations")
+
+# Use OpenAI SDK directly for chat
+from openai import AzureOpenAI
+client = AzureOpenAI(...)
+
+# Chat with memory
+response = client.chat.completions.create(
+    model="gpt-4o",
+    messages=memory_service.get_messages(user_id, conversation_id)
+)
 ```
 
-**Step 3:** Run it.
-
-That's the entire journey. No connection pooling to configure. No indexes to create manually. No auth middleware to wire up. No health check endpoints to build.
-
-**What you get without writing any of it:**
-- ✅ Data isolation (all queries scoped to `hello_world`)
+**What you get without building it:**
+- ✅ Data isolation (all queries scoped to `conversations`)
+- ✅ Memory management (Mem0 integration for intelligent context)
+- ✅ Authentication (sub-auth with session management)
+- ✅ WebSocket support (real-time message updates)
 - ✅ Index management (indexes created from manifest)
-- ✅ Authentication (if configured in manifest)
-- ✅ WebSocket support (if configured in manifest)
 - ✅ Health checks (built-in)
 
-The scaffolding that would normally take you a day? It's already done.
+The infrastructure that would normally take you weeks? It's already there.
 
 ### Example 2: Interactive RAG — From Zero to Semantic Search
 
@@ -419,12 +551,28 @@ engine = RuntimeEngine(...)
 await engine.initialize()
 await engine.register_app(manifest, create_indexes=True)
 
-# Get services (automatically initialized from manifest)
+# Get scoped database
 db = engine.get_scoped_db("interactive_rag")
-# Use OpenAI SDK directly - no LLM service abstraction
+
+# Use OpenAI SDK directly for LLM - no abstraction layer
+from typing import List
 from openai import AzureOpenAI
 client = AzureOpenAI(...)
-embedding_service = EmbeddingService(...)  # From manifest config
+
+# Create embedding service with your embed function
+async def embed_function(texts: List[str]) -> List[List[float]]:
+    response = client.embeddings.create(
+        model="text-embedding-3-small",
+        input=texts
+    )
+    return [item.embedding for item in response.data]
+
+from mdb_engine.embeddings import EmbeddingService
+embedding_service = EmbeddingService(
+    max_tokens_per_chunk=1000,
+    tokenizer_model="gpt-3.5-turbo",
+    embed_function=embed_function
+)
 
 # Ingest documents
 chunks = await embedding_service.split_and_embed(text=document_text)
@@ -469,7 +617,7 @@ You want to build a vector inversion attack demo. You need LLM services, embeddi
 - WebSocket infrastructure (with connection management)
 - Authentication and authorization
 
-With MDB_RUNTIME, you configure it in the manifest and write your logic:
+With MDB_ENGINE, you configure it in the manifest and write your logic:
 
 ```python
 # Initialize engine
@@ -486,8 +634,21 @@ target_response = client.chat.completions.create(
 )
 
 # Use EmbeddingService for embeddings
-from mdb_runtime.embeddings import EmbeddingService
-embedding_service = EmbeddingService(...)
+from typing import List
+from mdb_engine.embeddings import EmbeddingService
+
+async def embed_function(texts: List[str]) -> List[List[float]]:
+    response = client.embeddings.create(
+        model="text-embedding-3-small",
+        input=texts
+    )
+    return [item.embedding for item in response.data]
+
+embedding_service = EmbeddingService(
+    max_tokens_per_chunk=1000,
+    tokenizer_model="gpt-3.5-turbo",
+    embed_function=embed_function
+)
 embedding = await embedding_service.embed_chunks([target_response.choices[0].message.content])
 # ... perform vector inversion attack ...
 ```
@@ -504,7 +665,7 @@ The infrastructure is solved. You're just building the interesting part.
 
 ## The Architecture: How It Works
 
-MDB_RUNTIME acts as a hyper-intelligent proxy between your code and MongoDB. Here's the architecture:
+MDB_ENGINE acts as a hyper-intelligent proxy between your code and MongoDB. Here's the architecture:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -515,7 +676,7 @@ MDB_RUNTIME acts as a hyper-intelligent proxy between your code and MongoDB. Her
                        │ Uses ScopedMongoWrapper
                        │
 ┌──────────────────────▼──────────────────────────────────────┐
-│                  MDB_RUNTIME Engine                          │
+│                  MDB_ENGINE Engine                          │
 │  ┌──────────────────────────────────────────────────────┐  │
 │  │  RuntimeEngine                                        │  │
 │  │  - Manages connections                                │  │
@@ -568,7 +729,7 @@ MDB_RUNTIME acts as a hyper-intelligent proxy between your code and MongoDB. Her
 
 ## No Lock-In: The Graduation Path
 
-MDB_RUNTIME is an incubator, not a cage. Because all data is tagged with `app_id`, "graduating" an app to its own dedicated infrastructure is a simple database operation.
+MDB_ENGINE is an incubator, not a cage. Because all data is tagged with `app_id`, "graduating" an app to its own dedicated infrastructure is a simple database operation.
 
 ### To Export Your App:
 
@@ -584,7 +745,7 @@ mongorestore --db=conversations_prod ./export
 
 3. **Update Code**: Your code is already standard PyMongo/Motor code. Just replace:
 ```python
-# Before (MDB_RUNTIME)
+# Before (MDB_ENGINE)
 db = engine.get_scoped_db("conversations")
 
 # After (Standalone)
@@ -599,7 +760,7 @@ That's it. No code changes needed—just swap the database connection.
 
 ## Performance & Scale
 
-MDB_RUNTIME is built for production:
+MDB_ENGINE is built for production:
 
 - **Connection Pooling**: Configurable pool sizes with automatic health monitoring
 - **Async-Native**: Built on Motor (async MongoDB driver) for high concurrency
@@ -623,7 +784,7 @@ From the codebase:
 ### Installation
 
 ```bash
-pip install mdb-runtime
+pip install mdb-engine
 ```
 
 ### Quick Start
@@ -643,13 +804,18 @@ pip install mdb-runtime
 
 2. **Initialize the engine**:
 ```python
-from mdb_runtime import RuntimeEngine
+from pathlib import Path
+from mdb_engine import RuntimeEngine
 
 engine = RuntimeEngine(
     mongo_uri="mongodb://localhost:27017",
     db_name="my_cluster"
 )
 await engine.initialize()
+
+# Load and register app from manifest
+manifest_path = Path("manifest.json")
+manifest = await engine.load_manifest(manifest_path)
 await engine.register_app(manifest, create_indexes=True)
 ```
 
@@ -666,7 +832,7 @@ That's it. You're ready to build.
 
 ## The Bottom Line
 
-MDB_RUNTIME eliminates 70% of your scaffolding code by providing:
+MDB_ENGINE eliminates 70% of your scaffolding code by providing:
 
 - ✅ **Automatic data isolation** (two-layer scoping system)
 - ✅ **Declarative configuration** (manifest-driven development)
@@ -684,15 +850,16 @@ MDB_RUNTIME eliminates 70% of your scaffolding code by providing:
 ## Try It Today
 
 Check out the examples in the repository:
-- [`hello_world`](examples/hello_world/): Basic CRUD operations — see how little code it takes
-- [`interactive_rag`](examples/interactive_rag/): Full RAG application — semantic search without the complexity
-- [`vector_hacking`](examples/vector_hacking/): Advanced LLM usage — sophisticated AI with simple code
+- [`chit_chat`](examples/chit_chat/): AI chat application with persistent memory using Mem0 — demonstrates authentication, WebSockets, and memory management
+- [`interactive_rag`](examples/interactive_rag/): Full RAG application — semantic search with vector indexes and embedding service
+- [`vector_hacking`](examples/vector_hacking/): Advanced LLM usage — vector inversion attacks with real-time updates
+- [`parallax`](examples/parallax/): Schema generation and management — demonstrates dynamic schema handling
 
 Or start building your own app:
 
 ```bash
-git clone https://github.com/your-org/mdb-runtime
-cd mdb-runtime/examples/hello_world
+git clone https://github.com/your-org/mdb-engine
+cd mdb-engine/examples/chit_chat
 docker-compose up
 ```
 
@@ -700,5 +867,5 @@ docker-compose up
 
 ---
 
-*MDB_RUNTIME is open source and available on GitHub. Contributions welcome.*
+*MDB_ENGINE is open source and available on GitHub. Contributions welcome.*
 

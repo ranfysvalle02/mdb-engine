@@ -1,5 +1,5 @@
 #!/bin/bash
-# Test runner script for MDB_RUNTIME
+# Test runner script for MDB_ENGINE
 # Run from project root: ./scripts/run_tests.sh
 
 set -e
@@ -10,7 +10,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 cd "$PROJECT_ROOT"
 
-echo "🧪 MDB_RUNTIME Test Runner"
+echo "🧪 MDB_ENGINE Test Runner"
 echo "=========================="
 echo ""
 
@@ -28,7 +28,7 @@ case "$TEST_TYPE" in
     unit)
         echo "📦 Running unit tests..."
         if [ "$COVERAGE" = "true" ]; then
-            pytest tests/unit/ -v --cov=mdb_runtime --cov-report=term-missing --cov-report=html
+            pytest tests/unit/ -v --cov=mdb_engine --cov-report=term-missing --cov-report=html
         else
             pytest tests/unit/ -v
         fi
@@ -40,7 +40,7 @@ case "$TEST_TYPE" in
     all)
         echo "🚀 Running all tests..."
         if [ "$COVERAGE" = "true" ]; then
-            pytest tests/ -v --cov=mdb_runtime --cov-report=term-missing --cov-report=html
+            pytest tests/ -v --cov=mdb_engine --cov-report=term-missing --cov-report=html
         else
             pytest tests/ -v
         fi

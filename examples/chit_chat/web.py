@@ -18,26 +18,26 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 
-from mdb_runtime import RuntimeEngine
-from mdb_runtime.auth.sub_auth import (
+from mdb_engine import RuntimeEngine
+from mdb_engine.auth.sub_auth import (
     get_app_sub_user,
     create_app_session,
 )
-from mdb_runtime.auth.utils import (
+from mdb_engine.auth.utils import (
     login_user,
     register_user,
     logout_user,
 )
-from mdb_runtime.auth.decorators import (
+from mdb_engine.auth.decorators import (
     require_auth,
     rate_limit_auth,
     token_security,
 )
-from mdb_runtime.auth.integration import (
+from mdb_engine.auth.integration import (
     setup_auth_from_manifest,
     get_auth_config,
 )
-from mdb_runtime.routing.websockets import broadcast_to_app, register_message_handler
+from mdb_engine.routing.websockets import broadcast_to_app, register_message_handler
 from openai import AzureOpenAI
 from dotenv import load_dotenv
 import os
@@ -118,12 +118,12 @@ async def startup_event():
     await setup_auth_from_manifest(app, engine, "conversations")
     
     # Set global engine for embedding dependency injection
-    from mdb_runtime.embeddings.dependencies import set_global_engine
+    from mdb_engine.embeddings.dependencies import set_global_engine
     set_global_engine(engine, app_slug="conversations")
     
     # Initialize embedding service if configured in manifest.json
     try:
-        from mdb_runtime.embeddings import get_embedding_service
+        from mdb_engine.embeddings import get_embedding_service
         app_config = engine.get_app("conversations")
         embedding_config = app_config.get("embedding_config", {}) if app_config else {}
         if embedding_config:

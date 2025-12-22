@@ -37,7 +37,7 @@ In astronomy, **Parallax** is the apparent displacement of an object when viewed
 - Python 3.8+
 - Docker and Docker Compose (for containerized setup)
 - OR MongoDB running locally (for local setup)
-- MDB_RUNTIME installed
+- MDB_ENGINE installed
 - **LLM API Key** (OpenAI, Azure OpenAI, or compatible provider) - **REQUIRED**
 - **GitHub Personal Access Token** - **REQUIRED** for GraphQL API access
 - **Dependencies** - **REQUIRED**:
@@ -163,7 +163,7 @@ All data is automatically scoped to the `parallax` app:
 # You write:
 await db.parallax_reports.insert_one(report.dict())
 
-# MDB_RUNTIME stores:
+# MDB_ENGINE stores:
 {
     "repo_id": "owner/repo-name",
     "repo_name": "repo-name",
@@ -182,7 +182,7 @@ await db.parallax_reports.insert_one(report.dict())
 
 ### LLM Integration
 
-The example uses MDB_RUNTIME's LLM service with LangChain adapters:
+The example uses MDB_ENGINE's LLM service with LangChain adapters:
 
 ```python
 from openai import AzureOpenAI
@@ -309,7 +309,7 @@ docker-compose up
        │    ├──► Relevance Agent (Code-focused)
        │    └──► Technical Agent (Code-focused)
        │
-       └──► MongoDB (via MDB_RUNTIME)
+       └──► MongoDB (via MDB_ENGINE)
             └── parallax_reports
 ```
 
@@ -339,4 +339,4 @@ docker-compose up
 
 ## License
 
-Same as MDB_RUNTIME project.
+Same as MDB_ENGINE project.
