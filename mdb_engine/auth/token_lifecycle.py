@@ -3,7 +3,7 @@ Token Lifecycle Management
 
 Provides utilities for managing token lifecycle, rotation, and expiration handling.
 
-This module is part of MDB_ENGINE - MongoDB Runtime Engine.
+This module is part of MDB_ENGINE - MongoDB Engine.
 """
 
 import logging

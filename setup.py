@@ -51,6 +51,6 @@ setup(
         "Topic :: Database",
         "Topic :: Software Development :: Libraries :: Python Modules",
     ],
-    keywords="mongodb runtime engine database scoping",
+    keywords="mongodb engine database scoping",
     include_package_data=True,
 )

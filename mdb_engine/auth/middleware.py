@@ -3,7 +3,7 @@ Security Middleware
 
 Middleware for enforcing security settings from manifest configuration.
 
-This module is part of MDB_ENGINE - MongoDB Runtime Engine.
+This module is part of MDB_ENGINE - MongoDB Engine.
 """
 
 import os

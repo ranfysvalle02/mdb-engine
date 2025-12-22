@@ -2,12 +2,12 @@
 """
 FastAPI Web Application for Interactive RAG Example
 
-This demonstrates MDB_RUNTIME with:
+This demonstrates MDB_ENGINE with:
 - EmbeddingService for semantic text splitting and embeddings
 - OpenAI SDK for chat completions
 - Vector search with MongoDB Atlas Vector Search
 - Knowledge base management with sessions
-- Platform-level LLM abstractions via RuntimeEngine
+- Platform-level LLM abstractions via MongoDBEngine
 """
 import os
 import asyncio
@@ -46,7 +46,7 @@ from jinja2 import Template
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from mdb_engine import RuntimeEngine
+from mdb_engine import MongoDBEngine
 from mdb_engine.embeddings import EmbeddingService, get_embedding_service
 from mdb_engine.embeddings.dependencies import get_embedding_service_dep
 from openai import AzureOpenAI
@@ -75,7 +75,7 @@ import requests
 
 # Initialize FastAPI app
 app = FastAPI(
-    title="Interactive RAG - MDB_RUNTIME Demo",
+    title="Interactive RAG - MDB_ENGINE Demo",
     description="An interactive RAG system with knowledge base management",
     version="1.0.0"
 )
@@ -127,7 +127,7 @@ templates = Jinja2Templates(directory=str(template_dir))
 logger.info(f"Templates directory: {template_dir}")
 
 # Global engine instance (will be initialized in startup)
-engine: Optional[RuntimeEngine] = None
+engine: Optional[MongoDBEngine] = None
 db = None
 
 # App configuration
@@ -271,7 +271,7 @@ def chunk_text(text: str, max_tokens: int = 1000, tokenizer_model: str = "gpt-3.
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize the runtime engine on startup"""
+    """Initialize the MongoDB Engine on startup"""
     global engine, db
     
     app_status["startup_time"] = datetime.now().isoformat()
@@ -298,9 +298,9 @@ async def startup_event():
         )
         db_name = os.getenv("MONGO_DB_NAME", "interactive_rag_db")
         
-        # Initialize the runtime engine
+        # Initialize the MongoDB Engine
         add_status_log(f"Connecting to MongoDB: {db_name}...", "info", "mongodb")
-        engine = RuntimeEngine(
+        engine = MongoDBEngine(
             mongo_uri=mongo_uri,
             db_name=db_name
         )
@@ -310,7 +310,7 @@ async def startup_event():
         app_status["components"]["mongodb"]["status"] = "connected"
         app_status["components"]["mongodb"]["message"] = f"Connected to {db_name}"
         app_status["components"]["engine"]["status"] = "initialized"
-        app_status["components"]["engine"]["message"] = "RuntimeEngine ready"
+        app_status["components"]["engine"]["message"] = "MongoDBEngine ready"
         add_status_log("✅ Engine initialized successfully", "info", "engine")
         
         # Load and register the app manifest
@@ -464,7 +464,7 @@ async def _get_vector_search_results_async(query: str, session_id: str, embeddin
             return []
         
         # Vector search pipeline
-        # Index name is prefixed with app slug by RuntimeEngine
+        # Index name is prefixed with app slug by MongoDBEngine
         vector_index_name = f"{APP_SLUG}_embedding_vector_index"
         pipeline = [
             {
@@ -1245,7 +1245,7 @@ async def _direct_rag_chat(
         logger.warning(f"[RAG] No documents found for session '{request.session_id}'. Make sure documents are embedded first.")
     
     # Vector search pipeline
-    # Index name is prefixed with app slug by RuntimeEngine (e.g., "interactive_rag_embedding_vector_index")
+    # Index name is prefixed with app slug by MongoDBEngine (e.g., "interactive_rag_embedding_vector_index")
     vector_index_name = f"{APP_SLUG}_embedding_vector_index"
     pipeline = [
         {
@@ -1474,7 +1474,7 @@ async def get_diagnostics():
             relevant_packages = [
                 "langchain", "langchain-community", "langchain-openai",
                 "langchain-core", "langchain-mongodb",
-                "langgraph", "ddgs", "docling", "mdb-runtime"
+                "langgraph", "ddgs", "docling", "mdb-engine"
             ]
             diagnostics["installed_packages"] = {
                 pkg["name"]: pkg["version"]
@@ -1737,13 +1737,13 @@ async def get_index_status(
             index_status_str = "NOT_FOUND"
         
         # Auto-create index if missing and we have documents
-        # Note: Index creation is handled by RuntimeEngine during app registration
+        # Note: Index creation is handled by MongoDBEngine during app registration
         # If status is BUILDING, that means the index is being created - no need to trigger again
         if index_status_str == "NOT_FOUND" and doc_count > 0 and auto_create:
             if vector_index_name not in index_creation_in_progress:
-                logger.info(f"Index '{vector_index_name}' not found but {doc_count} documents exist. Index should be created automatically by RuntimeEngine.")
+                logger.info(f"Index '{vector_index_name}' not found but {doc_count} documents exist. Index should be created automatically by MongoDBEngine.")
                 index_creation_in_progress.add(vector_index_name)
-                # Don't set status to CREATING - let RuntimeEngine handle it
+                # Don't set status to CREATING - let MongoDBEngine handle it
                 # The next check will show BUILDING or READY when the index is actually being created/ready
         
         return {
@@ -1766,11 +1766,11 @@ async def create_indexes(db=Depends(get_db)):
     """Create or update all vector search indexes"""
     try:
         logger.info("Manual index creation requested...")
-        # Index creation is handled by RuntimeEngine during app registration
+        # Index creation is handled by MongoDBEngine during app registration
         # This endpoint just returns success - indexes are created automatically
         return {
             "status": "success",
-            "message": "Index creation is handled automatically by RuntimeEngine. Check index status for progress."
+            "message": "Index creation is handled automatically by MongoDBEngine. Check index status for progress."
         }
     except Exception as e:
         logger.error(f"Failed to create indexes: {e}", exc_info=True)
@@ -1818,7 +1818,7 @@ async def preview_search(
         raise HTTPException(status_code=500, detail="Failed to generate query embedding")
     
     # Vector search pipeline
-    # Index name is prefixed with app slug by RuntimeEngine
+    # Index name is prefixed with app slug by MongoDBEngine
     vector_index_name = f"{APP_SLUG}_embedding_vector_index"
     pipeline = [
         {

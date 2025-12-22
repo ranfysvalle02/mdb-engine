@@ -2,7 +2,7 @@
 Configuration management for MDB_ENGINE.
 
 This module provides optional configuration management using Pydantic.
-It's designed to be non-breaking - the RuntimeEngine can still be used
+It's designed to be non-breaking - the MongoDBEngine can still be used
 with direct parameters as before.
 """
 import os
@@ -19,24 +19,24 @@ except ImportError:
         pass
 
 
-class RuntimeConfig:
+class EngineConfig:
     """
-    Runtime engine configuration.
+    MongoDB Engine configuration.
     
     This class provides configuration management with environment variable
-    support. It's optional - RuntimeEngine can still be initialized with
+    support. It's optional - MongoDBEngine can still be initialized with
     direct parameters for backward compatibility.
     
     Example:
         # Using environment variables
-        config = RuntimeConfig()
-        engine = RuntimeEngine(
+        config = EngineConfig()
+        engine = MongoDBEngine(
             mongo_uri=config.mongo_uri,
             db_name=config.db_name
         )
         
         # Or using direct parameters (backward compatible)
-        engine = RuntimeEngine(
+        engine = MongoDBEngine(
             mongo_uri="mongodb://localhost:27017",
             db_name="my_db"
         )
@@ -107,16 +107,16 @@ class RuntimeConfig:
 
 # Pydantic-based configuration (optional, only if Pydantic is available)
 if PYDANTIC_AVAILABLE:
-    class RuntimeConfigPydantic(BaseSettings):
+    class EngineConfigPydantic(BaseSettings):
         """
         Pydantic-based configuration with automatic validation.
         
-        This is an optional alternative to RuntimeConfig that provides
+        This is an optional alternative to EngineConfig that provides
         automatic validation and type checking via Pydantic.
         
         Usage:
-            config = RuntimeConfigPydantic()
-            engine = RuntimeEngine(
+            config = EngineConfigPydantic()
+            engine = MongoDBEngine(
                 mongo_uri=config.mongo_uri,
                 db_name=config.db_name
             )

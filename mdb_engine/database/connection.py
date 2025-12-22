@@ -10,7 +10,7 @@ This module implements a thread-safe singleton pattern that ensures all
 components in the same process share a single MongoDB client instance with
 a reasonable connection pool size.
 
-This module is part of MDB_ENGINE - MongoDB Runtime Engine.
+This module is part of MDB_ENGINE - MongoDB Engine.
 
 Usage:
     from mdb_engine.database import get_shared_mongo_client, get_pool_metrics
@@ -174,7 +174,7 @@ def register_client_for_metrics(client: AsyncIOMotorClient) -> None:
     """
     Register a MongoDB client for pool metrics monitoring.
     
-    This allows RuntimeEngine and other components to register their clients
+    This allows MongoDBEngine and other components to register their clients
     so pool metrics can be tracked even if they don't use the shared client.
     
     Args:
@@ -193,7 +193,7 @@ async def get_pool_metrics(client: Optional[AsyncIOMotorClient] = None) -> Dict[
     
     Args:
         client: Optional specific client to check. If None, checks shared client first,
-                then any registered clients (e.g., RuntimeEngine's client).
+                then any registered clients (e.g., MongoDBEngine's client).
     
     Returns:
         Dictionary with pool metrics including:
@@ -212,7 +212,7 @@ async def get_pool_metrics(client: Optional[AsyncIOMotorClient] = None) -> Dict[
     if _shared_client is not None:
         return await _get_client_pool_metrics(_shared_client)
     
-    # Try registered clients (e.g., RuntimeEngine's client)
+    # Try registered clients (e.g., MongoDBEngine's client)
     for registered_client in _registered_clients:
         try:
             # Verify client is still valid

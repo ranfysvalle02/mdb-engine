@@ -14,7 +14,7 @@ import asyncio
 import os
 from pathlib import Path
 
-from mdb_engine import RuntimeEngine
+from mdb_engine import MongoDBEngine
 from mdb_engine.embeddings import EmbeddingService
 
 
@@ -35,8 +35,8 @@ async def main():
     print(f"📡 Connecting to MongoDB: {safe_uri}")
     print(f"📦 Database: {db_name}\n")
     
-    # Initialize the runtime engine
-    engine = RuntimeEngine(
+    # Initialize the MongoDB Engine
+    engine = MongoDBEngine(
         mongo_uri=mongo_uri,
         db_name=db_name
     )

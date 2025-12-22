@@ -567,15 +567,15 @@ async def login(credentials: dict):
 - **Session Management**: Limit concurrent sessions per user
 - **Device Tracking**: Track devices for security monitoring
 
-## Integration with RuntimeEngine
+## Integration with MongoDBEngine
 
-The auth module integrates seamlessly with RuntimeEngine:
+The auth module integrates seamlessly with MongoDBEngine:
 
 ```python
-from mdb_engine import RuntimeEngine
+from mdb_engine import MongoDBEngine
 from mdb_engine.auth import setup_auth_from_manifest
 
-engine = RuntimeEngine(mongo_uri="...", db_name="...")
+engine = MongoDBEngine(mongo_uri="...", db_name="...")
 await engine.initialize()
 
 manifest = await engine.load_manifest("manifest.json")
@@ -587,7 +587,7 @@ await setup_auth_from_manifest(engine, manifest)
 
 ## Related Modules
 
-- **`core/`** - RuntimeEngine integration
+- **`core/`** - MongoDBEngine integration
 - **`database/`** - Database access for user storage
 - **`observability/`** - Logging and metrics for auth events
 

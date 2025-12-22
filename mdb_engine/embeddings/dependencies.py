@@ -29,13 +29,13 @@ _global_app_slug: Optional[str] = None
 
 def set_global_engine(engine: Any, app_slug: Optional[str] = None) -> None:
     """
-    Set global RuntimeEngine instance for embedding dependency injection.
+    Set global MongoDBEngine instance for embedding dependency injection.
     
     This is useful when you have a single engine instance that you want
     to use across all apps. Call this during application startup.
     
     Args:
-        engine: RuntimeEngine instance
+        engine: MongoDBEngine instance
         app_slug: Optional app slug
     """
     global _global_engine, _global_app_slug
@@ -45,10 +45,10 @@ def set_global_engine(engine: Any, app_slug: Optional[str] = None) -> None:
 
 def get_global_engine() -> Optional[Any]:
     """
-    Get global RuntimeEngine instance.
+    Get global MongoDBEngine instance.
     
     Returns:
-        RuntimeEngine instance if set, None otherwise
+        MongoDBEngine instance if set, None otherwise
     """
     return _global_engine
 
@@ -65,7 +65,7 @@ def get_embedding_service_for_app(
     
     Args:
         app_slug: App slug (typically extracted from route context)
-        engine: RuntimeEngine instance (optional, will try to get from context)
+        engine: MongoDBEngine instance (optional, will try to get from context)
     
     Returns:
         EmbeddingService instance if embedding is enabled for this app, None otherwise
@@ -114,7 +114,7 @@ def create_embedding_dependency(app_slug: str, engine: Optional[Any] = None):
     
     Args:
         app_slug: App slug
-        engine: RuntimeEngine instance (optional)
+        engine: MongoDBEngine instance (optional)
     
     Returns:
         Dependency function that returns EmbeddingService or raises HTTPException

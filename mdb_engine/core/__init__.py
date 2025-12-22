@@ -1,11 +1,11 @@
 """
-Core runtime engine components.
+Core MongoDB Engine components.
 
-This module contains the main RuntimeEngine class and core
+This module contains the main MongoDBEngine class and core
 orchestration logic for managing apps.
 """
 
-from .engine import RuntimeEngine
+from .engine import MongoDBEngine
 
 from .manifest import (
     # Classes
@@ -36,8 +36,8 @@ from .manifest import (
 )
 
 __all__ = [
-    # Runtime Engine
-    "RuntimeEngine",
+    # MongoDB Engine
+    "MongoDBEngine",
     
     # Classes
     "ManifestValidator",

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Vector Hacking Example for MDB_RUNTIME
+Vector Hacking Example for MDB_ENGINE
 
-This example demonstrates the basic usage of MDB_RUNTIME with a vector hacking demo.
+This example demonstrates the basic usage of MDB_ENGINE with a vector hacking demo.
 It shows how to initialize the engine, register an app, and perform basic operations.
 """
 import asyncio
@@ -10,12 +10,12 @@ import os
 from pathlib import Path
 from datetime import datetime
 
-from mdb_engine import RuntimeEngine
+from mdb_engine import MongoDBEngine
 
 
 async def main():
     """Main example function"""
-    print("🚀 Initializing MDB_RUNTIME for Vector Hacking Demo...")
+    print("🚀 Initializing MDB_ENGINE for Vector Hacking Demo...")
     
     # Get MongoDB connection from environment
     # In Docker Compose, this is set automatically
@@ -30,8 +30,8 @@ async def main():
     print(f"📡 Connecting to MongoDB: {safe_uri}")
     print(f"📦 Database: {db_name}\n")
     
-    # Initialize the runtime engine
-    engine = RuntimeEngine(
+    # Initialize the MongoDB Engine
+    engine = MongoDBEngine(
         mongo_uri=mongo_uri,
         db_name=db_name
     )

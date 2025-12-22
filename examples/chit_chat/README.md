@@ -146,7 +146,7 @@ curl "http://localhost:8000/api/memories/stats" \
 
 The application uses MDB_ENGINE's core features:
 
-1. **App Registration**: RuntimeEngine automatically registers the app from manifest.json
+1. **App Registration**: MongoDBEngine automatically registers the app from manifest.json
 2. **Database Scoping**: `get_scoped_db()` creates app-scoped database wrapper
 3. **Automatic Filtering**: All queries and inserts automatically include app_id
 4. **Index Management**: Indexes are created automatically from manifest configuration

@@ -13,8 +13,8 @@ from typing import AsyncGenerator, Dict, Any
 from unittest.mock import AsyncMock, MagicMock, patch
 from pathlib import Path
 
-# Import runtime components for testing
-from mdb_engine.core.engine import RuntimeEngine
+# Import engine components for testing
+from mdb_engine.core.engine import MongoDBEngine
 from mdb_engine.database.scoped_wrapper import ScopedMongoWrapper, ScopedCollectionWrapper
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase, AsyncIOMotorCollection
 
@@ -108,12 +108,12 @@ def mock_mongo_collection() -> MagicMock:
 
 
 # ============================================================================
-# RUNTIME ENGINE FIXTURES
+# MONGODB ENGINE FIXTURES
 # ============================================================================
 
 @pytest.fixture
-def runtime_engine_config() -> Dict[str, Any]:
-    """Provide default configuration for RuntimeEngine."""
+def mongodb_engine_config() -> Dict[str, Any]:
+    """Provide default configuration for MongoDBEngine."""
     return {
         "mongo_uri": "mongodb://localhost:27017",
         "db_name": "test_db",
@@ -123,19 +123,19 @@ def runtime_engine_config() -> Dict[str, Any]:
 
 
 @pytest.fixture
-async def runtime_engine(mock_mongo_client: MagicMock, runtime_engine_config: Dict[str, Any]) -> AsyncGenerator[RuntimeEngine, None]:
-    """Create a RuntimeEngine instance with mocked MongoDB client."""
+async def mongodb_engine(mock_mongo_client: MagicMock, mongodb_engine_config: Dict[str, Any]) -> AsyncGenerator[MongoDBEngine, None]:
+    """Create a MongoDBEngine instance with mocked MongoDB client."""
     with patch('mdb_engine.core.engine.AsyncIOMotorClient', return_value=mock_mongo_client):
-        engine = RuntimeEngine(**runtime_engine_config)
+        engine = MongoDBEngine(**mongodb_engine_config)
         await engine.initialize()
         yield engine
         await engine.shutdown()
 
 
 @pytest.fixture
-async def uninitialized_runtime_engine(runtime_engine_config: Dict[str, Any]) -> RuntimeEngine:
-    """Create an uninitialized RuntimeEngine instance."""
-    return RuntimeEngine(**runtime_engine_config)
+async def uninitialized_mongodb_engine(mongodb_engine_config: Dict[str, Any]) -> MongoDBEngine:
+    """Create an uninitialized MongoDBEngine instance."""
+    return MongoDBEngine(**mongodb_engine_config)
 
 
 # ============================================================================

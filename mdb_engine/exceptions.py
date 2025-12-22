@@ -7,9 +7,9 @@ backward compatibility with RuntimeError.
 from typing import Optional, Dict, Any, List
 
 
-class RuntimeEngineError(RuntimeError):
+class MongoDBEngineError(RuntimeError):
     """
-    Base exception for runtime engine errors.
+    Base exception for MongoDB Engine errors.
     
     This exception maintains backward compatibility with RuntimeError
     while providing a more specific base class for MDB_ENGINE errors.
@@ -44,7 +44,7 @@ class RuntimeEngineError(RuntimeError):
         return self.message
 
 
-class InitializationError(RuntimeEngineError):
+class InitializationError(MongoDBEngineError):
     """
     Raised when engine initialization fails.
     
@@ -84,7 +84,7 @@ class InitializationError(RuntimeEngineError):
         self.db_name = db_name
 
 
-class ManifestValidationError(RuntimeEngineError):
+class ManifestValidationError(MongoDBEngineError):
     """
     Raised when manifest validation fails.
     
@@ -130,7 +130,7 @@ class ManifestValidationError(RuntimeEngineError):
         self.schema_version = schema_version
 
 
-class ConfigurationError(RuntimeEngineError):
+class ConfigurationError(MongoDBEngineError):
     """
     Raised when configuration is invalid or missing.
     

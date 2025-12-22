@@ -18,7 +18,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 
-from mdb_engine import RuntimeEngine
+from mdb_engine import MongoDBEngine
 from mdb_engine.auth.sub_auth import (
     get_app_sub_user,
     create_app_session,
@@ -70,7 +70,7 @@ templates_dir = Path("/app/templates") if Path("/app/templates").exists() else P
 templates = Jinja2Templates(directory=str(templates_dir))
 
 # Global engine instance
-engine: Optional[RuntimeEngine] = None
+engine: Optional[MongoDBEngine] = None
 db = None
 
 # Secret key for JWT
@@ -79,7 +79,7 @@ SECRET_KEY = os.environ.get("FLASK_SECRET_KEY", "conversations_demo_secret_key_c
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize the runtime engine on startup."""
+    """Initialize the MongoDB Engine on startup."""
     global engine, db
     
     logger.info("Starting Conversations Application...")
@@ -94,8 +94,8 @@ async def startup_event():
     
     logger.info(f"Connecting to MongoDB: {mongo_uri.replace('://', '://***@') if '@' in mongo_uri else mongo_uri} (db: {db_name})")
     
-    # Initialize the runtime engine
-    engine = RuntimeEngine(
+    # Initialize the MongoDB Engine
+    engine = MongoDBEngine(
         mongo_uri=mongo_uri,
         db_name=db_name
     )

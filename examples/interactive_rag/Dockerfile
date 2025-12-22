@@ -1,5 +1,5 @@
 # ============================================================================
-# Multi-stage Dockerfile for MDB_RUNTIME Interactive RAG Example
+# Multi-stage Dockerfile for MDB_ENGINE Interactive RAG Example
 # Enterprise-grade best practices: security, caching, minimal image size
 # ============================================================================
 
@@ -42,7 +42,7 @@ RUN     echo "=== Installing mdb-engine ===" && \
 # Verify installation worked in builder stage
 RUN echo "=== Verifying installation in builder ===" && \
     python -c "import mdb_engine; print(f'✓ mdb_engine {mdb_engine.__version__} imported successfully')" && \
-    python -c "from mdb_engine import RuntimeEngine; print('✓ RuntimeEngine imported successfully')" && \
+    python -c "from mdb_engine import MongoDBEngine; print('✓ MongoDBEngine imported successfully')" && \
     python -c "from mdb_engine.embeddings import EmbeddingService; print('✓ EmbeddingService imported successfully')" && \
     echo "=== Verification complete ==="
 
@@ -94,7 +94,7 @@ ENV PATH="/opt/venv/bin:$PATH" \
 RUN echo "=== Verifying installation in runtime stage ===" && \
     pip show mdb-engine || (echo "ERROR: mdb-engine package not found" && exit 1) && \
     python -c "import mdb_engine; print(f'✓ mdb_engine {mdb_engine.__version__} imported successfully')" && \
-    python -c "from mdb_engine import RuntimeEngine; print('✓ RuntimeEngine imported successfully')" && \
+    python -c "from mdb_engine import MongoDBEngine; print('✓ MongoDBEngine imported successfully')" && \
     python -c "from mdb_engine.embeddings import EmbeddingService; print('✓ EmbeddingService imported successfully')" && \
     echo "=== Verification complete ==="
 

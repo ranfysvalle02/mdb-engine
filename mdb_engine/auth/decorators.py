@@ -3,7 +3,7 @@ Authentication Decorators
 
 Decorators for simplifying authentication and security enforcement.
 
-This module is part of MDB_ENGINE - MongoDB Runtime Engine.
+This module is part of MDB_ENGINE - MongoDB Engine.
 """
 
 import logging

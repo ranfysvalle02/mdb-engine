@@ -4,7 +4,7 @@ JWT Token Utilities
 Provides JWT encoding and decoding utilities with automatic format handling.
 Supports access tokens, refresh tokens, and token pairs.
 
-This module is part of MDB_ENGINE - MongoDB Runtime Engine.
+This module is part of MDB_ENGINE - MongoDB Engine.
 """
 
 import jwt

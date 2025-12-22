@@ -7,7 +7,7 @@ This module provides:
 - Optimized validation with caching for scale
 - Parallel manifest processing capabilities
 
-This module is part of MDB_ENGINE - MongoDB Runtime Engine.
+This module is part of MDB_ENGINE - MongoDB Engine.
 
 SCHEMA VERSIONING STRATEGY
 ==========================
@@ -595,12 +595,12 @@ MANIFEST_SCHEMA_V2 = {
             "default": ["self"],
             "description": "List of app slugs whose data this app can access"
         },
-        "runtime_pip_deps": {
+        "pip_deps": {
             "type": "array",
             "items": {
                 "type": "string"
             },
-            "description": "List of pip dependencies for isolated runtime"
+            "description": "List of pip dependencies for isolated environment"
         },
         "managed_indexes": {
             "type": "object",
@@ -1187,7 +1187,7 @@ MANIFEST_SCHEMA_V2 = {
 }
 
 # Schema for Version 1.0 (backward compatibility - simplified)
-# Version 1.0 had: slug, name, description, status, auth_required, data_scope, runtime_pip_deps, managed_indexes
+# Version 1.0 had: slug, name, description, status, auth_required, data_scope, pip_deps, managed_indexes
 MANIFEST_SCHEMA_V1 = {
     "type": "object",
     "properties": {
@@ -1230,12 +1230,12 @@ MANIFEST_SCHEMA_V1 = {
             "default": ["self"],
             "description": "List of app slugs whose data this app can access"
         },
-        "runtime_pip_deps": {
+        "pip_deps": {
             "type": "array",
             "items": {
                 "type": "string"
             },
-            "description": "List of pip dependencies for isolated runtime"
+            "description": "List of pip dependencies for isolated environment"
         },
         "managed_indexes": {
             "type": "object",

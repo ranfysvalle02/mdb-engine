@@ -17,7 +17,7 @@ MDB_ENGINE provides built-in WebSocket support with app-level isolation and auto
 }
 ```
 
-That's it! The runtime automatically:
+That's it! The engine automatically:
 - ✅ Registers the WebSocket route with FastAPI
 - ✅ Creates an isolated connection manager for your app
 - ✅ Handles authentication (uses app's `auth_policy` by default)
@@ -342,7 +342,7 @@ if user_connections:
 When you call `engine.register_app(manifest)`, WebSocket routes are automatically registered:
 
 ```python
-from mdb_engine import RuntimeEngine
+from mdb_engine import MongoDBEngine
 from mdb_engine.routing.websockets import register_message_handler
 
 # 1. Register message handlers FIRST (before route registration)
@@ -353,7 +353,7 @@ async def handle_messages(websocket, message):
 register_message_handler("my_app", "realtime", handle_messages)
 
 # 2. Initialize engine and register app
-engine = RuntimeEngine(mongo_uri="...", db_name="...")
+engine = MongoDBEngine(mongo_uri="...", db_name="...")
 await engine.initialize()
 
 manifest = await engine.load_manifest("manifest.json")
@@ -421,8 +421,8 @@ async def on_document_created(document):
 1. **Keep manifest simple**: Only specify `path` in manifest.json - defaults are secure
 2. **Use `broadcast_to_app()`**: Simplest way to send messages to clients
 3. **Register handlers early**: Register message handlers before route registration
-4. **Respect auth_policy**: Let the runtime handle authentication automatically
-5. **Scope messages**: Always include `app_slug` (automatically added by runtime)
+4. **Respect auth_policy**: Let the engine handle authentication automatically
+5. **Scope messages**: Always include `app_slug` (automatically added by engine)
 6. **Filter by user**: Use `user_id` parameter for user-specific messages
 7. **Handle errors**: Wrap handler logic in try/except and send error responses
 8. **Use message types**: Structure messages with `type` field for easy routing

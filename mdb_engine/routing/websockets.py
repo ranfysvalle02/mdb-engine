@@ -2,7 +2,7 @@
 WebSocket Routing and Connection Management
 
 This module provides OPTIONAL WebSocket support for MDB_ENGINE apps via manifest.json configuration.
-Apps can declare WebSocket endpoints in their manifest, and the runtime automatically
+Apps can declare WebSocket endpoints in their manifest, and the engine automatically
 handles connection management, authentication, and message routing.
 
 WebSocket support is OPTIONAL and only enabled when:
@@ -17,7 +17,7 @@ Key Features:
 - Automatic ping/pong: Keeps connections alive
 - Connection metadata: Tracks user_id, user_email, connected_at for each connection
 
-This module is part of MDB_ENGINE - MongoDB Runtime Engine.
+This module is part of MDB_ENGINE - MongoDB Engine.
 """
 import asyncio
 import json

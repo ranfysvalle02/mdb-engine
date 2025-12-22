@@ -7,7 +7,7 @@ This directory contains example applications demonstrating how to use MDB_ENGINE
 ### [Hello World](./hello_world/)
 
 A simple, beginner-friendly example that demonstrates:
-- Initializing the runtime engine
+- Initializing the MongoDB Engine
 - Creating and registering an app manifest
 - Basic CRUD operations with automatic app scoping
 - Using `engine.mongo_db` for top-level database access
@@ -183,13 +183,13 @@ services:
 
 **All examples in this directory follow these best practices.** When building your own applications, always use mdb-engine abstractions:
 
-### ✅ DO: Use Runtime Engine Abstractions
+### ✅ DO: Use MongoDB Engine Abstractions
 
 ```python
-from mdb_engine import RuntimeEngine
+from mdb_engine import MongoDBEngine
 
 # Initialize engine
-engine = RuntimeEngine(mongo_uri=mongo_uri, db_name=db_name)
+engine = MongoDBEngine(mongo_uri=mongo_uri, db_name=db_name)
 await engine.initialize()
 
 # For app-scoped data (recommended for most operations)
@@ -225,7 +225,7 @@ await db.collection.find_one({})
 ### Key Benefits of Using Abstractions
 
 1. **Connection Pooling**: Reuses managed connection pools automatically
-2. **Observability**: All operations tracked by runtime metrics
+2. **Observability**: All operations tracked by engine metrics
 3. **Resource Management**: Automatic cleanup, no manual client management
 4. **App Scoping**: Automatic data isolation with `get_scoped_db()`
 5. **Index Management**: Automatic index creation from manifest.json

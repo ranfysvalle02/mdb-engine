@@ -5,7 +5,7 @@ Tests exception hierarchy and error messages.
 """
 import pytest
 from mdb_engine.exceptions import (
-    RuntimeEngineError,
+    MongoDBEngineError,
     InitializationError,
     ManifestValidationError,
     ConfigurationError,
@@ -15,46 +15,46 @@ from mdb_engine.exceptions import (
 class TestExceptionHierarchy:
     """Test exception inheritance hierarchy."""
     
-    def test_runtime_engine_error_is_runtime_error(self):
-        """Test that RuntimeEngineError is a RuntimeError."""
-        error = RuntimeEngineError("test error")
+    def test_mongodb_engine_error_is_runtime_error(self):
+        """Test that MongoDBEngineError is a RuntimeError."""
+        error = MongoDBEngineError("test error")
         assert isinstance(error, RuntimeError)
     
     def test_initialization_error_inheritance(self):
-        """Test that InitializationError inherits from RuntimeEngineError."""
+        """Test that InitializationError inherits from MongoDBEngineError."""
         error = InitializationError("init failed")
-        assert isinstance(error, RuntimeEngineError)
+        assert isinstance(error, MongoDBEngineError)
         assert isinstance(error, RuntimeError)
     
     def test_manifest_validation_error_inheritance(self):
-        """Test that ManifestValidationError inherits from RuntimeEngineError."""
+        """Test that ManifestValidationError inherits from MongoDBEngineError."""
         error = ManifestValidationError("validation failed")
-        assert isinstance(error, RuntimeEngineError)
+        assert isinstance(error, MongoDBEngineError)
         assert isinstance(error, RuntimeError)
     
     def test_configuration_error_inheritance(self):
-        """Test that ConfigurationError inherits from RuntimeEngineError."""
+        """Test that ConfigurationError inherits from MongoDBEngineError."""
         error = ConfigurationError("config invalid")
-        assert isinstance(error, RuntimeEngineError)
+        assert isinstance(error, MongoDBEngineError)
         assert isinstance(error, RuntimeError)
 
 
 class TestExceptionMessages:
     """Test exception message formatting."""
     
-    def test_runtime_engine_error_message(self):
-        """Test RuntimeEngineError message."""
+    def test_mongodb_engine_error_message(self):
+        """Test MongoDBEngineError message."""
         message = "Something went wrong"
-        error = RuntimeEngineError(message)
+        error = MongoDBEngineError(message)
         assert str(error) == message
         assert error.message == message
         assert error.context == {}
     
-    def test_runtime_engine_error_with_context(self):
-        """Test RuntimeEngineError message with context."""
+    def test_mongodb_engine_error_with_context(self):
+        """Test MongoDBEngineError message with context."""
         message = "Something went wrong"
         context = {"app_slug": "test", "collection": "users"}
-        error = RuntimeEngineError(message, context=context)
+        error = MongoDBEngineError(message, context=context)
         assert "context:" in str(error)
         assert "app_slug=test" in str(error)
         assert error.context == context

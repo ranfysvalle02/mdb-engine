@@ -5,8 +5,8 @@ Enterprise-grade engine for building applications
 with automatic database scoping, authentication, and resource management.
 """
 
-# Core runtime engine
-from .core import RuntimeEngine, ManifestValidator, ManifestParser
+# Core MongoDB Engine
+from .core import MongoDBEngine, ManifestValidator, ManifestParser
 
 # Database layer
 from .database import (
@@ -33,7 +33,7 @@ __version__ = "0.1.5"
 
 __all__ = [
     # Core
-    "RuntimeEngine",
+    "MongoDBEngine",
     "ManifestValidator",
     "ManifestParser",
     

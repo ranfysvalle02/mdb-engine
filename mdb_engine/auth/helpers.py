@@ -3,7 +3,7 @@ Authentication Helper Functions
 
 Provides helper functions for initializing token management components.
 
-This module is part of MDB_ENGINE - MongoDB Runtime Engine.
+This module is part of MDB_ENGINE - MongoDB Engine.
 """
 
 import logging

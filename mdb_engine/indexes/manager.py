@@ -3,7 +3,7 @@ Index Management Orchestration
 
 High-level functions for creating and managing indexes based on manifest definitions.
 
-This module is part of MDB_ENGINE - MongoDB Runtime Engine.
+This module is part of MDB_ENGINE - MongoDB Engine.
 """
 import json
 import logging

@@ -112,10 +112,10 @@ In your `main.py` (FastAPI example):
 ```python
 from pathlib import Path
 from fastapi import FastAPI
-from mdb_engine import RuntimeEngine
+from mdb_engine import MongoDBEngine
 
 app = FastAPI()
-engine = RuntimeEngine(mongo_uri="mongodb://localhost:27017", db_name="my_database")
+engine = MongoDBEngine(mongo_uri="mongodb://localhost:27017", db_name="my_database")
 
 @app.on_event("startup")
 async def startup():
@@ -171,7 +171,7 @@ Stop rewriting auth. The engine provides a unified authentication and authorizat
 }
 ```
 
-**Runtime Usage:**
+**Usage:**
 ```python
 from mdb_engine.auth import setup_auth_from_manifest, get_authz_provider, get_current_user
 

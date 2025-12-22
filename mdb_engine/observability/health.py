@@ -148,10 +148,10 @@ async def check_mongodb_health(
 
 async def check_engine_health(engine: Optional[Any]) -> HealthCheckResult:
     """
-    Check runtime engine health.
+    Check MongoDB Engine health.
     
     Args:
-        engine: RuntimeEngine instance
+        engine: MongoDBEngine instance
         
     Returns:
         HealthCheckResult
@@ -160,14 +160,14 @@ async def check_engine_health(engine: Optional[Any]) -> HealthCheckResult:
         return HealthCheckResult(
             name="engine",
             status=HealthStatus.UNHEALTHY,
-            message="RuntimeEngine not initialized",
+            message="MongoDBEngine not initialized",
         )
     
     if not engine._initialized:
         return HealthCheckResult(
             name="engine",
             status=HealthStatus.UNHEALTHY,
-            message="RuntimeEngine not initialized",
+            message="MongoDBEngine not initialized",
         )
     
     # Check registered apps
@@ -176,7 +176,7 @@ async def check_engine_health(engine: Optional[Any]) -> HealthCheckResult:
     return HealthCheckResult(
         name="engine",
         status=HealthStatus.HEALTHY,
-        message="RuntimeEngine is healthy",
+        message="MongoDBEngine is healthy",
         details={
             "initialized": True,
             "app_count": app_count,

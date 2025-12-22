@@ -1,5 +1,5 @@
 # ============================================================================
-# Multi-stage Dockerfile for MDB_RUNTIME Parallax Example
+# Multi-stage Dockerfile for MDB_ENGINE Parallax Example
 # Enterprise-grade best practices: security, caching, minimal image size
 # ============================================================================
 

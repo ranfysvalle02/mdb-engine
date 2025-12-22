@@ -19,7 +19,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 import json
 
-from mdb_engine import RuntimeEngine
+from mdb_engine import MongoDBEngine
 from parallax import ParallaxEngine, WATCHLIST
 from schema_generator import get_default_lens_configs
 from openai import AzureOpenAI
@@ -126,7 +126,7 @@ manager = ConnectionManager()
 templates = Jinja2Templates(directory="/app/templates")
 
 # Global engine instances
-engine: Optional[RuntimeEngine] = None
+engine: Optional[MongoDBEngine] = None
 parallax: Optional[ParallaxEngine] = None
 db = None
 
@@ -148,7 +148,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize the runtime engine and Parallax on startup"""
+    """Initialize the MongoDB Engine and Parallax on startup"""
     global engine, parallax, db
     
     logger.info("Starting Parallax...")
@@ -160,8 +160,8 @@ async def startup_event():
     )
     db_name = os.getenv("MONGO_DB_NAME", "parallax_db")
     
-    # Initialize the runtime engine
-    engine = RuntimeEngine(
+    # Initialize the MongoDB Engine
+    engine = MongoDBEngine(
         mongo_uri=mongo_uri,
         db_name=db_name
     )

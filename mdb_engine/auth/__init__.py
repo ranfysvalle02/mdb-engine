@@ -1,9 +1,9 @@
 """
 Authentication and Authorization Module
 
-Provides authentication, authorization, and access control for the runtime engine.
+Provides authentication, authorization, and access control for the MongoDB Engine.
 
-This module is part of MDB_ENGINE - MongoDB Runtime Engine.
+This module is part of MDB_ENGINE - MongoDB Engine.
 """
 
 from .provider import (

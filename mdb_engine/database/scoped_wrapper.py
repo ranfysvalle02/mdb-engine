@@ -4,7 +4,7 @@ Asynchronous MongoDB Scoped Wrapper
 Provides an asynchronous, app-scoped proxy wrapper around Motor's
 `AsyncIOMotorDatabase` and `AsyncIOMotorCollection` objects.
 
-This module is part of MDB_ENGINE - MongoDB Runtime Engine.
+This module is part of MDB_ENGINE - MongoDB Engine.
 
 Core Features:
 - `ScopedMongoWrapper`: Proxies a database. When a collection is

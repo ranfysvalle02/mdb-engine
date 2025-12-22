@@ -1,5 +1,5 @@
 """
-Runtime Engine
+Engine
 
 The core orchestration engine for MDB_ENGINE that manages:
 - Database connections
@@ -8,7 +8,7 @@ The core orchestration engine for MDB_ENGINE that manages:
 - Index management
 - Resource lifecycle
 
-This module is part of MDB_ENGINE - MongoDB Runtime Engine.
+This module is part of MDB_ENGINE - MongoDB Engine.
 """
 
 import os
@@ -23,7 +23,7 @@ from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError
 if TYPE_CHECKING:
     from ..auth import AuthorizationProvider
 
-# Import runtime components
+# Import engine components
 from ..database import ScopedMongoWrapper
 from ..exceptions import InitializationError
 from .manifest import ManifestValidator, ManifestParser
@@ -53,11 +53,11 @@ logger = logging.getLogger(__name__)
 contextual_logger = get_contextual_logger(__name__)
 
 
-class RuntimeEngine:
+class MongoDBEngine:
     """
-    Core runtime engine for managing multi-app applications.
+    The MongoDB Engine for managing multi-app applications.
     
-    This class orchestrates all runtime components including:
+    This class orchestrates all engine components including:
     - Database connections and scoping
     - Manifest validation and parsing
     - App registration
@@ -75,7 +75,7 @@ class RuntimeEngine:
         min_pool_size: int = DEFAULT_MIN_POOL_SIZE,
     ) -> None:
         """
-        Initialize the runtime engine.
+        Initialize the MongoDB Engine.
         
         Args:
             mongo_uri: MongoDB connection URI
@@ -92,7 +92,7 @@ class RuntimeEngine:
         self.max_pool_size = max_pool_size
         self.min_pool_size = min_pool_size
         
-        # Runtime state
+        # Engine state
         self._mongo_client: Optional[AsyncIOMotorClient] = None
         self._mongo_db: Optional[AsyncIOMotorDatabase] = None
         self._initialized: bool = False
@@ -105,7 +105,7 @@ class RuntimeEngine:
     
     async def initialize(self) -> None:
         """
-        Initialize the runtime engine.
+        Initialize the MongoDB Engine.
         
         This method:
         1. Connects to MongoDB
@@ -121,11 +121,11 @@ class RuntimeEngine:
         start_time = time.time()
         
         if self._initialized:
-            logger.warning("RuntimeEngine already initialized. Skipping re-initialization.")
+            logger.warning("MongoDBEngine already initialized. Skipping re-initialization.")
             return
         
         contextual_logger.info(
-            "Initializing RuntimeEngine",
+            "Initializing MongoDBEngine",
             extra={
                 "mongo_uri": self.mongo_uri,
                 "db_name": self.db_name,
@@ -162,7 +162,7 @@ class RuntimeEngine:
             duration_ms = (time.time() - start_time) * 1000
             record_operation("engine.initialize", duration_ms, success=True)
             contextual_logger.info(
-                "RuntimeEngine initialized successfully",
+                "MongoDBEngine initialized successfully",
                 extra={
                     "db_name": self.db_name,
                     "pool_size": f"{self.min_pool_size}-{self.max_pool_size}",
@@ -196,7 +196,7 @@ class RuntimeEngine:
             duration_ms = (time.time() - start_time) * 1000
             record_operation("engine.initialize", duration_ms, success=False)
             contextual_logger.critical(
-                "RuntimeEngine initialization failed",
+                "MongoDBEngine initialization failed",
                 extra={
                     "error_type": type(e).__name__,
                     "error": str(e),
@@ -206,7 +206,7 @@ class RuntimeEngine:
             )
             # Maintain backward compatibility: InitializationError is a RuntimeError
             raise InitializationError(
-                f"RuntimeEngine initialization failed: {e}",
+                f"MongoDBEngine initialization failed: {e}",
                 mongo_uri=self.mongo_uri,
                 db_name=self.db_name,
                 context={
@@ -227,7 +227,7 @@ class RuntimeEngine:
         """
         if not self._initialized:
             raise RuntimeError(
-                "RuntimeEngine not initialized. Call initialize() first.",
+                "MongoDBEngine not initialized. Call initialize() first.",
             )
         assert self._mongo_client is not None, "MongoDB client should not be None after initialization"
         return self._mongo_client
@@ -245,7 +245,7 @@ class RuntimeEngine:
         """
         if not self._initialized:
             raise RuntimeError(
-                "RuntimeEngine not initialized. Call initialize() first.",
+                "MongoDBEngine not initialized. Call initialize() first.",
             )
         assert self._mongo_db is not None, "MongoDB database should not be None after initialization"
         return self._mongo_db
@@ -287,7 +287,7 @@ class RuntimeEngine:
             >>> doc = await db.my_collection.find_one({"name": "test"})
         """
         if not self._initialized:
-            raise RuntimeError("RuntimeEngine not initialized. Call initialize() first.")
+            raise RuntimeError("MongoDBEngine not initialized. Call initialize() first.")
         
         if read_scopes is None:
             read_scopes = [app_slug]
@@ -384,7 +384,7 @@ class RuntimeEngine:
         start_time = time.time()
         
         if not self._initialized:
-            raise RuntimeError("RuntimeEngine not initialized. Call initialize() first.")
+            raise RuntimeError("MongoDBEngine not initialized. Call initialize() first.")
         
         slug: Optional[str] = manifest.get("slug")
         if not slug:
@@ -806,7 +806,7 @@ class RuntimeEngine:
             RuntimeError: If engine is not initialized.
         """
         if not self._initialized:
-            raise RuntimeError("RuntimeEngine not initialized. Call initialize() first.")
+            raise RuntimeError("MongoDBEngine not initialized. Call initialize() first.")
         
         logger.info("Reloading active apps from database...")
         
@@ -980,7 +980,7 @@ class RuntimeEngine:
     
     async def shutdown(self) -> None:
         """
-        Shutdown the runtime engine and clean up resources.
+        Shutdown the MongoDB Engine and clean up resources.
         
         This method:
         1. Closes MongoDB connections
@@ -995,7 +995,7 @@ class RuntimeEngine:
         if not self._initialized:
             return
         
-        contextual_logger.info("Shutting down RuntimeEngine...")
+        contextual_logger.info("Shutting down MongoDBEngine...")
         
         # Close MongoDB connection
         if self._mongo_client:
@@ -1010,14 +1010,14 @@ class RuntimeEngine:
         duration_ms = (time.time() - start_time) * 1000
         record_operation("engine.shutdown", duration_ms, success=True)
         contextual_logger.info(
-            "RuntimeEngine shutdown complete",
+            "MongoDBEngine shutdown complete",
             extra={
                 "app_count": app_count,
                 "duration_ms": round(duration_ms, 2),
             }
         )
     
-    def __enter__(self) -> "RuntimeEngine":
+    def __enter__(self) -> "MongoDBEngine":
         """
         Context manager entry (synchronous).
         
@@ -1025,7 +1025,7 @@ class RuntimeEngine:
         For async initialization, use async context manager (async with).
         
         Returns:
-            RuntimeEngine instance
+            MongoDBEngine instance
         """
         return self
     
@@ -1050,14 +1050,14 @@ class RuntimeEngine:
         # Users should call await shutdown() explicitly
         pass
     
-    async def __aenter__(self) -> "RuntimeEngine":
+    async def __aenter__(self) -> "MongoDBEngine":
         """
         Async context manager entry.
         
         Automatically initializes the engine when entering the context.
         
         Returns:
-            Initialized RuntimeEngine instance
+            Initialized MongoDBEngine instance
         """
         await self.initialize()
         return self
@@ -1082,7 +1082,7 @@ class RuntimeEngine:
     
     async def get_health_status(self) -> Dict[str, Any]:
         """
-        Get health status of the runtime engine.
+        Get health status of the MongoDB Engine.
         
         Returns:
             Dictionary with health status and component checks
@@ -1101,11 +1101,11 @@ class RuntimeEngine:
         try:
             from ..database.connection import get_pool_metrics
             async def pool_check_wrapper():
-                # Pass RuntimeEngine's client and pool config to get_pool_metrics for accurate monitoring
+                # Pass MongoDBEngine's client and pool config to get_pool_metrics for accurate monitoring
                 # This follows MongoDB best practice: monitor the actual client being used
                 async def get_metrics():
                     metrics = await get_pool_metrics(self._mongo_client)
-                    # Add RuntimeEngine's pool configuration if not already in metrics
+                    # Add MongoDBEngine's pool configuration if not already in metrics
                     if metrics.get("status") == "connected":
                         if "max_pool_size" not in metrics or metrics.get("max_pool_size") is None:
                             metrics["max_pool_size"] = self.max_pool_size
@@ -1137,7 +1137,7 @@ class RuntimeEngine:
     
     def get_metrics(self) -> Dict[str, Any]:
         """
-        Get metrics for the runtime engine.
+        Get metrics for the MongoDB Engine.
         
         Returns:
             Dictionary with operation metrics

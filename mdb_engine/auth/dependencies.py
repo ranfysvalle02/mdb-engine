@@ -3,7 +3,7 @@ FastAPI Authentication and Authorization Dependencies
 
 Provides FastAPI dependency functions for authentication and authorization.
 
-This module is part of MDB_ENGINE - MongoDB Runtime Engine.
+This module is part of MDB_ENGINE - MongoDB Engine.
 """
 
 import os

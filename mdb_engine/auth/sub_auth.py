@@ -7,7 +7,7 @@ This module allows apps to manage their own users and sessions
 separate from platform-level authentication, while maintaining integration
 with the platform's auth system.
 
-This module is part of MDB_ENGINE - MongoDB Runtime Engine.
+This module is part of MDB_ENGINE - MongoDB Engine.
 """
 
 import os

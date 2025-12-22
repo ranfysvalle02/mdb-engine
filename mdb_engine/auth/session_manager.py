@@ -3,7 +3,7 @@ Session Management
 
 Provides session tracking and management for user authentication sessions.
 
-This module is part of MDB_ENGINE - MongoDB Runtime Engine.
+This module is part of MDB_ENGINE - MongoDB Engine.
 """
 
 import logging

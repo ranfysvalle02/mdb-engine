@@ -3,7 +3,7 @@ Authentication Integration Helpers
 
 Helpers for integrating authentication features from manifest configuration.
 
-This module is part of MDB_ENGINE - MongoDB Runtime Engine.
+This module is part of MDB_ENGINE - MongoDB Engine.
 """
 
 import logging
@@ -49,7 +49,7 @@ async def get_auth_config(slug_id: str, engine) -> Dict[str, Any]:
     
     Args:
         slug_id: App slug identifier
-        engine: RuntimeEngine instance
+        engine: MongoDBEngine instance
     
     Returns:
         Dictionary with token_management, auth_policy, and sub_auth configs
@@ -95,7 +95,7 @@ async def setup_auth_from_manifest(app: FastAPI, engine, slug_id: str) -> bool:
     
     Args:
         app: FastAPI application instance
-        engine: RuntimeEngine instance
+        engine: MongoDBEngine instance
         slug_id: App slug identifier
     
     Returns:
@@ -241,7 +241,7 @@ async def add_security_middleware(app: FastAPI, slug_id: str, engine) -> bool:
     Args:
         app: FastAPI application instance
         slug_id: App slug identifier
-        engine: RuntimeEngine instance
+        engine: MongoDBEngine instance
     
     Returns:
         True if middleware was added, False otherwise

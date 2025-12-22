@@ -3,7 +3,7 @@ Default Casbin Models
 
 Provides default Casbin model configurations for authorization.
 
-This module is part of MDB_ENGINE - MongoDB Runtime Engine.
+This module is part of MDB_ENGINE - MongoDB Engine.
 """
 
 # Default RBAC (Role-Based Access Control) model

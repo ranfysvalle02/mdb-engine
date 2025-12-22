@@ -1,10 +1,10 @@
-# Core Runtime Engine Module
+# Core MongoDB Engine Module
 
 The central orchestration engine for MDB_ENGINE that manages database connections, app registration, manifest validation, index management, and resource lifecycle.
 
 ## Features
 
-- **RuntimeEngine**: Central orchestration for all runtime components
+- **MongoDBEngine**: Central orchestration for all engine components
 - **Manifest System**: JSON schema validation with versioning (v1.0, v2.0)
 - **App Registration**: Automatic app setup with isolation and indexing
 - **Health Checks**: Built-in health monitoring and status reporting
@@ -20,10 +20,10 @@ The core module is part of MDB_ENGINE. No additional installation required.
 ### Basic Usage
 
 ```python
-from mdb_engine import RuntimeEngine
+from mdb_engine import MongoDBEngine
 
 # Initialize engine
-engine = RuntimeEngine(
+engine = MongoDBEngine(
     mongo_uri="mongodb://localhost:27017",
     db_name="my_database"
 )
@@ -39,16 +39,16 @@ await engine.register_app(manifest)
 db = engine.get_scoped_db("my_app")
 ```
 
-## RuntimeEngine
+## MongoDBEngine
 
-The `RuntimeEngine` class is the central component that orchestrates all runtime functionality.
+The `MongoDBEngine` class is the central component that orchestrates all engine functionality.
 
 ### Initialization
 
 ```python
-from mdb_engine import RuntimeEngine
+from mdb_engine import MongoDBEngine
 
-engine = RuntimeEngine(
+engine = MongoDBEngine(
     mongo_uri="mongodb://localhost:27017",
     db_name="my_database",
     manifests_dir=Path("./manifests"),  # Optional
@@ -81,7 +81,7 @@ db = engine.get_scoped_db("my_app", auto_index=False)
 
 ### App Registration
 
-Register an app with the runtime engine:
+Register an app with the MongoDB Engine:
 
 ```python
 # Load manifest from file
@@ -157,7 +157,7 @@ A basic manifest.json:
 ```python
 from mdb_engine.core import ManifestValidator, validate_manifest
 
-# Using RuntimeEngine
+# Using MongoDBEngine
 is_valid, error, paths = await engine.validate_manifest(manifest)
 
 # Using validator directly
@@ -286,7 +286,7 @@ is_valid, error, paths = await validate_manifest_with_db(
 
 ## API Reference
 
-### RuntimeEngine
+### MongoDBEngine
 
 #### Methods
 
@@ -294,7 +294,7 @@ is_valid, error, paths = await validate_manifest_with_db(
 - `get_scoped_db(app_slug, read_scopes=None, write_scope=None, auto_index=True)` - Get scoped database wrapper
 - `validate_manifest(manifest)` - Validate manifest against schema
 - `load_manifest(path)` - Load and validate manifest from file
-- `register_app(manifest)` - Register app with runtime
+- `register_app(manifest)` - Register app with engine
 - `get_registered_apps()` - Get all registered apps
 - `get_app_info(app_slug)` - Get information about registered app
 - `unregister_app(app_slug)` - Unregister an app
@@ -346,7 +346,7 @@ export MONGO_ACTOR_MIN_POOL_SIZE=1
 export MONGO_SERVER_SELECTION_TIMEOUT_MS=5000
 ```
 
-### RuntimeEngine Parameters
+### MongoDBEngine Parameters
 
 - `mongo_uri` (required): MongoDB connection URI
 - `db_name` (required): Database name
@@ -466,7 +466,7 @@ Define various index types:
 
 1. **Always validate manifests** - Use `validate_manifest()` before registration
 2. **Use schema versioning** - Specify `schema_version` in manifests
-3. **Initialize once** - Create one RuntimeEngine instance per application
+3. **Initialize once** - Create one MongoDBEngine instance per application
 4. **Use scoped databases** - Always use `get_scoped_db()` for data isolation
 5. **Monitor health** - Regularly check engine and MongoDB health
 6. **Cache validation** - Validation results are cached automatically
@@ -493,7 +493,7 @@ except Exception as e:
 
 ```python
 from fastapi import FastAPI
-from mdb_engine import RuntimeEngine
+from mdb_engine import MongoDBEngine
 
 app = FastAPI()
 engine = None
@@ -501,7 +501,7 @@ engine = None
 @app.on_event("startup")
 async def startup():
     global engine
-    engine = RuntimeEngine(mongo_uri="...", db_name="...")
+    engine = MongoDBEngine(mongo_uri="...", db_name="...")
     await engine.initialize()
     
     manifest = await engine.load_manifest("manifest.json")

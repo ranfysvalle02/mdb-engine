@@ -4,7 +4,7 @@ Casbin Provider Factory
 Provides helper functions to auto-initialize Casbin authorization provider
 from manifest configuration.
 
-This module is part of MDB_ENGINE - MongoDB Runtime Engine.
+This module is part of MDB_ENGINE - MongoDB Engine.
 """
 
 import logging
@@ -128,7 +128,7 @@ async def initialize_casbin_from_manifest(
     Initialize Casbin provider from manifest configuration.
     
     Args:
-        engine: RuntimeEngine instance
+        engine: MongoDBEngine instance
         app_slug: App slug identifier
         auth_config: Auth configuration dict from manifest (contains auth_policy)
     

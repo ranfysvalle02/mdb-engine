@@ -3,7 +3,7 @@
 A demonstration of vector inversion/hacking using LLMs with MDB_ENGINE.
 
 This example shows:
-- How to initialize the runtime engine
+- How to initialize the MongoDB Engine
 - How to create and register an app manifest
 - Vector inversion attack using LLMs and embeddings
 - Real-time visualization of the attack progress
@@ -234,7 +234,7 @@ The vector_hacking example includes a **full-featured web application** with:
 
 ### Backend Features
 
-1. **Initializes the Runtime Engine** - Connects to MongoDB and sets up the runtime
+1. **Initializes the MongoDB Engine** - Connects to MongoDB and sets up the engine
 2. **Registers the App** - Loads the manifest and registers the "vector_hacking" app
 3. **Creates Data** - Inserts sample documents (experiments)
 4. **Queries Data** - Demonstrates find operations with automatic app scoping

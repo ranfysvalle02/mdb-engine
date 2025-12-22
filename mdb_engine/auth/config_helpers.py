@@ -4,7 +4,7 @@ Authentication Config Helper Utilities
 Type-safe utility functions for accessing and merging authentication configurations
 from manifest.json and app.state.
 
-This module is part of MDB_ENGINE - MongoDB Runtime Engine.
+This module is part of MDB_ENGINE - MongoDB Engine.
 """
 
 import logging

@@ -2,7 +2,7 @@
   "version": "2.0",
   "slug": "vector_hacking",
   "name": "Vector Hacking Demo",
-  "description": "A demonstration of vector inversion/hacking using LLMs with MDB_RUNTIME",
+  "description": "A demonstration of vector inversion/hacking using LLMs with MDB_ENGINE",
   "status": "active",
   "developer_id": "developer@example.com",
   "auth_required": false,

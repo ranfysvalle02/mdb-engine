@@ -32,8 +32,8 @@ mdb-engine/
 │   ├── exceptions.py           # Custom exceptions
 │   ├── config.py               # Configuration management
 │   │
-│   ├── core/                   # Core runtime engine
-│   │   ├── engine.py           # RuntimeEngine class
+│   ├── core/                   # Core MongoDB Engine
+│   │   ├── engine.py           # MongoDBEngine class
 │   │   └── manifest.py         # Manifest validation & parsing
 │   │
 │   ├── database/               # Database layer

@@ -1,6 +1,6 @@
 # MDB_ENGINE Test Suite
 
-This directory contains the test suite for MDB_ENGINE - MongoDB Multi-Tenant Runtime Engine.
+This directory contains the test suite for MDB_ENGINE - MongoDB Multi-Tenant Engine.
 
 ## Test Structure
 
@@ -59,7 +59,7 @@ pytest tests/unit/test_engine.py
 ### Run Specific Test
 
 ```bash
-pytest tests/unit/test_engine.py::TestRuntimeEngineInitialization::test_engine_initialization_success
+pytest tests/unit/test_engine.py::TestMongoDBEngineInitialization::test_engine_initialization_success
 ```
 
 ## Test Markers
@@ -78,7 +78,7 @@ Common fixtures are defined in `conftest.py`:
 - `mock_mongo_client` - Mock MongoDB client
 - `mock_mongo_database` - Mock MongoDB database
 - `mock_mongo_collection` - Mock MongoDB collection
-- `runtime_engine` - Initialized RuntimeEngine instance
+- `mongodb_engine` - Initialized MongoDBEngine instance
 - `scoped_db` - ScopedMongoWrapper instance
 - `sample_manifest` - Valid sample manifest
 - `sample_manifest_v1` - Valid v1.0 manifest
@@ -90,12 +90,12 @@ Common fixtures are defined in `conftest.py`:
 
 ```python
 import pytest
-from mdb_engine.core.engine import RuntimeEngine
+from mdb_engine.core.engine import MongoDBEngine
 
-class TestRuntimeEngine:
+class TestMongoDBEngine:
     @pytest.mark.asyncio
-    async def test_initialization(self, runtime_engine):
-        assert runtime_engine._initialized is True
+    async def test_initialization(self, mongodb_engine):
+        assert mongodb_engine._initialized is True
 ```
 
 ### Integration Test Example
@@ -127,7 +127,7 @@ Tests should be run in CI/CD pipelines:
 - Target: 80%+ coverage
 - Critical paths: 90%+ coverage
 - Focus areas:
-  - RuntimeEngine initialization and lifecycle
+  - MongoDBEngine initialization and lifecycle
   - Manifest validation
   - Database scoping
   - Error handling

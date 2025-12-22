@@ -1,5 +1,5 @@
 # ============================================================================
-# Multi-stage Dockerfile for MDB_RUNTIME Vector Hacking Example
+# Multi-stage Dockerfile for MDB_ENGINE Vector Hacking Example
 # Enterprise-grade best practices: security, caching, minimal image size
 # ============================================================================
 
@@ -47,7 +47,7 @@ RUN echo "=== Installing mdb-engine ===" && \
 # Verify installation worked in builder stage
 RUN echo "=== Verifying installation in builder ===" && \
     python -c "import mdb_engine; print(f'✓ mdb_engine {mdb_engine.__version__} imported successfully')" && \
-    python -c "from mdb_engine import RuntimeEngine; print('✓ RuntimeEngine imported successfully')" && \
+    python -c "from mdb_engine import MongoDBEngine; print('✓ MongoDBEngine imported successfully')" && \
     echo "=== Checking installed packages ===" && \
     pip list | grep -i mdb
 
@@ -92,7 +92,7 @@ RUN echo "=== Verifying installation in runtime stage ===" && \
     pip show mdb-engine || (echo "ERROR: mdb-engine package not found" && echo "=== Installed packages ===" && pip list && exit 1) && \
     echo "=== Testing import ===" && \
     python -c "import mdb_engine; print(f'✓ mdb_engine {mdb_engine.__version__} imported successfully')" && \
-    python -c "from mdb_engine import RuntimeEngine; print('✓ RuntimeEngine imported successfully')" && \
+    python -c "from mdb_engine import MongoDBEngine; print('✓ MongoDBEngine imported successfully')" && \
     echo "=== Verification complete ==="
 
 # Install vector hacking dependencies

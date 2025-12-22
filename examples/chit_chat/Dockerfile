@@ -1,5 +1,5 @@
 # ============================================================================
-# Multi-stage Dockerfile for MDB_RUNTIME ChitChat Example
+# Multi-stage Dockerfile for MDB_ENGINE ChitChat Example
 # Enterprise-grade best practices: security, caching, minimal image size
 # ============================================================================
 

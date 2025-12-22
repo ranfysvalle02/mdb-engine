@@ -2,7 +2,7 @@
 """
 FastAPI Web Application for Vector Hacking Example
 
-This demonstrates MDB_RUNTIME with a vector hacking demo including:
+This demonstrates MDB_ENGINE with a vector hacking demo including:
 - Vector inversion attack visualization
 - Real-time status updates
 - Modern, responsive UI
@@ -22,7 +22,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 
-from mdb_engine import RuntimeEngine
+from mdb_engine import MongoDBEngine
 from mdb_engine.embeddings import EmbeddingService
 from openai import AzureOpenAI
 from dotenv import load_dotenv
@@ -37,7 +37,7 @@ class StartAttackRequest(BaseModel):
 
 # Initialize FastAPI app
 app = FastAPI(
-    title="Vector Hacking - MDB_RUNTIME Demo",
+    title="Vector Hacking - MDB_ENGINE Demo",
     description="A demonstration of vector inversion/hacking using LLMs",
     version="1.0.0"
 )
@@ -58,7 +58,7 @@ if not templates_dir.exists():
 templates = Jinja2Templates(directory=str(templates_dir))
 
 # Global engine instance (will be initialized in startup)
-engine: Optional[RuntimeEngine] = None
+engine: Optional[MongoDBEngine] = None
 db = None
 vector_hacking_service = None
 
@@ -89,7 +89,7 @@ else:
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize the runtime engine on startup"""
+    """Initialize the MongoDB Engine on startup"""
     global engine, db, vector_hacking_service
     
     logger.info("Starting Vector Hacking Web Application...")
@@ -101,8 +101,8 @@ async def startup_event():
     )
     db_name = os.getenv("MONGO_DB_NAME", "vector_hacking_db")
     
-    # Initialize the runtime engine
-    engine = RuntimeEngine(
+    # Initialize the MongoDB Engine
+    engine = MongoDBEngine(
         mongo_uri=mongo_uri,
         db_name=db_name
     )

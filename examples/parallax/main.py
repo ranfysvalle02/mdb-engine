@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Parallax Example for MDB_RUNTIME
+Parallax Example for MDB_ENGINE
 
 This example demonstrates:
 - LLM integration with dual-agent analysis
@@ -13,12 +13,12 @@ import os
 from pathlib import Path
 from datetime import datetime
 
-from mdb_engine import RuntimeEngine
+from mdb_engine import MongoDBEngine
 
 
 async def main():
     """Main example function"""
-    print("🚀 Initializing Parallax with MDB_RUNTIME...")
+    print("🚀 Initializing Parallax with MDB_ENGINE...")
     
     # Get MongoDB connection from environment
     mongo_uri = os.getenv(
@@ -32,8 +32,8 @@ async def main():
     print(f"📡 Connecting to MongoDB: {safe_uri}")
     print(f"📦 Database: {db_name}\n")
     
-    # Initialize the runtime engine
-    engine = RuntimeEngine(
+    # Initialize the MongoDB Engine
+    engine = MongoDBEngine(
         mongo_uri=mongo_uri,
         db_name=db_name
     )
@@ -95,7 +95,7 @@ async def main():
             {
                 "session_id": session_id,
                 "role": "assistant",
-                "content": "Hello! I'm Parallax, a GitHub repository intelligence tool built with MDB_RUNTIME. I search GitHub repositories (with AGENTS.md or LLMs.md files) and analyze them from Relevance and Technical perspectives based on your watchlist keywords!",
+                "content": "Hello! I'm Parallax, a GitHub repository intelligence tool built with MDB_ENGINE. I search GitHub repositories (with AGENTS.md or LLMs.md files) and analyze them from Relevance and Technical perspectives based on your watchlist keywords!",
                 "created_at": datetime.utcnow()
             }
         ]

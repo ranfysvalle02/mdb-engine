@@ -3,7 +3,7 @@ Authentication Utility Functions
 
 High-level utility functions for common authentication flows.
 
-This module is part of MDB_ENGINE - MongoDB Runtime Engine.
+This module is part of MDB_ENGINE - MongoDB Engine.
 """
 
 import re

@@ -66,10 +66,10 @@ Enable memory service in your `manifest.json`:
 
 ```python
 from mdb_engine.memory import Mem0MemoryService
-from mdb_engine.core import RuntimeEngine
+from mdb_engine.core import MongoDBEngine
 
 # Initialize engine
-engine = RuntimeEngine(mongo_uri="...", db_name="...")
+engine = MongoDBEngine(mongo_uri="...", db_name="...")
 await engine.initialize()
 
 # Get memory service (automatically configured from manifest)
@@ -297,14 +297,14 @@ temperature=0.7
 temperature=1.0
 ```
 
-## Integration with RuntimeEngine
+## Integration with MongoDBEngine
 
-The memory service integrates seamlessly with RuntimeEngine:
+The memory service integrates seamlessly with MongoDBEngine:
 
 ```python
-from mdb_engine import RuntimeEngine
+from mdb_engine import MongoDBEngine
 
-engine = RuntimeEngine(mongo_uri="...", db_name="...")
+engine = MongoDBEngine(mongo_uri="...", db_name="...")
 await engine.initialize()
 
 # Load manifest with memory_config
@@ -448,5 +448,5 @@ Enable graph-based memory relationships:
 
 - **`embeddings/`** - Embedding generation service
 - **`database/`** - MongoDB integration
-- **`core/`** - RuntimeEngine integration
+- **`core/`** - MongoDBEngine integration
 

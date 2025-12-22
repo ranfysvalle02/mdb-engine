@@ -274,9 +274,9 @@ Define indexes in your `manifest.json`:
 Indexes are automatically created when you register the app:
 
 ```python
-from mdb_engine import RuntimeEngine
+from mdb_engine import MongoDBEngine
 
-engine = RuntimeEngine(mongo_uri="...", db_name="...")
+engine = MongoDBEngine(mongo_uri="...", db_name="...")
 await engine.initialize()
 
 manifest = await engine.load_manifest("manifest.json")
@@ -580,14 +580,14 @@ except Exception as e:
 
 ## Integration Examples
 
-### RuntimeEngine Integration
+### MongoDBEngine Integration
 
 Indexes are automatically created when registering apps:
 
 ```python
-from mdb_engine import RuntimeEngine
+from mdb_engine import MongoDBEngine
 
-engine = RuntimeEngine(mongo_uri="...", db_name="...")
+engine = MongoDBEngine(mongo_uri="...", db_name="...")
 await engine.initialize()
 
 # Load manifest with index definitions
@@ -647,6 +647,6 @@ for collection_name, index_definitions in collections_with_indexes.items():
 ## Related Modules
 
 - **`database/`** - AsyncAtlasIndexManager for Atlas indexes
-- **`core/`** - Manifest system and RuntimeEngine
+- **`core/`** - Manifest system and MongoDBEngine
 - **`observability/`** - Logging for index operations
 

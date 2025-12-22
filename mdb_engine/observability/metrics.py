@@ -1,7 +1,7 @@
 """
 Metrics collection for MDB_ENGINE.
 
-This module provides metrics collection for monitoring runtime performance,
+This module provides metrics collection for monitoring engine performance,
 operations, and health.
 """
 import time

@@ -3,7 +3,7 @@ Cookie Security Utilities
 
 Provides secure cookie configuration helpers based on manifest settings and environment.
 
-This module is part of MDB_ENGINE - MongoDB Runtime Engine.
+This module is part of MDB_ENGINE - MongoDB Engine.
 """
 
 import os

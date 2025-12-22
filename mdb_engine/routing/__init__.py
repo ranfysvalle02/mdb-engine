@@ -7,7 +7,7 @@ WebSocket support is OPTIONAL and only enabled when:
 1. Apps define "websockets" in their manifest.json
 2. WebSocket dependencies are available (FastAPI WebSocket support)
 
-If WebSockets are not configured or dependencies are missing, the runtime
+If WebSockets are not configured or dependencies are missing, the engine
 gracefully degrades without WebSocket functionality.
 """
 

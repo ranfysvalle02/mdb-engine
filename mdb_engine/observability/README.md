@@ -297,7 +297,7 @@ print(result.timestamp)   # Check timestamp
 
 ### Engine Health
 
-Check RuntimeEngine health:
+Check MongoDBEngine health:
 
 ```python
 from mdb_engine.observability import check_engine_health
@@ -510,7 +510,7 @@ async def get_metrics():
 
 ## Related Modules
 
-- **`core/`** - RuntimeEngine integration
+- **`core/`** - MongoDBEngine integration
 - **`database/`** - Database operation metrics
 - **`auth/`** - Authentication event logging
 

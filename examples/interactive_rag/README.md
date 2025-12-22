@@ -197,7 +197,7 @@ curl -X POST http://localhost:5001/preview_search \
 
 ### Components
 
-1. **RuntimeEngine** - Manages MongoDB connection and app registration
+1. **MongoDBEngine** - Manages MongoDB connection and app registration
 2. **EmbeddingService** - Handles semantic chunking and embedding generation
 3. **OpenAI SDK** - Provides chat completions via direct API calls
 4. **Vector Search** - MongoDB Atlas Vector Search for semantic retrieval

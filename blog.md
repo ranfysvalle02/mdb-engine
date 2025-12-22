@@ -1,6 +1,6 @@
 # MDB_ENGINE: The Missing Engine That Turns Your Prototype Graveyard Into a Production Platform
 
-*How a "WordPress-like" runtime for Python and MongoDB eliminates 70% of your scaffolding code and lets you focus on what matters: building features.*
+*How a "WordPress-like" engine for Python and MongoDB eliminates 70% of your scaffolding code and lets you focus on what matters: building features.*
 
 ---
 
@@ -100,7 +100,7 @@ That's it. With this manifest, you get:
 - ✅ WebSocket endpoint (automatically registered and isolated)
 - ✅ Data isolation (all queries scoped to `interactive_rag`)
 
-**Note:** For LLM operations, use the OpenAI SDK directly. The runtime doesn't include an LLM abstraction layer—you implement your own LLM clients using your preferred SDK.
+**Note:** For LLM operations, use the OpenAI SDK directly. The engine doesn't include an LLM abstraction layer—you implement your own LLM clients using your preferred SDK.
 
 ---
 
@@ -166,7 +166,7 @@ The `AutoIndexManager` tracks query patterns and automatically creates indexes w
 
 ## LLM Integration: Use Your Preferred Provider
 
-MDB_ENGINE doesn't include an LLM abstraction layer—developers implement their own LLM clients using their preferred SDK. This keeps the runtime focused on data management while giving you full control over LLM integration.
+MDB_ENGINE doesn't include an LLM abstraction layer—developers implement their own LLM clients using their preferred SDK. This keeps the engine focused on data management while giving you full control over LLM integration.
 
 ```python
 # Example: Using Azure OpenAI directly
@@ -324,7 +324,7 @@ That's it. This single configuration:
 - Links sub_auth users to Casbin roles automatically
 - Makes provider available via `get_authz_provider` dependency
 
-### Runtime Usage
+### Usage
 
 ```python
 from mdb_engine.auth import setup_auth_from_manifest, get_authz_provider, get_current_user
@@ -499,10 +499,10 @@ You define your manifest with memory configuration, authentication, and WebSocke
 
 ```python
 from pathlib import Path
-from mdb_engine import RuntimeEngine
+from mdb_engine import MongoDBEngine
 
 # Initialize engine
-engine = RuntimeEngine(mongo_uri="...", db_name="...")
+engine = MongoDBEngine(mongo_uri="...", db_name="...")
 await engine.initialize()
 
 # Load and register app
@@ -547,7 +547,7 @@ You define your vector index in the manifest. The engine creates it. You configu
 
 ```python
 # Initialize engine (same as before)
-engine = RuntimeEngine(...)
+engine = MongoDBEngine(...)
 await engine.initialize()
 await engine.register_app(manifest, create_indexes=True)
 
@@ -621,7 +621,7 @@ With MDB_ENGINE, you configure it in the manifest and write your logic:
 
 ```python
 # Initialize engine
-engine = RuntimeEngine(...)
+engine = MongoDBEngine(...)
 await engine.initialize()
 await engine.register_app(manifest, create_indexes=True)
 
@@ -678,7 +678,7 @@ MDB_ENGINE acts as a hyper-intelligent proxy between your code and MongoDB. Here
 ┌──────────────────────▼──────────────────────────────────────┐
 │                  MDB_ENGINE Engine                          │
 │  ┌──────────────────────────────────────────────────────┐  │
-│  │  RuntimeEngine                                        │  │
+│  │  MongoDBEngine                                        │  │
 │  │  - Manages connections                                │  │
 │  │  - Registers apps from manifests                      │  │
 │  │  - Provides scoped database access                    │  │
@@ -713,7 +713,7 @@ MDB_ENGINE acts as a hyper-intelligent proxy between your code and MongoDB. Here
 
 ### Key Components
 
-1. **RuntimeEngine**: The orchestrator that manages connections, app registration, and provides scoped database access.
+1. **MongoDBEngine**: The orchestrator that manages connections, app registration, and provides scoped database access.
 
 2. **ScopedMongoWrapper**: The proxy that intercepts all database operations to enforce scoping and automatic index management.
 
@@ -805,9 +805,9 @@ pip install mdb-engine
 2. **Initialize the engine**:
 ```python
 from pathlib import Path
-from mdb_engine import RuntimeEngine
+from mdb_engine import MongoDBEngine
 
-engine = RuntimeEngine(
+engine = MongoDBEngine(
     mongo_uri="mongodb://localhost:27017",
     db_name="my_cluster"
 )

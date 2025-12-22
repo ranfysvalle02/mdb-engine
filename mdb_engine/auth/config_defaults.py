@@ -4,7 +4,7 @@ Authentication Configuration Defaults
 Centralized default values for all authentication and security configurations.
 This module provides a single source of truth for all config defaults.
 
-This module is part of MDB_ENGINE - MongoDB Runtime Engine.
+This module is part of MDB_ENGINE - MongoDB Engine.
 """
 
 from typing import Dict, Any

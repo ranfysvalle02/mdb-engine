@@ -8,7 +8,7 @@ Provides comprehensive tenant lifecycle management including:
 - Tenant lifecycle hooks for customization
 - Tenant existence validation
 
-This module is part of MDB_ENGINE - MongoDB Multi-Tenant Runtime Engine.
+This module is part of MDB_ENGINE - MongoDB Multi-Tenant Engine.
 """
 import logging
 import asyncio
@@ -44,7 +44,7 @@ class TenantManager:
             app_slug: App slug
             config: Multi-tenant configuration from manifest
             db: Database wrapper (for tenant collection access)
-            engine: RuntimeEngine instance (for accessing other apps' data if needed)
+            engine: MongoDBEngine instance (for accessing other apps' data if needed)
         """
         self.app_slug = app_slug
         self.config = config
@@ -458,7 +458,7 @@ def register_tenant_manager(
         app_slug: App slug
         config: Multi-tenant configuration from manifest
         db: Database wrapper
-        engine: RuntimeEngine instance
+        engine: MongoDBEngine instance
     
     Returns:
         TenantManager instance

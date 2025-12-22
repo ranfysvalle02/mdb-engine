@@ -21,10 +21,10 @@ The database module is part of MDB_ENGINE. No additional installation required.
 
 ```python
 from mdb_engine.database import ScopedMongoWrapper
-from mdb_engine.core import RuntimeEngine
+from mdb_engine.core import MongoDBEngine
 
 # Get scoped database from engine
-engine = RuntimeEngine(mongo_uri="...", db_name="...")
+engine = MongoDBEngine(mongo_uri="...", db_name="...")
 await engine.initialize()
 
 db = engine.get_scoped_db("my_app")
@@ -486,10 +486,10 @@ except Exception as e:
 ```python
 from fastapi import FastAPI, Depends
 from mdb_engine.database import get_app_db, AppDB
-from mdb_engine.core import RuntimeEngine
+from mdb_engine.core import MongoDBEngine
 
 app = FastAPI()
-engine = RuntimeEngine(mongo_uri="...", db_name="...")
+engine = MongoDBEngine(mongo_uri="...", db_name="...")
 
 @app.on_event("startup")
 async def startup():
@@ -518,7 +518,7 @@ shared_db = ScopedMongoWrapper(
 
 ## Related Modules
 
-- **`core/`** - RuntimeEngine for app registration
+- **`core/`** - MongoDBEngine for app registration
 - **`indexes/`** - Index management orchestration
 - **`observability/`** - Metrics and logging
 

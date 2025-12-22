@@ -1,17 +1,17 @@
 # MDB_ENGINE Package Documentation
 
-MongoDB Runtime Engine - Package-level documentation.
+MongoDB Engine - Package-level documentation.
 
 ## Package Overview
 
-MDB_ENGINE provides a complete runtime engine for building MongoDB applications with automatic data isolation, authentication, and resource management.
+MDB_ENGINE provides a complete MongoDB Engine for building MongoDB applications with automatic data isolation, authentication, and resource management.
 
 ## Core Modules
 
-### `core` - Runtime Engine
+### `core` - MongoDB Engine
 
-**RuntimeEngine** (`core/engine.py`)
-- Central orchestration for all runtime components
+**MongoDBEngine** (`core/engine.py`)
+- Central orchestration for all engine components
 - Manages database connections, app registration, and lifecycle
 - Provides health checks and metrics
 
@@ -85,9 +85,9 @@ MDB_ENGINE provides a complete runtime engine for building MongoDB applications 
 ### Basic Engine Usage
 
 ```python
-from mdb_engine import RuntimeEngine
+from mdb_engine import MongoDBEngine
 
-engine = RuntimeEngine(
+engine = MongoDBEngine(
     mongo_uri="mongodb://localhost:27017",
     db_name="my_database"
 )

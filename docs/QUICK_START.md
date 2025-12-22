@@ -14,14 +14,14 @@ pip install -e .
 
 ## Basic Usage
 
-### 1. Initialize the Runtime Engine
+### 1. Initialize the MongoDB Engine
 
 ```python
-from mdb_engine import RuntimeEngine
+from mdb_engine import MongoDBEngine
 from pathlib import Path
 
 # Create engine instance
-engine = RuntimeEngine(
+engine = MongoDBEngine(
     mongo_uri="mongodb://localhost:27017",
     db_name="my_database",
     manifests_dir=Path("manifests")
@@ -84,7 +84,7 @@ from mdb_engine.indexes import AsyncAtlasIndexManager
 
 ```python
 # Automatic cleanup
-async with RuntimeEngine(mongo_uri, db_name) as engine:
+async with MongoDBEngine(mongo_uri, db_name) as engine:
     await engine.reload_apps()
     db = engine.get_scoped_db("my_app")
     # ... use engine
@@ -226,7 +226,7 @@ pytest --cov=mdb_engine --cov-report=html
 
 ```
 mdb_engine/
-├── core/              # RuntimeEngine, Manifest validation
+├── core/              # MongoDBEngine, Manifest validation
 ├── database/          # Scoped wrappers, AppDB, connection pooling
 ├── auth/              # Authentication, authorization
 ├── indexes/           # Index management

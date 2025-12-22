@@ -359,7 +359,7 @@ class DatabaseService:
 
 These utilities are primarily used internally by:
 
-- **`core/`** - RuntimeEngine uses validation and initialization checks
+- **`core/`** - MongoDBEngine uses validation and initialization checks
 - **`database/`** - Database module uses collection name validation
 - **`auth/`** - Auth module uses app slug validation
 - **`indexes/`** - Index module uses validation functions
