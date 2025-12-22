@@ -10,7 +10,7 @@ This module implements a thread-safe singleton pattern that ensures all
 components in the same process share a single MongoDB client instance with
 a reasonable connection pool size.
 
-This module is part of MDB_RUNTIME - MongoDB Multi-Tenant Runtime Engine.
+This module is part of MDB_RUNTIME - MongoDB Runtime Engine.
 
 Usage:
     from mdb_runtime.database import get_shared_mongo_client, get_pool_metrics

@@ -23,7 +23,7 @@
             {
               "type": "vector",
               "path": "embedding",
-              "numDimensions": 1024,
+              "numDimensions": 1536,
               "similarity": "cosine"
             },
             {
@@ -46,29 +46,11 @@
       }
     ]
   },
-  "llm_config": {
-    "enabled": true,
-    "default_chat_model": "azure/gpt-4o",
-    "default_embedding_model": "voyage/voyage-2",
-    "default_temperature": 0.0,
-    "max_retries": 4
-  },
   "embedding_config": {
     "enabled": true,
     "max_tokens_per_chunk": 1000,
     "tokenizer_model": "gpt-3.5-turbo",
-    "default_embedding_model": "voyage/voyage-2"
-  },
-  "websockets": {
-    "realtime": {
-      "path": "/ws",
-      "description": "Real-time ingestion progress and updates",
-      "auth": {
-        "required": false,
-        "allow_anonymous": true
-      },
-      "ping_interval": 30
-    }
+    "default_embedding_model": "text-embedding-3-small"
   }
 }
 

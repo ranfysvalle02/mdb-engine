@@ -7,7 +7,7 @@ This module provides:
 - Optimized validation with caching for scale
 - Parallel manifest processing capabilities
 
-This module is part of MDB_RUNTIME - MongoDB Multi-Tenant Runtime Engine.
+This module is part of MDB_RUNTIME - MongoDB Runtime Engine.
 
 SCHEMA VERSIONING STRATEGY
 ==========================
@@ -31,7 +31,6 @@ For Scale:
 import logging
 import hashlib
 import asyncio
-from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple, Callable, Awaitable
 from jsonschema import validate, ValidationError, SchemaError
 
@@ -302,6 +301,255 @@ MANIFEST_SCHEMA_V2 = {
             "additionalProperties": False,
             "description": "Sub-authentication configuration for app-specific user management. Enables apps to have their own user accounts and sessions independent of platform authentication."
         },
+        "token_management": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Enable enhanced token management features (refresh tokens, blacklist, sessions). Default: true."
+                },
+                "access_token_ttl": {
+                    "type": "integer",
+                    "minimum": 60,
+                    "default": 900,
+                    "description": "Access token TTL in seconds (default: 900 = 15 minutes)."
+                },
+                "refresh_token_ttl": {
+                    "type": "integer",
+                    "minimum": 3600,
+                    "default": 604800,
+                    "description": "Refresh token TTL in seconds (default: 604800 = 7 days)."
+                },
+                "token_rotation": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Enable refresh token rotation (new refresh token on each use). Default: true."
+                },
+                "max_sessions_per_user": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "default": 10,
+                    "description": "Maximum number of concurrent sessions per user (default: 10)."
+                },
+                "session_inactivity_timeout": {
+                    "type": "integer",
+                    "minimum": 60,
+                    "default": 1800,
+                    "description": "Session inactivity timeout in seconds before automatic cleanup (default: 1800 = 30 minutes)."
+                },
+                "security": {
+                    "type": "object",
+                    "properties": {
+                        "require_https": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": "Require HTTPS in production (default: false, auto-detected)."
+                        },
+                        "cookie_secure": {
+                            "type": "string",
+                            "enum": ["auto", "true", "false"],
+                            "default": "auto",
+                            "description": "Secure cookie flag: 'auto' = detect from request, 'true' = always secure, 'false' = never secure (default: 'auto')."
+                        },
+                        "cookie_samesite": {
+                            "type": "string",
+                            "enum": ["strict", "lax", "none"],
+                            "default": "lax",
+                            "description": "SameSite cookie attribute (default: 'lax')."
+                        },
+                        "cookie_httponly": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "HttpOnly cookie flag (default: true)."
+                        },
+                        "csrf_protection": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "Enable CSRF protection (default: true)."
+                        },
+                        "rate_limiting": {
+                            "type": "object",
+                            "properties": {
+                                "login": {
+                                    "type": "object",
+                                    "properties": {
+                                        "max_attempts": {"type": "integer", "minimum": 1, "default": 5},
+                                        "window_seconds": {"type": "integer", "minimum": 1, "default": 300}
+                                    },
+                                    "additionalProperties": False
+                                },
+                                "register": {
+                                    "type": "object",
+                                    "properties": {
+                                        "max_attempts": {"type": "integer", "minimum": 1, "default": 3},
+                                        "window_seconds": {"type": "integer", "minimum": 1, "default": 600}
+                                    },
+                                    "additionalProperties": False
+                                },
+                                "refresh": {
+                                    "type": "object",
+                                    "properties": {
+                                        "max_attempts": {"type": "integer", "minimum": 1, "default": 10},
+                                        "window_seconds": {"type": "integer", "minimum": 1, "default": 60}
+                                    },
+                                    "additionalProperties": False
+                                }
+                            },
+                            "additionalProperties": False,
+                            "description": "Rate limiting configuration per endpoint type."
+                        },
+                        "password_policy": {
+                            "type": "object",
+                            "properties": {
+                                "allow_plain_text": {
+                                    "type": "boolean",
+                                    "default": False,
+                                    "description": "Allow plain text passwords (NOT recommended, default: false)"
+                                },
+                                "min_length": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "default": 8,
+                                    "description": "Minimum password length (default: 8)"
+                                },
+                                "require_uppercase": {
+                                    "type": "boolean",
+                                    "default": True,
+                                    "description": "Require uppercase letters (default: true)"
+                                },
+                                "require_lowercase": {
+                                    "type": "boolean",
+                                    "default": True,
+                                    "description": "Require lowercase letters (default: true)"
+                                },
+                                "require_numbers": {
+                                    "type": "boolean",
+                                    "default": True,
+                                    "description": "Require numbers (default: true)"
+                                },
+                                "require_special": {
+                                    "type": "boolean",
+                                    "default": False,
+                                    "description": "Require special characters (default: false)"
+                                }
+                            },
+                            "additionalProperties": False,
+                            "description": "Password policy configuration"
+                        },
+                        "session_fingerprinting": {
+                            "type": "object",
+                            "properties": {
+                                "enabled": {
+                                    "type": "boolean",
+                                    "default": True,
+                                    "description": "Enable session fingerprinting (default: true)"
+                                },
+                                "validate_on_login": {
+                                    "type": "boolean",
+                                    "default": True,
+                                    "description": "Validate fingerprint on login (default: true)"
+                                },
+                                "validate_on_refresh": {
+                                    "type": "boolean",
+                                    "default": True,
+                                    "description": "Validate fingerprint on token refresh (default: true)"
+                                },
+                                "validate_on_request": {
+                                    "type": "boolean",
+                                    "default": False,
+                                    "description": "Validate fingerprint on every request (default: false, may impact performance)"
+                                },
+                                "strict_mode": {
+                                    "type": "boolean",
+                                    "default": False,
+                                    "description": "Strict mode: reject requests if fingerprint doesn't match (default: false)"
+                                }
+                            },
+                            "additionalProperties": False,
+                            "description": "Session fingerprinting configuration for security"
+                        },
+                        "account_lockout": {
+                            "type": "object",
+                            "properties": {
+                                "enabled": {
+                                    "type": "boolean",
+                                    "default": True,
+                                    "description": "Enable account lockout (default: true)"
+                                },
+                                "max_failed_attempts": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "default": 5,
+                                    "description": "Maximum failed login attempts before lockout (default: 5)"
+                                },
+                                "lockout_duration_seconds": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "default": 900,
+                                    "description": "Lockout duration in seconds (default: 900 = 15 minutes)"
+                                },
+                                "reset_on_success": {
+                                    "type": "boolean",
+                                    "default": True,
+                                    "description": "Reset failed attempts counter on successful login (default: true)"
+                                }
+                            },
+                            "additionalProperties": False,
+                            "description": "Account lockout configuration"
+                        },
+                        "ip_validation": {
+                            "type": "object",
+                            "properties": {
+                                "enabled": {
+                                    "type": "boolean",
+                                    "default": False,
+                                    "description": "Enable IP address validation (default: false)"
+                                },
+                                "strict": {
+                                    "type": "boolean",
+                                    "default": False,
+                                    "description": "Strict mode: reject requests if IP changes (default: false)"
+                                },
+                                "allow_ip_change": {
+                                    "type": "boolean",
+                                    "default": True,
+                                    "description": "Allow IP address changes during session (default: true)"
+                                }
+                            },
+                            "additionalProperties": False,
+                            "description": "IP address validation configuration"
+                        },
+                        "token_fingerprinting": {
+                            "type": "object",
+                            "properties": {
+                                "enabled": {
+                                    "type": "boolean",
+                                    "default": True,
+                                    "description": "Enable token fingerprinting (default: true)"
+                                },
+                                "bind_to_device": {
+                                    "type": "boolean",
+                                    "default": True,
+                                    "description": "Bind tokens to device ID (default: true)"
+                                }
+                            },
+                            "additionalProperties": False,
+                            "description": "Token fingerprinting configuration"
+                        }
+                    },
+                    "additionalProperties": False,
+                    "description": "Security settings for token management."
+                },
+                "auto_setup": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Automatically set up token management on app startup (default: true)."
+                }
+            },
+            "additionalProperties": False,
+            "description": "Token management configuration for enhanced authentication features."
+        },
         "data_scope": {
             "type": "array",
             "items": {
@@ -392,42 +640,6 @@ MANIFEST_SCHEMA_V2 = {
             },
             "description": "WebSocket endpoints configuration. Super simple setup - just specify the path! Each endpoint is automatically scoped and isolated to this app. Key is the endpoint name (e.g., 'realtime', 'events'), value contains path and optional settings. Routes are automatically registered with FastAPI during app registration."
         },
-        "llm_config": {
-            "type": "object",
-            "properties": {
-                "enabled": {
-                    "type": "boolean",
-                    "default": False,
-                    "description": "Enable LLM service for this app. When enabled, LLM service will be initialized and available via dependency injection."
-                },
-                "default_chat_model": {
-                    "type": "string",
-                    "default": "gpt-4o",
-                    "description": "Default chat/completion model (e.g., 'gpt-4o', 'claude-3-opus-20240229', 'gemini/gemini-pro'). Uses LiteLLM model routing."
-                },
-                "default_embedding_model": {
-                    "type": "string",
-                    "default": "voyage/voyage-2",
-                    "description": "Default embedding model (e.g., 'voyage/voyage-2', 'text-embedding-3-small', 'cohere/embed-english-v3.0'). Uses LiteLLM model routing."
-                },
-                "default_temperature": {
-                    "type": "number",
-                    "minimum": 0.0,
-                    "maximum": 2.0,
-                    "default": 0.0,
-                    "description": "Default temperature for chat completions (0.0 = deterministic, 2.0 = creative)"
-                },
-                "max_retries": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 10,
-                    "default": 4,
-                    "description": "Maximum number of retries for transient errors (rate limits, 5xx errors)"
-                }
-            },
-            "additionalProperties": False,
-            "description": "LLM service configuration. Enables app-level LLM access with provider-agnostic interface (OpenAI, Anthropic, Gemini, VoyageAI via LiteLLM). When enabled, LLM service is available via dependency injection in FastAPI routes."
-        },
         "embedding_config": {
             "type": "object",
             "properties": {
@@ -450,12 +662,210 @@ MANIFEST_SCHEMA_V2 = {
                 },
                 "default_embedding_model": {
                     "type": "string",
-                    "default": "voyage/voyage-2",
-                    "description": "Default embedding model for chunk embeddings (e.g., 'voyage/voyage-2', 'text-embedding-3-small', 'cohere/embed-english-v3.0'). Uses LiteLLM model routing. If not specified, falls back to llm_config.default_embedding_model."
+                    "default": "text-embedding-3-small",
+                    "description": "Default embedding model for chunk embeddings (e.g., 'text-embedding-3-small', 'text-embedding-ada-002'). Examples should implement their own embedding clients."
                 }
             },
             "additionalProperties": False,
-            "description": "Semantic text splitting and embedding configuration. Enables intelligent chunking with Rust-based semantic-text-splitter and provider-agnostic embeddings via LiteLLM. Perfect for RAG (Retrieval Augmented Generation) applications."
+            "description": "Semantic text splitting and embedding configuration. Enables intelligent chunking with Rust-based semantic-text-splitter. Examples should implement their own embedding clients. Perfect for RAG (Retrieval Augmented Generation) applications."
+        },
+        "memory_config": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Enable Mem0 memory service for this app. When enabled, Mem0MemoryService will be initialized and available for intelligent memory management using MongoDB as the vector store. mem0 handles embeddings and LLM via environment variables (.env)."
+                },
+                "collection_name": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9_]+$",
+                    "description": "MongoDB collection name for storing memories (defaults to '{app_slug}_memories'). Will be prefixed with app slug if not already prefixed."
+                },
+                "embedding_model_dims": {
+                    "type": "integer",
+                    "minimum": 128,
+                    "maximum": 4096,
+                    "default": 1536,
+                    "description": "Dimensions of the embedding vectors (OPTIONAL - auto-detected by embedding a test string). Only specify if you need to override auto-detection. Default: 1536. The system will automatically detect the correct dimensions from your embedding model."
+                },
+                "enable_graph": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Enable knowledge graph construction for entity relationships. When enabled, Mem0 will build a graph of connected entities from memories."
+                },
+                "infer": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Whether to infer memories from conversations (default: true). If false, stores messages as-is without inference. Requires LLM configured via environment variables if true."
+                },
+                "embedding_model": {
+                    "type": "string",
+                    "description": "Embedding model name (e.g., 'text-embedding-3-small'). If not provided, mem0 will use environment variables or defaults."
+                },
+                "chat_model": {
+                    "type": "string",
+                    "description": "Chat model name for inference (e.g., 'gpt-4o'). If not provided, mem0 will use environment variables or defaults."
+                },
+                "temperature": {
+                    "type": "number",
+                    "minimum": 0.0,
+                    "maximum": 2.0,
+                    "default": 0.0,
+                    "description": "Temperature for LLM inference (0.0 = deterministic, 2.0 = creative). Only used if infer=true."
+                },
+                "async_mode": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Whether to process memories asynchronously (default: true). Enables better performance for memory ingestion."
+                }
+            },
+            "additionalProperties": False,
+            "description": "Mem0 memory service configuration. Enables intelligent memory management that automatically extracts, stores, and retrieves user memories. Uses MongoDB as the vector store (native integration with mdb-runtime). mem0 handles embeddings and LLM via environment variables (.env). Configure AZURE_OPENAI_API_KEY/AZURE_OPENAI_ENDPOINT or OPENAI_API_KEY in your .env file."
+        },
+        "cors": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Enable CORS for this app (default: false)"
+                },
+                "allow_origins": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "default": ["*"],
+                    "description": "List of allowed origins (use ['*'] for all origins, not recommended for production)"
+                },
+                "allow_credentials": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Allow credentials (cookies, authorization headers) in CORS requests"
+                },
+                "allow_methods": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"]
+                    },
+                    "default": ["GET", "POST", "PUT", "DELETE", "PATCH"],
+                    "description": "List of allowed HTTP methods"
+                },
+                "allow_headers": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "default": ["*"],
+                    "description": "List of allowed headers (use ['*'] for all headers)"
+                },
+                "expose_headers": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "description": "List of headers to expose to the client"
+                },
+                "max_age": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 3600,
+                    "description": "Max age for preflight requests in seconds (default: 3600)"
+                }
+            },
+            "additionalProperties": False,
+            "description": "CORS (Cross-Origin Resource Sharing) configuration for web apps"
+        },
+        "observability": {
+            "type": "object",
+            "properties": {
+                "health_checks": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "Enable health check endpoint (default: true)"
+                        },
+                        "endpoint": {
+                            "type": "string",
+                            "pattern": "^/[a-zA-Z0-9_/-]*$",
+                            "default": "/health",
+                            "description": "Health check endpoint path (default: '/health')"
+                        },
+                        "interval_seconds": {
+                            "type": "integer",
+                            "minimum": 5,
+                            "default": 30,
+                            "description": "Health check interval in seconds (default: 30)"
+                        }
+                    },
+                    "additionalProperties": False,
+                    "description": "Health check configuration"
+                },
+                "metrics": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "Enable metrics collection (default: true)"
+                        },
+                        "collect_operation_metrics": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "Collect operation-level metrics (duration, errors, etc.)"
+                        },
+                        "collect_performance_metrics": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "Collect performance metrics (memory, CPU, etc.)"
+                        },
+                        "custom_metrics": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            },
+                            "description": "List of custom metric names to track"
+                        }
+                    },
+                    "additionalProperties": False,
+                    "description": "Metrics collection configuration"
+                },
+                "logging": {
+                    "type": "object",
+                    "properties": {
+                        "level": {
+                            "type": "string",
+                            "enum": ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+                            "default": "INFO",
+                            "description": "Logging level (default: 'INFO')"
+                        },
+                        "format": {
+                            "type": "string",
+                            "enum": ["json", "text"],
+                            "default": "json",
+                            "description": "Log format (default: 'json')"
+                        },
+                        "include_request_id": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "Include request ID in logs (default: true)"
+                        },
+                        "log_sensitive_data": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": "Log sensitive data (passwords, tokens, etc.) - NOT recommended for production (default: false)"
+                        }
+                    },
+                    "additionalProperties": False,
+                    "description": "Logging configuration"
+                }
+            },
+            "additionalProperties": False,
+            "description": "Observability configuration (health checks, metrics, logging)"
         },
         "developer_id": {
             "type": "string",
@@ -1381,6 +1791,10 @@ class ManifestValidator:
     async def validate_async(manifest: Dict[str, Any], use_cache: bool = True) -> Tuple[bool, Optional[str], Optional[List[str]]]:
         """
         Validate manifest asynchronously.
+        
+        This includes:
+        - JSON Schema validation
+        - Cross-field dependency validation
         
         Args:
             manifest: Manifest dictionary to validate

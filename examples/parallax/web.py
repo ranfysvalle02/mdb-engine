@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Parallax - Tech News Intelligence Tool
+Parallax - GitHub Repository Intelligence Tool
 
-The Parallax Dashboard visualizes tech news from two focused angles:
-1. Relevance: Why this story matters given your watchlist - personalized context and urgency
-2. Technical: Concise engineering assessment - performance, complexity, readiness, use cases
+The Parallax Dashboard visualizes GitHub repositories from two focused angles:
+1. Relevance: Why this repository/implementation matters given your watchlist - personalized context and urgency
+2. Technical: Concise engineering assessment - architecture, patterns, complexity, readiness, use cases
 """
 import os
 import asyncio
@@ -13,14 +13,20 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional
 
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
+import json
 
 from mdb_runtime import RuntimeEngine
 from parallax import ParallaxEngine, WATCHLIST
 from schema_generator import get_default_lens_configs
+from openai import AzureOpenAI
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -28,10 +34,47 @@ logger = logging.getLogger("Parallax")
 
 # Initialize FastAPI app
 app = FastAPI(
-    title="Parallax - Tech News Intelligence",
-    description="Focused intelligence tool analyzing tech news from Relevance and Technical perspectives",
+    title="Parallax - GitHub Repository Intelligence",
+    description="Focused intelligence tool analyzing GitHub repositories (with AGENTS.md/LLMs.md files) from Relevance and Technical perspectives",
     version="1.0.0"
 )
+
+# WebSocket connection manager for real-time updates
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: list[WebSocket] = []
+    
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+        logger.info(f"WebSocket connected. Total connections: {len(self.active_connections)}")
+    
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+        logger.info(f"WebSocket disconnected. Total connections: {len(self.active_connections)}")
+    
+    async def send_personal_message(self, message: dict, websocket: WebSocket):
+        try:
+            await websocket.send_json(message)
+        except Exception as e:
+            logger.error(f"Error sending WebSocket message: {e}")
+            self.disconnect(websocket)
+    
+    async def broadcast(self, message: dict):
+        disconnected = []
+        for connection in self.active_connections:
+            try:
+                await connection.send_json(message)
+            except Exception as e:
+                logger.error(f"Error broadcasting to WebSocket: {e}")
+                disconnected.append(connection)
+        
+        # Remove disconnected connections
+        for conn in disconnected:
+            self.disconnect(conn)
+
+manager = ConnectionManager()
 
 # Add CORS middleware
 app.add_middleware(
@@ -41,6 +84,43 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# WebSocket connection manager for real-time updates
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: list[WebSocket] = []
+    
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+        logger.info(f"WebSocket connected. Total connections: {len(self.active_connections)}")
+    
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+        logger.info(f"WebSocket disconnected. Total connections: {len(self.active_connections)}")
+    
+    async def send_personal_message(self, message: dict, websocket: WebSocket):
+        try:
+            await websocket.send_json(message)
+        except Exception as e:
+            logger.error(f"Error sending WebSocket message: {e}")
+            self.disconnect(websocket)
+    
+    async def broadcast(self, message: dict):
+        disconnected = []
+        for connection in self.active_connections:
+            try:
+                await connection.send_json(message)
+            except Exception as e:
+                logger.error(f"Error broadcasting to WebSocket: {e}")
+                disconnected.append(connection)
+        
+        # Remove disconnected connections
+        for conn in disconnected:
+            self.disconnect(conn)
+
+manager = ConnectionManager()
 
 # Templates directory
 templates = Jinja2Templates(directory="/app/templates")
@@ -108,6 +188,23 @@ async def startup_event():
     # Get scoped database
     db = engine.get_scoped_db("parallax")
     
+    # Set global engine for embedding dependency injection
+    from mdb_runtime.embeddings.dependencies import set_global_engine
+    set_global_engine(engine, app_slug="parallax")
+    
+    # Initialize embedding service if configured in manifest.json
+    try:
+        from mdb_runtime.embeddings import get_embedding_service
+        app_config = engine.get_app("parallax")
+        embedding_config = app_config.get("embedding_config", {}) if app_config else {}
+        if embedding_config:
+            embedding_service = get_embedding_service(config=embedding_config)
+            logger.info("EmbeddingService initialized from manifest.json")
+        else:
+            logger.debug("No embedding_config found in manifest.json - embedding service not initialized")
+    except Exception as e:
+        logger.warning(f"Failed to initialize EmbeddingService: {e}", exc_info=True)
+    
     # Initialize default watchlist config if it doesn't exist
     try:
         existing_config = await db.watchlist_config.find_one({"config_type": "watchlist"})
@@ -139,10 +236,27 @@ async def startup_event():
     # Initialize Parallax Engine
     global parallax
     try:
-        llm_service = engine.get_llm_service("parallax")
-        if not llm_service:
-            logger.error("LLM service not available! Check API keys (OPENAI_API_KEY or AZURE_OPENAI_API_KEY) and manifest configuration.")
-            raise RuntimeError("LLM service not available - required for Parallax")
+        # Create Azure OpenAI client
+        api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-01")
+        endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+        key = os.getenv("AZURE_OPENAI_API_KEY")
+        deployment_name = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4o")
+        
+        if not endpoint or not key:
+            logger.error("Azure OpenAI not configured! Set AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY environment variables.")
+            raise RuntimeError("Azure OpenAI not configured - required for Parallax")
+        
+        openai_client = AzureOpenAI(
+            api_version=api_version,
+            azure_endpoint=endpoint,
+            api_key=key
+        )
+        
+        # Get GitHub token
+        github_token = os.getenv("GITHUB_TOKEN")
+        if not github_token:
+            logger.error("GITHUB_TOKEN not set! Set it as an environment variable.")
+            raise RuntimeError("GITHUB_TOKEN is required for GitHub GraphQL API")
         
         # Load watchlist from DB or use default
         try:
@@ -151,12 +265,17 @@ async def startup_event():
         except Exception:
             watchlist = WATCHLIST
         
-        parallax = ParallaxEngine(llm_service, db, watchlist=watchlist)
+        parallax = ParallaxEngine(
+            openai_client, 
+            db, 
+            watchlist=watchlist, 
+            deployment_name=deployment_name,
+            github_token=github_token
+        )
         logger.info("Parallax Engine initialized successfully")
         
-        # Automatically trigger initial scan in background
-        logger.info("Triggering initial Parallax scan...")
-        asyncio.create_task(parallax.analyze_feed())
+        # Don't auto-trigger scan on startup - let user click the button
+        # This prevents UI issues and gives user control
     except Exception as e:
         logger.error(f"Failed to initialize Parallax Engine: {e}", exc_info=True)
         raise RuntimeError(f"Parallax Engine initialization failed: {str(e)}") from e
@@ -183,6 +302,81 @@ def get_db():
     return db
 
 
+@app.websocket("/ws/scan")
+async def websocket_scan(websocket: WebSocket):
+    """WebSocket endpoint for real-time scan progress and reports"""
+    await manager.connect(websocket)
+    try:
+        while True:
+            # Wait for scan request from client
+            data = await websocket.receive_json()
+            
+            if data.get("action") == "start_scan":
+                global parallax
+                if not parallax:
+                    await manager.send_personal_message({
+                        "type": "error",
+                        "message": "Parallax Engine not initialized"
+                    }, websocket)
+                    continue
+                
+                # Progress callback to send updates via WebSocket
+                async def progress_callback(update: dict):
+                    # Include repo_id for fetching the report
+                    if update.get("type") == "report_complete":
+                        update["repo_id"] = update.get("repo_id") or update.get("repo_name", "")
+                    await manager.send_personal_message(update, websocket)
+                
+                try:
+                    logger.info("🔄 Starting WebSocket scan...")
+                    await manager.send_personal_message({
+                        "type": "scan_started",
+                        "message": "Starting analysis..."
+                    }, websocket)
+                    
+                    # Run analysis with progress callback
+                    reports = await asyncio.wait_for(
+                        parallax.analyze_repositories(progress_callback=progress_callback),
+                        timeout=300.0
+                    )
+                    
+                    # Update last scan timestamp
+                    db = get_db()
+                    try:
+                        await db.watchlist_config.update_one(
+                            {"config_type": "watchlist"},
+                            {"$set": {"last_scan_timestamp": datetime.utcnow()}},
+                            upsert=True
+                        )
+                    except Exception as e:
+                        logger.warning(f"Could not update last scan timestamp: {e}")
+                    
+                    # Send final summary
+                    await manager.send_personal_message({
+                        "type": "scan_complete",
+                        "total_reports": len(reports),
+                        "message": f"Analysis complete: {len(reports)} repositories analyzed"
+                    }, websocket)
+                    
+                except asyncio.TimeoutError:
+                    await manager.send_personal_message({
+                        "type": "error",
+                        "message": "Analysis timed out after 5 minutes"
+                    }, websocket)
+                except Exception as e:
+                    logger.error(f"Error in WebSocket scan: {e}", exc_info=True)
+                    await manager.send_personal_message({
+                        "type": "error",
+                        "message": f"Scan failed: {str(e)}"
+                    }, websocket)
+            
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+    except Exception as e:
+        logger.error(f"WebSocket error: {e}", exc_info=True)
+        manager.disconnect(websocket)
+
+
 @app.post("/api/refresh", response_class=JSONResponse)
 async def trigger_refresh():
     """Trigger the multi-agent analysis manually"""
@@ -199,7 +393,8 @@ async def trigger_refresh():
     
     try:
         logger.info("🔄 Triggering Parallax analysis...")
-        reports = await parallax.analyze_feed()
+        # Add timeout to prevent hanging (5 minutes max)
+        reports = await asyncio.wait_for(parallax.analyze_feed(), timeout=300.0)
         
         # Update last scan timestamp
         db = get_db()
@@ -213,12 +408,12 @@ async def trigger_refresh():
             logger.warning(f"Could not update last scan timestamp: {e}")
         
         if len(reports) == 0:
-            logger.info("No new stories found matching watchlist criteria")
+            logger.info("No new repositories found matching watchlist criteria")
             return {
                 "success": True,
                 "status": "no_new",
                 "new_reports": 0,
-                "message": "Found nothing new. All matching stories have already been analyzed."
+                "message": "Found nothing new. All matching repositories have already been analyzed."
             }
         else:
             logger.info(f"Generated {len(reports)} new Parallax reports")
@@ -226,8 +421,18 @@ async def trigger_refresh():
                 "success": True,
                 "status": "success",
                 "new_reports": len(reports),
-                "message": f"Analyzed {len(reports)} new stories"
+                "message": f"Analyzed {len(reports)} new repositories"
             }
+    except asyncio.TimeoutError:
+        logger.error("Parallax analysis timed out after 5 minutes")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "success": False,
+                "error": "Analysis timed out",
+                "detail": "The analysis took too long. Try reducing the scan limit or check your LLM API configuration."
+            }
+        )
     except Exception as e:
         logger.error(f"Error in Parallax analysis: {e}", exc_info=True)
         return JSONResponse(
@@ -240,19 +445,82 @@ async def trigger_refresh():
         )
 
 
+@app.get("/api/reports/{repo_id:path}", response_class=JSONResponse)
+async def get_report(repo_id: str):
+    """Get a single Parallax report by repo_id (supports slashes in repo_id like 'owner/repo')"""
+    db = get_db()
+    
+    try:
+        # FastAPI automatically URL-decodes the path parameter, so repo_id should be correct
+        # But let's also try URL-decoding just in case
+        import urllib.parse
+        repo_id_decoded = urllib.parse.unquote(repo_id)
+        
+        # Try both the original and decoded version
+        report = await db.parallax_reports.find_one({"repo_id": repo_id_decoded})
+        if not report:
+            report = await db.parallax_reports.find_one({"repo_id": repo_id})
+        
+        if not report:
+            # Log for debugging
+            logger.warning(f"Report not found for repo_id: {repo_id} (decoded: {repo_id_decoded})")
+            # Try to find any reports to see what format they're stored in
+            sample = await db.parallax_reports.find_one({})
+            if sample:
+                logger.debug(f"Sample repo_id format in DB: {sample.get('repo_id')}")
+            return JSONResponse(
+                status_code=404,
+                content={"success": False, "error": f"Report not found for repo_id: {repo_id}"}
+            )
+        
+        # Convert ObjectId to string
+        report_dict = dict(report)
+        report_dict['_id'] = str(report_dict.get('_id', ''))
+        
+        # Mark as fresh if needed
+        scan_config = await db.watchlist_config.find_one({"config_type": "watchlist"})
+        if scan_config and scan_config.get("last_scan_timestamp"):
+            from datetime import datetime
+            last_scan = scan_config["last_scan_timestamp"]
+            if isinstance(last_scan, str):
+                last_scan = datetime.fromisoformat(last_scan.replace('Z', '+00:00'))
+            if last_scan:
+                last_scan_iso = last_scan.isoformat()
+                report_dict["is_fresh"] = report_dict.get("timestamp") and report_dict["timestamp"] > last_scan_iso
+        
+        return {
+            "success": True,
+            "report": report_dict
+        }
+    except Exception as e:
+        logger.error(f"Error fetching report: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "error": str(e)}
+        )
+
+
 @app.get("/api/reports", response_class=JSONResponse)
-async def get_reports(limit: int = 10, keyword: str = None, sort_by: str = "date_desc"):
+async def get_reports(limit: int = 50, keyword: str = None, sort_by: str = "date_desc", max_limit: int = None):
     """
     Get Parallax reports
     
     Args:
-        limit: Maximum number of reports to return
+        limit: Maximum number of reports to return (default: 50)
         keyword: Optional keyword to filter by (must be in matched_keywords)
         sort_by: Sort order - "date_desc", "date_asc", "relevance"
+        max_limit: Maximum limit allowed (if set, limits the limit parameter)
     """
     db = get_db()
     
     try:
+        # Apply max_limit if specified
+        if max_limit is not None and limit > max_limit:
+            limit = max_limit
+        
+        # Ensure limit is reasonable (between 1 and 1000)
+        limit = max(1, min(1000, limit))
+        
         query = {}
         
         # If filtering by keyword
@@ -269,27 +537,40 @@ async def get_reports(limit: int = 10, keyword: str = None, sort_by: str = "date
             if isinstance(last_scan, str):
                 last_scan = datetime.fromisoformat(last_scan.replace('Z', '+00:00'))
         
-        # Determine sort order
-        sort_order = [("timestamp", -1)]  # Default: newest first
-        if sort_by == "date_asc":
-            sort_order = [("timestamp", 1)]  # Oldest first
-        elif sort_by == "relevance":
-            sort_order = [("timestamp", -1)]
-        
-        reports = await db.parallax_reports.find(query).sort(sort_order).limit(limit * 2).to_list(length=limit * 2)
-        
-        # Mark reports as fresh
-        if last_scan:
-            last_scan_iso = last_scan.isoformat()
-            for r in reports:
-                r["is_fresh"] = r.get("timestamp") and r["timestamp"] > last_scan_iso
-        
-        # Apply relevance sorting if needed
+        # For relevance sorting, we need to fetch more and sort in memory
+        # For date sorting, we can use MongoDB sort
         if sort_by == "relevance":
-            reports.sort(key=lambda x: (len(x.get("matched_keywords", [])), x.get("timestamp", "")), reverse=True)
-        
-        # Limit to requested amount
-        reports = reports[:limit]
+            # Fetch more reports for relevance sorting (need to sort by matched_keywords count)
+            reports = await db.parallax_reports.find(query).to_list(length=limit * 3)
+            
+            # Mark reports as fresh
+            if last_scan:
+                last_scan_iso = last_scan.isoformat()
+                for r in reports:
+                    r["is_fresh"] = r.get("timestamp") and r["timestamp"] > last_scan_iso
+            
+            # Sort by relevance: more matched keywords = higher relevance, then by timestamp
+            reports.sort(key=lambda x: (
+                -len(x.get("matched_keywords", [])),  # Negative for descending
+                x.get("relevance", {}).get("relevance_score", 0) if isinstance(x.get("relevance"), dict) else 0,
+                x.get("timestamp", "") if x.get("timestamp") else ""
+            ), reverse=True)
+            
+            # Limit after sorting
+            reports = reports[:limit]
+        else:
+            # Determine sort order for date-based sorting
+            sort_order = [("timestamp", -1)]  # Default: newest first
+            if sort_by == "date_asc":
+                sort_order = [("timestamp", 1)]  # Oldest first
+            
+            reports = await db.parallax_reports.find(query).sort(sort_order).limit(limit).to_list(length=limit)
+            
+            # Mark reports as fresh
+            if last_scan:
+                last_scan_iso = last_scan.isoformat()
+                for r in reports:
+                    r["is_fresh"] = r.get("timestamp") and r["timestamp"] > last_scan_iso
         
         # Convert to dict format for JSON serialization
         reports_data = []
@@ -330,10 +611,21 @@ async def get_watchlist():
     try:
         keywords = await parallax.get_watchlist()
         scan_limit = await parallax.get_scan_limit()
+        min_stars = parallax.min_stars
+        language_filter = parallax.language_filter or ''
+        
+        # Get max_limit from config
+        db = get_db()
+        config = await db.watchlist_config.find_one({"config_type": "watchlist"})
+        max_limit = config.get("max_limit") if config else None
+        
         return {
             "success": True,
             "watchlist": keywords,
-            "scan_limit": scan_limit
+            "scan_limit": scan_limit,
+            "min_stars": min_stars,
+            "language_filter": language_filter,
+            "max_limit": max_limit
         }
     except Exception as e:
         logger.error(f"Error fetching watchlist: {e}")
@@ -358,6 +650,9 @@ async def update_watchlist(request: Request):
         data = await request.json()
         keywords = data.get("watchlist", [])
         scan_limit = data.get("scan_limit")
+        min_stars = data.get("min_stars")
+        language_filter = data.get("language_filter")
+        max_limit = data.get("max_limit")
         
         if not isinstance(keywords, list):
             return JSONResponse(
@@ -373,7 +668,40 @@ async def update_watchlist(request: Request):
                     content={"success": False, "error": "scan_limit must be between 1 and 500"}
                 )
         
-        success = await parallax.update_watchlist(keywords, scan_limit=scan_limit)
+        if min_stars is not None:
+            min_stars = int(min_stars)
+            if min_stars < 0 or min_stars > 100000:
+                return JSONResponse(
+                    status_code=400,
+                    content={"success": False, "error": "min_stars must be between 0 and 100000"}
+                )
+        
+        # Validate language filter if provided
+        if language_filter is not None and language_filter:
+            language_filter = str(language_filter).strip().lower()
+            # GitHub supports common language names
+            if not language_filter:
+                language_filter = None
+        
+        # Validate max_limit if provided
+        if max_limit is not None:
+            max_limit = int(max_limit)
+            if max_limit < 1 or max_limit > 1000:
+                return JSONResponse(
+                    status_code=400,
+                    content={"success": False, "error": "max_limit must be between 1 and 1000"}
+                )
+        
+        success = await parallax.update_watchlist(keywords, scan_limit=scan_limit, min_stars=min_stars, language_filter=language_filter)
+        
+        # Update max_limit in watchlist_config if provided
+        if max_limit is not None:
+            db = get_db()
+            await db.watchlist_config.update_one(
+                {"config_type": "watchlist"},
+                {"$set": {"max_limit": max_limit}},
+                upsert=True
+            )
         if success:
             return {
                 "success": True,
@@ -506,7 +834,7 @@ async def update_lens(lens_name: str, request: Request):
 
 
 @app.get("/", response_class=HTMLResponse)
-async def dashboard(request: Request, keyword: str = None, sort_by: str = "date_desc"):
+async def dashboard(request: Request, keyword: str = None, sort_by: str = "date_desc", limit: int = 50, max_limit: int = None):
     """
     The Parallax Dashboard.
     Renders the 3-Column Split View.
@@ -514,8 +842,17 @@ async def dashboard(request: Request, keyword: str = None, sort_by: str = "date_
     Args:
         keyword: Optional keyword to filter by
         sort_by: Sort order - "date_desc", "date_asc", "relevance"
+        limit: Maximum number of reports to display (default: 50)
+        max_limit: Maximum limit allowed (if set, limits the limit parameter)
     """
     db = get_db()
+    
+    # Apply max_limit if specified
+    if max_limit is not None and limit > max_limit:
+        limit = max_limit
+    
+    # Ensure limit is reasonable
+    limit = max(1, min(1000, limit))
     
     try:
         query = {}
@@ -534,46 +871,62 @@ async def dashboard(request: Request, keyword: str = None, sort_by: str = "date_
             if isinstance(last_scan, str):
                 last_scan = datetime.fromisoformat(last_scan.replace('Z', '+00:00'))
         
-        # Determine sort order
-        sort_order = [("timestamp", -1)]  # Default: newest first
-        if sort_by == "date_asc":
-            sort_order = [("timestamp", 1)]  # Oldest first
-        elif sort_by == "relevance":
-            # Sort by relevance (based on matched_keywords count, virality score, etc.)
-            sort_order = [("timestamp", -1)]
-        
-        reports = await db.parallax_reports.find(query).sort(sort_order).limit(50).to_list(length=50)
-        
-        # Mark reports as fresh
-        if last_scan:
-            last_scan_iso = last_scan.isoformat()
-            for r in reports:
-                r["is_fresh"] = r.get("timestamp") and r["timestamp"] > last_scan_iso
-        
-        # Apply relevance sorting if needed
+        # For relevance sorting, we need to fetch more and sort in memory
+        # For date sorting, we can use MongoDB sort
         if sort_by == "relevance":
-            # Sort by number of matched keywords (more = more relevant), then by timestamp
-            reports.sort(key=lambda x: (len(x.get("matched_keywords", [])), x.get("timestamp", "")), reverse=True)
+            # Fetch more reports for relevance sorting
+            reports = await db.parallax_reports.find(query).to_list(length=limit * 3)
+            
+            # Mark reports as fresh
+            if last_scan:
+                last_scan_iso = last_scan.isoformat()
+                for r in reports:
+                    r["is_fresh"] = r.get("timestamp") and r["timestamp"] > last_scan_iso
+            
+            # Sort by relevance: more matched keywords = higher relevance, then by relevance_score, then timestamp
+            reports.sort(key=lambda x: (
+                -len(x.get("matched_keywords", [])),  # Negative for descending
+                x.get("relevance", {}).get("relevance_score", 0) if isinstance(x.get("relevance"), dict) else 0,
+                x.get("timestamp", "") if x.get("timestamp") else ""
+            ), reverse=True)
+            
+            # Limit after sorting
+            reports = reports[:limit]
+        else:
+            # Determine sort order for date-based sorting
+            sort_order = [("timestamp", -1)]  # Default: newest first
+            if sort_by == "date_asc":
+                sort_order = [("timestamp", 1)]  # Oldest first
+            
+            reports = await db.parallax_reports.find(query).sort(sort_order).limit(limit).to_list(length=limit)
+            
+            # Mark reports as fresh
+            if last_scan:
+                last_scan_iso = last_scan.isoformat()
+                for r in reports:
+                    r["is_fresh"] = r.get("timestamp") and r["timestamp"] > last_scan_iso
         
-        # Limit to 10 for display
-        reports = reports[:10]
-        
-        # Get current watchlist
+        # Get current watchlist and max_limit
         watchlist = WATCHLIST
+        max_limit = None
         global parallax
         if parallax:
             watchlist = await parallax.get_watchlist()
+            # Get max_limit from config
+            config = await db.watchlist_config.find_one({"config_type": "watchlist"})
+            max_limit = config.get("max_limit") if config else None
         
-        # If no reports and we have a parallax engine, trigger a scan
-        if not reports and not keyword:
-            if parallax:
-                logger.info("No reports found, triggering initial scan...")
-                # Trigger scan in background (don't wait)
-                asyncio.create_task(parallax.analyze_feed())
+        # Apply max_limit to limit if specified
+        if max_limit is not None and limit > max_limit:
+            limit = max_limit
+        
+        # Don't auto-trigger scan - let user click the button
+        # This prevents infinite reload loops
     except Exception as e:
         logger.error(f"Error fetching reports for dashboard: {e}")
         reports = []
         watchlist = WATCHLIST
+        max_limit = None
     
     # Render the dashboard template
     return templates.TemplateResponse(
@@ -583,7 +936,9 @@ async def dashboard(request: Request, keyword: str = None, sort_by: str = "date_
             "reports": reports,
             "watchlist": watchlist,  # Pass as list, not joined string
             "selected_keyword": keyword,
-            "sort_by": sort_by
+            "sort_by": sort_by,
+            "limit": limit,
+            "max_limit": max_limit
         }
     )
 

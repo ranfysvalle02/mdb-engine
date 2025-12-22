@@ -17,7 +17,7 @@ Key Features:
 - Automatic ping/pong: Keeps connections alive
 - Connection metadata: Tracks user_id, user_email, connected_at for each connection
 
-This module is part of MDB_RUNTIME - MongoDB Multi-Tenant Runtime Engine.
+This module is part of MDB_RUNTIME - MongoDB Runtime Engine.
 """
 import asyncio
 import json

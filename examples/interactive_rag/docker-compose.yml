@@ -25,7 +25,6 @@ services:
       - PYTHONUNBUFFERED=${PYTHONUNBUFFERED:-1}
       # LLM API Keys (set these in .env file)
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - VOYAGE_API_KEY=${VOYAGE_API_KEY:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       # Azure OpenAI Configuration
       - AZURE_OPENAI_ENDPOINT=${AZURE_OPENAI_ENDPOINT:-}

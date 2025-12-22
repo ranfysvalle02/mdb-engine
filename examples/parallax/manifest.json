@@ -17,8 +17,8 @@
     "parallax_reports": [
       {
         "type": "regular",
-        "keys": {"story_id": 1},
-        "name": "story_id_idx",
+        "keys": {"repo_id": 1},
+        "name": "repo_id_idx",
         "options": {
           "background": true,
           "unique": true
@@ -28,6 +28,14 @@
         "type": "regular",
         "keys": {"timestamp": -1},
         "name": "timestamp_idx",
+        "options": {
+          "background": true
+        }
+      },
+      {
+        "type": "regular",
+        "keys": {"repo_name": 1},
+        "name": "repo_name_idx",
         "options": {
           "background": true
         }
@@ -44,12 +52,5 @@
         }
       }
     ]
-  },
-  "llm_config": {
-    "enabled": true,
-    "default_chat_model": "gpt-4o",
-    "default_embedding_model": "voyage/voyage-2",
-    "default_temperature": 0.0,
-    "max_retries": 4
   }
 }

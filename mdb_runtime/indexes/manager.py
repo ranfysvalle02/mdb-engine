@@ -3,7 +3,7 @@ Index Management Orchestration
 
 High-level functions for creating and managing indexes based on manifest definitions.
 
-This module is part of MDB_RUNTIME - MongoDB Multi-Tenant Runtime Engine.
+This module is part of MDB_RUNTIME - MongoDB Runtime Engine.
 """
 import json
 import logging

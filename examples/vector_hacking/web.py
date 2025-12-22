@@ -23,6 +23,12 @@ from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 
 from mdb_runtime import RuntimeEngine
+from mdb_runtime.embeddings import EmbeddingService
+from openai import AzureOpenAI
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 
 class StartAttackRequest(BaseModel):
@@ -121,34 +127,83 @@ async def startup_event():
     # Get scoped database and store globally
     db = engine.get_scoped_db("vector_hacking")
     
-    # Initialize vector hacking service with LLM service abstraction
-    # LLM service is automatically initialized by RuntimeEngine from manifest.json llm_config
+    # Initialize vector hacking service with Azure OpenAI client and EmbeddingService
     try:
-        # Get LLM service from RuntimeEngine (initialized from manifest.json)
-        # This service provides unified interface for all LLM operations
-        llm_service = engine.get_llm_service("vector_hacking")
+        # Create Azure OpenAI client
+        api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-01")
+        endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+        key = os.getenv("AZURE_OPENAI_API_KEY")
+        deployment_name = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4o")
         
-        # Get LLM config from manifest.json for reference
-        llm_config = {}
+        if not endpoint or not key:
+            logger.error("Azure OpenAI not configured! Set AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY environment variables.")
+            raise RuntimeError("Azure OpenAI not configured - required for vector hacking")
+        
+        openai_client = AzureOpenAI(
+            api_version=api_version,
+            azure_endpoint=endpoint,
+            api_key=key
+        )
+        
+        # Get EmbeddingService - try memory service first, fallback to standalone
         app_config = engine.get_app("vector_hacking")
-        if app_config and "llm_config" in app_config:
-            llm_config = app_config["llm_config"]
-            logger.info(f"LLM config loaded from manifest.json: {llm_config.get('default_chat_model')} / {llm_config.get('default_embedding_model')}")
+        embedding_model = "text-embedding-3-small"
+        temperature = 0.8
         
-        if not llm_service:
-            logger.warning("LLM service not available - ensure llm_config.enabled=true in manifest.json")
+        # Detect if using Azure OpenAI
+        is_azure = bool(os.getenv("AZURE_OPENAI_ENDPOINT") and os.getenv("AZURE_OPENAI_API_KEY"))
         
-        # Initialize vector hacking service with LLM service abstraction
-        # All LLM calls will go through the unified abstraction
+        # Get embedding model and temperature from manifest.json config
+        if app_config:
+            if "embedding_config" in app_config:
+                config_embedding_model = app_config["embedding_config"].get("default_embedding_model")
+                # If using Azure OpenAI, prefer Azure-compatible models
+                if config_embedding_model:
+                    if is_azure and not config_embedding_model.startswith(("text-embedding", "ada")):
+                        logger.warning(f"Embedding model '{config_embedding_model}' may not be compatible with Azure OpenAI. Using '{embedding_model}' instead.")
+                    else:
+                        embedding_model = config_embedding_model
+        
+        # Try memory service first (if memory_config is enabled)
+        memory_service = engine.get_memory_service("vector_hacking")
+        if memory_service:
+            try:
+                # Note: EmbeddingService doesn't use memory_service - it's standalone
+                # Use get_embedding_service helper instead
+                from mdb_runtime.embeddings import get_embedding_service
+                embedding_service = get_embedding_service(config={})
+                logger.info("EmbeddingService initialized with mem0 (via memory service)")
+            except Exception as e:
+                logger.warning(f"Failed to create EmbeddingService from memory service: {e}, trying standalone")
+                memory_service = None  # Fall through to standalone initialization
+        
+        # Fallback: initialize standalone using manifest.json config
+        if not memory_service:
+            embedding_config = app_config.get("embedding_config", {}) if app_config else {}
+            
+            config = {}
+            # Use the embedding_model we determined above (which already handles Azure compatibility)
+            config["default_embedding_model"] = embedding_model
+            
+            from mdb_runtime.embeddings import get_embedding_service
+            embedding_service = get_embedding_service(config=config)
+            logger.info(f"EmbeddingService initialized standalone (from manifest.json, model: {embedding_model})")
+        
+        logger.info(f"Vector hacking config: chat={deployment_name}, embedding={embedding_model}, temp={temperature}")
+        
+        # Initialize vector hacking service
         vector_hacking_service = VectorHackingService(
             mongo_uri=mongo_uri,
             db_name=db_name,
             write_scope="vector_hacking",
             read_scopes=["vector_hacking"],
-            llm_service=llm_service,  # LLM service abstraction (from manifest.json)
-            llm_config=llm_config      # Config reference (from manifest.json)
+            openai_client=openai_client,
+            embedding_service=embedding_service,
+            deployment_name=deployment_name,
+            embedding_model=embedding_model,
+            temperature=temperature
         )
-        logger.info("Vector hacking service initialized with LLM service abstraction")
+        logger.info("Vector hacking service initialized with Azure OpenAI and EmbeddingService")
     except Exception as e:
         logger.error(f"Failed to initialize vector hacking service: {e}")
         import traceback
@@ -200,13 +255,13 @@ async def root(request: Request):
             logger.error(f"Error rendering index: {e}")
             # Fallback to direct template rendering
             try:
-                return templates.TemplateResponse("index.html", {"request": request})
+                return templates.TemplateResponse(request, "index.html")
             except Exception:
                 return HTMLResponse(content="<h1>Vector Hacking Demo</h1><p>Template rendering failed. Check logs.</p>")
     else:
         # Fallback if service not available
         try:
-            return templates.TemplateResponse("index.html", {"request": request})
+            return templates.TemplateResponse(request, "index.html")
         except Exception:
             return HTMLResponse(content="<h1>Vector Hacking Demo</h1><p>Vector hacking service not initialized. Please check configuration.</p>")
 

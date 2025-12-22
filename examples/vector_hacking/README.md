@@ -16,8 +16,7 @@ This example shows:
 - OR MongoDB running locally (for local setup)
 - MDB_RUNTIME installed
 - **API Keys** (for vector hacking features):
-  - `OPENAI_API_KEY` - For LLM-based guessing
-  - `VOYAGE_API_KEY` - For embedding generation
+  - `OPENAI_API_KEY` or `AZURE_OPENAI_API_KEY` - For LLM-based guessing and embeddings
 
 ## Setup
 
@@ -99,19 +98,26 @@ docker-compose down -v
 
 The vector hacking demo **requires** API keys to function. You need:
 
-1. **OPENAI_API_KEY** - For LLM-based guessing (GPT-3.5-turbo)
+1. **OPENAI_API_KEY** - For LLM-based guessing and embeddings (OpenAI)
    - Get your key from: https://platform.openai.com/api-keys
    
-2. **VOYAGE_API_KEY** - For embedding generation
-   - Get your key from: https://www.voyageai.com/
+   OR
+   
+2. **AZURE_OPENAI_API_KEY** and **AZURE_OPENAI_ENDPOINT** - For Azure OpenAI
+   - Get your credentials from your Azure OpenAI resource
 
 **Option 1: .env file (Recommended)**
 Docker Compose automatically loads environment variables from a `.env` file in the same directory. Create a `.env` file in the `vector_hacking` directory:
 
 ```bash
 # .env file
+# Option 1: Standard OpenAI
 OPENAI_API_KEY=sk-your-openai-key-here
-VOYAGE_API_KEY=your-voyage-key-here
+
+# Option 2: Azure OpenAI
+AZURE_OPENAI_API_KEY=your-azure-key-here
+AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
+AZURE_OPENAI_DEPLOYMENT_NAME=gpt-4o
 
 # Optional: Override other settings
 APP_PORT=8000
@@ -128,8 +134,13 @@ docker-compose up
 
 **Option 2: Export before running**
 ```bash
+# Standard OpenAI
 export OPENAI_API_KEY=sk-your-openai-key-here
-export VOYAGE_API_KEY=your-voyage-key-here
+
+# OR Azure OpenAI
+export AZURE_OPENAI_API_KEY=your-azure-key-here
+export AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
+
 docker-compose up
 ```
 
@@ -138,7 +149,9 @@ Edit `docker-compose.yml` and set the values directly:
 ```yaml
 environment:
   - OPENAI_API_KEY=sk-your-openai-key-here
-  - VOYAGE_API_KEY=your-voyage-key-here
+  # OR for Azure OpenAI:
+  # - AZURE_OPENAI_API_KEY=your-azure-key-here
+  # - AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
 ```
 
 **Note:** Without these API keys, the vector hacking attack will not start. You'll see an error message in the logs indicating that the target vector could not be initialized.
@@ -227,7 +240,7 @@ The vector_hacking example includes a **full-featured web application** with:
 4. **Queries Data** - Demonstrates find operations with automatic app scoping
 5. **Updates Data** - Shows how updates work with scoped database
 6. **Shows Health Status** - Displays engine health information via API
-7. **Vector Hacking** - Uses LLM service abstraction (LiteLLM) for chat completions and embeddings with concurrent asyncio processing
+7. **Vector Hacking** - Uses OpenAI SDK directly for chat completions and embeddings with concurrent asyncio processing
 
 ## Expected Output
 
@@ -306,115 +319,66 @@ db.experiments.find({
 })
 ```
 
-## LLM Usage via LiteLLM
+## LLM Usage
 
-This demo uses the **MDB_RUNTIME LLM Service abstraction** powered by [LiteLLM](https://docs.litellm.ai/) for all LLM interactions. This provides a unified, provider-agnostic interface for chat completions and embeddings.
+This demo uses the OpenAI SDK directly for LLM interactions. The code uses Azure OpenAI or standard OpenAI clients for chat completions and embeddings.
 
 ### Configuration
 
-LLM settings are configured in `manifest.json`:
+API keys are configured via environment variables:
 
-```json
-{
-  "llm_config": {
-    "enabled": true,
-    "default_chat_model": "gpt-3.5-turbo",
-    "default_embedding_model": "voyage/voyage-2",
-    "default_temperature": 0.8,
-    "max_retries": 4
-  }
-}
+```bash
+# For OpenAI
+OPENAI_API_KEY=your-openai-key
+
+# For Azure OpenAI
+AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
+AZURE_OPENAI_API_KEY=your-azure-key
+AZURE_OPENAI_DEPLOYMENT_NAME=gpt-4o
+
+# Embeddings use the same API keys as above (OpenAI or Azure OpenAI)
 ```
-
-### How It Works
-
-1. **RuntimeEngine Initialization**: When the app starts, `RuntimeEngine` reads the `llm_config` from `manifest.json` and automatically initializes an `LLMService` instance for the app.
-
-2. **Provider Routing**: LiteLLM handles provider routing based on the model prefix:
-   - `gpt-3.5-turbo`, `gpt-4o` → OpenAI
-   - `claude-3-opus-20240229` → Anthropic
-   - `voyage/voyage-2` → VoyageAI
-   - `text-embedding-3-small` → OpenAI
-   - `cohere/embed-english-v3.0` → Cohere
-
-3. **API Key Management**: LiteLLM automatically reads API keys from environment variables:
-   - `OPENAI_API_KEY` for OpenAI models
-   - `ANTHROPIC_API_KEY` for Anthropic models
-   - `VOYAGE_API_KEY` for VoyageAI embeddings
-   - `COHERE_API_KEY` for Cohere embeddings
 
 ### Usage in Vector Hacking Demo
 
-The demo uses the LLM service in two ways:
+The demo uses OpenAI SDK directly:
 
 #### 1. Chat Completions (Text Generation)
 
 ```python
 # In vector_hacking.py
-TEXT = await llm_service.chat(
-    messages,
-    model=llm_config.get("default_chat_model", "gpt-3.5-turbo"),
-    temperature=llm_config.get("default_temperature", 0.8),
+from openai import AzureOpenAI
+
+client = AzureOpenAI(...)
+response = client.chat.completions.create(
+    model="gpt-3.5-turbo",
+    messages=messages,
+    temperature=0.8,
     max_tokens=15
 )
 ```
 
-This generates text guesses for the vector inversion attack. The model is configurable via `manifest.json`.
+This generates text guesses for the vector inversion attack.
 
 #### 2. Embeddings (Vector Generation)
 
 ```python
-# In vector_hacking.py
-embedding_model = llm_config.get("default_embedding_model", "voyage/voyage-2")
-vectors = await llm_service.embed(TEXT, model=embedding_model)
+# Uses EmbeddingService which uses mem0 for embeddings
+from mdb_runtime.embeddings import EmbeddingService
+
+embedding_service = EmbeddingService(...)
+embeddings = await embedding_service.embed_chunks([text])
 ```
 
 This generates vector embeddings for both the target text and each guess, enabling distance calculations.
 
-### Switching Models
-
-To use different models, simply update `manifest.json`:
-
-```json
-{
-  "llm_config": {
-    "enabled": true,
-    "default_chat_model": "claude-3-opus-20240229",  // Switch to Claude
-    "default_embedding_model": "text-embedding-3-small",  // Switch to OpenAI embeddings
-    "default_temperature": 0.7,
-    "max_retries": 4
-  }
-}
-```
-
-No code changes required! The abstraction handles provider routing automatically.
-
-### Supported Models
-
-Via LiteLLM, you can use any of these models (and more):
-
-**Chat Models:**
-- OpenAI: `gpt-4o`, `gpt-3.5-turbo`, `gpt-4-turbo-preview`
-- Anthropic: `claude-3-opus-20240229`, `claude-3-sonnet-20240229`, `claude-3-haiku-20240307`
-- Google: `gemini/gemini-pro`, `gemini/gemini-pro-vision`
-- Meta: `meta-llama/Llama-3-8b-chat-hf`
-
-**Embedding Models:**
-- VoyageAI: `voyage/voyage-2`, `voyage/voyage-large-2` (default, SOTA)
-- OpenAI: `text-embedding-3-small`, `text-embedding-3-large`
-- Cohere: `cohere/embed-english-v3.0`, `cohere/embed-multilingual-v3.0`
-
-See [LiteLLM documentation](https://docs.litellm.ai/) for the complete list.
-
 ### Error Handling & Retries
 
-The LLM service automatically handles:
+The demo includes retry logic for:
 - **Rate Limits**: Exponential backoff retry
-- **Transient Errors**: Automatic retries (configurable via `max_retries`)
+- **Transient Errors**: Automatic retries
 - **Timeout Errors**: Retry with backoff
 - **Service Unavailable**: Graceful degradation
-
-All retry logic is handled transparently - you don't need to implement it yourself.
 
 ### Cost Tracking
 
@@ -423,23 +387,11 @@ The demo tracks costs for each API call:
 - Embeddings: ~$0.0001 per request
 - Total cost accumulates and displays in real-time in the UI
 
-### Benefits of the Abstraction
-
-1. **Provider Agnostic**: Switch between OpenAI, Anthropic, VoyageAI without code changes
-2. **Resilient**: Built-in retry logic for rate limits and transient errors
-3. **Observable**: Structured logging for latency, model usage, and costs
-4. **Type Safe**: Optional structured extraction via Instructor + Pydantic
-5. **Configurable**: All settings in `manifest.json`, no hardcoded values
-
-### Advanced Usage
-
-For more advanced features (structured extraction, batch processing, etc.), see the [LLM Service documentation](../../mdb_runtime/llm/README.md).
-
 ## Vector Hacking Details
 
 ### How It Works
 
-1. **Target Vector**: A target text ("Be mindful") is embedded into a vector using Voyage AI
+1. **Target Vector**: A target text ("Be mindful") is embedded into a vector using OpenAI/AzureOpenAI
 2. **LLM Guessing**: An LLM (GPT-3.5-turbo) generates guesses for what the text might be
 3. **Error Calculation**: Each guess is embedded and compared to the target vector
 4. **Iterative Improvement**: The LLM uses feedback (error values) to improve guesses
@@ -459,7 +411,7 @@ The attack parameters can be modified in `vector_hacking.py`:
 - `TARGET`: The target text to reverse-engineer
 - `MATCH_ERROR`: Error threshold for success (default: 0.4)
 - `COST_LIMIT`: Maximum cost before stopping (default: 60.0)
-- `VOYAGE_MODEL`: Embedding model to use (default: "voyage-2")
+- `default_embedding_model`: Embedding model to use (default: "text-embedding-3-small", configured in manifest.json)
 - `NUM_PARALLEL_GUESSES`: Number of parallel guesses per iteration (default: 3)
 
 ## Docker Compose Services
@@ -471,7 +423,7 @@ The `docker-compose.yml` file includes:
 - **Purpose:** Runs the vector_hacking example
 - **Build:** Automatically builds from Dockerfile
 - **Dependencies:** Waits for MongoDB to be healthy
-- **API Keys:** Requires OPENAI_API_KEY and VOYAGE_API_KEY
+- **API Keys:** Requires OPENAI_API_KEY (or AZURE_OPENAI_API_KEY + AZURE_OPENAI_ENDPOINT)
 
 ### MongoDB
 - **Port:** 27017
@@ -493,7 +445,7 @@ Docker Compose automatically loads environment variables from a `.env` file in t
 ```bash
 # Required for vector hacking features
 OPENAI_API_KEY=your_key_here
-VOYAGE_API_KEY=your_key_here
+# Use OPENAI_API_KEY or AZURE_OPENAI_API_KEY (see above)
 
 # Optional: Override other settings
 APP_PORT=8000
@@ -631,8 +583,8 @@ docker-compose up --build
 
 Vector inversion is a security demonstration showing how embeddings can potentially be reverse-engineered. This example uses:
 
-- **LiteLLM** for provider-agnostic LLM access (via MDB_RUNTIME LLM Service)
-- **Voyage AI** for generating embeddings (default, configurable)
+- **OpenAI SDK** for direct LLM access (Azure OpenAI or standard OpenAI)
+- **OpenAI/AzureOpenAI** for generating embeddings (via EmbeddingService, auto-detected from env vars)
 - **OpenAI GPT-3.5-turbo** for generating guesses (default, configurable)
 - **MDB_RUNTIME** for data persistence and app scoping
 - **Asyncio** for concurrent processing

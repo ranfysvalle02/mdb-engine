@@ -156,3 +156,23 @@ MONGO_URI: str = os.getenv("MONGO_URI", "")
 DB_NAME: str = os.getenv("DB_NAME", "")
 """Database name (from environment variable)."""
 
+# ============================================================================
+# TOKEN MANAGEMENT CONFIGURATION
+# ============================================================================
+
+# Token lifetimes (can be overridden via environment variables)
+ACCESS_TOKEN_TTL: int = int(os.getenv("ACCESS_TOKEN_TTL", "900"))  # 15 minutes
+"""Access token TTL in seconds (default: 900 / 15 minutes)."""
+
+REFRESH_TOKEN_TTL: int = int(os.getenv("REFRESH_TOKEN_TTL", "604800"))  # 7 days
+"""Refresh token TTL in seconds (default: 604800 / 7 days)."""
+
+TOKEN_ROTATION_ENABLED: bool = os.getenv("TOKEN_ROTATION_ENABLED", "true").lower() == "true"
+"""Whether to rotate refresh tokens on each use (default: true)."""
+
+MAX_SESSIONS_PER_USER: int = int(os.getenv("MAX_SESSIONS_PER_USER", "10"))
+"""Maximum number of concurrent sessions per user (default: 10)."""
+
+SESSION_INACTIVITY_TIMEOUT: int = int(os.getenv("SESSION_INACTIVITY_TIMEOUT", "1800"))  # 30 minutes
+"""Session inactivity timeout in seconds (default: 1800 / 30 minutes)."""
+

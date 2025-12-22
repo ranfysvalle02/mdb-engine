@@ -40,8 +40,8 @@ The biggest pain point in multi-app (or even single-app) development is data iso
 await db.tasks.find({}).to_list(length=10)
 
 # THE ENGINE EXECUTES THIS (Secure, Scoped Query):
-# Collection: task_manager_tasks
-# Query: {"app_id": "task_manager"}
+# Collection: conversations
+# Query: {"app_id": "conversations"}
 
 ```
 
@@ -77,8 +77,8 @@ Create `manifest.json` in your project root.
 
 ```json
 {
-  "slug": "task_manager",
-  "name": "My Task App",
+  "slug": "conversations",
+  "name": "My Chat App",
   "auth_required": true,
   "managed_indexes": {
     "tasks": [{ "keys": {"priority": -1}, "name": "priority_idx" }]
@@ -108,8 +108,8 @@ async def startup():
 # 3. Use the Scoped Database
 @app.post("/tasks")
 async def create_task(task: dict):
-    # This DB instance is physically and logically sandboxed to 'task_manager'
-    db = engine.get_scoped_db("task_manager")
+    # This DB instance is physically and logically sandboxed to 'conversations'
+    db = engine.get_scoped_db("conversations")
     
     # Auto-tagged with app_id; indexes auto-managed
     result = await db.tasks.insert_one(task)
@@ -154,7 +154,7 @@ MDB_RUNTIME is an incubator, not a cage. Because all data is tagged with `app_id
 
 1. **Dump:** Use `mongodump` with a query filter:
 ```bash
-mongodump --query='{"app_id":"task_manager"}' --out=./export
+mongodump --query='{"app_id":"conversations"}' --out=./export
 
 ```
 

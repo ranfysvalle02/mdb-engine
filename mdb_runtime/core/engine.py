@@ -8,7 +8,7 @@ The core orchestration engine for MDB_RUNTIME that manages:
 - Index management
 - Resource lifecycle
 
-This module is part of MDB_RUNTIME - MongoDB Multi-Tenant Runtime Engine.
+This module is part of MDB_RUNTIME - MongoDB Runtime Engine.
 """
 
 import os
@@ -97,7 +97,7 @@ class RuntimeEngine:
         self._mongo_db: Optional[AsyncIOMotorDatabase] = None
         self._initialized: bool = False
         self._apps: Dict[str, Dict[str, Any]] = {}
-        self._llm_services: Dict[str, Any] = {}  # App slug -> LLMService instance
+        self._memory_services: Dict[str, Any] = {}  # App slug -> Mem0MemoryService instance
         
         # Validators
         self.manifest_validator = ManifestValidator()
@@ -418,14 +418,21 @@ class RuntimeEngine:
             # Store app config
             self._apps[slug] = manifest
             
+            # Invalidate auth config cache for this app
+            try:
+                from ..auth.integration import invalidate_auth_config_cache
+                invalidate_auth_config_cache(slug)
+            except Exception as e:
+                logger.debug(f"Could not invalidate auth config cache for {slug}: {e}")
+            
             # Create indexes if requested
             if create_indexes and "managed_indexes" in manifest:
                 await self._create_app_indexes(slug, manifest)
             
-            # Initialize LLM service if configured
-            llm_config = manifest.get("llm_config")
-            if llm_config and llm_config.get("enabled", False):
-                await self._initialize_llm_service(slug, llm_config)
+            # Initialize Memory service if configured (works standalone with MongoDB, configured via .env)
+            memory_config = manifest.get("memory_config")
+            if memory_config and memory_config.get("enabled", False):
+                await self._initialize_memory_service(slug, memory_config)
             
             duration_ms = (time.time() - start_time) * 1000
             # Register WebSocket endpoints if configured
@@ -433,13 +440,18 @@ class RuntimeEngine:
             if websockets_config:
                 await self._register_websockets(slug, websockets_config)
             
+            # Set up observability (health checks, metrics, logging)
+            observability_config = manifest.get("observability", {})
+            if observability_config:
+                await self._setup_observability(slug, manifest, observability_config)
+            
             record_operation("engine.register_app", duration_ms, success=True, app_slug=slug)
             contextual_logger.info(
                 "App registered successfully",
                 extra={
                     "app_slug": slug,
                     "create_indexes": create_indexes,
-                    "llm_enabled": bool(llm_config and llm_config.get("enabled", False)),
+                    "memory_enabled": bool(memory_config and memory_config.get("enabled", False)),
                     "websockets_configured": bool(websockets_config),
                     "duration_ms": round(duration_ms, 2),
                 }
@@ -448,64 +460,92 @@ class RuntimeEngine:
         finally:
             clear_app_context()
     
-    async def _initialize_llm_service(
+    async def _initialize_memory_service(
         self,
         slug: str,
-        llm_config: Dict[str, Any]
+        memory_config: Dict[str, Any]
     ) -> None:
         """
-        Initialize LLM service for an app.
+        Initialize Mem0 memory service for an app.
         
-        LLM support is OPTIONAL - only processes if dependencies are available.
+        Memory support is OPTIONAL - only processes if dependencies are available.
+        mem0 handles embeddings and LLM via environment variables (.env).
         
         Args:
             slug: App slug
-            llm_config: LLM configuration from manifest
+            memory_config: Memory configuration from manifest (already validated)
         """
-        # Try to import LLM service (optional dependency)
+        
+        # Try to import Memory service (optional dependency)
         try:
-            from ..llm import LLMService, LLMServiceError
+            from ..memory import Mem0MemoryService, Mem0MemoryServiceError
         except ImportError as e:
             contextual_logger.warning(
-                f"LLM configuration found for app '{slug}' but dependencies are not available: {e}. "
-                f"LLM support will be disabled for this app. Install with: "
-                f"pip install litellm instructor pydantic pydantic-settings tenacity"
+                f"Memory configuration found for app '{slug}' but dependencies are not available: {e}. "
+                f"Memory support will be disabled for this app. Install with: "
+                f"pip install mem0ai"
             )
             return
         
         contextual_logger.info(
-            f"Initializing LLM service for app '{slug}'",
+            f"Initializing Mem0 memory service for app '{slug}'",
             extra={
                 "app_slug": slug,
-                "default_chat_model": llm_config.get("default_chat_model", "gpt-4o"),
-                "default_embedding_model": llm_config.get("default_embedding_model", "voyage/voyage-2")
+                "collection_name": memory_config.get("collection_name", f"{slug}_memories"),
+                "enable_graph": memory_config.get("enable_graph", False),
+                "embedding_model_dims": memory_config.get("embedding_model_dims", 1536),
+                "infer": memory_config.get("infer", True)
             }
         )
         
         try:
-            # Create LLM service with app-specific configuration
-            # Extract only the config fields we want to pass (exclude 'enabled')
+            # Extract memory config (exclude 'enabled')
+            # Also include embedding_model, chat_model, temperature from memory_config if provided
             service_config = {
-                k: v for k, v in llm_config.items() 
-                if k != "enabled" and k in ["default_chat_model", "default_embedding_model", "default_temperature", "max_retries"]
+                k: v for k, v in memory_config.items() 
+                if k != "enabled" and k in [
+                    "collection_name", "embedding_model_dims", "enable_graph", 
+                    "infer", "async_mode", "embedding_model", "chat_model", "temperature"
+                ]
             }
             
-            llm_service = LLMService(config=service_config)
-            self._llm_services[slug] = llm_service
+            # Set default collection name if not provided
+            if "collection_name" not in service_config:
+                service_config["collection_name"] = f"{slug}_memories"
+            else:
+                # Ensure collection name is prefixed with app slug (as per manifest description)
+                # This ensures mem0 uses the same collection naming convention as mdb-runtime
+                collection_name = service_config["collection_name"]
+                if not collection_name.startswith(f"{slug}_"):
+                    service_config["collection_name"] = f"{slug}_{collection_name}"
+                    contextual_logger.info(
+                        f"Prefixed memory collection name: '{collection_name}' -> '{service_config['collection_name']}'",
+                        extra={"app_slug": slug, "original": collection_name, "prefixed": service_config["collection_name"]}
+                    )
+            
+            # Create Memory service with MongoDB integration
+            # mem0 handles embeddings and LLM via environment variables (.env)
+            memory_service = Mem0MemoryService(
+                mongo_uri=self.mongo_uri,
+                db_name=self.db_name,
+                app_slug=slug,
+                config=service_config
+            )
+            self._memory_services[slug] = memory_service
             
             contextual_logger.info(
-                f"LLM service initialized for app '{slug}'",
+                f"Mem0 memory service initialized for app '{slug}'",
                 extra={"app_slug": slug}
             )
-        except LLMServiceError as e:
+        except Mem0MemoryServiceError as e:
             contextual_logger.error(
-                f"Failed to initialize LLM service for app '{slug}': {e}",
+                f"Failed to initialize memory service for app '{slug}': {e}",
                 extra={"app_slug": slug, "error": str(e)},
                 exc_info=True
             )
         except Exception as e:
             contextual_logger.error(
-                f"Unexpected error initializing LLM service for app '{slug}': {e}",
+                f"Unexpected error initializing memory service for app '{slug}': {e}",
                 extra={"app_slug": slug, "error": str(e)},
                 exc_info=True
             )
@@ -550,7 +590,12 @@ class RuntimeEngine:
         # Pre-initialize WebSocket managers
         for endpoint_name, endpoint_config in websockets_config.items():
             path = endpoint_config.get("path", f"/{endpoint_name}")
-            manager = get_websocket_manager(slug)
+            # get_websocket_manager is async, so we need to await it
+            try:
+                manager = await get_websocket_manager(slug)
+            except Exception as e:
+                contextual_logger.warning(f"Could not initialize WebSocket manager for {slug}: {e}")
+                continue
             contextual_logger.debug(
                 f"Configured WebSocket endpoint '{endpoint_name}' at path '{path}'",
                 extra={"app_slug": slug, "endpoint": endpoint_name, "path": path}
@@ -789,6 +834,68 @@ class RuntimeEngine:
             logger.error(f"❌ Error reloading apps: {e}", exc_info=True)
             return 0
     
+    async def _setup_observability(
+        self,
+        slug: str,
+        manifest: Dict[str, Any],
+        observability_config: Dict[str, Any]
+    ) -> None:
+        """
+        Set up observability features (health checks, metrics, logging) from manifest.
+        
+        Args:
+            slug: App slug
+            manifest: Full manifest dictionary
+            observability_config: Observability configuration from manifest
+        """
+        try:
+            # Set up health checks
+            health_config = observability_config.get("health_checks", {})
+            if health_config.get("enabled", True):
+                # Health check endpoint will be registered by the app itself
+                # We just log the configuration
+                endpoint = health_config.get("endpoint", "/health")
+                contextual_logger.info(
+                    f"Health checks configured for {slug}",
+                    extra={
+                        "endpoint": endpoint,
+                        "interval_seconds": health_config.get("interval_seconds", 30)
+                    }
+                )
+            
+            # Set up metrics
+            metrics_config = observability_config.get("metrics", {})
+            if metrics_config.get("enabled", True):
+                contextual_logger.info(
+                    f"Metrics collection configured for {slug}",
+                    extra={
+                        "operation_metrics": metrics_config.get("collect_operation_metrics", True),
+                        "performance_metrics": metrics_config.get("collect_performance_metrics", True),
+                        "custom_metrics": metrics_config.get("custom_metrics", [])
+                    }
+                )
+            
+            # Set up logging
+            logging_config = observability_config.get("logging", {})
+            if logging_config:
+                log_level = logging_config.get("level", "INFO")
+                log_format = logging_config.get("format", "json")
+                contextual_logger.info(
+                    f"Logging configured for {slug}",
+                    extra={
+                        "level": log_level,
+                        "format": log_format,
+                        "include_request_id": logging_config.get("include_request_id", True)
+                    }
+                )
+                # Note: Actual logging configuration would be applied by the app's startup code
+                
+        except Exception as e:
+            contextual_logger.warning(
+                f"Could not set up observability for {slug}: {e}",
+                exc_info=True
+            )
+    
     def get_app(self, slug: str) -> Optional[Dict[str, Any]]:
         """
         Get app configuration by slug.
@@ -801,24 +908,66 @@ class RuntimeEngine:
         """
         return self._apps.get(slug)
     
-    def get_llm_service(self, slug: str) -> Optional[Any]:
+    async def get_manifest(self, slug: str) -> Optional[Dict[str, Any]]:
         """
-        Get LLM service for an app.
+        Get app manifest by slug (async alias for get_app).
         
         Args:
             slug: App slug
         
         Returns:
-            LLMService instance if LLM is enabled for this app, None otherwise
+            App manifest dict or None if not found
+        """
+        return self._apps.get(slug)
+    
+    def get_database(self) -> AsyncIOMotorDatabase:
+        """
+        Get the MongoDB database instance.
+        
+        Returns:
+            AsyncIOMotorDatabase instance
+        """
+        return self.mongo_db
+    
+    def get_memory_service(self, slug: str) -> Optional[Any]:
+        """
+        Get Mem0 memory service for an app.
+        
+        Args:
+            slug: App slug
+        
+        Returns:
+            Mem0MemoryService instance if memory is enabled for this app, None otherwise
             
         Example:
             ```python
-            llm_service = engine.get_llm_service("my_app")
-            if llm_service:
-                response = await llm_service.chat("Hello, world!")
+            memory_service = engine.get_memory_service("my_app")
+            if memory_service:
+                memories = memory_service.add(
+                    messages=[{"role": "user", "content": "I love sci-fi movies"}],
+                    user_id="alice"
+                )
             ```
         """
-        return self._llm_services.get(slug)
+        try:
+            service = self._memory_services.get(slug)
+            # Verify the service is still valid (has required attributes)
+            if service is not None:
+                # Quick health check - ensure it has the memory attribute
+                if not hasattr(service, 'memory'):
+                    contextual_logger.warning(
+                        f"Memory service for '{slug}' is missing 'memory' attribute, returning None",
+                        extra={"app_slug": slug}
+                    )
+                    return None
+            return service
+        except Exception as e:
+            contextual_logger.error(
+                f"Error retrieving memory service for '{slug}': {e}",
+                exc_info=True,
+                extra={"app_slug": slug, "error": str(e)}
+            )
+            return None
     
     def list_apps(self) -> List[str]:
         """
@@ -856,7 +1005,7 @@ class RuntimeEngine:
         self._initialized = False
         app_count = len(self._apps)
         self._apps.clear()
-        self._llm_services.clear()
+        self._memory_services.clear()
         
         duration_ms = (time.time() - start_time) * 1000
         record_operation("engine.shutdown", duration_ms, success=True)

@@ -3,19 +3,23 @@ FastAPI Authentication and Authorization Dependencies
 
 Provides FastAPI dependency functions for authentication and authorization.
 
-This module is part of MDB_RUNTIME - MongoDB Multi-Tenant Runtime Engine.
+This module is part of MDB_RUNTIME - MongoDB Runtime Engine.
 """
 
 import os
+import uuid
 import logging
-from typing import Optional, Dict, Any, Mapping, List, Callable
+from typing import Optional, Dict, Any, Mapping, List, Callable, Tuple
+from datetime import datetime, timedelta
 
 import jwt
 from fastapi import Request, Depends, HTTPException, status, Cookie
 
 # Import from local modules
 from .provider import AuthorizationProvider
-from .jwt import decode_jwt_token
+from .jwt import decode_jwt_token, extract_token_metadata
+from .token_store import TokenBlacklist
+from .session_manager import SessionManager
 
 logger = logging.getLogger(__name__)
 
@@ -62,18 +66,69 @@ async def get_authz_provider(request: Request) -> AuthorizationProvider:
     return provider
 
 
+async def get_token_blacklist(request: Request) -> Optional[TokenBlacklist]:
+    """
+    FastAPI Dependency: Retrieves token blacklist from app.state.
+    
+    Returns None if blacklist is not configured (backward compatibility).
+    """
+    blacklist = getattr(request.app.state, "token_blacklist", None)
+    return blacklist
+
+
+async def get_session_manager(request: Request) -> Optional[SessionManager]:
+    """
+    FastAPI Dependency: Retrieves session manager from app.state.
+    
+    Returns None if session manager is not configured (backward compatibility).
+    """
+    session_mgr = getattr(request.app.state, "session_manager", None)
+    return session_mgr
+
+
 async def get_current_user(
+    request: Request,
     token: Optional[str] = Cookie(default=None),
 ) -> Optional[Dict[str, Any]]:
     """
     FastAPI Dependency: Decodes and validates the JWT stored in the 'token' cookie.
+    
+    Enhanced with token blacklist checking if blacklist is available.
     """
     if not token:
         logger.debug("get_current_user: No 'token' cookie found.")
         return None
 
     try:
+        # Extract token metadata first to get jti
+        metadata = extract_token_metadata(token, SECRET_KEY)
+        jti = metadata.get("jti") if metadata else None
+        
+        # Check blacklist if available
+        if jti:
+            blacklist = await get_token_blacklist(request)
+            if blacklist:
+                is_revoked = await blacklist.is_revoked(jti)
+                if is_revoked:
+                    logger.info(f"get_current_user: Token {jti} is blacklisted (revoked)")
+                    return None
+                
+                # Also check user-level revocation
+                user_id = metadata.get("user_id") or metadata.get("email")
+                if user_id:
+                    user_revoked = await blacklist.is_user_revoked(user_id)
+                    if user_revoked:
+                        logger.info(f"get_current_user: All tokens for user {user_id} are revoked")
+                        return None
+        
         payload = decode_jwt_token(token, SECRET_KEY)
+        
+        # Verify token type (should be access token for backward compatibility, or no type)
+        token_type = payload.get("type")
+        if token_type and token_type not in ("access", None):
+            logger.warning(f"get_current_user: Invalid token type '{token_type}' for access token")
+            return None
+        
         logger.debug(
             f"get_current_user: Token successfully decoded for user '{payload.get('email', 'N/A')}'."
         )
@@ -108,7 +163,35 @@ async def get_current_user_from_request(request: Request) -> Optional[Dict[str, 
         return None
     
     try:
+        # Extract token metadata first to get jti
+        metadata = extract_token_metadata(token, SECRET_KEY)
+        jti = metadata.get("jti") if metadata else None
+        
+        # Check blacklist if available
+        if jti:
+            blacklist = await get_token_blacklist(request)
+            if blacklist:
+                is_revoked = await blacklist.is_revoked(jti)
+                if is_revoked:
+                    logger.info(f"get_current_user_from_request: Token {jti} is blacklisted (revoked)")
+                    return None
+                
+                # Also check user-level revocation
+                user_id = metadata.get("user_id") or metadata.get("email")
+                if user_id:
+                    user_revoked = await blacklist.is_user_revoked(user_id)
+                    if user_revoked:
+                        logger.info(f"get_current_user_from_request: All tokens for user {user_id} are revoked")
+                        return None
+        
         payload = decode_jwt_token(token, SECRET_KEY)
+        
+        # Verify token type (should be access token for backward compatibility, or no type)
+        token_type = payload.get("type")
+        if token_type and token_type not in ("access", None):
+            logger.warning(f"get_current_user_from_request: Invalid token type '{token_type}' for access token")
+            return None
+        
         logger.debug(
             f"get_current_user_from_request: Token successfully decoded for user '{payload.get('email', 'N/A')}'."
         )
@@ -122,6 +205,86 @@ async def get_current_user_from_request(request: Request) -> Optional[Dict[str, 
     except Exception as e:
         logger.error(
             f"get_current_user_from_request: Unexpected error decoding JWT: {e}", exc_info=True
+        )
+        return None
+
+
+async def get_refresh_token(
+    request: Request,
+    refresh_token: Optional[str] = Cookie(default=None),
+) -> Optional[Dict[str, Any]]:
+    """
+    FastAPI Dependency: Validates refresh token from cookie.
+    
+    Args:
+        request: FastAPI Request object
+        refresh_token: Refresh token from cookie (default cookie name: 'refresh_token')
+    
+    Returns:
+        Decoded refresh token payload or None if invalid
+    """
+    if not refresh_token:
+        # Try alternative cookie name
+        refresh_token = request.cookies.get("refresh_token")
+        if not refresh_token:
+            logger.debug("get_refresh_token: No refresh token cookie found.")
+            return None
+    
+    try:
+        # Extract token metadata first
+        metadata = extract_token_metadata(refresh_token, SECRET_KEY)
+        jti = metadata.get("jti") if metadata else None
+        
+        # Check blacklist if available
+        if jti:
+            blacklist = await get_token_blacklist(request)
+            if blacklist:
+                is_revoked = await blacklist.is_revoked(jti)
+                if is_revoked:
+                    logger.info(f"get_refresh_token: Refresh token {jti} is blacklisted")
+                    return None
+        
+        payload = decode_jwt_token(refresh_token, SECRET_KEY)
+        
+        # Verify token type
+        token_type = payload.get("type")
+        if token_type != "refresh":
+            logger.warning(f"get_refresh_token: Invalid token type '{token_type}' for refresh token")
+            return None
+        
+        # Check session if available
+        session_mgr = await get_session_manager(request)
+        if session_mgr and jti:
+            session = await session_mgr.get_session_by_refresh_token(jti)
+            if not session or not session.get("active"):
+                logger.info(f"get_refresh_token: Session not found or inactive for refresh token {jti}")
+                return None
+            
+            # Validate session fingerprint if enabled
+            from .config_helpers import get_session_fingerprinting_config
+            fingerprinting_config = get_session_fingerprinting_config(request)
+            if fingerprinting_config.get("enabled", True) and fingerprinting_config.get("validate_on_refresh", True):
+                stored_fingerprint = session.get("session_fingerprint")
+                if stored_fingerprint:
+                    from .utils import generate_session_fingerprint
+                    device_id = request.cookies.get("device_id") or payload.get("device_id")
+                    if device_id:
+                        current_fingerprint = generate_session_fingerprint(request, device_id)
+                        if current_fingerprint != stored_fingerprint:
+                            logger.warning(f"get_refresh_token: Session fingerprint mismatch for refresh token {jti}")
+                            return None
+        
+        logger.debug(f"get_refresh_token: Refresh token validated for user '{payload.get('email', 'N/A')}'")
+        return payload
+    except jwt.ExpiredSignatureError:
+        logger.info("get_refresh_token: Refresh token has expired.")
+        return None
+    except jwt.InvalidTokenError as e:
+        logger.warning(f"get_refresh_token: Invalid refresh token: {e}")
+        return None
+    except Exception as e:
+        logger.error(
+            f"get_refresh_token: Unexpected error decoding refresh token: {e}", exc_info=True
         )
         return None
 
@@ -326,4 +489,139 @@ def require_permission(obj: str, act: str, force_login: bool = True):
 # Note: require_experiment_access and require_experiment_ownership_or_admin
 # are large functions that depend on get_experiment_config from the application layer.
 # They will be extracted in a follow-up step or can be imported from the application layer.
+
+
+async def refresh_access_token(
+    request: Request,
+    refresh_token_payload: Dict[str, Any],
+    device_info: Optional[Dict[str, Any]] = None
+) -> Optional[Tuple[str, str, Dict[str, Any]]]:
+    """
+    Refresh an access token using a valid refresh token.
+    
+    This function:
+    1. Validates the refresh token
+    2. Checks session status
+    3. Generates new token pair (with rotation if enabled)
+    4. Updates session activity
+    5. Revokes old refresh token if rotation is enabled
+    
+    Args:
+        request: FastAPI Request object
+        refresh_token_payload: Decoded refresh token payload
+        device_info: Optional device information for new tokens
+    
+    Returns:
+        Tuple of (access_token, refresh_token, metadata) or None if refresh failed
+    """
+    try:
+        from .jwt import generate_token_pair
+        from ..config import TOKEN_ROTATION_ENABLED
+        
+        user_id = refresh_token_payload.get("user_id") or refresh_token_payload.get("email")
+        old_refresh_jti = refresh_token_payload.get("jti")
+        device_id = refresh_token_payload.get("device_id")
+        
+        if not user_id:
+            logger.warning("refresh_access_token: No user_id in refresh token")
+            return None
+        
+        # Check session if available
+        session_mgr = await get_session_manager(request)
+        session = None
+        if session_mgr:
+            session = await session_mgr.get_session_by_refresh_token(old_refresh_jti)
+            if not session or not session.get("active"):
+                logger.warning(f"refresh_access_token: Session not found or inactive for {old_refresh_jti}")
+                return None
+            
+            # Validate session fingerprint if enabled
+            from .config_helpers import get_session_fingerprinting_config
+            fingerprinting_config = get_session_fingerprinting_config(request)
+            if fingerprinting_config.get("enabled", True) and fingerprinting_config.get("validate_on_refresh", True):
+                stored_fingerprint = session.get("session_fingerprint")
+                if stored_fingerprint:
+                    from .utils import generate_session_fingerprint
+                    device_id = device_id or request.cookies.get("device_id")
+                    if device_id:
+                        current_fingerprint = generate_session_fingerprint(request, device_id)
+                        if current_fingerprint != stored_fingerprint:
+                            logger.warning(f"refresh_access_token: Session fingerprint mismatch for user {user_id}")
+                            return None
+        
+        # Prepare user data for new tokens
+        user_data = {
+            "user_id": user_id,
+            "email": refresh_token_payload.get("email"),
+        }
+        
+        # Use existing device_id or generate new one
+        if not device_id:
+            device_id = str(uuid.uuid4()) if not device_info else device_info.get("device_id")
+        
+        if device_info:
+            device_info["device_id"] = device_id
+        else:
+            device_info = {"device_id": device_id}
+        
+        # Generate new token pair
+        access_token, new_refresh_token, token_metadata = generate_token_pair(
+            user_data,
+            SECRET_KEY,
+            device_info=device_info
+        )
+        
+        # If rotation enabled, revoke old refresh token
+        if TOKEN_ROTATION_ENABLED and old_refresh_jti:
+            blacklist = await get_token_blacklist(request)
+            if blacklist:
+                # Get expiry from old token
+                from ..config import REFRESH_TOKEN_TTL
+                expires_at = datetime.utcnow() + timedelta(seconds=REFRESH_TOKEN_TTL)
+                await blacklist.revoke_token(
+                    old_refresh_jti,
+                    user_id=user_id,
+                    expires_at=expires_at,
+                    reason="token_rotation"
+                )
+            
+            # Revoke old session if rotation enabled
+            if session_mgr:
+                await session_mgr.revoke_session_by_refresh_token(old_refresh_jti)
+        
+        # Create or update session with new refresh token
+        if session_mgr:
+            new_refresh_jti = token_metadata.get("refresh_jti")
+            ip_address = request.client.host if request.client else None
+            
+            from .utils import generate_session_fingerprint
+            new_fingerprint = generate_session_fingerprint(request, device_id) if device_id else None
+            
+            if old_refresh_jti and TOKEN_ROTATION_ENABLED:
+                update_data = {
+                    "refresh_jti": new_refresh_jti,
+                    "last_seen": datetime.utcnow(),
+                    "ip_address": ip_address
+                }
+                if new_fingerprint:
+                    update_data["session_fingerprint"] = new_fingerprint
+                await session_mgr.collection.update_one(
+                    {"refresh_jti": old_refresh_jti},
+                    {"$set": update_data}
+                )
+            else:
+                await session_mgr.create_session(
+                    user_id=user_id,
+                    device_id=device_id,
+                    refresh_jti=new_refresh_jti,
+                    device_info=device_info,
+                    ip_address=ip_address,
+                    session_fingerprint=new_fingerprint
+                )
+        
+        logger.debug(f"refresh_access_token: New tokens generated for user {user_id}")
+        return access_token, new_refresh_token, token_metadata
+    except Exception as e:
+        logger.error(f"refresh_access_token: Error refreshing token: {e}", exc_info=True)
+        return None
 

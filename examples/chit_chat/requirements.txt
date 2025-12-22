@@ -1,0 +1,24 @@
+# Requirements for ChitChat Example
+# Install MDB_RUNTIME first: pip install mdb-runtime
+# Or install from source: pip install -e ../..
+
+mdb-runtime>=0.1.0
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+jinja2>=3.1.2
+python-multipart>=0.0.6
+bcrypt>=4.0.1
+pydantic>=2.0.0
+python-dateutil>=2.8.2
+
+# AI/LLM Dependencies (install at least one provider)
+# OpenAI (recommended)
+openai>=1.12.0
+# Anthropic (alternative)
+anthropic>=0.18.0
+# Ollama (for local/self-hosted)
+# Note: Ollama uses OpenAI-compatible API, so openai package works
+
+# Demo seeding script
+aiohttp>=3.9.0
+

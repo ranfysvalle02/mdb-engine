@@ -1,10 +1,10 @@
 # MDB_RUNTIME Package Documentation
 
-MongoDB Multi-Tenant Runtime Engine - Package-level documentation.
+MongoDB Runtime Engine - Package-level documentation.
 
 ## Package Overview
 
-MDB_RUNTIME provides a complete runtime engine for building multi-tenant MongoDB applications with automatic data isolation, authentication, and resource management.
+MDB_RUNTIME provides a complete runtime engine for building MongoDB applications with automatic data isolation, authentication, and resource management.
 
 ## Core Modules
 

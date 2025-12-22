@@ -3,7 +3,7 @@ Authorization Provider Interface
 
 Defines the pluggable Authorization (AuthZ) interface for the platform.
 
-This module is part of MDB_RUNTIME - MongoDB Multi-Tenant Runtime Engine.
+This module is part of MDB_RUNTIME - MongoDB Runtime Engine.
 """
 
 from __future__ import annotations # MUST be the first import for string type hints

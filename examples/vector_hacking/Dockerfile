@@ -97,7 +97,7 @@ RUN echo "=== Verifying installation in runtime stage ===" && \
 
 # Install vector hacking dependencies
 RUN echo "=== Installing vector hacking dependencies ===" && \
-    pip install --no-cache-dir numpy litellm instructor pydantic pydantic-settings tenacity && \
+    pip install --no-cache-dir numpy instructor pydantic pydantic-settings tenacity && \
     echo "=== Dependencies installed ==="
 
 # Switch to non-root user

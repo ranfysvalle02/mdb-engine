@@ -5,22 +5,14 @@ This module demonstrates vector inversion attacks using the LLM service abstract
 All LLM interactions (chat completions and embeddings) go through the unified
 LLM service interface configured via manifest.json.
 
-Configuration (manifest.json):
-    {
-      "llm_config": {
-        "enabled": true,
-        "default_chat_model": "gpt-3.5-turbo",
-        "default_embedding_model": "voyage/voyage-2",
-        "default_temperature": 0.8,
-        "max_retries": 4
-      }
-    }
+Configuration:
+    LLM and embedding models are configured via environment variables:
+    - OPENAI_API_KEY or AZURE_OPENAI_API_KEY for chat completions and embeddings
+    - Embedding model can be configured in manifest.json embedding_config section
 
 Usage:
-    The LLM service is automatically initialized by RuntimeEngine from manifest.json
-    and passed to VectorHackingService. All LLM calls use the abstraction:
-    - llm_service.chat() for text generation
-    - llm_service.embed() for vector embeddings
+    The code uses OpenAI SDK directly for chat completions and EmbeddingService
+    (via mem0) for embeddings. All LLM calls use direct API clients.
 """
 import logging
 import time
@@ -42,9 +34,9 @@ TEXT_SIMILARITY_THRESHOLD = 0.85  # Text similarity threshold (0-1, higher = str
 COST_LIMIT = 100.0  # Maximum cost before stopping
 
 # LLM Configuration:
-# All LLM models and settings are configured via manifest.json llm_config section.
-# The LLM service abstraction handles provider routing (OpenAI, Anthropic, VoyageAI, etc.)
-# via LiteLLM, so you can switch models by changing the manifest.json config. 
+# All LLM models and settings are configured via environment variables.
+# The code uses OpenAI SDK directly (Azure OpenAI or standard OpenAI) for chat completions.
+# Embeddings are handled via EmbeddingService which uses mem0. 
 
 # Experiment-local paths
 experiment_dir = pathlib.Path(__file__).parent
@@ -140,23 +132,24 @@ class SharedState:
                 'STAGNATION_COUNT': self.STAGNATION_COUNT
             }
 
-async def generate_and_evaluate_guess(v_target, shared_state, llm_service, llm_config, target_hint=None):
+async def generate_and_evaluate_guess(v_target, shared_state, openai_client, embedding_service, deployment_name: str, embedding_model: str, temperature: float = 0.8, target_hint=None):
     """
-    Generate and evaluate a guess using the LLM service abstraction.
+    Generate and evaluate a guess using direct Azure OpenAI client and EmbeddingService.
     
-    This function demonstrates the LLM service abstraction:
-    - Uses llm_service.chat() for text generation (configured via manifest.json)
-    - Uses llm_service.embed() for vector embeddings (configured via manifest.json)
-    - All models and settings come from manifest.json llm_config section
+    This function uses:
+    - Azure OpenAI client for chat completions
+    - EmbeddingService (using mem0) for embeddings
     
     Args:
         v_target: Target vector (numpy array)
         shared_state: SharedState instance for shared state
-        llm_service: LLMService instance (from RuntimeEngine, configured via manifest.json)
-        llm_config: LLM configuration dict (from manifest.json llm_config section)
+        openai_client: AzureOpenAI client instance
+        embedding_service: EmbeddingService instance (using mem0)
+        deployment_name: Chat model deployment name
+        embedding_model: Embedding model name
+        temperature: Temperature for chat completions
         target_hint: Optional hint about the target phrase
     """
-    # LLM service is already initialized and passed in
 
     # Build prompt with target hint if available
     target_info = ""
@@ -238,8 +231,7 @@ Rules:
         chat_cost = 0.0
         embed_cost = 0.0
         
-        # Use LLM service abstraction for chat completion
-        # Model and settings come from manifest.json llm_config section
+        # Use Azure OpenAI client for chat completion
         try:
             # Create messages for the LLM
             messages = [
@@ -247,21 +239,23 @@ Rules:
                 {"role": "user", "content": f"[context]{assist}[/context] \n\n [user input]{m}[/user input]"}
             ]
             
-            # Call LLM service abstraction - model configured via manifest.json
-            # llm_service.chat() handles provider routing (OpenAI, Anthropic, etc.) via LiteLLM
-            TEXT = await llm_service.chat(
-                messages,
-                model=llm_config.get("default_chat_model", "gpt-3.5-turbo"),  # From manifest.json
-                temperature=llm_config.get("default_temperature", 0.8),  # From manifest.json
+            # Call Azure OpenAI directly
+            response = await asyncio.to_thread(
+                openai_client.chat.completions.create,
+                model=deployment_name,
+                messages=messages,
+                temperature=temperature,
                 max_tokens=15  # Allow for longer phrases
             )
             
-            TEXT = TEXT.strip()
+            TEXT = response.choices[0].message.content.strip()
             # Estimate chat cost (slightly variable for realism)
             chat_cost = 0.0001 + (np.random.random() * 0.00005)
             
         except Exception as e:
-            await shared_state.report_error(f"LLM chat call failed: {e}")
+            error_msg = f"LLM chat call failed: {e}"
+            logger.warning(f"⚠️ {error_msg}")
+            await shared_state.report_error(error_msg)
             # Still track cost for failed attempt
             chat_cost = 0.0001
             await shared_state.increment_cost(chat_cost)
@@ -274,17 +268,12 @@ Rules:
             await shared_state.increment_cost(chat_cost)
             return
 
-        # Embed using LLM service abstraction
-        # Embedding model configured via manifest.json llm_config.default_embedding_model
+        # Embed using EmbeddingService (mem0)
         try:
-            # Get embedding model from manifest.json config
-            embedding_model = llm_config.get("default_embedding_model", "voyage/voyage-2")
+            # Call EmbeddingService for embeddings
+            vectors = await embedding_service.embed_chunks([TEXT], model=embedding_model)
             
-            # Call LLM service abstraction for embeddings
-            # llm_service.embed() handles provider routing (VoyageAI, OpenAI, Cohere, etc.) via LiteLLM
-            vectors = await llm_service.embed(TEXT, model=embedding_model)
-            
-            # Extract the vector (embed returns List[List[float]], we want the first one)
+            # Extract the vector (embed_chunks returns List[List[float]], we want the first one)
             if vectors and len(vectors) > 0:
                 v_text = np.array(vectors[0])
             else:
@@ -298,7 +287,9 @@ Rules:
             embed_cost = 0.0001 + (np.random.random() * 0.00005)
                 
         except Exception as e:
-            await shared_state.report_error(f"Embedding failed: {e}")
+            error_msg = f"Embedding failed: {e}"
+            logger.warning(f"⚠️ {error_msg}")
+            await shared_state.report_error(error_msg)
             # Track costs so far
             embed_cost = 0.0001
             await shared_state.increment_cost(chat_cost + embed_cost)
@@ -321,43 +312,38 @@ Rules:
         # Log interesting progress - only for really good guesses
         if VECTOR_ERROR < 0.45:
             logger.info(f"🔥 Hot guess! '{TEXT}' with error {VECTOR_ERROR:.4f}")
+        elif VECTOR_ERROR < 1.0:
+            logger.debug(f"📊 Guess: '{TEXT}' with error {VECTOR_ERROR:.4f}")
         
         # Update best guess (target_text is stored in shared_state for text matching)
         # Cost is tracked here for successful attempts
         await shared_state.update_best_guess(TEXT, VECTOR_ERROR, total_cost)
 
     except Exception as e:
-        await shared_state.report_error(f"Worker Error: {e}")
+        error_msg = f"Worker Error: {e}"
+        logger.error(f"❌ {error_msg}", exc_info=True)
+        await shared_state.report_error(error_msg)
 
 class VectorHackingService:
-    def __init__(self, mongo_uri: str, db_name: str, write_scope: str, read_scopes: List[str], llm_service=None, llm_config: Optional[Dict[str, Any]] = None):
+    def __init__(self, mongo_uri: str, db_name: str, write_scope: str, read_scopes: List[str], openai_client=None, embedding_service=None, deployment_name: str = "gpt-4o", embedding_model: str = "text-embedding-3-small", temperature: float = 0.8):
         """
-        Vector Hacking Service - runs vector inversion attacks using LLM service abstraction.
+        Vector Hacking Service - runs vector inversion attacks using Azure OpenAI and EmbeddingService.
         
-        This service demonstrates the LLM service abstraction pattern:
-        1. LLM configuration comes from manifest.json llm_config section
-        2. RuntimeEngine initializes LLMService from manifest.json
-        3. All LLM calls use the unified abstraction (llm_service.chat(), llm_service.embed())
-        4. Provider-agnostic: switch models/providers by changing manifest.json
-        
-        Configuration Example (manifest.json):
-            {
-              "llm_config": {
-                "enabled": true,
-                "default_chat_model": "gpt-3.5-turbo",
-                "default_embedding_model": "voyage/voyage-2",
-                "default_temperature": 0.8,
-                "max_retries": 4
-              }
-            }
+        This service uses:
+        1. Azure OpenAI client for chat completions
+        2. EmbeddingService (using mem0) for embeddings
+        3. Configuration from manifest.json and environment variables
         
         Args:
             mongo_uri: MongoDB connection URI
             db_name: Database name
             write_scope: App slug for write operations
             read_scopes: List of app slugs for read operations
-            llm_service: LLMService instance (initialized by RuntimeEngine from manifest.json)
-            llm_config: LLM configuration dict from manifest.json llm_config section
+            openai_client: AzureOpenAI client instance
+            embedding_service: EmbeddingService instance (using mem0)
+            deployment_name: Chat model deployment name
+            embedding_model: Embedding model name
+            temperature: Temperature for chat completions
         """
         self.mongo_uri = mongo_uri
         self.db_name = db_name
@@ -367,8 +353,11 @@ class VectorHackingService:
         self.shared_state = None
         self.v_target = None
         self.current_target = TARGET  # Track current target phrase
-        self.llm_service = llm_service  # LLM service instance (if available)
-        self.llm_config = llm_config or {}  # LLM config for Ray workers
+        self.openai_client = openai_client
+        self.embedding_service = embedding_service
+        self.deployment_name = deployment_name
+        self.embedding_model = embedding_model
+        self.temperature = temperature
         self.last_best_error = np.inf  # Track last best error to detect improvements
         
         # Load templates
@@ -381,37 +370,35 @@ class VectorHackingService:
         except ImportError:
             self.templates = None
 
-        # Initialize target embedding using LLM service
+        # Initialize target embedding using EmbeddingService
         # Note: __init__ is sync, so we'll defer embedding to start_hacking
         # This is fine since we need to embed the target anyway when starting
         self.v_target = None
-        logger.info(f"[{write_scope}] LLM service configured. Target embedding will be done on start.")
+        logger.info(f"[{write_scope}] OpenAI client and EmbeddingService configured. Target embedding will be done on start.")
 
     async def render_index(self):
         if self.templates:
+            # Create a minimal request object for template rendering
+            fake_request = type('Request', (), {'url': type('URL', (), {'path': '/'})()})()
             return self.templates.TemplateResponse(
-                "index.html",
-                {
-                    "request": type('Request', (), {'url': type('URL', (), {'path': '/'})()})()
-                }
+                fake_request,
+                "index.html"
             ).body.decode('utf-8')
         return "<h1>Vector Hacking Demo</h1><p>Templates not loaded.</p>"
 
     async def generate_random_target(self) -> str:
         """
-        Generate a random target phrase using LLM service abstraction.
+        Generate a random target phrase using Azure OpenAI client.
         
-        Uses the LLM service to generate a random meaningful phrase that will
+        Uses the Azure OpenAI client to generate a random meaningful phrase that will
         be used as the target for vector inversion attack.
         
         Returns:
             str: A random target phrase
         """
-        if not self.llm_service:
-            from mdb_runtime.llm import LLMService
-            if not self.llm_config:
-                return TARGET  # Fallback to default
-            self.llm_service = LLMService(config=self.llm_config)
+        if not self.openai_client:
+            logger.error("OpenAI client not provided")
+            return TARGET  # Fallback to default target only
         
         try:
             prompt = """Generate a short, meaningful phrase (3-7 words) that would be good for a vector inversion challenge.
@@ -423,15 +410,15 @@ Examples:
 
 Generate ONE random phrase. Output ONLY the phrase, nothing else."""
             
-            # Use LLM service abstraction to generate random target
-            random_phrase = await self.llm_service.chat(
-                prompt,
-                model=self.llm_config.get("default_chat_model", "gpt-3.5-turbo"),
+            # Use Azure OpenAI client to generate random target
+            response = await asyncio.to_thread(
+                self.openai_client.chat.completions.create,
+                model=self.deployment_name,
+                messages=[{"role": "user", "content": prompt}],
                 temperature=1.2  # Higher temperature for more randomness
             )
             
-            # Clean up the response
-            random_phrase = random_phrase.strip().strip('"').strip("'")
+            random_phrase = response.choices[0].message.content.strip().strip('"').strip("'")
             if random_phrase:
                 logger.info(f"Generated random target: '{random_phrase}'")
                 return random_phrase
@@ -484,22 +471,14 @@ Generate ONE random phrase. Output ONLY the phrase, nothing else."""
         self.current_target = target_to_use
         
         # Re-embed the target using LLM service abstraction
-        # Model configured via manifest.json llm_config.default_embedding_model
+        # Model configured via EmbeddingService (from manifest.json embedding_config or environment)
         try:
-            from mdb_runtime.llm import LLMService
+            # Use EmbeddingService (from mem0)
+            if not self.embedding_service:
+                raise RuntimeError("EmbeddingService not provided - must be initialized from engine.get_memory_service()")
             
-            # Use provided LLM service (from RuntimeEngine) or create one from manifest config
-            service_to_use = self.llm_service
-            if service_to_use is None:
-                # Fallback: create service from manifest.json config
-                service_to_use = LLMService(config=self.llm_config)
-            
-            # Get embedding model from manifest.json config
-            embedding_model = self.llm_config.get("default_embedding_model", "voyage/voyage-2")
-            
-            # Use LLM service abstraction for embedding
-            # llm_service.embed() handles provider routing via LiteLLM
-            vectors = await service_to_use.embed([target_to_use], model=embedding_model)
+            # Embedding model is configured in constructor
+            vectors = await self.embedding_service.embed_chunks([target_to_use], model=self.embedding_model)
             
             if vectors and len(vectors) > 0:
                 self.v_target = np.array(vectors[0])
@@ -522,6 +501,7 @@ Generate ONE random phrase. Output ONLY the phrase, nothing else."""
         
         self.running = True
         self.task = asyncio.create_task(self._run_loop())
+        logger.info(f"🎯 Attack started! Target: '{target_to_use}', vector dim: {len(self.v_target)}")
         
         # Game-like response with excitement
         return {
@@ -559,8 +539,10 @@ Generate ONE random phrase. Output ONLY the phrase, nothing else."""
 
     async def _run_loop(self):
         if not self.shared_state or self.v_target is None:
+            logger.warning("⚠️ Attack loop cannot start: shared_state or v_target is None")
             return
 
+        logger.info("🚀 Attack loop started!")
         try:
             iteration = 0
             while self.running:
@@ -592,26 +574,31 @@ Generate ONE random phrase. Output ONLY the phrase, nothing else."""
                 NUM_PARALLEL_GUESSES = 3
                 
                 # Use asyncio.gather for parallel execution
-                # All guesses use the LLM service abstraction (configured via manifest.json)
-                from mdb_runtime.llm import LLMService
-                
-                # Use LLM service from RuntimeEngine (configured via manifest.json)
-                # or create fallback from config
-                llm_service_to_use = self.llm_service or LLMService(config=self.llm_config)
+                # All guesses use Azure OpenAI client and EmbeddingService
+                if not self.openai_client or not self.embedding_service:
+                    raise RuntimeError("OpenAI client and EmbeddingService must be provided")
                 
                 tasks = [
                     generate_and_evaluate_guess(
                         self.v_target, 
                         self.shared_state,
-                        llm_service_to_use,  # LLM service abstraction
-                        self.llm_config,     # Config from manifest.json
+                        self.openai_client,
+                        self.embedding_service,
+                        self.deployment_name,
+                        self.embedding_model,
+                        self.temperature,
                         self.current_target   # Pass target hint
                     ) 
                     for _ in range(NUM_PARALLEL_GUESSES)
                 ]
                 
                 # Execute all guesses in parallel using LLM service abstraction
-                await asyncio.gather(*tasks, return_exceptions=True)
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                
+                # Log any exceptions that occurred
+                for i, result in enumerate(results):
+                    if isinstance(result, Exception):
+                        logger.warning(f"⚠️ Guess task {i+1} failed: {result}")
                 
                 # Check again AFTER batch completes (in case match was found during batch)
                 state = await self.shared_state.get_state()
@@ -635,15 +622,21 @@ Generate ONE random phrase. Output ONLY the phrase, nothing else."""
                     self.last_best_error = current_error
                     logger.info(f"New best guess found (error: {current_error:.4f}) - continuing attack...")
                 
-                # Log progress every 20 iterations
-                if iteration % 20 == 0 and state['CURRENT_BEST_ERROR'] != np.inf:
-                    logger.info(f"Progress: {state['GUESSES_MADE']} guesses, best error: {state['CURRENT_BEST_ERROR']:.4f}, cost: ${state['TOTAL_COST']:.4f}")
+                # Log progress every 20 iterations (or every 5 for first 20 iterations)
+                log_interval = 5 if iteration < 20 else 20
+                if iteration % log_interval == 0:
+                    if state['CURRENT_BEST_ERROR'] != np.inf:
+                        logger.info(f"📈 Progress (iter {iteration}): {state['GUESSES_MADE']} guesses, best error: {state['CURRENT_BEST_ERROR']:.4f}, cost: ${state['TOTAL_COST']:.4f}, best: '{state['CURRENT_BEST_TEXT']}'")
+                    else:
+                        logger.info(f"📈 Progress (iter {iteration}): {state['GUESSES_MADE']} guesses made, no valid guesses yet, cost: ${state['TOTAL_COST']:.4f}")
+                    if state.get('LAST_ERROR'):
+                        logger.warning(f"⚠️ Last error: {state['LAST_ERROR']}")
                 
                 # Small delay between batches
                 await asyncio.sleep(0.3)
                 
         except Exception as e:
-            logger.error(f"Error in loop: {e}")
+            logger.error(f"❌ Error in attack loop: {e}", exc_info=True)
             self.running = False
 
     async def get_status(self):
@@ -658,7 +651,7 @@ Generate ONE random phrase. Output ONLY the phrase, nothing else."""
                 "running": False,
                 "paused": False,
                 "TARGET": self.current_target,
-                "MODEL_USED": self.llm_config.get("default_chat_model", "gpt-3.5-turbo"),
+                "MODEL_USED": self.deployment_name,
                 "READY_FOR_NEXT": True,
                 "message": "Ready to start attack! 🎯"
             }
@@ -703,7 +696,7 @@ Generate ONE random phrase. Output ONLY the phrase, nothing else."""
             "TOTAL_COST": round(state['TOTAL_COST'], 4),
             "MATCH_FOUND": match_found,
             "LAST_ERROR": state['LAST_ERROR'],
-            "MODEL_USED": self.llm_config.get("default_chat_model", "gpt-3.5-turbo"),
+            "MODEL_USED": self.deployment_name,
             "TARGET": self.current_target,
             "READY_FOR_NEXT": not self.running and (match_found or not self.shared_state),
             "message": status_msg

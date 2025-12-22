@@ -1,6 +1,0 @@
-# Requirements for Hello World Example
-# Install MDB_RUNTIME first: pip install mdb-runtime
-# Or install from source: pip install -e ../..
-
-mdb-runtime>=0.1.0
-

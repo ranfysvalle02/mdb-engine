@@ -1,7 +1,7 @@
 """
-MDB_RUNTIME - MongoDB Multi-Tenant Runtime Engine
+MDB_RUNTIME - MongoDB Runtime Engine
 
-Enterprise-grade runtime engine for building multi-tenant applications
+Enterprise-grade runtime engine for building applications
 with automatic database scoping, authentication, and resource management.
 """
 

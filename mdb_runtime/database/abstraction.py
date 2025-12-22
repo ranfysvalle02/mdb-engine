@@ -8,7 +8,7 @@ This module provides an easy-to-use API that matches MongoDB's API closely,
 so apps can use familiar MongoDB methods. All operations automatically
 handle app scoping and indexing behind the scenes.
 
-This module is part of MDB_RUNTIME - MongoDB Multi-Tenant Runtime Engine.
+This module is part of MDB_RUNTIME - MongoDB Runtime Engine.
 
 Usage:
     from mdb_runtime.database import AppDB, Collection

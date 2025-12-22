@@ -1,0 +1,1157 @@
+{% extends "base.html" %}
+
+{% block title %}{{ conversation.title }}{% endblock %}
+
+{% block extra_css %}
+<style>
+    .conversation-container {
+        display: flex;
+        gap: 20px;
+        height: calc(100vh - 200px);
+        max-width: 1400px;
+        margin: 0 auto;
+    }
+    
+    .conversation-main {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+    }
+    
+    .memory-sidebar {
+        width: 320px;
+        display: flex;
+        flex-direction: column;
+        gap: 15px;
+    }
+    
+    .conversation-header {
+        padding: 20px;
+        background: var(--mongodb-bg-secondary);
+        border: 1px solid var(--mongodb-border);
+        border-radius: 8px 8px 0 0;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    
+    .conversation-title {
+        font-size: 20px;
+        font-weight: 600;
+    }
+    
+    .conversation-messages {
+        flex: 1;
+        overflow-y: auto;
+        padding: 20px;
+        background: var(--mongodb-bg);
+        border-left: 1px solid var(--mongodb-border);
+        border-right: 1px solid var(--mongodb-border);
+    }
+    
+    .message {
+        margin-bottom: 20px;
+        display: flex;
+        gap: 12px;
+    }
+    
+    .message.user {
+        flex-direction: row-reverse;
+    }
+    
+    .message-avatar {
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 600;
+        flex-shrink: 0;
+    }
+    
+    .message.user .message-avatar {
+        background: var(--mongodb-green);
+        color: var(--mongodb-bg);
+    }
+    
+    .message.assistant .message-avatar {
+        background: var(--mongodb-bg-tertiary);
+        color: var(--mongodb-text);
+    }
+    
+    .message-content {
+        flex: 1;
+        max-width: 70%;
+    }
+    
+    .message.user .message-content {
+        text-align: right;
+    }
+    
+    .message-bubble {
+        padding: 12px 16px;
+        border-radius: 12px;
+        display: inline-block;
+        word-wrap: break-word;
+    }
+    
+    .message.user .message-bubble {
+        background: var(--mongodb-green);
+        color: var(--mongodb-bg);
+    }
+    
+    .message.assistant .message-bubble {
+        background: var(--mongodb-bg-tertiary);
+        color: var(--mongodb-text);
+        border: 1px solid var(--mongodb-border);
+    }
+    
+    .message-time {
+        font-size: 12px;
+        opacity: 0.6;
+        margin-top: 4px;
+    }
+    
+    .conversation-input {
+        padding: 20px;
+        background: var(--mongodb-bg-secondary);
+        border: 1px solid var(--mongodb-border);
+        border-radius: 0 0 8px 8px;
+    }
+    
+    .input-form {
+        display: flex;
+        gap: 10px;
+    }
+    
+    .input-form input {
+        flex: 1;
+        padding: 12px;
+        background: var(--mongodb-bg-tertiary);
+        border: 1px solid var(--mongodb-border);
+        border-radius: 6px;
+        color: var(--mongodb-text);
+        font-size: 14px;
+    }
+    
+    .input-form input:focus {
+        outline: none;
+        border-color: var(--mongodb-green);
+    }
+    
+    .input-form button {
+        padding: 12px 24px;
+    }
+    
+    .loading {
+        display: inline-block;
+        width: 12px;
+        height: 12px;
+        border: 2px solid var(--mongodb-text-secondary);
+        border-top-color: var(--mongodb-green);
+        border-radius: 50%;
+        animation: spin 0.6s linear infinite;
+    }
+    
+    @keyframes spin {
+        to { transform: rotate(360deg); }
+    }
+    
+    /* Memory UI Styles */
+    .memory-panel {
+        background: var(--mongodb-bg-secondary);
+        border: 1px solid var(--mongodb-border);
+        border-radius: 8px;
+        padding: 15px;
+        max-height: 400px;
+        overflow-y: auto;
+    }
+    
+    .memory-panel-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 12px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid var(--mongodb-border);
+    }
+    
+    .memory-panel-title {
+        font-weight: 600;
+        font-size: 14px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+    
+    .memory-panel-title::before {
+        content: "🧠";
+        font-size: 16px;
+    }
+    
+    .memory-item {
+        padding: 10px;
+        margin-bottom: 8px;
+        background: var(--mongodb-bg-tertiary);
+        border: 1px solid var(--mongodb-border);
+        border-radius: 6px;
+        font-size: 13px;
+        line-height: 1.4;
+        position: relative;
+    }
+    
+    .memory-item.active {
+        border-color: var(--mongodb-green);
+        background: rgba(16, 185, 129, 0.1);
+    }
+    
+    .memory-icon {
+        margin-right: 6px;
+    }
+    
+    .stat-item {
+        display: flex;
+        justify-content: space-between;
+        padding: 8px 0;
+        font-size: 13px;
+        border-bottom: 1px solid var(--mongodb-border);
+    }
+    
+    .stat-item:last-child {
+        border-bottom: none;
+    }
+    
+    .stat-label {
+        opacity: 0.7;
+    }
+    
+    .stat-value {
+        font-weight: 600;
+        color: var(--mongodb-green);
+    }
+    
+    .memory-context-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 8px;
+        background: rgba(16, 185, 129, 0.1);
+        border: 1px solid var(--mongodb-green);
+        border-radius: 12px;
+        font-size: 11px;
+        color: var(--mongodb-green);
+        margin-left: 8px;
+    }
+    
+    .memory-context-badge::before {
+        content: "🧠";
+        font-size: 12px;
+    }
+    
+    .memory-storage-indicator {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        padding: 12px 16px;
+        background: var(--mongodb-green);
+        color: var(--mongodb-bg);
+        border-radius: 8px;
+        font-size: 12px;
+        display: none;
+        align-items: center;
+        gap: 8px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        z-index: 1000;
+        animation: slideIn 0.3s ease-out;
+    }
+    
+    .memory-storage-indicator.show {
+        display: flex;
+    }
+    
+    .memory-storage-indicator::before {
+        content: "💾";
+        font-size: 16px;
+    }
+    
+    @keyframes slideIn {
+        from {
+            transform: translateY(20px);
+            opacity: 0;
+        }
+        to {
+            transform: translateY(0);
+            opacity: 1;
+        }
+    }
+    
+    .empty-memory-state {
+        text-align: center;
+        padding: 20px;
+        opacity: 0.6;
+        font-size: 13px;
+    }
+    
+    .refresh-memories-btn {
+        padding: 6px 12px;
+        font-size: 12px;
+        background: var(--mongodb-bg-tertiary);
+        border: 1px solid var(--mongodb-border);
+        border-radius: 4px;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+    
+    .refresh-memories-btn:hover {
+        background: var(--mongodb-border);
+        border-color: var(--mongodb-green);
+    }
+    
+    /* Mem0 Activity Log */
+    .mem0-activity-log {
+        background: var(--mongodb-bg-secondary);
+        border: 1px solid var(--mongodb-border);
+        border-radius: 8px;
+        padding: 15px;
+        max-height: 300px;
+        overflow-y: auto;
+        margin-top: 15px;
+    }
+    
+    .mem0-activity-title {
+        font-weight: 600;
+        font-size: 14px;
+        margin-bottom: 12px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+    
+    .mem0-activity-title::before {
+        content: "⚡";
+        font-size: 16px;
+    }
+    
+    .activity-item {
+        padding: 8px;
+        margin-bottom: 6px;
+        background: var(--mongodb-bg-tertiary);
+        border-left: 3px solid var(--mongodb-green);
+        border-radius: 4px;
+        font-size: 12px;
+        line-height: 1.4;
+    }
+    
+    .activity-item.search {
+        border-left-color: #3b82f6;
+    }
+    
+    .activity-item.store {
+        border-left-color: var(--mongodb-green);
+    }
+    
+    .activity-item.extract {
+        border-left-color: #f59e0b;
+    }
+    
+    .activity-time {
+        font-size: 10px;
+        opacity: 0.6;
+        margin-top: 4px;
+    }
+    
+    /* Memory Details */
+    .memory-item {
+        cursor: pointer;
+        position: relative;
+    }
+    
+    .memory-item:hover {
+        background: var(--mongodb-bg-secondary);
+    }
+    
+    .memory-score {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        font-size: 10px;
+        padding: 2px 6px;
+        background: rgba(16, 185, 129, 0.2);
+        border-radius: 10px;
+        color: var(--mongodb-green);
+    }
+    
+    .memory-metadata {
+        font-size: 11px;
+        opacity: 0.7;
+        margin-top: 4px;
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+    
+    .metadata-tag {
+        padding: 2px 6px;
+        background: var(--mongodb-bg-secondary);
+        border-radius: 4px;
+        font-size: 10px;
+    }
+    
+    /* Mem0 Operations Badge */
+    .mem0-ops-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 8px;
+        background: rgba(59, 130, 246, 0.1);
+        border: 1px solid #3b82f6;
+        border-radius: 12px;
+        font-size: 11px;
+        color: #3b82f6;
+        margin-left: 8px;
+    }
+    
+    .mem0-ops-badge::before {
+        content: "🔍";
+        font-size: 12px;
+    }
+    
+    /* Filter Controls */
+    .memory-filters {
+        margin-bottom: 10px;
+        padding: 8px;
+        background: var(--mongodb-bg-tertiary);
+        border-radius: 4px;
+        font-size: 11px;
+    }
+    
+    .filter-group {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        margin-bottom: 6px;
+    }
+    
+    .filter-group:last-child {
+        margin-bottom: 0;
+    }
+    
+    .filter-label {
+        font-weight: 600;
+        min-width: 80px;
+    }
+    
+    .filter-select {
+        flex: 1;
+        padding: 4px 8px;
+        background: var(--mongodb-bg);
+        border: 1px solid var(--mongodb-border);
+        border-radius: 4px;
+        font-size: 11px;
+        color: var(--mongodb-text);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="conversation-container">
+    <div class="conversation-main">
+        <div class="conversation-header">
+            <div class="conversation-title">{{ conversation.title }}</div>
+            <div>
+                <a href="/conversations" class="btn btn-secondary" style="margin-right: 10px;">← Back</a>
+                <button onclick="deleteConversation()" class="btn btn-secondary" style="background: rgba(248, 81, 73, 0.2); color: #f85149;">Delete</button>
+            </div>
+        </div>
+        
+        <div class="conversation-messages" id="messages-container">
+            {% for message in messages %}
+            <div class="message {{ message.role }}">
+                <div class="message-avatar">
+                    {% if message.role == 'user' %}
+                        👤
+                    {% else %}
+                        🤖
+                    {% endif %}
+                </div>
+                <div class="message-content">
+                    <div class="message-bubble">{{ message.content }}</div>
+                    <div class="message-time">
+                        {{ message.created_at.strftime('%Y-%m-%d %H:%M') if message.created_at else 'N/A' }}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        
+        <div class="conversation-input">
+            <form id="message-form" onsubmit="sendMessage(event)">
+                <div class="input-form">
+                    <input 
+                        type="text" 
+                        id="message-input" 
+                        placeholder="Type your message..." 
+                        required
+                        autocomplete="off"
+                    >
+                    <button type="submit" class="btn" id="send-btn">Send</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <!-- Memory Sidebar -->
+    <div class="memory-sidebar">
+        <!-- Active Memory Context -->
+        <div class="memory-panel">
+            <div class="memory-panel-header">
+                <div class="memory-panel-title">Mem0 Active Context</div>
+                <button class="refresh-memories-btn" onclick="manualRefreshMemories()" title="Refresh memories">🔄</button>
+            </div>
+            
+            <!-- Metadata Filters -->
+            <div class="memory-filters" id="memory-filters">
+                <div class="filter-group">
+                    <span class="filter-label">Filter by:</span>
+                    <select class="filter-select" id="metadata-filter" onchange="applyMetadataFilter()">
+                        <option value="">All memories</option>
+                        <option value="conversations_app">From conversations</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div style="margin-bottom: 10px;">
+                <input 
+                    type="text" 
+                    id="memory-search-input" 
+                    placeholder="Semantic search memories..." 
+                    style="width: 100%; padding: 6px; font-size: 12px; background: var(--mongodb-bg-tertiary); border: 1px solid var(--mongodb-border); border-radius: 4px; color: var(--mongodb-text);"
+                    onkeyup="searchMemories(event)"
+                >
+            </div>
+            <div id="memory-context-list">
+                <div class="empty-memory-state">No active memories yet. Start chatting to build context!</div>
+            </div>
+        </div>
+        
+        <!-- Mem0 Activity Log -->
+        <div class="mem0-activity-log">
+            <div class="mem0-activity-title">Mem0 Activity Log</div>
+            <div id="activity-log-content">
+                <div class="empty-memory-state">No activity yet. Start a conversation to see Mem0 in action!</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Memory Storage Indicator -->
+<div class="memory-storage-indicator" id="memory-storage-indicator">
+    Memory stored successfully
+</div>
+
+<script>
+const conversationId = '{{ conversation._id }}';
+let activeMemoryContext = [];
+let memoryRefreshRetryCount = 0;
+let isWaitingForNewMemories = false;
+const MAX_MEMORY_RETRY_ATTEMPTS = 3;
+const MEMORY_RETRY_DELAYS = [1000, 2000, 4000]; // Exponential backoff: 1s, 2s, 4s
+
+function scrollToBottom() {
+    const container = document.getElementById('messages-container');
+    container.scrollTop = container.scrollHeight;
+}
+
+// WebSocket connection for real-time memory updates
+let memoryWebSocket = null;
+let wsReconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 5;
+
+function connectMemoryWebSocket() {
+    try {
+        // Get WebSocket URL from current page
+        // WebSocket authentication uses cookies automatically
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/ws`;
+        
+        console.log('Connecting to memory WebSocket:', wsUrl);
+        memoryWebSocket = new WebSocket(wsUrl);
+        
+        memoryWebSocket.onopen = () => {
+            console.log('Memory WebSocket connected');
+            wsReconnectAttempts = 0;
+            addActivityLog('search', 'WebSocket connected for real-time updates', true);
+        };
+        
+        memoryWebSocket.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                handleWebSocketMessage(data);
+            } catch (error) {
+                console.error('Failed to parse WebSocket message:', error);
+            }
+        };
+        
+        memoryWebSocket.onerror = (error) => {
+            console.error('WebSocket error:', error);
+        };
+        
+        memoryWebSocket.onclose = () => {
+            console.log('Memory WebSocket disconnected');
+            memoryWebSocket = null;
+            
+            // Attempt to reconnect
+            if (wsReconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+                wsReconnectAttempts++;
+                const delay = Math.min(1000 * Math.pow(2, wsReconnectAttempts), 10000); // Exponential backoff, max 10s
+                console.log(`Reconnecting WebSocket in ${delay}ms (attempt ${wsReconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
+                setTimeout(connectMemoryWebSocket, delay);
+            } else {
+                console.error('Max WebSocket reconnect attempts reached');
+                addActivityLog('search', 'WebSocket connection lost - using polling fallback', false);
+                // Fallback to polling if WebSocket fails
+                startPollingFallback();
+            }
+        };
+    } catch (error) {
+        console.error('Failed to create WebSocket connection:', error);
+        startPollingFallback();
+    }
+}
+
+function handleWebSocketMessage(data) {
+    const messageType = data.type;
+    
+    try {
+        switch (messageType) {
+            case 'connected':
+                console.log('[WebSocket] Authenticated:', data);
+                addActivityLog('search', 'WebSocket connected for real-time updates', true);
+                break;
+                
+            case 'memory_stored':
+                console.log('[WebSocket] Memory stored event:', data);
+                addActivityLog('store', data.message || `Mem0 extracted ${data.memory_count || 0} memories`, true);
+                
+                // If memory data is included, update UI immediately
+                if (data.all_memories && Array.isArray(data.all_memories) && data.all_memories.length > 0) {
+                    console.log('[WebSocket] Updating memories immediately from WebSocket data');
+                    displayMemories(data.all_memories);
+                } else {
+                    // Fallback: refresh memories if data not included
+                    isWaitingForNewMemories = true;
+                    memoryRefreshRetryCount = 0;
+                    
+                    // Shorter delay since we're already waiting 0.3s on backend
+                    setTimeout(() => {
+                        console.log('[WebSocket] Refreshing memories after memory_stored event (0.5s delay)');
+                        const filter = document.getElementById('metadata-filter')?.value || null;
+                        refreshMemories(filter, 0, false);
+                    }, 500); // Reduced delay for faster updates
+                }
+                break;
+                
+            case 'memory_search':
+                console.log('[WebSocket] Memory search event:', data);
+                // Memories were found and used - already displayed in message
+                // No need to refresh here as memories are already shown
+                break;
+                
+            case 'ping':
+                // Respond to ping with pong
+                if (memoryWebSocket && memoryWebSocket.readyState === WebSocket.OPEN) {
+                    memoryWebSocket.send(JSON.stringify({ type: 'pong' }));
+                } else {
+                    console.warn('[WebSocket] Received ping but WebSocket is not open');
+                }
+                break;
+                
+            default:
+                console.log('[WebSocket] Unknown message type:', messageType, data);
+        }
+    } catch (error) {
+        console.error('[WebSocket] Error handling message:', error, data);
+        // Don't break the WebSocket connection on handler errors
+    }
+}
+
+function startPollingFallback() {
+    // Fallback polling if WebSocket fails
+    console.log('Starting polling fallback for memory updates');
+    setInterval(() => {
+        const filter = document.getElementById('metadata-filter')?.value || null;
+        refreshMemories(filter);
+    }, 10000); // Poll every 10 seconds as fallback
+}
+
+// Scroll to bottom on load
+window.addEventListener('load', () => {
+    scrollToBottom();
+    
+    // Load memories immediately
+    refreshMemories();
+    
+    // Connect to WebSocket for real-time updates
+    connectMemoryWebSocket();
+});
+
+// Clean up WebSocket on page unload
+window.addEventListener('beforeunload', () => {
+    if (memoryWebSocket) {
+        memoryWebSocket.close();
+    }
+});
+
+// Refresh active memory context
+async function refreshMemories(metadataFilter = null, retryAttempt = 0, isRetry = false) {
+    try {
+        console.log(`[Memory Refresh] Attempt ${retryAttempt + 1}${isRetry ? ' (retry)' : ''}`);
+        
+        // Always use get_all endpoint, then filter client-side if needed
+        // The search endpoint requires a query, so we can't use it for "all memories"
+        const response = await fetch('/api/memories?limit=20');
+        if (response.ok) {
+            const data = await response.json();
+            if (data.success) {
+                let memories = data.memories || [];
+                
+                // Apply metadata filter client-side if needed
+                if (metadataFilter && memories.length > 0) {
+                    memories = memories.filter(m => {
+                        const metadata = m.metadata || {};
+                        return metadata.source === metadataFilter;
+                    });
+                }
+                
+                if (memories.length > 0) {
+                    console.log(`[Memory Refresh] Successfully loaded ${memories.length} memories`);
+                    displayMemories(memories);
+                    // Reset retry state on success
+                    memoryRefreshRetryCount = 0;
+                    isWaitingForNewMemories = false;
+                } else {
+                    // No memories found
+                    const container = document.getElementById('memory-context-list');
+                    const searchInput = document.getElementById('memory-search-input');
+                    
+                    // Retry logic: only retry if we're waiting for new memories (after message send)
+                    if (isWaitingForNewMemories && retryAttempt < MAX_MEMORY_RETRY_ATTEMPTS) {
+                        const delay = MEMORY_RETRY_DELAYS[retryAttempt] || MEMORY_RETRY_DELAYS[MEMORY_RETRY_DELAYS.length - 1];
+                        console.log(`[Memory Refresh] No memories found, retrying in ${delay}ms (attempt ${retryAttempt + 1}/${MAX_MEMORY_RETRY_ATTEMPTS})`);
+                        setTimeout(() => {
+                            refreshMemories(metadataFilter, retryAttempt + 1, true);
+                        }, delay);
+                    } else {
+                        // Show empty state if no memories and not retrying
+                        if (!searchInput || !searchInput.value.trim()) {
+                            container.innerHTML = '<div class="empty-memory-state">No memories yet. Start chatting to build context!</div>';
+                        }
+                        // Reset retry state
+                        if (retryAttempt >= MAX_MEMORY_RETRY_ATTEMPTS) {
+                            console.log('[Memory Refresh] Max retry attempts reached, giving up');
+                            isWaitingForNewMemories = false;
+                            memoryRefreshRetryCount = 0;
+                        }
+                    }
+                }
+            } else {
+                console.error('[Memory Refresh] Failed to get memories:', data);
+                const container = document.getElementById('memory-context-list');
+                container.innerHTML = '<div class="empty-memory-state">Error loading memories</div>';
+                // Reset retry state on error
+                isWaitingForNewMemories = false;
+                memoryRefreshRetryCount = 0;
+            }
+        } else {
+            console.error('[Memory Refresh] Failed to fetch memories:', response.status, response.statusText);
+            const container = document.getElementById('memory-context-list');
+            container.innerHTML = '<div class="empty-memory-state">Error loading memories</div>';
+            // Reset retry state on error
+            isWaitingForNewMemories = false;
+            memoryRefreshRetryCount = 0;
+        }
+    } catch (error) {
+        console.error('[Memory Refresh] Failed to refresh memories:', error);
+        const container = document.getElementById('memory-context-list');
+        if (container) {
+            container.innerHTML = '<div class="empty-memory-state">Error loading memories</div>';
+        }
+        // Reset retry state on error
+        isWaitingForNewMemories = false;
+        memoryRefreshRetryCount = 0;
+    }
+}
+
+// Display memories in the context panel
+function displayMemories(memories) {
+    const container = document.getElementById('memory-context-list');
+    
+    if (!container) {
+        console.error('Memory container not found');
+        return;
+    }
+    
+    if (!memories || memories.length === 0) {
+        container.innerHTML = '<div class="empty-memory-state">No memories yet. Start chatting to build context!</div>';
+        return;
+    }
+    
+    console.log('[Memory Display] Displaying', memories.length, 'memories:', memories);
+    
+    container.innerHTML = memories.map((memory, index) => {
+        console.log(`[Memory Display] Processing memory ${index + 1}:`, memory);
+        // Handle different memory formats from Mem0
+        // Prioritize v2 format: {"id": "...", "memory": "...", "metadata": {...}}
+        let memoryText = '';
+        let memoryId = null;
+        let metadata = {};
+        let score = null;
+        
+        // Mem0 v2 API format (normalized by backend) - primary format
+        if (typeof memory === 'object' && memory !== null) {
+            // v2 format: direct "memory" field
+            memoryText = memory.memory || memory.text || '';
+            memoryId = memory.id || memory._id || null;
+            metadata = memory.metadata || {};
+            score = memory.score || null;
+            
+            // Legacy formats: nested data structure
+            if (!memoryText && memory.data) {
+                if (typeof memory.data === 'object' && memory.data !== null) {
+                    memoryText = memory.data.memory || memory.data.text || '';
+                    metadata = memory.metadata || memory.data.metadata || {};
+                }
+            }
+            
+            // Fallback: try to extract from any string field
+            if (!memoryText) {
+                // Look for any string field that might contain the memory
+                for (const [key, value] of Object.entries(memory)) {
+                    if (typeof value === 'string' && value.length > 0 && key !== 'id' && key !== '_id') {
+                        memoryText = value;
+                        break;
+                    }
+                }
+            }
+            
+            // Last resort: stringify if nothing found
+            if (!memoryText) {
+                memoryText = JSON.stringify(memory);
+            }
+        } else if (typeof memory === 'string') {
+            // String format memory
+            memoryText = memory;
+            memoryId = `mem-${index}`;
+        } else {
+            // Unknown format
+            memoryText = String(memory);
+            memoryId = `mem-${index}`;
+        }
+        
+        // Ensure we have an ID
+        if (!memoryId) {
+            memoryId = `mem-${index}`;
+        }
+        
+        console.log(`[Memory Display] Parsed memory ${index + 1}:`, {
+            id: memoryId,
+            text: memoryText.substring(0, 50) + (memoryText.length > 50 ? '...' : ''),
+            metadata: Object.keys(metadata).length,
+            score: score
+        });
+        
+        const isActive = activeMemoryContext.some(active => 
+            typeof active === 'string' && (active.includes(memoryText) || memoryText.includes(active))
+        );
+        const displayText = memoryText.length > 60 ? memoryText.substring(0, 60) + '...' : memoryText;
+        const scoreHtml = score !== null && score !== undefined ? `<span class="memory-score">Score: ${(score * 100).toFixed(1)}%</span>` : '';
+        const metadataTags = Object.entries(metadata).filter(([k, v]) => k && v).map(([k, v]) => 
+            `<span class="metadata-tag">${k}: ${v}</span>`
+        ).join('');
+        
+        return `
+            <div class="memory-item ${isActive ? 'active' : ''}" title="${memoryText.replace(/"/g, '&quot;')}" onclick="showMemoryDetails('${memoryId}')">
+                ${scoreHtml}
+                <div><span class="memory-icon">💭</span>${displayText}</div>
+                ${metadataTags ? `<div class="memory-metadata">${metadataTags}</div>` : ''}
+            </div>
+        `;
+    }).join('');
+}
+
+// Show memory details (for future enhancement)
+function showMemoryDetails(memoryId) {
+    // Could open a modal or expand to show full details
+    console.log('Memory details for:', memoryId);
+}
+
+// Manual refresh function
+function manualRefreshMemories() {
+    const filter = document.getElementById('metadata-filter')?.value || null;
+    addActivityLog('search', 'Manually refreshing memories...', true);
+    refreshMemories(filter);
+}
+
+// Apply metadata filter
+function applyMetadataFilter() {
+    const filter = document.getElementById('metadata-filter')?.value || null;
+    refreshMemories(filter);
+}
+
+// Show memory storage indicator
+function showMemoryStorageIndicator() {
+    const indicator = document.getElementById('memory-storage-indicator');
+    indicator.classList.add('show');
+    setTimeout(() => {
+        indicator.classList.remove('show');
+    }, 3000);
+}
+
+// Search memories
+async function searchMemories(event) {
+    const query = event.target.value.trim();
+    
+    if (!query || query.length < 2) {
+        const filter = document.getElementById('metadata-filter')?.value;
+        refreshMemories(filter);
+        return;
+    }
+    
+    try {
+        // Add activity log entry
+        addActivityLog('search', `Searching memories for: "${query}"`);
+        
+        const metadataFilter = document.getElementById('metadata-filter')?.value;
+        let url = `/api/memories/search?query=${encodeURIComponent(query)}&limit=5`;
+        if (metadataFilter) {
+            const metadata = JSON.stringify({source: metadataFilter});
+            url += `&metadata=${encodeURIComponent(metadata)}`;
+        }
+        
+        const response = await fetch(url);
+        if (response.ok) {
+            const data = await response.json();
+            if (data.success && data.results && data.results.length > 0) {
+                displayMemories(data.results);
+                addActivityLog('search', `Found ${data.results.length} relevant memories`, true);
+            } else {
+                // Show no results message
+                const container = document.getElementById('memory-context-list');
+                container.innerHTML = `<div class="empty-memory-state">No memories found for "${query}"</div>`;
+                addActivityLog('search', `No memories found for: "${query}"`, false);
+            }
+        }
+    } catch (error) {
+        console.error('Failed to search memories:', error);
+        addActivityLog('search', `Search failed: ${error.message}`, false);
+    }
+}
+
+// Add activity to the Mem0 activity log
+function addActivityLog(type, message, success = true) {
+    const container = document.getElementById('activity-log-content');
+    
+    // Remove empty state if present
+    if (container.querySelector('.empty-memory-state')) {
+        container.innerHTML = '';
+    }
+    
+    const time = new Date().toLocaleTimeString();
+    const icon = type === 'search' ? '🔍' : type === 'store' ? '💾' : type === 'extract' ? '🧠' : '⚡';
+    const statusIcon = success ? '✅' : '❌';
+    
+    const activityItem = document.createElement('div');
+    activityItem.className = `activity-item ${type}`;
+    activityItem.innerHTML = `
+        <div>${icon} ${statusIcon} ${message}</div>
+        <div class="activity-time">${time}</div>
+    `;
+    
+    container.insertBefore(activityItem, container.firstChild);
+    
+    // Keep only last 10 activities
+    while (container.children.length > 10) {
+        container.removeChild(container.lastChild);
+    }
+    
+    // Auto-scroll to top
+    container.scrollTop = 0;
+}
+
+async function sendMessage(event) {
+    event.preventDefault();
+    
+    const input = document.getElementById('message-input');
+    const message = input.value.trim();
+    
+    if (!message) return;
+    
+    // Clear input
+    input.value = '';
+    input.disabled = true;
+    document.getElementById('send-btn').disabled = true;
+    
+    // Add user message to UI
+    addMessage('user', message);
+    
+    // Show loading indicator
+    const loadingId = addMessage('assistant', '<span class="loading"></span> Thinking...');
+    
+    try {
+        const formData = new FormData();
+        formData.append('message', message);
+        
+        const response = await fetch(`/api/conversations/${conversationId}/messages`, {
+            method: 'POST',
+            body: formData
+        });
+        
+        if (!response.ok) {
+            throw new Error('Failed to send message');
+        }
+        
+        const data = await response.json();
+        
+        // Remove loading message
+        removeMessage(loadingId);
+        
+        // Add AI response with memory context badge if available
+        let responseContent = data.message.content;
+        
+        // Show Mem0 operations
+        if (data.mem0_operations) {
+            const ops = data.mem0_operations;
+            let opsInfo = [];
+            
+            if (ops.search_performed) {
+                opsInfo.push(`🔍 Found ${ops.memories_found} relevant memories`);
+                addActivityLog('search', `Semantic search found ${ops.memories_found} relevant memories`, true);
+            }
+            
+            if (ops.storage_scheduled) {
+                opsInfo.push('💾 Storing conversation for fact extraction');
+                addActivityLog('store', 'Storing conversation in Mem0 for fact extraction', true);
+            }
+            
+            if (ops.inference_enabled) {
+                opsInfo.push('🧠 Inference enabled - extracting facts automatically');
+                addActivityLog('extract', 'Mem0 will extract facts from this conversation', true);
+            }
+            
+            if (ops.graph_enabled) {
+                opsInfo.push('🕸️ Knowledge graph enabled');
+            }
+            
+            if (opsInfo.length > 0) {
+                responseContent += `<span class="mem0-ops-badge" title="${opsInfo.join('\\n')}">Mem0 Active</span>`;
+            }
+        }
+        
+        if (data.memory_context && data.memory_context.used_memories > 0) {
+            responseContent += `<span class="memory-context-badge" title="Using ${data.memory_context.used_memories} relevant memories">${data.memory_context.used_memories} memories</span>`;
+            
+            // Update active memory context with search details
+            if (data.memory_context.search_details) {
+                displayMemories(data.memory_context.search_details);
+            } else {
+                activeMemoryContext = data.memory_context.memories || [];
+                displayMemories(activeMemoryContext.map(m => ({ memory: m })));
+            }
+        }
+        
+        // Add AI response
+        addMessage('assistant', responseContent);
+        
+        // Show memory storage indicator
+        showMemoryStorageIndicator();
+        
+        // Set flag to indicate we're waiting for new memories (enables retry logic)
+        isWaitingForNewMemories = true;
+        memoryRefreshRetryCount = 0;
+        
+        // Delayed refresh to allow async memory processing (2-3 seconds)
+        // This gives Mem0 time to process and store memories asynchronously
+        const filter = document.getElementById('metadata-filter')?.value;
+        setTimeout(() => {
+            console.log('[Memory Refresh] Delayed refresh after message send (2.5s delay)');
+            refreshMemories(filter, 0, false);
+        }, 2500); // 2.5 second delay
+        
+        // Note: Memory storage events will also come via WebSocket and trigger refresh
+        
+    } catch (error) {
+        removeMessage(loadingId);
+        addMessage('assistant', `Error: ${error.message}. Please try again.`);
+    } finally {
+        input.disabled = false;
+        document.getElementById('send-btn').disabled = false;
+        input.focus();
+    }
+}
+
+function addMessage(role, content) {
+    const container = document.getElementById('messages-container');
+    
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `message ${role}`;
+    messageDiv.id = `msg-${Date.now()}-${Math.random()}`;
+    
+    const avatar = role === 'user' ? '👤' : '🤖';
+    const time = new Date().toLocaleTimeString();
+    
+    // Create message bubble with proper HTML handling
+    const bubbleDiv = document.createElement('div');
+    bubbleDiv.className = 'message-bubble';
+    bubbleDiv.innerHTML = content; // Allow HTML for memory badges
+    
+    messageDiv.innerHTML = `
+        <div class="message-avatar">${avatar}</div>
+        <div class="message-content">
+            <div class="message-bubble"></div>
+            <div class="message-time">${time}</div>
+        </div>
+    `;
+    
+    // Insert content into bubble
+    messageDiv.querySelector('.message-bubble').innerHTML = content;
+    
+    container.appendChild(messageDiv);
+    scrollToBottom();
+    
+    return messageDiv.id;
+}
+
+function removeMessage(messageId) {
+    const message = document.getElementById(messageId);
+    if (message) {
+        message.remove();
+    }
+}
+
+async function deleteConversation() {
+    if (!confirm('Are you sure you want to delete this conversation?')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/conversations/${conversationId}`, {
+            method: 'DELETE'
+        });
+        
+        if (response.ok) {
+            window.location.href = '/conversations';
+        } else {
+            alert('Failed to delete conversation');
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+// WebSocket connection for real-time updates (optional - not needed for single-user conversations)
+// Removed to prevent duplicate messages since API response already includes the message
+</script>
+{% endblock %}
+

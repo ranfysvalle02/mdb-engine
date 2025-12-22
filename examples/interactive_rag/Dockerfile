@@ -28,14 +28,14 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 COPY mdb_runtime ./mdb_runtime
 
 # Install mdb_runtime with all dependencies
-RUN echo "=== Installing mdb-runtime ===" && \
-    pip install --no-cache-dir . && \
+RUN     echo "=== Installing mdb-runtime ===" && \
+    pip install --no-cache-dir .[llm] && \
     echo "=== Installing web dependencies ===" && \
     pip install --no-cache-dir uvicorn[standard] jinja2 python-multipart websockets && \
     echo "=== Installing LLM dependencies ===" && \
-    pip install --no-cache-dir litellm instructor pydantic pydantic-settings tenacity semantic-text-splitter && \
+    pip install --no-cache-dir instructor pydantic pydantic-settings tenacity semantic-text-splitter && \
     echo "=== Installing RAG dependencies ===" && \
-    pip install --no-cache-dir langchain langchain-litellm langchain-openai langchain-mongodb langchain-core langgraph ddgs docling requests && \
+    pip install --no-cache-dir ddgs docling requests && \
     echo "=== Installation complete ===" && \
     pip show mdb-runtime
 
@@ -43,7 +43,7 @@ RUN echo "=== Installing mdb-runtime ===" && \
 RUN echo "=== Verifying installation in builder ===" && \
     python -c "import mdb_runtime; print(f'✓ mdb_runtime {mdb_runtime.__version__} imported successfully')" && \
     python -c "from mdb_runtime import RuntimeEngine; print('✓ RuntimeEngine imported successfully')" && \
-    python -c "from mdb_runtime.llm import LLMService, EmbeddingService; print('✓ LLM services imported successfully')" && \
+    python -c "from mdb_runtime.embeddings import EmbeddingService; print('✓ EmbeddingService imported successfully')" && \
     echo "=== Verification complete ==="
 
 # Stage 2: Runtime - Minimal production image
@@ -95,7 +95,7 @@ RUN echo "=== Verifying installation in runtime stage ===" && \
     pip show mdb-runtime || (echo "ERROR: mdb-runtime package not found" && exit 1) && \
     python -c "import mdb_runtime; print(f'✓ mdb_runtime {mdb_runtime.__version__} imported successfully')" && \
     python -c "from mdb_runtime import RuntimeEngine; print('✓ RuntimeEngine imported successfully')" && \
-    python -c "from mdb_runtime.llm import LLMService, EmbeddingService; print('✓ LLM services imported successfully')" && \
+    python -c "from mdb_runtime.embeddings import EmbeddingService; print('✓ EmbeddingService imported successfully')" && \
     echo "=== Verification complete ==="
 
 # Switch to non-root user

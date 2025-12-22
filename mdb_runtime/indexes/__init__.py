@@ -3,7 +3,7 @@ Index Management Module
 
 Provides index management utilities for MongoDB Atlas Search and regular indexes.
 
-This module is part of MDB_RUNTIME - MongoDB Multi-Tenant Runtime Engine.
+This module is part of MDB_RUNTIME - MongoDB Runtime Engine.
 """
 
 # Re-export index managers from database module for convenience

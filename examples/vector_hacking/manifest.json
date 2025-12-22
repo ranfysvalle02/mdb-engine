@@ -24,7 +24,7 @@
         }
       }
     ],
-    "voyage_embeddings": [
+    "embeddings": [
       {
         "type": "regular",
         "keys": {"source_id": 1, "chunk_index": 1},
@@ -41,7 +41,7 @@
             {
               "type": "vector",
               "path": "embedding",
-              "numDimensions": 1024,
+              "numDimensions": 1536,
               "similarity": "cosine"
             }
           ]
@@ -49,23 +49,10 @@
       }
     ]
   },
-  "websockets": {
-    "realtime": {
-      "path": "/ws",
-      "description": "Real-time updates for vector hacking progress"
-    }
-  },
-  "llm_config": {
-    "enabled": true,
-    "default_chat_model": "gpt-3.5-turbo",
-    "default_embedding_model": "voyage/voyage-2",
-    "default_temperature": 0.8,
-    "max_retries": 4
-  },
   "embedding_config": {
     "enabled": true,
     "max_tokens_per_chunk": 1000,
-    "default_embedding_model": "voyage/voyage-2"
+    "default_embedding_model": "text-embedding-3-small"
   }
 }
 

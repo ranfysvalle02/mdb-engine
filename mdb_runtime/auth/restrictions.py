@@ -12,7 +12,7 @@ Pattern:
 
 This ensures demo users remain in a safe, read-only demo environment.
 
-This module is part of MDB_RUNTIME - MongoDB Multi-Tenant Runtime Engine.
+This module is part of MDB_RUNTIME - MongoDB Runtime Engine.
 """
 
 import logging
@@ -90,7 +90,7 @@ async def require_non_demo_user(
     if not slug_id:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Tenant slug_id not found in request state"
+            detail="App slug_id not found in request state"
         )
     
     # Try to get user from request

@@ -1432,7 +1432,7 @@ function attachChatListeners() {
      addUserMessage(text);
      setThinking(true);
 
-     const embeddingModel = embeddingModelSelector ? embeddingModelSelector.value : "voyage/voyage-2";
+     const embeddingModel = embeddingModelSelector ? embeddingModelSelector.value : "text-embedding-3-small";
      const numSources = numSourcesInput ? parseInt(numSourcesInput.value) || 3 : 3;
      const maxChunkLen = maxCharsInput ? parseInt(maxCharsInput.value) || 2000 : 2000;
 
@@ -1527,7 +1527,7 @@ function attachChatListeners() {
       alert("Type your query in the box first.");
       return;
      }
-     const embeddingModel = embeddingModelSelector ? embeddingModelSelector.value : "voyage/voyage-2";
+     const embeddingModel = embeddingModelSelector ? embeddingModelSelector.value : "text-embedding-3-small";
      const numSources = numSourcesInput ? parseInt(numSourcesInput.value) || 3 : 3;
      const minScore = minScoreInput ? parseFloat(minScoreInput.value) || 0 : 0;
      fetch("/preview_search", {

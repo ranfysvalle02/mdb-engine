@@ -82,6 +82,31 @@ AUTHZ_CACHE_TTL: Final[int] = 300  # 5 minutes
 """Authorization cache TTL in seconds."""
 
 # ============================================================================
+# TOKEN MANAGEMENT CONSTANTS
+# ============================================================================
+
+# Token lifetimes (in seconds)
+ACCESS_TOKEN_TTL: Final[int] = 900  # 15 minutes
+"""Default access token TTL in seconds."""
+
+REFRESH_TOKEN_TTL: Final[int] = 604800  # 7 days
+"""Default refresh token TTL in seconds."""
+
+# Token management settings
+TOKEN_ROTATION_ENABLED: Final[bool] = True
+"""Whether to rotate refresh tokens on each use."""
+
+MAX_SESSIONS_PER_USER: Final[int] = 10
+"""Maximum number of concurrent sessions per user."""
+
+SESSION_INACTIVITY_TIMEOUT: Final[int] = 1800  # 30 minutes
+"""Session inactivity timeout in seconds before automatic cleanup."""
+
+# Token versioning
+CURRENT_TOKEN_VERSION: Final[str] = "1.0"
+"""Current token schema version for migration support."""
+
+# ============================================================================
 # SCHEMA CONSTANTS
 # ============================================================================
 

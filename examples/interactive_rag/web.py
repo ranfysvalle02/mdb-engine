@@ -4,7 +4,7 @@ FastAPI Web Application for Interactive RAG Example
 
 This demonstrates MDB_RUNTIME with:
 - EmbeddingService for semantic text splitting and embeddings
-- LLMService for chat completions
+- OpenAI SDK for chat completions
 - Vector search with MongoDB Atlas Vector Search
 - Knowledge base management with sessions
 - Platform-level LLM abstractions via RuntimeEngine
@@ -47,54 +47,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from mdb_runtime import RuntimeEngine
-from mdb_runtime.llm import LLMService, EmbeddingService, get_embedding_service
-from mdb_runtime.llm.dependencies import set_global_engine, get_llm_service_dependency
-# Removed WebSocket imports - using polling instead
+from mdb_runtime.embeddings import EmbeddingService, get_embedding_service
+from mdb_runtime.embeddings.dependencies import get_embedding_service_dep
+from openai import AzureOpenAI
+from dotenv import load_dotenv
+import os
 
-# LangChain imports - with detailed error reporting
-LANGCHAIN_AVAILABLE = False
-LANGCHAIN_ERROR_DETAILS = []
-
-try:
-    from langgraph.prebuilt import create_react_agent
-except ImportError as e:
-    LANGCHAIN_ERROR_DETAILS.append(f"langgraph.prebuilt: {str(e)}")
-    logger.error(f"Failed to import langgraph.prebuilt: {e}", exc_info=True)
-
-# Optional imports (not required for LangGraph, but useful for compatibility)
-try:
-    from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-except ImportError:
-    pass
-
-try:
-    from langchain_core.messages import HumanMessage, AIMessage
-except ImportError:
-    pass
-
-try:
-    from langchain_core.tools import tool
-except ImportError as e:
-    LANGCHAIN_ERROR_DETAILS.append(f"langchain_core.tools: {str(e)}")
-    logger.error(f"Failed to import langchain_core.tools: {e}", exc_info=True)
-
-try:
-    from langchain_litellm import ChatLiteLLM
-except ImportError as e:
-    LANGCHAIN_ERROR_DETAILS.append(f"langchain_litellm: {str(e)}")
-    logger.error(f"Failed to import langchain_litellm: {e}", exc_info=True)
-
-# Check if all imports succeeded
-if not LANGCHAIN_ERROR_DETAILS:
-    LANGCHAIN_AVAILABLE = True
-    logger.info("All LangChain imports successful")
-else:
-    error_summary = "\n".join(f"  - {detail}" for detail in LANGCHAIN_ERROR_DETAILS)
-    logger.error(
-        f"LangChain imports failed. Details:\n{error_summary}\n"
-        f"Install with: pip install langchain langchain-community langchain-litellm litellm\n"
-        f"Or check if packages are installed: pip list | grep langchain"
-    )
+# Load environment variables
+load_dotenv()
 
 # Additional dependencies - with detailed error reporting
 try:
@@ -179,6 +139,7 @@ SESSION_FIELD = "session_id"
 chat_history: Dict[str, List[Dict[str, str]]] = {}
 current_session: str = "default"
 last_retrieved_sources: List[str] = []
+last_retrieved_chunks: List[Dict[str, Any]] = []
 background_tasks: Dict[str, Dict[str, Any]] = {}
 
 _current_user_query: Optional[str] = None  # Store current user query for tool context
@@ -195,10 +156,8 @@ app_status: Dict[str, Any] = {
     "components": {
         "mongodb": {"status": "unknown", "message": ""},
         "engine": {"status": "unknown", "message": ""},
-        "llm_service": {"status": "unknown", "message": ""},
         "embedding_service": {"status": "unknown", "message": ""},
         "docling": {"status": "unknown", "message": ""},
-        "langchain": {"status": "unknown", "message": ""},
         "rapidocr": {"status": "unknown", "message": ""}
     }
 }
@@ -240,31 +199,70 @@ def get_db():
     return db
 
 
-def get_llm_service() -> LLMService:
-    """Get LLM service for this app"""
-    global engine
-    if not engine:
-        raise HTTPException(status_code=503, detail="Engine not initialized")
-    llm_service = engine.get_llm_service(APP_SLUG)
-    if not llm_service:
+def get_azure_openai_client() -> AzureOpenAI:
+    """Get Azure OpenAI client configured from environment variables"""
+    api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-01")
+    endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+    key = os.getenv("AZURE_OPENAI_API_KEY")
+    deployment_name = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4o")
+    
+    if not endpoint or not key:
         raise HTTPException(
             status_code=503,
-            detail="LLM service not available. Ensure llm_config.enabled is true in manifest.json"
+            detail="Azure OpenAI not configured. Set AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY environment variables."
         )
-    return llm_service
+    
+    return AzureOpenAI(
+        api_version=api_version,
+        azure_endpoint=endpoint,
+        api_key=key
+    )
 
 
-def get_embedding_service_dep(llm_service: LLMService = Depends(get_llm_service)) -> EmbeddingService:
-    """Get EmbeddingService for this app"""
-    global engine
-    if not engine:
-        raise HTTPException(status_code=503, detail="Engine not initialized")
+async def embed_text(text: str, model: str = "text-embedding-3-small") -> List[float]:
+    """Generate embedding for text using Azure OpenAI"""
+    client = get_azure_openai_client()
+    # Remove any model prefixes
+    clean_model = model.replace("azure/", "").replace("openai/", "")
     
-    # Get embedding config from manifest
-    manifest = engine.get_app(APP_SLUG)
-    embedding_config = manifest.get("embedding_config", {}) if manifest else {}
+    try:
+        response = await asyncio.to_thread(
+            client.embeddings.create,
+            model=clean_model,
+            input=text
+        )
+        return response.data[0].embedding
+    except Exception as e:
+        logger.error(f"Failed to generate embedding: {e}", exc_info=True)
+        raise
+
+
+async def embed_chunks(texts: List[str], model: str = "text-embedding-3-small") -> List[List[float]]:
+    """Generate embeddings for multiple texts using Azure OpenAI"""
+    client = get_azure_openai_client()
+    # Remove any model prefixes
+    clean_model = model.replace("azure/", "").replace("openai/", "")
     
-    return get_embedding_service(llm_service, config=embedding_config)
+    try:
+        response = await asyncio.to_thread(
+            client.embeddings.create,
+            model=clean_model,
+            input=texts
+        )
+        return [item.embedding for item in response.data]
+    except Exception as e:
+        logger.error(f"Failed to generate embeddings: {e}", exc_info=True)
+        raise
+
+
+def chunk_text(text: str, max_tokens: int = 1000, tokenizer_model: str = "gpt-3.5-turbo") -> List[str]:
+    """Simple text chunking by tokens (approximate)"""
+    from semantic_text_splitter import TextSplitter
+    
+    # Use semantic-text-splitter for better chunking
+    splitter = TextSplitter.from_tiktoken_model(tokenizer_model, max_tokens)
+    chunks = splitter.chunks(text)
+    return list(chunks)
 
 
 # ============================================================================
@@ -331,91 +329,19 @@ async def startup_event():
         # Get scoped database and store globally
         db = engine.get_scoped_db(APP_SLUG)
         
-        # Set global references for LangChain tools
-        global _global_db, _global_embedding_service, _global_llm_service
+        # Set global references
+        global _global_db
         _global_db = db
         
-        # Check LLM service
-        _global_llm_service = engine.get_llm_service(APP_SLUG)
-        if _global_llm_service:
-            app_status["components"]["llm_service"]["status"] = "available"
-            model_info = f"Model: {_global_llm_service.settings.default_chat_model}"
-            if _global_llm_service.settings.azure_openai_api_key:
-                endpoint_info = _global_llm_service.settings.azure_openai_endpoint or "not set"
-                deployment_info = _global_llm_service.settings.azure_openai_deployment_name or "not set"
-                model_info += f" | Azure Endpoint: {endpoint_info} | Deployment: {deployment_info}"
-            app_status["components"]["llm_service"]["message"] = model_info
-            add_status_log(f"✅ LLM Service available: {_global_llm_service.settings.default_chat_model}", "info", "llm")
-            
-            # Test Azure OpenAI connection if configured
-            if _global_llm_service.settings.azure_openai_api_key:
-                try:
-                    # Quick test to verify Azure OpenAI is working
-                    test_messages = [{"role": "user", "content": "test"}]
-                    # Don't actually call it during startup, just log the config
-                    add_status_log(f"🔧 Azure OpenAI configured: endpoint={_global_llm_service.settings.azure_openai_endpoint}, deployment={_global_llm_service.settings.azure_openai_deployment_name}", "info", "llm")
-                except Exception as e:
-                    add_status_log(f"⚠️  Azure OpenAI config check: {str(e)}", "warning", "llm")
-            
-            manifest = engine.get_app(APP_SLUG)
-            embedding_config = manifest.get("embedding_config", {}) if manifest else {}
-            _global_embedding_service = get_embedding_service(_global_llm_service, config=embedding_config)
-            app_status["components"]["embedding_service"]["status"] = "available"
-            app_status["components"]["embedding_service"]["message"] = f"Model: {embedding_config.get('default_embedding_model', 'default')}"
-            add_status_log(f"✅ Embedding Service available", "info", "embedding")
-        else:
-            app_status["components"]["llm_service"]["status"] = "unavailable"
-            app_status["components"]["llm_service"]["message"] = "LLM service not configured"
-            add_status_log("⚠️  LLM Service not available", "warning", "llm")
+        # Check Azure OpenAI configuration
+        endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+        key = os.getenv("AZURE_OPENAI_API_KEY")
+        deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4o")
         
-        # Check component availability with detailed diagnostics
-        if LANGCHAIN_AVAILABLE:
-            app_status["components"]["langchain"]["status"] = "available"
-            app_status["components"]["langchain"]["message"] = "LangChain tools enabled"
-            add_status_log("✅ LangChain available", "info", "langchain")
+        if endpoint and key:
+            add_status_log(f"✅ Azure OpenAI configured: {deployment}", "info", "llm")
         else:
-            app_status["components"]["langchain"]["status"] = "unavailable"
-            error_msg = "LangChain not installed"
-            if LANGCHAIN_ERROR_DETAILS:
-                error_msg = f"LangChain import failed: {len(LANGCHAIN_ERROR_DETAILS)} error(s)"
-                add_status_log(f"❌ LangChain import errors:\n" + "\n".join(f"  - {d}" for d in LANGCHAIN_ERROR_DETAILS), "error", "langchain")
-            app_status["components"]["langchain"]["message"] = error_msg
-            add_status_log("⚠️  LangChain not available", "warning", "langchain")
-            
-            # Try to diagnose the issue
-            try:
-                import subprocess
-                import sys
-                result = subprocess.run(
-                    [sys.executable, "-m", "pip", "list"],
-                    capture_output=True,
-                    text=True,
-                    timeout=5
-                )
-                if result.returncode == 0:
-                    installed_packages = result.stdout.lower()
-                    langchain_packages = [
-                        "langchain", "langchain-community", "langchain-litellm", 
-                        "langchain-core", "litellm"
-                    ]
-                    missing = [pkg for pkg in langchain_packages if pkg not in installed_packages]
-                    if missing:
-                        add_status_log(
-                            f"🔍 Diagnostic: Missing packages: {', '.join(missing)}. "
-                            f"Run: pip install {' '.join(missing)}",
-                            "warning", "langchain"
-                        )
-                    else:
-                        add_status_log(
-                            f"🔍 Diagnostic: Packages appear installed but imports failed. "
-                            f"Check Python path and virtual environment.",
-                            "warning", "langchain"
-                        )
-            except Exception as diag_error:
-                add_status_log(
-                    f"🔍 Could not run diagnostic check: {str(diag_error)}",
-                    "warning", "langchain"
-                )
+            add_status_log("⚠️  Azure OpenAI not configured", "warning", "llm")
         
         if DOCLING_AVAILABLE:
             app_status["components"]["docling"]["status"] = "available"
@@ -431,7 +357,28 @@ async def startup_event():
         app_status["components"]["rapidocr"]["message"] = "Will initialize on first use"
         
         # Set global engine for dependency injection
-        set_global_engine(engine)
+        from mdb_runtime.embeddings.dependencies import set_global_engine
+        set_global_engine(engine, app_slug=APP_SLUG)
+        
+        # Initialize global embedding service for tools
+        # Uses manifest.json magic: works with or without memory_config
+        global _global_embedding_service
+        try:
+            # Initialize embedding service using manifest.json config
+            app_config = engine.get_app(APP_SLUG)
+            embedding_config = app_config.get("embedding_config", {}) if app_config else {}
+            
+            # Note: Memory service (Mem0MemoryService) handles its own embeddings separately
+            # EmbeddingService is for standalone embedding operations
+            _global_embedding_service = get_embedding_service(config=embedding_config)
+            app_status["components"]["embedding_service"]["status"] = "available"
+            app_status["components"]["embedding_service"]["message"] = "EmbeddingService initialized (from manifest.json)"
+            add_status_log("✅ EmbeddingService initialized (from manifest.json)", "info", "embedding")
+        except Exception as e:
+            logger.warning(f"Failed to initialize EmbeddingService: {e}", exc_info=True)
+            app_status["components"]["embedding_service"]["status"] = "unavailable"
+            app_status["components"]["embedding_service"]["message"] = f"Failed to initialize: {str(e)}"
+            add_status_log(f"⚠️  Failed to initialize EmbeddingService: {e}", "warning", "embedding")
         
         app_status["initialized"] = True
         app_status["status"] = "ready"
@@ -461,12 +408,53 @@ async def shutdown_event():
 
 # Global references for tools (will be set during startup)
 _global_db = None
-_global_embedding_service = None
-_global_llm_service = None
+_global_embedding_service: Optional[EmbeddingService] = None
+
+def get_embedding_service_dependency() -> EmbeddingService:
+    """FastAPI dependency to get the global embedding service"""
+    global _global_embedding_service
+    if not _global_embedding_service:
+        # Try to get it from global engine if available
+        try:
+            from mdb_runtime.embeddings.dependencies import _global_engine, _global_app_slug
+            from mdb_runtime.embeddings import get_embedding_service
+            if _global_engine and _global_app_slug:
+                app_config = _global_engine.get_app(_global_app_slug)
+                embedding_config = app_config.get("embedding_config", {}) if app_config else {}
+                _global_embedding_service = get_embedding_service(config=embedding_config)
+        except Exception as e:
+            logger.warning(f"Failed to get embedding service from global engine: {e}", exc_info=True)
+    
+    if not _global_embedding_service:
+        raise HTTPException(
+            status_code=503,
+            detail="EmbeddingService unavailable. Please ensure embedding_config is set in manifest.json."
+        )
+    return _global_embedding_service
 
 async def _get_vector_search_results_async(query: str, session_id: str, embedding_model: str, num_sources: int = 3) -> List[Dict]:
     """Async helper function for vector search (used by tools)"""
-    if not _global_db or not _global_embedding_service:
+    global _global_embedding_service
+    
+    if not _global_db:
+        return []
+    
+    # Get embedding service if not set (manifest.json magic - works with or without memory_config)
+    if not _global_embedding_service:
+        try:
+            from mdb_runtime.embeddings.dependencies import _global_engine, _global_app_slug
+            from mdb_runtime.embeddings import get_embedding_service
+            if _global_engine:
+                # Initialize standalone using manifest.json
+                app_config = _global_engine.get_app(_global_app_slug)
+                embedding_config = app_config.get("embedding_config", {}) if app_config else {}
+                
+                _global_embedding_service = get_embedding_service(config=embedding_config)
+        except Exception as e:
+            logger.warning(f"Failed to get embedding service: {e}", exc_info=True)
+            return []
+    
+    if not _global_embedding_service:
         return []
     
     try:
@@ -508,10 +496,11 @@ async def _get_vector_search_results_async(query: str, session_id: str, embeddin
         return []
 
 
-# LangChain Tools
-if LANGCHAIN_AVAILABLE:
+# Note: LangChain tools removed - examples should implement their own LLM clients
+# Tools functionality can be implemented using direct Azure OpenAI client
+if False:  # Disabled - LangChain removed
     @tool
-    async def search_knowledge_base(query: str, embedding_model: str = "voyage/voyage-2", num_sources: int = 3, max_chunk_length: int = 2000) -> str:
+    async def search_knowledge_base(query: str, embedding_model: str = "text-embedding-3-small", num_sources: int = 3, max_chunk_length: int = 2000) -> str:
         """Query the knowledge base to find relevant chunks for `query`."""
         global current_session, last_retrieved_sources, _current_user_query
         
@@ -773,36 +762,12 @@ else:
 # LangChain Agent Setup
 # ============================================================================
 
-def create_agent_executor(llm_service: LLMService) -> Optional[Any]:
+def create_agent_executor(client: AzureOpenAI) -> Optional[Any]:
     """Create LangGraph agent using platform's LLM service (modern LangGraph approach)"""
-    if not LANGCHAIN_AVAILABLE:
-        return None
-    
-    try:
-        # Create LangChain LLM using platform's configuration
-        # ChatLiteLLM uses LiteLLM under the hood (same as platform)
-        # For Azure OpenAI, the model should be in format: azure/<deployment-name>
-        model_name = llm_service.settings.default_chat_model
-        logger.info(f"[Agent] Creating LangChain LLM with model: {model_name}, temperature: {llm_service.settings.default_temperature}")
-        
-        langchain_llm = ChatLiteLLM(
-            model=model_name,
-            temperature=llm_service.settings.default_temperature
-        )
-        
-        logger.info(f"[Agent] LangChain LLM created successfully")
-        
-        # Create LangGraph agent directly (no need for prompt template or AgentExecutor)
-        # LangGraph's create_react_agent handles everything internally
-        logger.info(f"[Agent] Creating LangGraph react agent with {len(LANGCHAIN_TOOLS)} tools")
-        agent_executor = create_react_agent(langchain_llm, LANGCHAIN_TOOLS)
-        
-        logger.info(f"[Agent] LangGraph agent created successfully")
-        return agent_executor
-        
-    except Exception as e:
-        logger.error(f"Failed to create LangGraph agent: {e}", exc_info=True)
-        return None
+    # LangChain agents removed - examples should implement their own agent logic
+    # This function is kept for compatibility but returns None
+    logger.warning("[Agent] LangChain agents removed - implement your own agent logic")
+    return None
 
 
 # ============================================================================
@@ -888,7 +853,7 @@ class IngestRequest(BaseModel):
 async def start_ingestion_task(
     request: IngestRequest,
     db=Depends(get_db),
-    embedding_service: EmbeddingService = Depends(get_embedding_service_dep)
+    embedding_service: EmbeddingService = Depends(get_embedding_service_dependency)
 ):
     """Start an ingestion task"""
     # Check duplicates
@@ -1051,19 +1016,17 @@ async def run_ingestion_task(
 class ChatRequest(BaseModel):
     query: str
     session_id: str
-    embedding_model: str = "voyage/voyage-2"
+    embedding_model: str = "text-embedding-3-small"
     rag_params: Optional[Dict[str, Any]] = None
 
 
 @app.post("/chat")
 async def chat(
     request: ChatRequest,
-    db=Depends(get_db),
-    llm_service: LLMService = Depends(get_llm_service),
-    embedding_service: EmbeddingService = Depends(get_embedding_service_dep)
+    db=Depends(get_db)
 ):
-    """Chat endpoint with RAG using LangChain agent"""
-    global current_session, chat_history, last_retrieved_sources, _current_user_query
+    """Chat endpoint with RAG using direct Azure OpenAI client"""
+    global current_session, chat_history, last_retrieved_sources, last_retrieved_chunks, _current_user_query
     
     if not request.query or not request.session_id:
         raise HTTPException(status_code=400, detail="Missing 'query' or 'session_id'")
@@ -1097,10 +1060,14 @@ async def chat(
             elif role == "assistant":
                 langgraph_messages.append(("assistant", content))
         
-        # Create agent executor if LangChain is available
-        if LANGCHAIN_AVAILABLE:
-            logger.info(f"[Chat] Creating LangGraph agent for session '{request.session_id}'")
-            agent_executor = create_agent_executor(llm_service)
+        # Get Azure OpenAI client
+        client = get_azure_openai_client()
+        deployment_name = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4o")
+        
+        # LangChain agents removed - use direct RAG
+        if False:  # LangChain disabled
+            logger.info(f"[Chat] LangChain agents removed - using direct RAG")
+            agent_executor = None
             if agent_executor:
                 # Use LangGraph agent
                 # Add system instruction about embedding model
@@ -1146,17 +1113,17 @@ async def chat(
                 sources_used = last_retrieved_sources
                 logger.info(f"[Chat] LangGraph agent response received ({len(response_text)} chars), sources: {sources_used}")
             else:
-                # Fallback to direct LLM if agent creation failed
-                logger.warning("Agent executor creation failed, falling back to direct LLM")
+                # Use direct RAG (LangChain removed)
+                logger.info("Using direct RAG chat")
                 response_text = await _direct_rag_chat(
-                    request, db, llm_service, embedding_service, current_chat_history
+                    request, db, client, deployment_name, current_chat_history
                 )
                 sources_used = last_retrieved_sources
         else:
-            # Fallback to direct RAG if LangChain not available
-            logger.warning("LangChain not available, using direct RAG")
+            # Use direct RAG
+            logger.info("Using direct RAG chat")
             response_text = await _direct_rag_chat(
-                request, db, llm_service, embedding_service, current_chat_history
+                request, db, client, deployment_name, current_chat_history
             )
             sources_used = last_retrieved_sources
         
@@ -1189,7 +1156,7 @@ async def chat(
                 "content": response_text,
                 "sources": sources_used,
                 "query": request.query,  # Include query for chunk inspection
-                "chunks": retrieved_chunks  # Include retrieved chunks for inspection
+                "chunks": last_retrieved_chunks  # Include retrieved chunks for inspection
             }],
             "session_update": {
                 "all_sessions": all_sessions,
@@ -1215,22 +1182,58 @@ async def chat(
 async def _direct_rag_chat(
     request: ChatRequest,
     db,
-    llm_service: LLMService,
-    embedding_service: EmbeddingService,
+    client: AzureOpenAI,
+    deployment_name: str,
     current_chat_history: List[Dict[str, str]]
 ) -> str:
-    """Fallback direct RAG chat (without LangChain agent)"""
-    global last_retrieved_sources
+    """Direct RAG chat using Azure OpenAI client"""
+    global last_retrieved_sources, last_retrieved_chunks
     
     # Perform vector search
     rag_params = request.rag_params or {}
     num_sources = rag_params.get("num_sources", 3)
     max_chunk_length = rag_params.get("max_chunk_length", 2000)
     
-    # Get relevant chunks
-    query_vector = await embedding_service.embed_chunks([request.query], model=request.embedding_model)
-    if not query_vector:
-        raise HTTPException(status_code=500, detail="Failed to generate query embedding")
+    # Get embedding service if not set (manifest.json magic - works with or without memory_config)
+    global _global_embedding_service
+    if not _global_embedding_service:
+        try:
+            from mdb_runtime.embeddings.dependencies import _global_engine, _global_app_slug
+            from mdb_runtime.embeddings import get_embedding_service
+            if _global_engine:
+                # Initialize standalone using manifest.json
+                app_config = _global_engine.get_app(_global_app_slug)
+                embedding_config = app_config.get("embedding_config", {}) if app_config else {}
+                
+                _global_embedding_service = get_embedding_service(config=embedding_config)
+        except Exception as e:
+            logger.error(f"Failed to initialize EmbeddingService: {e}", exc_info=True)
+            raise HTTPException(
+                status_code=503,
+                detail="EmbeddingService unavailable. Cannot perform vector search."
+            )
+    
+    if not _global_embedding_service:
+        raise HTTPException(
+            status_code=503,
+            detail="EmbeddingService unavailable. Cannot perform vector search."
+        )
+    
+    # Generate query embedding
+    try:
+        query_vector = await _global_embedding_service.embed_chunks([request.query], model=request.embedding_model)
+    except Exception as e:
+        logger.error(f"Failed to generate query embedding: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to generate query embedding: {str(e)}"
+        )
+    
+    if not query_vector or len(query_vector) == 0:
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to generate query embedding: embed_chunks returned empty result"
+        )
     
     # Debug: Check if documents exist for this session
     doc_count = await db.knowledge_base_sessions.count_documents(
@@ -1273,37 +1276,36 @@ async def _direct_rag_chat(
         error_msg = str(search_error)
         logger.error(f"[RAG] Vector search failed: {error_msg}", exc_info=True)
         
+        # Check for dimension mismatch error
+        if "indexed with" in error_msg.lower() and "dimensions but queried with" in error_msg.lower():
+            # Extract dimension information from error message
+            import re
+            dim_match = re.search(r'indexed with (\d+) dimensions but queried with (\d+)', error_msg.lower())
+            if dim_match:
+                indexed_dims = dim_match.group(1)
+                queried_dims = dim_match.group(2)
+                query_vector_dims = len(query_vector[0]) if query_vector and len(query_vector) > 0 else "unknown"
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Vector dimension mismatch: The vector index '{vector_index_name}' was created with {indexed_dims}-dimensional vectors, but the query embedding model '{request.embedding_model}' produces {queried_dims}-dimensional vectors. Query vector has {query_vector_dims} dimensions. Please use the same embedding model for both indexing and querying, or recreate the index with the correct dimensions."
+                )
+            else:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Vector dimension mismatch: {error_msg}. Please ensure the embedding model used for queries matches the model used when creating the index."
+                )
         # Check if it's a vector index issue
-        if "index" in error_msg.lower() or "vectorSearch" in error_msg.lower():
+        elif "index" in error_msg.lower() or "vectorSearch" in error_msg.lower():
             logger.error(f"[RAG] Vector index may not exist. Check if '{vector_index_name}' is created and queryable.")
-            # Fallback: try a simple text search instead
-            logger.warning(f"[RAG] Attempting fallback text search...")
-            try:
-                # Simple text search as fallback
-                text_results = await db.knowledge_base_sessions.find(
-                    {
-                        f"metadata.{SESSION_FIELD}": request.session_id,
-                        "text": {"$regex": request.query[:50], "$options": "i"}
-                    }
-                ).limit(num_sources).to_list(length=num_sources)
-                
-                if text_results:
-                    results = [
-                        {
-                            "content": r.get("text", ""),
-                            "source": r.get("metadata", {}).get("source", "N/A"),
-                            "score": 0.5  # Dummy score for text search
-                        }
-                        for r in text_results
-                    ]
-                    logger.info(f"[RAG] Fallback text search found {len(results)} results")
-                else:
-                    results = []
-            except Exception as fallback_error:
-                logger.error(f"[RAG] Fallback search also failed: {fallback_error}")
-                results = []
+            raise HTTPException(
+                status_code=500,
+                detail=f"Vector search failed: Vector index '{vector_index_name}' may not exist or is not queryable. {error_msg}"
+            )
         else:
-            results = []
+            raise HTTPException(
+                status_code=500,
+                detail=f"Vector search failed: {error_msg}"
+            )
     
     # Debug logging
     logger.info(f"[RAG] Vector search found {len(results)} results for query: '{request.query[:100]}...'")
@@ -1326,10 +1328,20 @@ async def _direct_rag_chat(
         
         context = "\n---\n".join(context_parts)
         last_retrieved_sources = sources_used
+        # Transform chunks to match frontend expectations (text instead of content)
+        last_retrieved_chunks = [
+            {
+                "text": r.get("content", ""),
+                "source": r.get("source", "N/A"),
+                "score": r.get("score", 0.0)
+            }
+            for r in results
+        ]
         logger.info(f"[RAG] Built context with {len(context_parts)} chunks, total length: {len(context)} chars, sources: {sources_used}")
     else:
         context = "No relevant information found in the knowledge base."
         last_retrieved_sources = []
+        last_retrieved_chunks = []  # No chunks when no results
         logger.warning(f"[RAG] No results found for query in session '{request.session_id}'. Check if documents are embedded and vector index exists.")
         
         # Provide helpful context in the response
@@ -1353,7 +1365,7 @@ async def _direct_rag_chat(
     
     user_prompt = f"Context from knowledge base:\n\n{context}\n\nUser question: {request.query}"
     
-    # Get LLM response
+    # Get LLM response using Azure OpenAI client
     messages = [{"role": "system", "content": system_prompt}]
     # Add recent chat history
     for msg in current_chat_history[-5:]:  # Last 5 messages for context
@@ -1361,9 +1373,15 @@ async def _direct_rag_chat(
     messages.append({"role": "user", "content": user_prompt})
     
     try:
-        logger.info(f"[RAG] Sending {len(messages)} messages to LLM (model: {llm_service.settings.default_chat_model})")
+        logger.info(f"[RAG] Sending {len(messages)} messages to Azure OpenAI (model: {deployment_name})")
         logger.debug(f"[RAG] User prompt length: {len(user_prompt)} chars, context length: {len(context)} chars")
-        response = await llm_service.chat(messages)
+        completion = await asyncio.to_thread(
+            client.chat.completions.create,
+            model=deployment_name,
+            messages=messages,
+            max_tokens=1000
+        )
+        response = completion.choices[0].message.content
         logger.info(f"[RAG] Received response ({len(response) if response else 0} chars): {response[:200] if response else 'None'}...")
         return response
     except Exception as e:
@@ -1454,9 +1472,9 @@ async def get_diagnostics():
             packages = json.loads(result.stdout)
             # Filter for relevant packages
             relevant_packages = [
-                "langchain", "langchain-community", "langchain-litellm",
-                "langchain-core", "langchain-openai", "langchain-mongodb",
-                "langgraph", "litellm", "ddgs", "docling", "mdb-runtime"
+                "langchain", "langchain-community", "langchain-openai",
+                "langchain-core", "langchain-mongodb",
+                "langgraph", "ddgs", "docling", "mdb-runtime"
             ]
             diagnostics["installed_packages"] = {
                 pkg["name"]: pkg["version"]
@@ -1478,8 +1496,7 @@ async def get_diagnostics():
         ("langchain_core.prompts", "langchain_core.prompts"),
         ("langchain_core.messages", "langchain_core.messages"),
         ("langchain_core.tools", "langchain_core.tools"),
-        ("langchain_litellm", "langchain_litellm"),
-        ("litellm", "litellm"),
+        ("langchain_openai", "langchain_openai"),
         ("ddgs", "ddgs"),
         ("docling", "docling"),
     ]
@@ -1550,21 +1567,23 @@ async def get_state(session_id: str = "default", db=Depends(get_db)):
         
         logger.info(f"[State] Returning state: all_sessions={all_sessions}, current_session={effective_current_session}, session_id_param={session_id}, global_current_session={current_session}, chat_history_keys={list(chat_history.keys()) if chat_history else []}")
         
-        # Get available embedding models (from LLM service)
+        # Get available embedding models (from manifest.json)
         available_models = []
         if engine:
             try:
-                llm_service = engine.get_llm_service(APP_SLUG)
-                if llm_service and hasattr(llm_service.settings, 'default_embedding_model'):
-                    model = llm_service.settings.default_embedding_model
-                    if model:
-                        available_models.append(model)
+                app_config = engine.get_app(APP_SLUG)
+                if app_config:
+                    # Check embedding_config for embedding model
+                    if "embedding_config" in app_config:
+                        model = app_config["embedding_config"].get("default_embedding_model")
+                        if model and model not in available_models:
+                            available_models.append(model)
             except Exception as e:
-                logger.warning(f"Could not get LLM service: {e}")
+                logger.warning(f"Could not get embedding model from config: {e}")
         
         # Default to a common embedding model if none found
         if not available_models:
-            available_models = ["voyage/voyage-2"]
+            available_models = ["text-embedding-3-small"]
         
         # Get index status for each model
         index_status = {}
@@ -1647,7 +1666,7 @@ async def get_state(session_id: str = "default", db=Depends(get_db)):
 @app.get("/index_status")
 async def get_index_status(
     session_id: str = "default",
-    embedding_model: str = "voyage/voyage-2",
+    embedding_model: str = "text-embedding-3-small",
     auto_create: bool = False,
     db=Depends(get_db)
 ):
@@ -1777,7 +1796,7 @@ async def clear_history(request: ClearHistoryRequest):
 class PreviewSearchRequest(BaseModel):
     query: str
     session_id: str
-    embedding_model: str = "voyage/voyage-2"
+    embedding_model: str = "text-embedding-3-small"
     num_sources: int = 3
 
 
@@ -1790,7 +1809,7 @@ class SearchRequest(BaseModel):
 async def preview_search(
     request: PreviewSearchRequest,
     db=Depends(get_db),
-    embedding_service: EmbeddingService = Depends(get_embedding_service_dep)
+    embedding_service: EmbeddingService = Depends(get_embedding_service_dependency)
 ):
     """Preview vector search results"""
     # Generate query embedding
@@ -2016,7 +2035,7 @@ class IngestURLRequest(BaseModel):
 async def ingest_url(
     request: IngestURLRequest,
     db=Depends(get_db),
-    embedding_service: EmbeddingService = Depends(get_embedding_service_dep)
+    embedding_service: EmbeddingService = Depends(get_embedding_service_dependency)
 ):
     """Ingest URL content directly"""
     # Check duplicates
@@ -2122,7 +2141,7 @@ async def api_update_chunk(
     chunk_id: str,
     content: str = Form(...),
     db=Depends(get_db),
-    embedding_service: EmbeddingService = Depends(get_embedding_service_dep)
+    embedding_service: EmbeddingService = Depends(get_embedding_service_dependency)
 ):
     """Update a chunk and re-embed"""
     # Re-embed the content
@@ -2148,36 +2167,6 @@ async def api_update_chunk(
 # ============================================================================
 # Source Browsing
 # ============================================================================
-
-                index_info = "Vector index appears to exist and is accessible"
-            except Exception as idx_error:
-                index_info = f"Vector index error: {str(idx_error)[:200]}"
-        except Exception as e:
-            index_info = f"Could not check index: {str(e)[:200]}"
-        
-        result = {
-            "collection_exists": has_collection,
-            "total_documents": total_docs,
-            "session_documents": session_docs,
-            "documents_with_embeddings": docs_with_embeddings,
-            "session_id": session_id,
-            "sample_document": {
-                "has_document": sample_doc is not None,
-                "structure": {
-                    "has_text": "text" in (sample_doc or {}),
-                    "has_embedding": "embedding" in (sample_doc or {}),
-                    "has_metadata": "metadata" in (sample_doc or {}),
-                    "embedding_dimensions": len(sample_doc.get("embedding", [])) if sample_doc and "embedding" in sample_doc else 0,
-                    "metadata_keys": list(sample_doc.get("metadata", {}).keys()) if sample_doc and "metadata" in sample_doc else []
-                } if sample_doc else None
-            },
-            "vector_index_status": index_info
-        }
-        
-        return result
-    except Exception as e:
-        logger.error(f"Error in debug endpoint: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Debug check failed: {str(e)}")
 
 
 @app.get("/sources")
@@ -2336,7 +2325,7 @@ async def chunk_preview(
     content: str = Form(...),
     chunk_size: int = Form(1000),
     chunk_overlap: int = Form(150),
-    embedding_service: EmbeddingService = Depends(get_embedding_service_dep)
+    embedding_service: EmbeddingService = Depends(get_embedding_service_dependency)
 ):
     """Preview how content will be chunked with detailed information"""
     logs = []
@@ -2364,7 +2353,7 @@ async def chunk_preview(
         log_message(f"Starting chunk preview: content_length={len(content)}, chunk_size={chunk_size}, chunk_overlap={chunk_overlap}")
         log_message("Initializing text splitter with tokenizer model: gpt-3.5-turbo")
         
-        # Get chunks
+        # Get chunks (chunk_text is async, must await)
         chunks = await embedding_service.chunk_text(
             content,
             max_tokens=chunk_size,

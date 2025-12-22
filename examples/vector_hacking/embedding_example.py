@@ -4,7 +4,7 @@ Semantic Text Splitting and Embedding Example
 
 This example demonstrates the new EmbeddingService that combines:
 1. Semantic text splitting (Rust-based, fast and accurate)
-2. Embedding generation (via LiteLLM, provider-agnostic)
+2. Embedding generation (via mem0, provider-agnostic)
 3. MongoDB storage (structured document format)
 
 The service is configured via manifest.json embedding_config section.
@@ -15,7 +15,7 @@ import os
 from pathlib import Path
 
 from mdb_runtime import RuntimeEngine
-from mdb_runtime.llm import LLMService, EmbeddingService, get_embedding_service
+from mdb_runtime.embeddings import EmbeddingService
 
 
 async def main():
@@ -70,21 +70,17 @@ async def main():
             print("   Add 'embedding_config' section with 'enabled: true' to enable it.")
             return
         
-        # Get LLM config from manifest
-        llm_config = manifest.get("llm_config", {})
-        if not llm_config.get("enabled", False):
-            print("⚠️  LLM service not enabled in manifest.json")
-            print("   Embedding service requires LLM service to be enabled.")
+        # Get memory service (EmbeddingService uses mem0 from memory service)
+        memory_service = engine.get_memory_service("vector_hacking")
+        if not memory_service:
+            print("⚠️  Memory service not enabled in manifest.json")
+            print("   Embedding service requires memory_config.enabled=true in manifest.json.")
             return
         
-        # Initialize LLM Service
-        print("🔧 Initializing LLM Service...")
-        llm_service = LLMService(config=llm_config)
-        print("✅ LLM Service initialized\n")
-        
-        # Initialize Embedding Service
+        # Initialize Embedding Service (uses mem0 from memory service)
         print("🔧 Initializing Embedding Service...")
-        embedding_service = get_embedding_service(llm_service, config=embedding_config)
+        from mdb_runtime.embeddings import get_embedding_service
+        embedding_service = get_embedding_service()
         print("✅ Embedding Service initialized\n")
         
         # Get a scoped database for the app
@@ -111,15 +107,15 @@ async def main():
         model limits while preserving semantic boundaries. This is crucial for maintaining context
         in RAG applications.
         
-        LiteLLM provides a universal wrapper for LLM and embedding APIs, allowing you to switch
-        between providers (OpenAI, VoyageAI, Cohere) by simply changing a model string.
+        The EmbeddingService supports OpenAI and AzureOpenAI embeddings,
+        auto-detected from environment variables.
         """ * 10  # Repeat to generate multiple chunks
         
         # Process and store
         result = await embedding_service.process_and_store(
             text_content=long_text,
             source_id="doc_101",
-            collection=db.voyage_embeddings,
+            collection=db.embeddings,
             max_tokens=embedding_config.get("max_tokens_per_chunk", 1000),
             embedding_model=embedding_config.get("default_embedding_model")
         )
@@ -135,7 +131,7 @@ async def main():
         print("-" * 60)
         
         # Find all chunks for this source
-        chunks = await db.voyage_embeddings.find(
+        chunks = await db.embeddings.find(
             {"source_id": "doc_101"}
         ).sort("chunk_index", 1).to_list(length=None)
         
@@ -181,7 +177,7 @@ async def main():
         # ============================================
         print("💡 What happened:")
         print("   1. Text was split semantically using Rust-based semantic-text-splitter")
-        print("   2. Each chunk was embedded using LiteLLM (VoyageAI in this case)")
+        print("   2. Each chunk was embedded using OpenAI/AzureOpenAI (auto-detected)")
         print("   3. Documents were stored in MongoDB with proper structure")
         print("   4. All configuration came from manifest.json")
         print()

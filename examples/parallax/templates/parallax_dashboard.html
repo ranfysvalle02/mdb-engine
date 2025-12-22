@@ -3,10 +3,125 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Parallax | Tech News Intelligence</title>
+    <title>Parallax | GitHub Repository Intelligence</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
     <style>
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        @keyframes slideInRight {
+            from {
+                opacity: 0;
+                transform: translateX(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+        
+        @keyframes fadeOut {
+            from {
+                opacity: 1;
+            }
+            to {
+                opacity: 0;
+            }
+        }
+        
+        .animate-fade-in {
+            animation: fadeIn 0.4s ease-out;
+        }
+        
+        .animate-slide-in-right {
+            animation: slideInRight 0.3s ease-out;
+        }
+        
+        @keyframes shimmer {
+            0% { background-position: -1000px 0; }
+            100% { background-position: 1000px 0; }
+        }
+        
+        .shimmer {
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
+            background-size: 1000px 100%;
+            animation: shimmer 2s infinite;
+        }
+        
+        @keyframes scaleIn {
+            from {
+                opacity: 0;
+                transform: scale(0.95);
+            }
+            to {
+                opacity: 1;
+                transform: scale(1);
+            }
+        }
+        
+        .scale-in {
+            animation: scaleIn 0.3s ease-out;
+        }
+        
+        /* Enhanced card hover effects */
+        .parallax-card {
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        
+        .parallax-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4), 0 0 20px rgba(96, 165, 250, 0.1);
+            border-color: rgba(96, 165, 250, 0.3);
+        }
+        
+        /* Smooth button interactions */
+        button {
+            transition: all 0.2s ease;
+        }
+        
+        button:active {
+            transform: scale(0.98);
+        }
+        
+        /* Better focus states */
+        button:focus-visible,
+        select:focus-visible {
+            outline: 2px solid rgba(96, 165, 250, 0.6);
+            outline-offset: 2px;
+        }
+        
+        /* Improved empty state */
+        .empty-state {
+            animation: fadeIn 0.6s ease-out;
+        }
+        
+        /* Enhanced progress indicator */
+        .progress-glow {
+            box-shadow: 0 0 10px rgba(96, 165, 250, 0.5);
+        }
+        
+        /* Smooth scroll behavior */
+        html {
+            scroll-behavior: smooth;
+        }
+        
+        /* Better badge hover effects */
+        .keyword-badge {
+            transition: all 0.2s ease;
+        }
+        
+        .keyword-badge:hover {
+            transform: translateY(-2px) scale(1.05);
+        }
         :root {
             --mouse-x: 0.5;
             --mouse-y: 0.5;
@@ -120,13 +235,19 @@
         }
         
         .parallax-card.visible {
-            opacity: 1;
-            transform: translateY(0);
+            opacity: 1 !important;
+            transform: translateY(0) !important;
+        }
+        
+        /* Override opacity for animated cards - must be visible */
+        .parallax-card.animate-fade-in {
+            opacity: 1 !important;
+            transform: translateY(0) !important;
         }
 
         /* Subtle hover effect on cards */
         .parallax-card:hover {
-            transform: translateY(-8px);
+            transform: translateY(-8px) !important;
             transition: transform 0.2s ease-out;
         }
 
@@ -221,11 +342,11 @@
             </div>
             <div class="flex items-center gap-3">
                 <button onclick="openSettings()" 
-                    class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded-lg text-sm font-semibold transition flex items-center gap-2 border border-slate-700 hover:border-slate-600">
+                    class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-2 border border-slate-700 hover:border-slate-600 hover:shadow-lg hover:scale-105">
                     <i class="fa-solid fa-sliders-h"></i> Configure
                 </button>
                 <button onclick="refreshData()" id="refreshBtn" 
-                    class="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white px-4 py-2 rounded-lg text-sm font-semibold transition flex items-center gap-2 shadow-lg pulse-glow">
+                    class="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-2 shadow-lg hover:shadow-xl hover:scale-105 pulse-glow">
                     <i class="fa-solid fa-radar"></i> Scan
                 </button>
             </div>
@@ -260,12 +381,12 @@
                 <div class="space-y-4">
                     <div>
                         <div class="flex items-center gap-2 mb-4">
-                            <p class="text-sm text-slate-400">Keywords to monitor in Hacker News stories</p>
+                            <p class="text-sm text-slate-400">Keywords to search for in GitHub repositories</p>
                             <div class="popover-trigger">
                                 <i class="fa-solid fa-circle-question text-slate-500 hover:text-blue-400 transition text-sm"></i>
                                 <div class="popover-content">
                                     <strong>Watchlist Keywords</strong>
-                                    Add keywords to monitor Hacker News stories. Stories containing these keywords will be analyzed. Examples: "MongoDB", "vector", "AI", "Python". Press Enter or click + to add.
+                                    Add keywords to search GitHub repositories. Repos matching these keywords (with AGENTS.md or LLMs.md files) will be analyzed. Examples: "MongoDB", "vector", "AI", "Python". Press Enter or click + to add.
                                 </div>
                             </div>
                         </div>
@@ -276,7 +397,7 @@
                             <input 
                                 type="text" 
                                 id="newWatchlistItem" 
-                                placeholder="Add keyword (e.g., MongoDB, vector, voyageAI)"
+                                placeholder="Add keyword (e.g., MongoDB, vector, AI)"
                                 class="tag-input flex-1 bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
                                 onkeypress="if(event.key === 'Enter') addWatchlistItem()"
                             >
@@ -293,11 +414,11 @@
                                 <i class="fa-solid fa-circle-question text-slate-500 hover:text-blue-400 transition text-xs"></i>
                                 <div class="popover-content">
                                     <strong>Scan Limit</strong>
-                                    Controls how many top Hacker News stories to check per scan. Higher values = more coverage but slower scans. Recommended: 50-100 for balance.
+                                    Controls how many repositories to search per keyword. Higher values = more coverage but slower scans. Recommended: 20-50 for balance.
                                 </div>
                             </div>
                         </div>
-                        <p class="text-xs text-slate-300 mb-2">Number of top Hacker News stories to check per scan (1-500)</p>
+                        <p class="text-xs text-slate-300 mb-2">Number of repositories to search per keyword (1-500)</p>
                         <div class="flex items-center gap-3">
                             <input 
                                 type="number" 
@@ -307,8 +428,53 @@
                                 value="50"
                                 class="w-24 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500"
                             >
-                            <span class="text-xs text-slate-400">stories</span>
+                            <span class="text-xs text-slate-400">repos per keyword</span>
                         </div>
+                    </div>
+                    
+                    <div class="pt-4 border-t border-slate-700">
+                        <div class="flex items-center gap-2 mb-2">
+                            <label class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Minimum Stars</label>
+                            <div class="popover-trigger">
+                                <i class="fa-solid fa-circle-question text-slate-500 hover:text-blue-400 transition text-xs"></i>
+                                <div class="popover-content">
+                                    <strong>Minimum Stars</strong>
+                                    Only search repositories with at least this many stars. Higher values = more established repos but fewer results. Recommended: 50-100 for balance.
+                                </div>
+                            </div>
+                        </div>
+                        <p class="text-xs text-slate-300 mb-2">Minimum stars required (0-100000)</p>
+                        <div class="flex items-center gap-3">
+                            <input 
+                                type="number" 
+                                id="minStars" 
+                                min="0" 
+                                max="100000" 
+                                value="50"
+                                class="w-24 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500"
+                            >
+                            <span class="text-xs text-slate-400">⭐ stars</span>
+                        </div>
+                    </div>
+                    
+                    <div class="pt-4 border-t border-slate-700">
+                        <div class="flex items-center gap-2 mb-2">
+                            <label class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Language Filter</label>
+                            <div class="popover-trigger">
+                                <i class="fa-solid fa-circle-question text-slate-500 hover:text-blue-400 transition text-xs"></i>
+                                <div class="popover-content">
+                                    <strong>Language Filter</strong>
+                                    Optional: Filter repositories by programming language (e.g., "python", "javascript", "typescript"). Leave empty to search all languages.
+                                </div>
+                            </div>
+                        </div>
+                        <p class="text-xs text-slate-300 mb-2">Filter by programming language (optional)</p>
+                        <input 
+                            type="text" 
+                            id="languageFilter" 
+                            placeholder="e.g., python, javascript, typescript"
+                            class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                        >
                     </div>
                 </div>
             </div>
@@ -345,7 +511,7 @@
                                 id="relevancePrompt" 
                                 rows="5"
                                 class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 font-mono focus:outline-none focus:border-amber-500"
-                                placeholder="You are the {role} Specialist. Analyze this news title in context of watchlist: {watchlist}...\n\n{format_instructions}"
+                                placeholder="You are the {role} Specialist. Analyze this GitHub repository and its AGENTS.md/LLMs.md file in context of watchlist: {watchlist}...\n\n{format_instructions}"
                             ></textarea>
                             <p class="text-xs text-slate-300 mt-1">Use {role}, {watchlist}, {format_instructions}</p>
                         </div>
@@ -435,22 +601,22 @@
 
     <main class="max-w-7xl mx-auto px-6 py-10 space-y-12">
         
-        <!-- Filters and Sort -->
-        <div class="mb-6 space-y-4">
+        <!-- Filters and Sort - Sticky (sticks below nav) -->
+        <div class="sticky top-[73px] z-40 mb-6 space-y-4 py-4 -mx-6 px-6 bg-slate-950/98 backdrop-blur-lg border-b border-slate-800/50 shadow-xl">
             <div class="flex items-center justify-between flex-wrap gap-4">
                 <!-- Keyword Filter -->
                 <div class="flex items-center gap-3">
                     <span class="text-sm text-slate-400 font-semibold">Filter by keyword:</span>
                     <div class="flex flex-wrap gap-2">
                         <button onclick="filterByKeyword(null)" 
-                            class="px-3 py-1.5 text-xs font-semibold rounded-lg transition
-                            {% if not selected_keyword %} bg-blue-600 text-white {% else %} bg-slate-800 text-slate-400 hover:bg-slate-700 {% endif %}">
+                            class="px-3 py-1.5 text-xs font-semibold rounded-lg transition-all hover:scale-105
+                            {% if not selected_keyword %} bg-blue-600 text-white shadow-lg {% else %} bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white {% endif %}">
                             All
                         </button>
                         {% for kw in watchlist %}
                         <button onclick="filterByKeyword('{{ kw }}')" 
-                            class="px-3 py-1.5 text-xs font-semibold rounded-lg transition
-                            {% if selected_keyword == kw %} bg-green-600 text-white {% else %} bg-slate-800 text-slate-400 hover:bg-slate-700 {% endif %}">
+                            class="px-3 py-1.5 text-xs font-semibold rounded-lg transition-all hover:scale-105
+                            {% if selected_keyword == kw %} bg-green-600 text-white shadow-lg {% else %} bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white {% endif %}">
                             {{ kw }}
                         </button>
                         {% endfor %}
@@ -475,33 +641,48 @@
         </div>
         
         {% if not reports %}
-        <div class="text-center py-20">
+        <div class="text-center py-20 empty-state">
             {% if selected_keyword %}
-            <div class="inline-block mb-4">
-                <i class="fa-solid fa-filter text-4xl text-slate-500"></i>
+            <div class="inline-block mb-6 scale-in">
+                <div class="relative">
+                    <i class="fa-solid fa-filter text-6xl text-slate-500/50"></i>
+                    <div class="absolute inset-0 flex items-center justify-center">
+                        <i class="fa-solid fa-search text-2xl text-slate-400"></i>
+                    </div>
+                </div>
             </div>
-            <h2 class="text-xl mb-2 gradient-text">No Results for "{{ selected_keyword }}"</h2>
-            <p class="text-sm text-slate-400 mb-4">No reports found matching this keyword.</p>
-            <button onclick="filterByKeyword(null)" class="mt-4 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition">
+            <h2 class="text-2xl mb-3 gradient-text font-bold">No Results for "{{ selected_keyword }}"</h2>
+            <p class="text-sm text-slate-400 mb-6 max-w-md mx-auto">No reports found matching this keyword. Try a different filter or start a new scan.</p>
+            <button onclick="filterByKeyword(null)" class="mt-4 px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-all font-semibold shadow-lg hover:shadow-xl hover:scale-105">
                 <i class="fa-solid fa-times mr-2"></i>Clear Filter
             </button>
             {% else %}
-            <div class="inline-block mb-4">
-                <i class="fa-solid fa-circle-notch fa-spin text-4xl text-blue-500"></i>
+            <div class="inline-block mb-6 scale-in">
+                <div class="relative">
+                    <i class="fa-solid fa-layer-group text-6xl text-slate-500/30 float"></i>
+                    <div class="absolute inset-0 flex items-center justify-center">
+                        <i class="fa-solid fa-radar text-3xl text-blue-400/60 pulse-glow"></i>
+                    </div>
+                </div>
             </div>
-            <h2 class="text-xl mb-2 gradient-text">Scanning Hacker News...</h2>
-            <p class="text-sm text-slate-400 mb-4">Searching for <span id="watchlistDisplay" class="text-blue-400 font-mono">{{ watchlist|join(', ') }}</span></p>
-            <p class="text-xs text-slate-300">This may take 30-60 seconds. The page will auto-refresh when ready.</p>
-            <script>
-                // Auto-refresh every 5 seconds until we have reports (only if no filters applied)
-                setTimeout(() => location.reload(), 5000);
-            </script>
+            <h2 class="text-2xl mb-3 gradient-text font-bold">No Reports Yet</h2>
+            <p class="text-sm text-slate-400 mb-2 max-w-md mx-auto">No Parallax reports found for keywords:</p>
+            <div class="flex flex-wrap justify-center gap-2 mb-6">
+                {% for kw in watchlist %}
+                <span class="px-3 py-1 bg-blue-500/20 text-blue-300 rounded-lg text-xs font-semibold border border-blue-500/40">{{ kw }}</span>
+                {% endfor %}
+            </div>
+            <p class="text-xs text-slate-500 mb-6 max-w-md mx-auto">Click the "Scan" button above to search and analyze GitHub repositories matching your watchlist.</p>
+            <button onclick="refreshData()" class="mt-4 px-8 py-4 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white rounded-lg transition-all font-semibold shadow-lg hover:shadow-xl hover:scale-105 pulse-glow">
+                <i class="fa-solid fa-radar mr-2"></i>Start Scan
+            </button>
             {% endif %}
         </div>
         {% endif %}
 
+        <div id="reportsContainer" class="space-y-6">
         {% for r in reports %}
-        <div class="group relative glass-enhanced border border-slate-800 rounded-2xl overflow-hidden hover:border-slate-700 transition duration-500 shadow-2xl parallax-card">
+        <div class="group relative glass-enhanced border border-slate-800 rounded-2xl overflow-hidden transition-all duration-300 shadow-2xl parallax-card hover:shadow-2xl">
             
             <!-- Enhanced Card Header -->
             <div class="relative bg-gradient-to-br from-slate-800/60 via-slate-800/50 to-slate-900/50 p-4 border-b border-slate-700/80 backdrop-blur-sm">
@@ -515,7 +696,7 @@
                         {% if r.matched_keywords %}
                         <div class="flex items-center gap-2 flex-wrap">
                             {% for kw in r.matched_keywords %}
-                            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold bg-gradient-to-r from-green-600/20 to-emerald-600/20 text-green-300 border border-green-500/40 uppercase tracking-wide shadow-sm hover:shadow-md hover:border-green-500/60 transition-all duration-200">
+                            <span class="keyword-badge inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold bg-gradient-to-r from-green-600/20 to-emerald-600/20 text-green-300 border border-green-500/40 uppercase tracking-wide shadow-sm hover:shadow-md hover:border-green-500/60 cursor-pointer">
                                 <i class="fa-solid fa-tag text-[9px]"></i>{{ kw }}
                             </span>
                             {% endfor %}
@@ -543,9 +724,59 @@
                 <div class="mb-3">
                     <a href="{{ r.url }}" target="_blank" class="group block">
                         <h2 class="text-lg font-bold text-white group-hover:text-blue-400 transition-colors duration-200 leading-snug pr-6">
-                            {{ r.original_title }}
+                            {{ r.repo_owner }}/{{ r.repo_name }}
                             <i class="fa-solid fa-external-link-alt text-xs opacity-40 group-hover:opacity-70 ml-2 transition-opacity"></i>
                         </h2>
+                                <div class="flex items-center gap-3 mt-2 text-xs text-slate-400 flex-wrap">
+                                    <span class="flex items-center gap-1">
+                                        <i class="fa-solid fa-star text-yellow-400"></i>
+                                        {{ r.stars if r.stars else 0 }}
+                                    </span>
+                                    {% if r.forks_count %}
+                                    <span class="flex items-center gap-1">
+                                        <i class="fa-solid fa-code-branch text-blue-400"></i>
+                                        {{ r.forks_count }}
+                                    </span>
+                                    {% endif %}
+                                    {% if r.pull_requests_count is not none %}
+                                    <span class="flex items-center gap-1">
+                                        <i class="fa-solid fa-code-pull-request text-purple-400"></i>
+                                        {{ r.pull_requests_count }} PRs
+                                    </span>
+                                    {% endif %}
+                                    {% if r.issues_count is not none %}
+                                    <span class="flex items-center gap-1">
+                                        <i class="fa-solid fa-circle-exclamation text-orange-400"></i>
+                                        {{ r.issues_count }} issues
+                                    </span>
+                                    {% endif %}
+                                    {% if r.primary_language %}
+                                    <span class="flex items-center gap-1">
+                                        <i class="fa-solid fa-code text-cyan-400"></i>
+                                        {{ r.primary_language }}
+                                    </span>
+                                    {% endif %}
+                                    <span class="flex items-center gap-1">
+                                        <i class="fa-solid fa-file-code"></i>
+                                        {{ r.file_found if r.file_found else 'AGENTS.md' }}
+                                    </span>
+                                </div>
+                                {% if r.last_updated or r.last_commit_message %}
+                                <div class="mt-2 pt-2 border-t border-slate-700/30">
+                                    {% if r.last_updated %}
+                                    <div class="text-[10px] text-slate-500 mb-1">
+                                        <i class="fa-solid fa-clock text-[9px]"></i>
+                                        Updated: {{ r.last_updated[:10] if r.last_updated else 'Unknown' }}
+                                    </div>
+                                    {% endif %}
+                                    {% if r.last_commit_message %}
+                                    <div class="text-[10px] text-slate-500 italic truncate" title="{{ r.last_commit_message }}">
+                                        <i class="fa-solid fa-code-commit text-[9px]"></i>
+                                        {{ r.last_commit_message[:60] }}{% if r.last_commit_message|length > 60 %}...{% endif %}
+                                    </div>
+                                    {% endif %}
+                                </div>
+                                {% endif %}
                     </a>
                 </div>
             </div>
@@ -559,26 +790,48 @@
                             <i class="fa-solid fa-bullseye text-xs"></i>
                             <h3 class="text-xs font-bold uppercase tracking-wider">Relevance</h3>
                         </div>
-                        <span class="font-mono text-amber-400 font-bold text-xs">{{ r.relevance.relevance_score if r.relevance and r.relevance.relevance_score else 0 }}/100</span>
+                        <span class="font-mono text-amber-400 font-bold text-xs">{{ r.relevance.get('relevance_score', 0) if r.relevance else 0 }}/100</span>
                     </div>
                     <!-- Badge Fields Header -->
                     <div class="flex items-center justify-between mb-3 pb-2 border-b border-slate-700/30">
                         <span class="text-[10px] text-slate-300 uppercase font-semibold">Urgency</span>
                         <span class="text-[10px] font-bold px-2 py-0.5 rounded
-                            {% if r.relevance and r.relevance.urgency == 'High' %} bg-orange-500/20 text-orange-400 border border-orange-800/50
-                            {% elif r.relevance and r.relevance.urgency == 'Medium' %} bg-yellow-500/20 text-yellow-400 border border-yellow-800/50
+                            {% if r.relevance and r.relevance.get('urgency') == 'High' %} bg-orange-500/20 text-orange-400 border border-orange-800/50
+                            {% elif r.relevance and r.relevance.get('urgency') == 'Medium' %} bg-yellow-500/20 text-yellow-400 border border-yellow-800/50
                             {% else %} bg-slate-500/20 text-slate-400 border border-slate-700/50 {% endif %}">
-                            {{ r.relevance.urgency if r.relevance and r.relevance.urgency else 'Low' }}
+                            {{ r.relevance.get('urgency', 'Low') if r.relevance else 'Low' }}
                         </span>
                     </div>
                     <div class="space-y-3">
                         <div>
+                            <p class="text-[10px] text-slate-300 uppercase font-semibold mb-1">Keywords Used</p>
+                            {% if r.relevance and r.relevance.get('keywords_used') %}
+                            <div class="flex flex-wrap gap-1.5 mt-1">
+                                {% for kw in r.relevance.get('keywords_used', []) %}
+                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-green-600/20 text-green-300 border border-green-500/40">
+                                    <i class="fa-solid fa-check text-[8px]"></i>{{ kw }}
+                                </span>
+                                {% endfor %}
+                            </div>
+                            {% else %}
+                            <p class="text-xs text-slate-400 italic">No watchlist keywords found in implementation</p>
+                            {% endif %}
+                        </div>
+                        <div>
+                            <p class="text-[10px] text-slate-300 uppercase font-semibold mb-1">Keyword Usage</p>
+                            <p class="text-xs text-slate-300 leading-relaxed">{{ r.relevance.get('keywords_usage_details', 'N/A') if r.relevance else 'N/A' }}</p>
+                        </div>
+                        <div>
                             <p class="text-[10px] text-slate-300 uppercase font-semibold mb-1">Why It Matters</p>
-                            <p class="text-xs text-slate-300 leading-relaxed">{{ r.relevance.why_it_matters if r.relevance and r.relevance.why_it_matters else 'N/A' }}</p>
+                            <p class="text-xs text-slate-300 leading-relaxed">{{ r.relevance.get('why_it_matters', 'N/A') if r.relevance else 'N/A' }}</p>
                         </div>
                         <div>
                             <p class="text-[10px] text-slate-300 uppercase font-semibold mb-1">Key Insight</p>
-                            <p class="text-xs text-slate-300 leading-relaxed">{{ r.relevance.key_insight if r.relevance and r.relevance.key_insight else 'N/A' }}</p>
+                            <p class="text-xs text-slate-300 leading-relaxed">{{ r.relevance.get('key_insight', 'N/A') if r.relevance else 'N/A' }}</p>
+                        </div>
+                        <div class="pt-2 border-t border-slate-700/30">
+                            <p class="text-[9px] text-slate-400 uppercase font-semibold mb-1">Partnership Opportunity</p>
+                            <p class="text-xs text-slate-400 leading-relaxed italic">{{ r.relevance.get('partnership_opportunity', 'N/A') if r.relevance else 'N/A' }}</p>
                         </div>
                     </div>
                 </div>
@@ -615,12 +868,16 @@
                     </div>
                     <div class="space-y-3">
                         <div>
-                            <p class="text-[10px] text-slate-300 uppercase font-semibold mb-1">Performance</p>
-                            <p class="text-xs text-slate-300 leading-relaxed">{{ r.product.performance if r.product and r.product.performance else 'N/A' }}</p>
+                            <p class="text-[10px] text-slate-300 uppercase font-semibold mb-1">Architecture</p>
+                            <p class="text-xs text-slate-300 leading-relaxed">{{ r.product.architecture if r.product and r.product.architecture else 'N/A' }}</p>
                         </div>
                         <div>
-                            <p class="text-[10px] text-slate-300 uppercase font-semibold mb-1">Use Case</p>
-                            <p class="text-xs text-slate-300 leading-relaxed">{{ r.product.use_case if r.product and r.product.use_case else 'N/A' }}</p>
+                            <p class="text-[10px] text-slate-300 uppercase font-semibold mb-1">Tech Stack</p>
+                            <p class="text-xs text-slate-300 leading-relaxed">{{ r.product.tech_stack if r.product and r.product.tech_stack else 'N/A' }}</p>
+                        </div>
+                        <div>
+                            <p class="text-[10px] text-slate-300 uppercase font-semibold mb-1">Code Patterns</p>
+                            <p class="text-xs text-slate-300 leading-relaxed">{{ r.product.code_patterns if r.product and r.product.code_patterns else 'N/A' }}</p>
                         </div>
                     </div>
                 </div>
@@ -636,6 +893,9 @@
             settingsModal: null,
             watchlistTags: null,
             scanLimit: null,
+            minStars: null,
+            languageFilter: null,
+            maxLimit: null,
             newWatchlistItem: null,
             watchlistDisplay: null
         };
@@ -645,6 +905,9 @@
             elements.settingsModal = document.getElementById('settingsModal');
             elements.watchlistTags = document.getElementById('watchlistTags');
             elements.scanLimit = document.getElementById('scanLimit');
+            elements.minStars = document.getElementById('minStars');
+            elements.languageFilter = document.getElementById('languageFilter');
+            elements.maxLimit = document.getElementById('maxLimit');
             elements.newWatchlistItem = document.getElementById('newWatchlistItem');
             elements.watchlistDisplay = document.getElementById('watchlistDisplay');
         }
@@ -653,6 +916,8 @@
         let currentLensConfigs = {};
         let currentLensTab = 'Relevance';
         let currentScanLimit = 50;
+        let currentMinStars = 50;
+        let currentLanguageFilter = '';
         
         // Load watchlist on page load
         async function loadWatchlist() {
@@ -662,7 +927,13 @@
                 if(data.success) {
                     currentWatchlist = data.watchlist;
                     currentScanLimit = data.scan_limit || 50;
+                    currentMinStars = data.min_stars || 50;
+                    currentLanguageFilter = data.language_filter || '';
+                    const currentMaxLimit = data.max_limit || 50;
                     if(elements.scanLimit) elements.scanLimit.value = currentScanLimit;
+                    if(elements.minStars) elements.minStars.value = currentMinStars;
+                    if(elements.languageFilter) elements.languageFilter.value = currentLanguageFilter;
+                    if(elements.maxLimit) elements.maxLimit.value = currentMaxLimit;
                     renderWatchlistTags();
                 }
             } catch(e) {
@@ -1000,16 +1271,21 @@
                     currentLensConfigs[lensName].schema_fields = currentLensConfigs[lensName].schema_fields.filter(f => f.name && f.name.trim());
                 });
                 
-                // Get scan limit
+                // Save watchlist and search config
                 const scanLimit = elements.scanLimit ? parseInt(elements.scanLimit.value) || 50 : 50;
+                const minStars = elements.minStars ? parseInt(elements.minStars.value) || 50 : 50;
+                const languageFilter = elements.languageFilter ? elements.languageFilter.value.trim() : '';
+                const maxLimit = elements.maxLimit ? parseInt(elements.maxLimit.value) || null : null;
                 
-                // Save watchlist and scan limit
                 const watchlistRes = await fetch('/api/watchlist', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({
                         watchlist: currentWatchlist,
-                        scan_limit: scanLimit
+                        scan_limit: scanLimit,
+                        min_stars: minStars,
+                        language_filter: languageFilter || null,
+                        max_limit: maxLimit
                     })
                 });
                 
@@ -1048,46 +1324,441 @@
             }
         }
         
+        let wsConnection = null;
+        let isScanning = false;
+        
+        // Function to render a report card from data
+        function renderReportCard(report) {
+            const container = document.getElementById('reportsContainer');
+            if (!container) return;
+            
+            // Format timestamp
+            const timestamp = report.timestamp ? new Date(report.timestamp).toISOString().split('T')[0] : 'Unknown';
+            const isFresh = report.is_fresh || false;
+            
+            // Build matched keywords HTML
+            let keywordsHTML = '';
+            if (report.matched_keywords && report.matched_keywords.length > 0) {
+                keywordsHTML = report.matched_keywords.map(kw => 
+                    `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold bg-gradient-to-r from-green-600/20 to-emerald-600/20 text-green-300 border border-green-500/40 uppercase tracking-wide shadow-sm hover:shadow-md hover:border-green-500/60 transition-all duration-200">
+                        <i class="fa-solid fa-tag text-[9px]"></i>${kw}
+                    </span>`
+                ).join('');
+            }
+            
+            // Build relevance keywords used HTML
+            let relevanceKeywordsHTML = '';
+            if (report.relevance && report.relevance.keywords_used && report.relevance.keywords_used.length > 0) {
+                relevanceKeywordsHTML = report.relevance.keywords_used.map(kw => 
+                    `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-green-600/20 text-green-300 border border-green-500/40">
+                        <i class="fa-solid fa-check text-[8px]"></i>${kw}
+                    </span>`
+                ).join('');
+            }
+            
+            const cardHTML = `
+                <div class="group relative glass-enhanced border border-slate-800 rounded-2xl overflow-hidden hover:border-slate-700 transition duration-500 shadow-2xl animate-fade-in">
+                    <!-- Enhanced Card Header -->
+                    <div class="relative bg-gradient-to-br from-slate-800/60 via-slate-800/50 to-slate-900/50 p-4 border-b border-slate-700/80 backdrop-blur-sm">
+                        <!-- Header Top Row: Source Detected + Matched Keywords -->
+                        <div class="flex items-center justify-between gap-3 mb-3 flex-wrap">
+                            <!-- Left: Source Detected + Matched Keywords -->
+                            <div class="flex items-center gap-3 flex-wrap flex-1">
+                                <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold bg-blue-500/15 text-blue-300 border border-blue-500/40 uppercase tracking-wider backdrop-blur-sm">
+                                    <i class="fa-solid fa-radar text-[10px]"></i>Source Detected
+                                </span>
+                                ${keywordsHTML ? `<div class="flex items-center gap-2 flex-wrap">${keywordsHTML}</div>` : ''}
+                            </div>
+                            
+                            <!-- Right: NEW Badge + Timestamp -->
+                            <div class="flex items-center gap-3">
+                                ${isFresh ? `<span class="new-badge inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold bg-gradient-to-r from-green-600/90 to-emerald-600/90 text-white border border-green-500/60 uppercase tracking-wider shadow-lg shadow-green-500/30 backdrop-blur-sm">
+                                    <i class="fa-solid fa-sparkles text-[10px]"></i>NEW
+                                </span>` : ''}
+                                <div class="flex items-center gap-2 text-xs text-slate-300">
+                                    <i class="fa-solid fa-clock text-[10px]"></i>
+                                    <time datetime="${report.timestamp || ''}" class="font-mono">${timestamp}</time>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Title Section -->
+                        <div class="mb-3">
+                            <a href="${report.url || '#'}" target="_blank" class="group block">
+                                <h2 class="text-lg font-bold text-white group-hover:text-blue-400 transition-colors duration-200 leading-snug pr-6">
+                                    ${report.repo_owner || 'Unknown'}/${report.repo_name || 'Unknown'}
+                                    <i class="fa-solid fa-external-link-alt text-xs opacity-40 group-hover:opacity-70 ml-2 transition-opacity"></i>
+                                </h2>
+                                <div class="flex items-center gap-3 mt-2 text-xs text-slate-400 flex-wrap">
+                                    <span class="flex items-center gap-1">
+                                        <i class="fa-solid fa-star text-yellow-400"></i>
+                                        ${report.stars || 0}
+                                    </span>
+                                    ${report.forks_count ? `<span class="flex items-center gap-1">
+                                        <i class="fa-solid fa-code-branch text-blue-400"></i>
+                                        ${report.forks_count}
+                                    </span>` : ''}
+                                    ${report.pull_requests_count !== null && report.pull_requests_count !== undefined ? `<span class="flex items-center gap-1">
+                                        <i class="fa-solid fa-code-pull-request text-purple-400"></i>
+                                        ${report.pull_requests_count} PRs
+                                    </span>` : ''}
+                                    ${report.issues_count !== null && report.issues_count !== undefined ? `<span class="flex items-center gap-1">
+                                        <i class="fa-solid fa-circle-exclamation text-orange-400"></i>
+                                        ${report.issues_count} issues
+                                    </span>` : ''}
+                                    ${report.primary_language ? `<span class="flex items-center gap-1">
+                                        <i class="fa-solid fa-code text-cyan-400"></i>
+                                        ${report.primary_language}
+                                    </span>` : ''}
+                                    <span class="flex items-center gap-1">
+                                        <i class="fa-solid fa-file-code"></i>
+                                        ${report.file_found || 'AGENTS.md'}
+                                    </span>
+                                </div>
+                                ${(report.last_updated || report.last_commit_message) ? `
+                                <div class="mt-2 pt-2 border-t border-slate-700/30">
+                                    ${report.last_updated ? `
+                                    <div class="text-[10px] text-slate-500 mb-1">
+                                        <i class="fa-solid fa-clock text-[9px]"></i>
+                                        Updated: ${report.last_updated.substring(0, 10) || 'Unknown'}
+                                    </div>
+                                    ` : ''}
+                                    ${report.last_commit_message ? `
+                                    <div class="text-[10px] text-slate-500 italic truncate" title="${report.last_commit_message}">
+                                        <i class="fa-solid fa-code-commit text-[9px]"></i>
+                                        ${report.last_commit_message.length > 60 ? report.last_commit_message.substring(0, 60) + '...' : report.last_commit_message}
+                                    </div>
+                                    ` : ''}
+                                </div>
+                                ` : ''}
+                            </a>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-slate-800">
+                        <!-- Relevance Lens -->
+                        <div class="p-4 hover:bg-slate-800/30 transition lens-card">
+                            <div class="flex items-center justify-between mb-3 pb-2 border-b border-slate-700/50">
+                                <div class="flex items-center gap-1.5 text-amber-400">
+                                    <i class="fa-solid fa-bullseye text-xs"></i>
+                                    <h3 class="text-xs font-bold uppercase tracking-wider">Relevance</h3>
+                                </div>
+                                <span class="font-mono text-amber-400 font-bold text-xs">${report.relevance?.relevance_score || 0}/100</span>
+                            </div>
+                            <div class="flex items-center justify-between mb-3 pb-2 border-b border-slate-700/30">
+                                <span class="text-[10px] text-slate-300 uppercase font-semibold">Urgency</span>
+                                <span class="text-[10px] font-bold px-2 py-0.5 rounded ${getUrgencyClass(report.relevance?.urgency || 'Low')}">
+                                    ${report.relevance?.urgency || 'Low'}
+                                </span>
+                            </div>
+                            <div class="space-y-3">
+                                <div>
+                                    <p class="text-[10px] text-slate-300 uppercase font-semibold mb-1">Keywords Used</p>
+                                    ${relevanceKeywordsHTML ? `<div class="flex flex-wrap gap-1.5 mt-1">${relevanceKeywordsHTML}</div>` : '<p class="text-xs text-slate-400 italic">No watchlist keywords found in implementation</p>'}
+                                </div>
+                                <div>
+                                    <p class="text-[10px] text-slate-300 uppercase font-semibold mb-1">Keyword Usage</p>
+                                    <p class="text-xs text-slate-300 leading-relaxed">${report.relevance?.keywords_usage_details || 'N/A'}</p>
+                                </div>
+                                <div>
+                                    <p class="text-[10px] text-slate-300 uppercase font-semibold mb-1">Why It Matters</p>
+                                    <p class="text-xs text-slate-300 leading-relaxed">${report.relevance?.why_it_matters || 'N/A'}</p>
+                                </div>
+                                <div>
+                                    <p class="text-[10px] text-slate-300 uppercase font-semibold mb-1">Key Insight</p>
+                                    <p class="text-xs text-slate-300 leading-relaxed">${report.relevance?.key_insight || 'N/A'}</p>
+                                </div>
+                                <div class="pt-2 border-t border-slate-700/30">
+                                    <p class="text-[9px] text-slate-400 uppercase font-semibold mb-1">Partnership Opportunity</p>
+                                    <p class="text-xs text-slate-400 leading-relaxed italic">${report.relevance?.partnership_opportunity || 'N/A'}</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Technical Lens -->
+                        <div class="p-4 hover:bg-slate-800/30 transition lens-card">
+                            <div class="flex items-center justify-between mb-3 pb-2 border-b border-slate-700/50">
+                                <div class="flex items-center gap-1.5 text-cyan-400">
+                                    <i class="fa-solid fa-microchip text-xs"></i>
+                                    <h3 class="text-xs font-bold uppercase tracking-wider">Technical</h3>
+                                </div>
+                                <span class="text-[10px] text-slate-300 uppercase font-semibold">Assessment</span>
+                            </div>
+                            <div class="grid grid-cols-2 gap-3 mb-3 pb-2 border-b border-slate-700/30">
+                                <div class="flex items-center justify-between gap-1.5">
+                                    <span class="text-[10px] text-slate-300 uppercase font-semibold">Complexity</span>
+                                    <span class="text-[10px] font-bold px-2 py-0.5 rounded ${getComplexityClass(report.product?.complexity || 'N/A')}">
+                                        ${report.product?.complexity || 'N/A'}
+                                    </span>
+                                </div>
+                                <div class="flex items-center justify-between gap-1.5">
+                                    <span class="text-[10px] text-slate-300 uppercase font-semibold">Readiness</span>
+                                    <span class="text-[10px] font-bold px-2 py-0.5 rounded ${getReadinessClass(report.product?.readiness || 'N/A')}">
+                                        ${report.product?.readiness || 'N/A'}
+                                    </span>
+                                </div>
+                            </div>
+                            <div class="space-y-3">
+                                <div>
+                                    <p class="text-[10px] text-slate-300 uppercase font-semibold mb-1">Architecture</p>
+                                    <p class="text-xs text-slate-300 leading-relaxed">${report.product?.architecture || 'N/A'}</p>
+                                </div>
+                                <div>
+                                    <p class="text-[10px] text-slate-300 uppercase font-semibold mb-1">Tech Stack</p>
+                                    <p class="text-xs text-slate-300 leading-relaxed">${report.product?.tech_stack || 'N/A'}</p>
+                                </div>
+                                <div>
+                                    <p class="text-[10px] text-slate-300 uppercase font-semibold mb-1">Code Patterns</p>
+                                    <p class="text-xs text-slate-300 leading-relaxed">${report.product?.code_patterns || 'N/A'}</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            // Create element and add with animation
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = cardHTML.trim();
+            const cardElement = tempDiv.firstElementChild;
+            
+            // Remove the parallax-card class that sets opacity: 0
+            cardElement.classList.remove('parallax-card');
+            // Add animation class
+            cardElement.classList.add('animate-fade-in');
+            
+            // Force visibility with inline styles (overrides any CSS)
+            cardElement.style.setProperty('opacity', '1', 'important');
+            cardElement.style.setProperty('transform', 'translateY(0)', 'important');
+            
+            // Insert at the top of container
+            if (container.firstChild) {
+                container.insertBefore(cardElement, container.firstChild);
+            } else {
+                container.appendChild(cardElement);
+            }
+            
+            // Scroll to top smoothly if needed
+            setTimeout(() => {
+                cardElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }, 100);
+        }
+        
+        function getUrgencyClass(urgency) {
+            if (urgency === 'High') return 'bg-orange-500/20 text-orange-400 border border-orange-800/50';
+            if (urgency === 'Medium') return 'bg-yellow-500/20 text-yellow-400 border border-yellow-800/50';
+            return 'bg-slate-500/20 text-slate-400 border border-slate-700/50';
+        }
+        
+        function getComplexityClass(complexity) {
+            if (complexity === 'High') return 'bg-red-500/20 text-red-400 border border-red-800/50';
+            if (complexity === 'Medium') return 'bg-yellow-500/20 text-yellow-400 border border-yellow-800/50';
+            return 'bg-green-500/20 text-green-400 border border-green-800/50';
+        }
+        
+        function getReadinessClass(readiness) {
+            if (readiness === 'Production') return 'bg-green-500/20 text-green-400 border border-green-800/50';
+            if (readiness === 'Beta') return 'bg-blue-500/20 text-blue-400 border border-blue-800/50';
+            return 'bg-orange-500/20 text-orange-400 border border-orange-800/50';
+        }
+        
         async function refreshData() {
+            if(isScanning) {
+                showNotification('Scan already in progress', 'info');
+                return;
+            }
+            
             const btn = document.getElementById('refreshBtn');
             const originalHTML = btn.innerHTML;
             btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Scanning...';
             btn.disabled = true;
+            isScanning = true;
             btn.classList.add('opacity-75', 'cursor-not-allowed');
+            
+            // Remove empty state if present
+            const emptyState = document.querySelector('.text-center.py-20');
+            if (emptyState) {
+                emptyState.style.display = 'none';
+            }
+            
+            // Ensure reports container exists
+            let container = document.getElementById('reportsContainer');
+            if (!container) {
+                container = document.createElement('div');
+                container.id = 'reportsContainer';
+                container.className = 'space-y-6';
+                const mainContent = document.querySelector('.max-w-7xl.mx-auto');
+                if (mainContent) {
+                    mainContent.appendChild(container);
+                }
+            }
+            
+            // Create elegant progress indicator
+            const progressDiv = document.createElement('div');
+            progressDiv.id = 'scanProgress';
+            progressDiv.className = 'fixed top-20 right-6 bg-slate-900/95 backdrop-blur-md border border-slate-700/50 rounded-xl shadow-2xl z-50 p-5 min-w-[320px] max-w-[400px] animate-slide-in-right';
+            progressDiv.innerHTML = `
+                <div class="flex items-center justify-between mb-3">
+                    <div class="flex items-center gap-2">
+                        <i class="fa-solid fa-circle-notch fa-spin text-blue-400"></i>
+                        <span class="text-white font-semibold text-sm">Scanning GitHub</span>
+                    </div>
+                    <button onclick="closeProgressModal()" class="text-slate-400 hover:text-white transition-all hover:scale-110 rounded p-1">
+                        <i class="fa-solid fa-times"></i>
+                    </button>
+                </div>
+                <div class="text-sm text-slate-300 mb-3" id="scanProgressText">Initializing search...</div>
+                <div class="mb-2 bg-slate-800 rounded-full h-2.5 overflow-hidden shadow-inner">
+                    <div id="scanProgressBar" class="progress-glow bg-gradient-to-r from-blue-500 via-cyan-500 to-purple-500 h-2.5 rounded-full transition-all duration-500 ease-out shimmer" style="width: 0%"></div>
+                </div>
+                <div class="text-xs text-slate-400 mt-2" id="scanProgressStats">0 repositories found</div>
+            `;
+            document.body.appendChild(progressDiv);
+            
+            try {
+                // Connect to WebSocket
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const wsUrl = `${protocol}//${window.location.host}/ws/scan`;
+                wsConnection = new WebSocket(wsUrl);
+                
+                wsConnection.onopen = () => {
+                    console.log('WebSocket connected');
+                    wsConnection.send(JSON.stringify({action: 'start_scan'}));
+                };
+                
+                wsConnection.onmessage = async (event) => {
+                    const data = JSON.parse(event.data);
+                    const progressText = document.getElementById('scanProgressText');
+                    const progressBar = document.getElementById('scanProgressBar');
+                    const progressStats = document.getElementById('scanProgressStats');
+                    
+                    if(data.type === 'scan_started') {
+                        progressText.textContent = 'Searching GitHub repositories...';
+                        progressBar.style.width = '5%';
+                        progressStats.textContent = '0 repositories found';
+                    } else if(data.type === 'report_complete') {
+                        const {repo_id, repo_name, stars, files_analyzed, total_processed, total_found} = data;
+                        
+                        // Update progress UI
+                        progressText.innerHTML = `
+                            <span class="text-green-400">✓</span> 
+                            <strong class="text-white">${repo_name}</strong> 
+                            <span class="text-slate-400">(⭐ ${stars})</span>
+                        `;
+                        const progress = total_found > 0 ? Math.min(95, (total_processed / total_found) * 95) : 50;
+                        progressBar.style.width = `${progress}%`;
+                        progressStats.textContent = `${total_processed}/${total_found} repositories analyzed`;
+                        
+                        // Fetch and render the report card immediately (with small delay to ensure DB write completes)
+                        setTimeout(async () => {
+                            try {
+                                // Use encodeURIComponent to properly encode the repo_id (handles slashes)
+                                const encodedRepoId = encodeURIComponent(repo_id);
+                                const response = await fetch(`/api/reports/${encodedRepoId}`);
+                                if (response.ok) {
+                                    const result = await response.json();
+                                    if (result.success && result.report) {
+                                        renderReportCard(result.report);
+                                        showNotification(`✓ ${repo_name} analyzed`, 'success');
+                                    }
+                                } else {
+                                    // Log error for debugging
+                                    const errorData = await response.json().catch(() => ({}));
+                                    console.error(`Failed to fetch report for ${repo_id}:`, response.status, errorData);
+                                    // Retry once after a longer delay (DB might need more time)
+                                    setTimeout(async () => {
+                                        try {
+                                            const retryResponse = await fetch(`/api/reports/${encodedRepoId}`);
+                                            if (retryResponse.ok) {
+                                                const retryResult = await retryResponse.json();
+                                                if (retryResult.success && retryResult.report) {
+                                                    renderReportCard(retryResult.report);
+                                                }
+                                            }
+                                        } catch (e) {
+                                            console.error('Retry failed:', e);
+                                        }
+                                    }, 1000);
+                                }
+                            } catch (e) {
+                                console.error('Error fetching report:', e);
+                            }
+                        }, 500); // Small delay to ensure DB write completes
+                    } else if(data.type === 'analysis_complete' || data.type === 'scan_complete') {
+                        progressText.innerHTML = `<span class="text-green-400">✓</span> <strong class="text-white">Complete!</strong>`;
+                        progressBar.style.width = '100%';
+                        progressStats.textContent = `${data.total_reports || 0} repositories analyzed`;
+                        showNotification(`Analysis complete: ${data.total_reports || 0} repositories`, 'success');
+                        
+                        // Close progress modal after delay
+                        setTimeout(() => {
+                            closeProgressModal();
+                            btn.innerHTML = originalHTML;
+                            btn.disabled = false;
+                            isScanning = false;
+                        btn.classList.remove('opacity-75', 'cursor-not-allowed');
+                        }, 2000);
+                    } else if(data.type === 'error') {
+                        progressText.innerHTML = `<span class="text-red-400">✗</span> <span class="text-white">${data.message}</span>`;
+                        showNotification(data.message, 'error');
+                        btn.innerHTML = originalHTML;
+                        btn.disabled = false;
+                        isScanning = false;
+                        btn.classList.remove('opacity-75', 'cursor-not-allowed');
+                        setTimeout(() => closeProgressModal(), 3000);
+                    }
+                };
+                
+                wsConnection.onerror = (error) => {
+                    console.error('WebSocket error:', error);
+                    showNotification('Connection error. Falling back to regular scan...', 'error');
+                    fallbackRefresh();
+                };
+                
+                wsConnection.onclose = () => {
+                    console.log('WebSocket closed');
+                    if (!isScanning) return; // Already handled
+                        setTimeout(() => {
+                        closeProgressModal();
+                    }, 1000);
+                };
+                
+            } catch(e) {
+                console.error('WebSocket setup error:', e);
+                showNotification('WebSocket not available. Using fallback...', 'info');
+                fallbackRefresh();
+            }
+        }
+        
+        function closeProgressModal() {
+            const progressDiv = document.getElementById('scanProgress');
+            if (progressDiv) {
+                progressDiv.style.animation = 'fadeOut 0.3s ease-out';
+                setTimeout(() => progressDiv.remove(), 300);
+            }
+        }
+        
+        async function fallbackRefresh() {
+            const btn = document.getElementById('refreshBtn');
+            const originalHTML = btn.innerHTML;
             
             try {
                 const res = await fetch('/api/refresh', {method: 'POST'});
                 const data = await res.json();
                 if(data.success) {
-                    if(data.status === 'no_new') {
-                        // Show "nothing new" message
-                        btn.innerHTML = '<i class="fa-solid fa-check"></i> Scan Complete';
-                        btn.classList.remove('opacity-75', 'cursor-not-allowed');
-                        btn.disabled = false;
-                        
-                        // Show notification
-                        showNotification(data.message, 'info');
-                        
-                        // Reset button after 3 seconds
-                        setTimeout(() => {
-                            btn.innerHTML = originalHTML;
-                        }, 3000);
-                    } else {
-                        // New reports found, reload page
-                        setTimeout(() => location.reload(), 1000);
-                    }
+                    showNotification(data.message || 'Scan complete', data.status === 'no_new' ? 'info' : 'success');
+                    setTimeout(() => location.reload(), 2000);
                 } else {
-                    alert(`Scan failed: ${data.error || 'Unknown error'}`);
+                    showNotification(`Scan failed: ${data.error || 'Unknown error'}`, 'error');
                     btn.innerHTML = originalHTML;
                     btn.disabled = false;
-                    btn.classList.remove('opacity-75', 'cursor-not-allowed');
+                    isScanning = false;
                 }
             } catch(e) {
-                console.error(e);
-                alert("Scan failed. Check console.");
+                showNotification(`Scan error: ${e.message}`, 'error');
                 btn.innerHTML = originalHTML;
                 btn.disabled = false;
-                btn.classList.remove('opacity-75', 'cursor-not-allowed');
+                isScanning = false;
             }
         }
         

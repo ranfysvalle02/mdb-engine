@@ -30,7 +30,7 @@ COPY mdb_runtime ./mdb_runtime
 # Install mdb_runtime with LLM dependencies
 RUN pip install --no-cache-dir .[llm] && \
     pip install --no-cache-dir uvicorn[standard] jinja2 python-multipart websockets && \
-    pip install --no-cache-dir langchain langchain-community langchain-core langgraph langchain-litellm litellm pydantic pydantic-settings requests httpx
+    pip install --no-cache-dir requests httpx
 
 # Stage 2: Runtime - Minimal production image
 FROM python:3.11-slim

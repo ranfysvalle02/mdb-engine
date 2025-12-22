@@ -2,7 +2,7 @@
 
 An interactive RAG (Retrieval Augmented Generation) system demonstrating MDB_RUNTIME with:
 - **EmbeddingService** for semantic text splitting and embeddings
-- **LLMService** for chat completions
+- **OpenAI SDK** for chat completions
 - **Vector search** with MongoDB Atlas Vector Search
 - **Knowledge base management** with sessions
 - **Modern FastAPI** web application
@@ -45,7 +45,7 @@ An interactive RAG (Retrieval Augmented Generation) system demonstrating MDB_RUN
 - Docker and Docker Compose (for containerized setup)
 - OR MongoDB running locally (for local setup)
 - MDB_RUNTIME installed
-- LLM API keys (Azure OpenAI, OpenAI, VoyageAI, or other LiteLLM-supported providers)
+- LLM API keys (Azure OpenAI or OpenAI)
 
 ## Environment Variables
 
@@ -64,7 +64,6 @@ AZURE_OPENAI_MODEL_NAME=gpt-4o
 
 # Alternative: Standard OpenAI
 OPENAI_API_KEY=your-openai-key
-VOYAGE_API_KEY=your-voyage-key
 
 # Firecrawl for URL extraction
 FIRECRAWL_API_KEY=your-firecrawl-key
@@ -135,7 +134,7 @@ curl -X POST http://localhost:5001/chat \
   -d '{
     "query": "What is the main topic of the documents?",
     "session_id": "my_session",
-    "embedding_model": "voyage/voyage-2",
+    "embedding_model": "text-embedding-3-small",
     "rag_params": {
       "num_sources": 3,
       "max_chunk_length": 2000
@@ -151,7 +150,7 @@ curl -X POST http://localhost:5001/preview_search \
   -d '{
     "query": "search query",
     "session_id": "my_session",
-    "embedding_model": "voyage/voyage-2",
+    "embedding_model": "text-embedding-3-small",
     "num_sources": 5
   }'
 ```
@@ -200,7 +199,7 @@ curl -X POST http://localhost:5001/preview_search \
 
 1. **RuntimeEngine** - Manages MongoDB connection and app registration
 2. **EmbeddingService** - Handles semantic chunking and embedding generation
-3. **LLMService** - Provides chat completions via LiteLLM
+3. **OpenAI SDK** - Provides chat completions via direct API calls
 4. **Vector Search** - MongoDB Atlas Vector Search for semantic retrieval
 5. **FastAPI** - Modern async web framework
 
@@ -211,7 +210,7 @@ User Input → EmbeddingService (chunk & embed) → MongoDB
                                                       ↓
 User Query → EmbeddingService (embed query) → Vector Search → MongoDB
                                                       ↓
-Retrieved Chunks → LLMService (chat with context) → Response
+Retrieved Chunks → OpenAI SDK (chat with context) → Response
 ```
 
 ### Document Structure
@@ -229,7 +228,7 @@ Documents in the knowledge base collection:
     "source": "document_1",
     "source_type": "text",
     "session_id": "my_session",
-    "model": "voyage/voyage-2",
+    "model": "text-embedding-3-small",
     "created_at": ISODate("...")
   }
 }
@@ -243,11 +242,6 @@ Key configuration:
 
 ```json
 {
-  "llm_config": {
-    "enabled": true,
-    "default_chat_model": "gpt-4o",
-    "default_embedding_model": "voyage/voyage-2"
-  },
   "embedding_config": {
     "enabled": true,
     "max_tokens_per_chunk": 1000,
@@ -276,21 +270,17 @@ Key configuration:
 
 ### Embedding Models
 
-Supported via LiteLLM:
-- `voyage/voyage-2` (default, recommended)
-- `text-embedding-3-small`
-- `text-embedding-3-large`
-- `cohere/embed-english-v3.0`
-- And more...
+Supported embedding models:
+- `text-embedding-3-small` (default) - via OpenAI or AzureOpenAI API
+- `text-embedding-3-large` - via OpenAI or AzureOpenAI API
+- `text-embedding-ada-002` - via OpenAI or AzureOpenAI API
 
 ### Chat Models
 
-Supported via LiteLLM:
-- `gpt-4o` (default)
-- `gpt-4-turbo`
-- `claude-3-opus-20240229`
-- `gemini/gemini-pro`
-- And more...
+Supported chat models:
+- `gpt-4o` (default) - via Azure OpenAI or OpenAI API
+- `gpt-4-turbo` - via Azure OpenAI or OpenAI API
+- Other models supported by Azure OpenAI or OpenAI
 
 ## Best Practices
 
@@ -329,8 +319,9 @@ Supported via LiteLLM:
    ```
 
 2. **Verify embedding dimensions match index:**
-   - VoyageAI: 1024 dimensions
    - OpenAI text-embedding-3-small: 1536 dimensions
+   - OpenAI text-embedding-3-large: 3072 dimensions
+   - OpenAI text-embedding-ada-002: 1536 dimensions
    - Update manifest.json if dimensions don't match
 
 ### Embedding Generation Fails
@@ -338,12 +329,14 @@ Supported via LiteLLM:
 1. **Check API keys:**
    ```bash
    echo $OPENAI_API_KEY
-   echo $VOYAGE_API_KEY
+   # OR for Azure OpenAI:
+   echo $AZURE_OPENAI_API_KEY
+   echo $AZURE_OPENAI_ENDPOINT
    ```
 
-2. **Verify LiteLLM configuration:**
-   - Model names should use LiteLLM format (e.g., `voyage/voyage-2`)
-   - Check LiteLLM documentation for provider-specific setup
+2. **Verify API configuration:**
+   - Check that API keys are set correctly in environment variables
+   - For Azure OpenAI, ensure endpoint and deployment name are configured
 
 ### Chunking Issues
 
@@ -374,7 +367,6 @@ Supported via LiteLLM:
 ## Resources
 
 - [MDB_RUNTIME Documentation](../../README.md)
-- [EmbeddingService Documentation](../../mdb_runtime/llm/README.md)
-- [LiteLLM Documentation](https://docs.litellm.ai/)
+- [EmbeddingService Documentation](../../mdb_runtime/embeddings/README.md)
 - [MongoDB Atlas Vector Search](https://www.mongodb.com/docs/atlas/atlas-vector-search/)
 

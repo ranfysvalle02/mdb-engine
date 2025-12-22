@@ -26,6 +26,4 @@ requests>=2.31.0
 
 langchain
 langchain-community
-langchain-litellm
-litellm
 langgraph

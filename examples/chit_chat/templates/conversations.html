@@ -1,0 +1,181 @@
+{% extends "base.html" %}
+
+{% block title %}Conversations{% endblock %}
+
+{% block extra_css %}
+<style>
+    .conversations-container {
+        display: flex;
+        gap: 20px;
+        height: calc(100vh - 200px);
+    }
+    
+    .conversations-sidebar {
+        width: 300px;
+        background: var(--mongodb-bg-secondary);
+        border: 1px solid var(--mongodb-border);
+        border-radius: 8px;
+        padding: 20px;
+        overflow-y: auto;
+    }
+    
+    .conversations-main {
+        flex: 1;
+        background: var(--mongodb-bg-secondary);
+        border: 1px solid var(--mongodb-border);
+        border-radius: 8px;
+        padding: 40px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+    }
+    
+    .new-conversation-btn {
+        width: 100%;
+        margin-bottom: 20px;
+    }
+    
+    .conversation-item {
+        padding: 12px;
+        margin-bottom: 8px;
+        background: var(--mongodb-bg-tertiary);
+        border: 1px solid var(--mongodb-border);
+        border-radius: 6px;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+    
+    .conversation-item:hover {
+        background: var(--mongodb-border);
+        border-color: var(--mongodb-green);
+    }
+    
+    .conversation-item.active {
+        background: var(--mongodb-green);
+        color: var(--mongodb-bg);
+        border-color: var(--mongodb-green);
+    }
+    
+    .conversation-title {
+        font-weight: 600;
+        margin-bottom: 4px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    
+    .conversation-date {
+        font-size: 12px;
+        opacity: 0.7;
+    }
+    
+    .conversation-memory-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 2px 6px;
+        background: rgba(16, 185, 129, 0.1);
+        border: 1px solid var(--mongodb-green);
+        border-radius: 10px;
+        font-size: 10px;
+        color: var(--mongodb-green);
+        margin-top: 4px;
+    }
+    
+    .conversation-memory-badge::before {
+        content: "🧠";
+        font-size: 10px;
+    }
+    
+    .empty-state {
+        opacity: 0.6;
+    }
+    
+    .empty-state h2 {
+        margin-bottom: 10px;
+    }
+    
+    .empty-state p {
+        margin-bottom: 20px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="conversations-container">
+    <div class="conversations-sidebar">
+        <button onclick="createConversation()" class="btn new-conversation-btn">+ New Conversation</button>
+        
+        <div id="conversations-list">
+            {% for conversation in conversations %}
+            <div class="conversation-item" onclick="openConversation('{{ conversation._id }}')">
+                <div class="conversation-title">{{ conversation.title }}</div>
+                <div class="conversation-date">
+                    {{ conversation.updated_at.strftime('%Y-%m-%d %H:%M') if conversation.updated_at else 'N/A' }}
+                </div>
+                <div class="conversation-memory-badge" style="display: none;" id="memory-badge-{{ conversation._id }}">
+                    Memory enabled
+                </div>
+            </div>
+            {% else %}
+            <div class="empty-state" style="text-align: center; padding: 40px 0;">
+                <p>No conversations yet</p>
+                <p style="font-size: 14px; opacity: 0.7;">Create your first conversation to get started!</p>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    
+    <div class="conversations-main">
+        <div class="empty-state">
+            <h2>💬 Welcome to Conversations</h2>
+            <p>Select a conversation from the sidebar or create a new one to start chatting with AI.</p>
+            <button onclick="createConversation()" class="btn">Create New Conversation</button>
+        </div>
+    </div>
+</div>
+
+<script>
+async function createConversation() {
+    try {
+        const response = await fetch('/api/conversations', {
+            method: 'POST'
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            window.location.href = `/conversations/${data.conversation._id}`;
+        } else {
+            alert('Failed to create conversation');
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+function openConversation(conversationId) {
+    window.location.href = `/conversations/${conversationId}`;
+}
+
+// Check if memory service is available and show badges
+window.addEventListener('load', async () => {
+    try {
+        const response = await fetch('/api/memories/stats');
+        if (response.ok) {
+            const data = await response.json();
+            if (data.success && data.stats && data.stats.memory_enabled) {
+                // Show memory badge on all conversations
+                document.querySelectorAll('[id^="memory-badge-"]').forEach(badge => {
+                    badge.style.display = 'inline-flex';
+                });
+            }
+        }
+    } catch (error) {
+        console.error('Failed to check memory status:', error);
+    }
+});
+</script>
+{% endblock %}
+

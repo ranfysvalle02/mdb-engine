@@ -1,0 +1,139 @@
+{
+  "schema_version": "2.0",
+  "slug": "conversations",
+  "name": "ChitChat - AI Chat with Memory",
+  "description": "Beautiful AI chat application with persistent memory using Mem0. Demonstrates intelligent memory management, semantic search, and context-aware AI responses.",
+  "status": "active",
+  "developer_id": "developer@example.com",
+  "auth_required": false,
+  "auth_policy": {
+    "required": false,
+    "allow_anonymous": true
+  },
+  "sub_auth": {
+    "enabled": true,
+    "strategy": "app_users",
+    "collection_name": "users",
+    "session_cookie_name": "conversations_session",
+    "session_ttl_seconds": 86400,
+    "allow_registration": true
+  },
+  "token_management": {
+    "enabled": true,
+    "access_token_ttl": 900,
+    "refresh_token_ttl": 604800,
+    "token_rotation": true,
+    "max_sessions_per_user": 10,
+    "session_inactivity_timeout": 1800,
+    "security": {
+      "require_https": false,
+      "cookie_secure": "auto",
+      "cookie_samesite": "lax",
+      "cookie_httponly": true,
+      "csrf_protection": true,
+      "rate_limiting": {
+        "login": {"max_attempts": 5, "window_seconds": 300},
+        "register": {"max_attempts": 3, "window_seconds": 600},
+        "refresh": {"max_attempts": 10, "window_seconds": 60}
+      },
+      "password_policy": {
+        "allow_plain_text": false,
+        "min_length": 8,
+        "require_uppercase": true,
+        "require_lowercase": true,
+        "require_numbers": true,
+        "require_special": false
+      },
+      "session_fingerprinting": {
+        "enabled": true,
+        "validate_on_login": true,
+        "validate_on_refresh": true,
+        "validate_on_request": false,
+        "strict_mode": false
+      },
+      "account_lockout": {
+        "enabled": true,
+        "max_failed_attempts": 5,
+        "lockout_duration_seconds": 900,
+        "reset_on_success": true
+      },
+      "ip_validation": {
+        "enabled": false,
+        "strict": false,
+        "allow_ip_change": true
+      },
+      "token_fingerprinting": {
+        "enabled": true,
+        "bind_to_device": true
+      }
+    },
+    "auto_setup": true
+  },
+  "memory_config": {
+    "enabled": true,
+    "collection_name": "user_memories",
+    "enable_graph": true,
+    "infer": true,
+    "async_mode": true
+  },
+  "managed_indexes": {
+    "conversations": [
+      {
+        "type": "regular",
+        "keys": {"user_id": 1, "created_at": -1},
+        "name": "user_conversations_idx",
+        "options": {
+          "background": true
+        }
+      },
+      {
+        "type": "regular",
+        "keys": {"created_at": -1},
+        "name": "created_idx",
+        "options": {
+          "background": true
+        }
+      }
+    ],
+    "messages": [
+      {
+        "type": "regular",
+        "keys": {"conversation_id": 1, "created_at": 1},
+        "name": "conversation_messages_idx",
+        "options": {
+          "background": true
+        }
+      },
+      {
+        "type": "regular",
+        "keys": {"user_id": 1, "created_at": -1},
+        "name": "user_messages_idx",
+        "options": {
+          "background": true
+        }
+      }
+    ],
+    "users": [
+      {
+        "type": "regular",
+        "keys": {"email": 1},
+        "name": "email_idx",
+        "options": {
+          "background": true,
+          "unique": true
+        }
+      }
+    ]
+  },
+  "websockets": {
+    "realtime": {
+      "path": "/ws",
+      "description": "Real-time message updates and memory events",
+      "auth": {
+        "required": true,
+        "allow_anonymous": false
+      },
+      "ping_interval": 30
+    }
+  }
+}

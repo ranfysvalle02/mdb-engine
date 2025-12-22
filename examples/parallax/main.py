@@ -95,7 +95,7 @@ async def main():
             {
                 "session_id": session_id,
                 "role": "assistant",
-                "content": "Hello! I'm Parallax, a tech news intelligence tool built with MDB_RUNTIME. I monitor Hacker News and analyze stories from Relevance and Technical perspectives based on your watchlist!",
+                "content": "Hello! I'm Parallax, a GitHub repository intelligence tool built with MDB_RUNTIME. I search GitHub repositories (with AGENTS.md or LLMs.md files) and analyze them from Relevance and Technical perspectives based on your watchlist keywords!",
                 "created_at": datetime.utcnow()
             }
         ]

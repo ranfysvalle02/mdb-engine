@@ -7,7 +7,7 @@ This module allows apps to manage their own users and sessions
 separate from platform-level authentication, while maintaining integration
 with the platform's auth system.
 
-This module is part of MDB_RUNTIME - MongoDB Multi-Tenant Runtime Engine.
+This module is part of MDB_RUNTIME - MongoDB Runtime Engine.
 """
 
 import os
@@ -51,8 +51,8 @@ async def get_app_sub_user(
     
     Args:
         request: FastAPI Request object
-        slug_id: Tenant slug
-        db: Tenant database wrapper (ScopedMongoWrapper or AppDB)
+        slug_id: App slug
+        db: Database wrapper (ScopedMongoWrapper or AppDB)
         config: Optional app config (if not provided, fetches from request)
         allow_demo_fallback: If True and no session found, try demo mode for seamless demo access
         (SECURITY: Only works on non-auth routes - demo users cannot access login/registration)
@@ -140,7 +140,7 @@ async def get_app_sub_user(
         collection = getattr(db, collection_name)
         user = await collection.find_one({"_id": user_id})
         if not user:
-            logger.warning(f"Tenant user {user_id} not found in collection {collection_name}")
+            logger.warning(f"User {user_id} not found in collection {collection_name}")
             return None
         
         # Add app user ID to user dict
@@ -199,9 +199,9 @@ async def _try_demo_mode(
     
     Args:
         request: FastAPI Request object
-        slug_id: Tenant slug
-        db: Tenant database wrapper
-        config: Tenant config (must contain sub_auth block)
+        slug_id: App slug
+        db: Database wrapper
+        config: App config (must contain sub_auth block)
     
     Returns:
         Demo user dict if demo mode is enabled and demo user is available, None otherwise
@@ -276,8 +276,8 @@ async def create_app_session(
     
     Args:
         request: FastAPI Request object
-        slug_id: Tenant slug
-        user_id: Tenant user ID (from app's users collection)
+        slug_id: App slug
+        user_id: User ID (from app's users collection)
         config: Optional app config
         response: Optional Response object to set cookie on (creates new if None)
     
@@ -294,7 +294,7 @@ async def create_app_session(
         config = await get_app_config_func(request, slug_id, {"sub_auth": 1})
     
     if not config:
-        raise ValueError(f"Tenant config not found for {slug_id}")
+        raise ValueError(f"App config not found for {slug_id}")
     
     sub_auth = config.get("sub_auth", {})
     if not sub_auth.get("enabled", False):
@@ -357,7 +357,7 @@ async def authenticate_app_user(
     Authenticate a user against app-specific users collection.
     
     Args:
-        db: Tenant database wrapper
+        db: Database wrapper
         email: User email
         password: Plain text password
         store_id: Optional store ID filter (for store_factory multi-store scenario)
@@ -389,13 +389,13 @@ async def authenticate_app_user(
         if not user:
             return None
         
-        # Check password (support both plain text for demo and hashed for production)
-        stored_password = user.get("password") or user.get("password_hash")
+        # Check password (bcrypt only - plain text support removed for security)
+        stored_password = user.get("password_hash") or user.get("password")
         
         if not stored_password:
             return None
         
-        # If it's a bcrypt hash, verify it
+        # Only allow bcrypt hashed passwords
         if isinstance(stored_password, bytes) or (isinstance(stored_password, str) and stored_password.startswith("$2b$")):
             if isinstance(stored_password, str):
                 stored_password = stored_password.encode("utf-8")
@@ -405,10 +405,9 @@ async def authenticate_app_user(
             if bcrypt.checkpw(password, stored_password):
                 return user
         else:
-            # Plain text password (for demo purposes)
-            if stored_password == password:
-                logger.warning("Using plain text password - not recommended for production")
-                return user
+            # Password is not bcrypt hashed - reject for security
+            logger.warning(f"User {email} has non-bcrypt password hash - password verification rejected")
+            return None
         
         return None
         
@@ -424,19 +423,17 @@ async def create_app_user(
     role: str = "user",
     store_id: Optional[str] = None,
     collection_name: str = "users",
-    hash_password: bool = True
 ) -> Optional[Dict[str, Any]]:
     """
     Create a new user in app-specific users collection.
     
     Args:
-        db: Tenant database wrapper
+        db: Database wrapper
         email: User email
-        password: Plain text password
+        password: Plain text password (will be hashed with bcrypt)
         role: User role (default: "user")
         store_id: Optional store ID (for store_factory)
         collection_name: Collection name for users
-        hash_password: Whether to hash the password (default: True)
     
     Returns:
         Created user dict, or None if creation failed
@@ -470,20 +467,17 @@ async def create_app_user(
         if existing:
             return None
         
-        # Hash password if requested
-        if hash_password:
-            try:
-                password_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt())
-            except Exception as e:
-                logger.error(f"Error hashing password: {e}", exc_info=True)
-                return None
-        else:
-            password_hash = password  # Plain text (for demo only)
+        # Always hash password (plain text support removed for security)
+        try:
+            password_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt())
+        except Exception as e:
+            logger.error(f"Error hashing password: {e}", exc_info=True)
+            return None
         
         # Create user document
         user_doc = {
             "email": email,
-            "password_hash" if hash_password else "password": password_hash,
+            "password_hash": password_hash,
             "role": role,
             "date_created": datetime.datetime.utcnow()
         }
@@ -517,8 +511,8 @@ async def get_or_create_anonymous_user(
     
     Args:
         request: FastAPI Request object
-        slug_id: Tenant slug
-        db: Tenant database wrapper
+        slug_id: App slug
+        db: Database wrapper
         config: Optional app config
     
     Returns:
@@ -632,8 +626,8 @@ async def ensure_demo_users_exist(
     4. Links to platform demo user if configured
     
     Args:
-        db: Tenant database wrapper
-        slug_id: Tenant slug
+        db: Database wrapper
+        slug_id: App slug
         config: Optional app config (fetches if not provided)
         mongo_uri: Optional MongoDB URI for accessing platform demo user
         db_name: Optional database name for accessing platform demo user
@@ -867,8 +861,8 @@ async def get_or_create_demo_user_for_request(
     
     Args:
         request: FastAPI Request object
-        slug_id: Tenant slug
-        db: Tenant database wrapper
+        slug_id: App slug
+        db: Database wrapper
         config: Optional app config
         get_app_config_func: Optional callable to get app config
     
@@ -944,8 +938,8 @@ async def get_or_create_demo_user(
     3. Creates the demo user if it doesn't exist
     
     Args:
-        db: Tenant database wrapper
-        slug_id: Tenant slug
+        db: Database wrapper
+        slug_id: App slug
         config: Experiment config (must contain sub_auth block)
         mongo_uri: Optional MongoDB URI for accessing platform demo user
         db_name: Optional database name for accessing platform demo user
@@ -1043,8 +1037,8 @@ async def ensure_demo_users_for_actor(
             logger.info(f"Ensured {len(demo_users)} demo user(s) exist")
     
     Args:
-        db: Tenant database wrapper
-        slug_id: Tenant slug
+        db: Database wrapper
+        slug_id: App slug
         mongo_uri: MongoDB connection URI
         db_name: Database name
     

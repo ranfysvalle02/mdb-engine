@@ -37,8 +37,8 @@ All writes are automatically tagged with `{"app_id": "my_app"}`. All reads are a
 await db.tasks.find({}).to_list(length=10)
 
 # THE ENGINE EXECUTES THIS (Secure, Scoped Query):
-# Collection: task_manager_tasks
-# Query: {"app_id": "task_manager"}
+# Collection: conversations
+# Query: {"app_id": "conversations"}
 ```
 
 This isn't just convenience—it's **security by default**. You can't accidentally leak data between apps because the engine enforces isolation at the database layer.
@@ -80,11 +80,6 @@ Here's a real manifest from the `interactive_rag` example that demonstrates the 
         }
       }
     ]
-  },
-  "llm_config": {
-    "enabled": true,
-    "default_chat_model": "azure/gpt-4o",
-    "default_embedding_model": "voyage/voyage-2"
   },
   "embedding_config": {
     "enabled": true,
@@ -170,46 +165,31 @@ The `AutoIndexManager` tracks query patterns and automatically creates indexes w
 
 ---
 
-## Built-in LLM Service: Provider-Agnostic AI
+## LLM Integration: Use Your Preferred Provider
 
-MDB_RUNTIME includes a first-class LLM service that works with any provider via LiteLLM:
+MDB_RUNTIME doesn't include an LLM abstraction layer—developers implement their own LLM clients using their preferred SDK. This keeps the runtime focused on data management while giving you full control over LLM integration.
 
 ```python
-# Get LLM service from engine (initialized from manifest.json)
-llm_service = engine.get_llm_service("my_app")
+# Example: Using Azure OpenAI directly
+from openai import AzureOpenAI
+from dotenv import load_dotenv
+import os
 
-# Chat completions (works with OpenAI, Anthropic, Azure, Gemini, etc.)
-response = await llm_service.chat(
-    messages=[{"role": "user", "content": "Hello!"}],
-    model="gpt-4o"  # or "claude-3-opus", "azure/gpt-4o", etc.
+load_dotenv()
+
+client = AzureOpenAI(
+    api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-01"),
+    azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
+    api_key=os.getenv("AZURE_OPENAI_API_KEY")
 )
 
-# Structured outputs with Pydantic (via Instructor)
-class UserProfile(BaseModel):
-    name: str
-    age: int
-    email: str
-
-profile = await llm_service.chat_structured(
-    messages=[{"role": "user", "content": "Extract user info..."}],
-    response_model=UserProfile
-)
-
-# Embeddings (works with VoyageAI, OpenAI, Cohere, etc.)
-embeddings = await llm_service.embed(
-    texts=["Hello, world!", "How are you?"],
-    model="voyage/voyage-2"
+completion = client.chat.completions.create(
+    model=os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4o"),
+    messages=[{"role": "user", "content": "Hello!"}]
 )
 ```
 
-The service includes:
-- **Automatic retries** with exponential backoff
-- **Rate limit handling** (transparent retries)
-- **Provider-agnostic routing** (switch models without code changes)
-- **Structured outputs** (Pydantic model validation)
-- **Cost tracking** (via LiteLLM's built-in logging)
-
-All configured in your manifest—no code required.
+For embeddings, MDB_RUNTIME provides `EmbeddingService` which uses mem0 for provider-agnostic embedding generation.
 
 ---
 
@@ -218,12 +198,12 @@ All configured in your manifest—no code required.
 For RAG applications, MDB_RUNTIME includes an `EmbeddingService` that handles intelligent text chunking:
 
 ```python
-from mdb_runtime.llm import EmbeddingService
+from mdb_runtime.embeddings import EmbeddingService
 
 embedding_service = EmbeddingService(
     max_tokens_per_chunk=1000,
     tokenizer_model="gpt-3.5-turbo",
-    default_embedding_model="voyage/voyage-2"
+    default_embedding_model="text-embedding-3-small"
 )
 
 # Intelligent chunking with semantic boundaries
@@ -441,7 +421,9 @@ await engine.register_app(manifest, create_indexes=True)
 
 # Get services (automatically initialized from manifest)
 db = engine.get_scoped_db("interactive_rag")
-llm_service = engine.get_llm_service("interactive_rag")
+# Use OpenAI SDK directly - no LLM service abstraction
+from openai import AzureOpenAI
+client = AzureOpenAI(...)
 embedding_service = EmbeddingService(...)  # From manifest config
 
 # Ingest documents
@@ -468,7 +450,6 @@ results = await db.knowledge_base_sessions.aggregate(pipeline).to_list(10)
 
 **What you get without building it:**
 - ✅ Vector search (indexes created automatically, dimensions validated)
-- ✅ LLM service (provider-agnostic, configured in manifest, retries handled)
 - ✅ Embedding service (semantic chunking with Rust-based splitter)
 - ✅ WebSocket real-time updates (for ingestion progress)
 - ✅ All the basics (isolation, auth, health checks)
@@ -491,28 +472,29 @@ You want to build a vector inversion attack demo. You need LLM services, embeddi
 With MDB_RUNTIME, you configure it in the manifest and write your logic:
 
 ```python
-# Initialize with LLM service
+# Initialize engine
 engine = RuntimeEngine(...)
 await engine.initialize()
 await engine.register_app(manifest, create_indexes=True)
 
-llm_service = engine.get_llm_service("vector_hacking")
-
-# Use LLM for vector inversion attack
-target = await llm_service.chat(
-    messages=[{"role": "user", "content": "Generate a random target phrase"}],
+# Use OpenAI SDK directly for LLM
+from openai import AzureOpenAI
+client = AzureOpenAI(...)
+target_response = client.chat.completions.create(
     model="gpt-3.5-turbo",
-    temperature=0.8
+    messages=[{"role": "user", "content": "Generate a random target phrase"}]
 )
 
-# Generate embeddings and perform attack
-embedding = await llm_service.embed(texts=[target], model="voyage/voyage-2")
+# Use EmbeddingService for embeddings
+from mdb_runtime.embeddings import EmbeddingService
+embedding_service = EmbeddingService(...)
+embedding = await embedding_service.embed_chunks([target_response.choices[0].message.content])
 # ... perform vector inversion attack ...
 ```
 
 **What you get without building it:**
-- ✅ Advanced LLM usage (structured outputs, embeddings, automatic retries)
 - ✅ Vector operations (with automatic index management)
+- ✅ Embedding service (semantic chunking and embedding generation)
 - ✅ Real-time WebSocket updates (for attack progress, connection management handled)
 - ✅ Full-stack application (FastAPI + frontend, all the plumbing done)
 
@@ -578,9 +560,7 @@ MDB_RUNTIME acts as a hyper-intelligent proxy between your code and MongoDB. Her
 
 4. **AsyncAtlasIndexManager**: Manages Atlas Search and Vector Search indexes with async-native polling for index readiness.
 
-5. **LLMService**: Provider-agnostic LLM service with automatic retries and structured outputs.
-
-6. **EmbeddingService**: Semantic text splitting and embedding generation.
+5. **EmbeddingService**: Semantic text splitting and embedding generation.
 
 7. **WebSocketManager**: App-isolated WebSocket connection management.
 
@@ -594,23 +574,23 @@ MDB_RUNTIME is an incubator, not a cage. Because all data is tagged with `app_id
 
 1. **Dump** with app_id filter:
 ```bash
-mongodump --query='{"app_id":"task_manager"}' --out=./export
+mongodump --query='{"app_id":"conversations"}' --out=./export
 ```
 
 2. **Restore** into a fresh MongoDB cluster:
 ```bash
-mongorestore --db=task_manager_prod ./export
+mongorestore --db=conversations_prod ./export
 ```
 
 3. **Update Code**: Your code is already standard PyMongo/Motor code. Just replace:
 ```python
 # Before (MDB_RUNTIME)
-db = engine.get_scoped_db("task_manager")
+db = engine.get_scoped_db("conversations")
 
 # After (Standalone)
 from motor.motor_asyncio import AsyncIOMotorClient
 client = AsyncIOMotorClient("mongodb://...")
-db = client["task_manager_prod"]
+db = client["conversations_prod"]
 ```
 
 That's it. No code changes needed—just swap the database connection.
@@ -691,8 +671,7 @@ MDB_RUNTIME eliminates 70% of your scaffolding code by providing:
 - ✅ **Automatic data isolation** (two-layer scoping system)
 - ✅ **Declarative configuration** (manifest-driven development)
 - ✅ **Automatic index management** (query-driven + manifest-driven)
-- ✅ **Built-in LLM service** (provider-agnostic, configured in manifest)
-- ✅ **Semantic embeddings** (intelligent text chunking)
+- ✅ **Semantic embeddings** (intelligent text chunking via EmbeddingService)
 - ✅ **WebSocket support** (configuration-based real-time)
 - ✅ **Authentication & authorization** (multiple strategies, RBAC)
 - ✅ **Observability** (automatic logging, metrics, health checks)
