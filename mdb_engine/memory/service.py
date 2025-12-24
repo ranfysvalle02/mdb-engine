@@ -813,23 +813,7 @@ class Mem0MemoryService:
                         },
                     )
                     return []  # Return empty list instead of retrying
-                except Exception as mem0_error:
-                    logger.error(
-                        f"mem0.get_all raised exception (attempt {attempt + 1}): {mem0_error}",
-                        exc_info=True,
-                        extra={
-                            "app_slug": self.app_slug,
-                            "user_id": user_id,
-                            "error": str(mem0_error),
-                            "attempt": attempt + 1,
-                        },
-                    )
-                    # If this is the last attempt, return empty list instead of raising
-                    if attempt >= max_retries:
-                        return []
-                    # Otherwise, continue to retry
-                    attempt += 1
-                    continue
+                # Type 4: Let other exceptions bubble up to framework handler
 
                 logger.debug(
                     f"Raw result from mem0.get_all (attempt {attempt + 1}): type={type(result)}",

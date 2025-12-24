@@ -455,12 +455,7 @@ class AsyncAtlasIndexManager:
                     f"DB Error during polling for index '{name}': "
                     f"{getattr(e, 'details', e)}. Retrying..."
                 )
-            except Exception:
-                logger.exception(
-                    f"Unexpected error during polling for index '{name}'. "
-                    f"Retrying..."
-                )
-                # Continue polling for unexpected errors too (they might be transient)
+                # Continue polling for transient errors
 
             if index_info:
                 status = index_info.get("status")
@@ -1420,8 +1415,13 @@ class ScopedMongoWrapper:
                     try:
                         # Quick ping to verify connection is still valid
                         await real_collection.database.client.admin.command("ping")
-                    except Exception:
+                    except (
+                        ConnectionFailure,
+                        OperationFailure,
+                        ServerSelectionTimeoutError,
+                    ):
                         # Connection is closed, skip index creation
+                        # Type 2: Recoverable - skip index creation if connection fails
                         logger.debug(
                             f"Skipping app_id index creation for '{collection_name}': "
                             f"connection is closed (likely during shutdown)"
@@ -1542,8 +1542,13 @@ class ScopedMongoWrapper:
                     try:
                         # Quick ping to verify connection is still valid
                         await real_collection.database.client.admin.command("ping")
-                    except Exception:
+                    except (
+                        ConnectionFailure,
+                        OperationFailure,
+                        ServerSelectionTimeoutError,
+                    ):
                         # Connection is closed, skip index creation
+                        # Type 2: Recoverable - skip index creation if connection fails
                         logger.debug(
                             f"Skipping app_id index creation for '{collection_name}': "
                             f"connection is closed (likely during shutdown)"

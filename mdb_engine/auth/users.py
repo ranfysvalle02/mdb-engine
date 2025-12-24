@@ -82,8 +82,9 @@ def _convert_user_id_to_objectid(user_id: Any) -> Tuple[Any, Optional[str]]:
         ):
             try:
                 return ObjectId(user_id), None
-            except Exception:
-                # If conversion fails, keep as string
+            except (TypeError, ValueError):
+                # If conversion fails (shouldn't happen after format check), keep as string
+                # Type 2: Recoverable - return original string as fallback
                 return user_id, None
         # If it's not a valid ObjectId format, keep as string
         return user_id, None
@@ -1315,7 +1316,8 @@ async def ensure_demo_users_for_actor(
                 if alt_path.exists():
                     manifest_path = alt_path
                     logger.debug(f"Using manifest from alternative path: {alt_path}")
-            except Exception:
+            except OSError:
+                # Type 2: Recoverable - if cwd() fails, just skip alternative path
                 pass
 
         if not manifest_path.exists():

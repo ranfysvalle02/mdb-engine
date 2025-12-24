@@ -299,8 +299,9 @@ class ParallaxEngine:
                                     if len(parts) >= 3:
                                         parsed_yaml = yaml.safe_load(parts[1]) or {}
                                         yaml_data.update(parsed_yaml)  # Merge YAML from multiple files
-                                except Exception as e:
-                                    logger.debug(f"Failed to parse YAML frontmatter from {file_info['filename']} for {name_with_owner}: {e}")
+                                except (yaml.YAMLError, ValueError, TypeError, AttributeError):
+                                    # Type 2: Recoverable - YAML parsing failed, skip frontmatter
+                                    logger.debug(f"Failed to parse YAML frontmatter from {file_info['filename']} for {name_with_owner}", exc_info=True)
                     
                     # Split nameWithOwner into owner and name
                     parts = name_with_owner.split('/', 1)
@@ -372,8 +373,9 @@ class ParallaxEngine:
             logger.info(f"   📊 Found {len(valid_findings)} repositories with target files (analyzing all files found)")
             return valid_findings
         
-        except Exception as e:
-            logger.error(f"Error searching GitHub for keyword '{keyword}': {e}", exc_info=True)
+        except (AttributeError, RuntimeError, ConnectionError, ValueError, TypeError, KeyError):
+            # Type 2: Recoverable - GitHub search failed, return empty list
+            logger.error(f"Error searching GitHub for keyword '{keyword}'", exc_info=True)
             return []
     
     async def _search_and_filter_repos(self) -> List[Dict[str, Any]]:
@@ -431,8 +433,9 @@ class ParallaxEngine:
                 config.pop("_id", None)
                 self.lens_configs[lens_name] = config
                 return config
-        except Exception as e:
-            logger.debug(f"Could not load lens config for {lens_name}: {e}")
+        except (AttributeError, RuntimeError, ConnectionError, ValueError, TypeError, KeyError):
+            # Type 2: Recoverable - lens config load failed, return None
+            logger.debug(f"Could not load lens config for {lens_name}", exc_info=True)
         return None
     
     async def _get_lens_model(self, lens_name: str) -> Optional[Any]:
@@ -455,8 +458,9 @@ class ParallaxEngine:
             )
             self.lens_models[lens_name] = model
             return model
-        except Exception as e:
-            logger.error(f"Failed to create model for {lens_name}: {e}", exc_info=True)
+        except (AttributeError, RuntimeError, ValueError, TypeError, KeyError):
+            # Type 2: Recoverable - model creation failed, return None
+            logger.error(f"Failed to create model for {lens_name}", exc_info=True)
             return None
     
     async def _generate_viewpoint(
@@ -553,8 +557,9 @@ class ParallaxEngine:
             if 'content' in locals():
                 logger.error(f"Response content: {content[:500]}")
             return None
-        except Exception as e:
-            logger.error(f"{lens_name} Viewpoint Failed: {e}", exc_info=True)
+        except (AttributeError, RuntimeError, ConnectionError, ValueError, TypeError, KeyError):
+            # Type 2: Recoverable - viewpoint generation failed, return None
+            logger.error(f"{lens_name} Viewpoint Failed", exc_info=True)
             if 'content' in locals():
                 logger.error(f"Response content: {content[:500]}")
             return None  # Fail gracefully
@@ -576,8 +581,9 @@ class ParallaxEngine:
                 if config.get("language_filter"):
                     self.language_filter = config["language_filter"]
                     logger.info(f"Loaded language_filter from config: {self.language_filter}")
-        except Exception as e:
-            logger.debug(f"Could not load watchlist config: {e}, using default")
+        except (AttributeError, RuntimeError, ConnectionError, ValueError, TypeError, KeyError):
+            # Type 2: Recoverable - watchlist config load failed, use defaults
+            logger.debug("Could not load watchlist config, using default", exc_info=True)
     
     async def update_watchlist(self, keywords: List[str], scan_limit: Optional[int] = None, min_stars: Optional[int] = None, language_filter: Optional[str] = None) -> bool:
         """Update the watchlist configuration"""
@@ -604,8 +610,9 @@ class ParallaxEngine:
             self.watchlist = keywords
             logger.info(f"Updated watchlist: {keywords}, scan_limit: {self.scan_limit}, min_stars: {self.min_stars}, language_filter: {self.language_filter}")
             return True
-        except Exception as e:
-            logger.error(f"Failed to update watchlist: {e}")
+        except (AttributeError, RuntimeError, ConnectionError, ValueError, TypeError):
+            # Type 2: Recoverable - watchlist update failed, return False
+            logger.error("Failed to update watchlist", exc_info=True)
             return False
     
     async def get_scan_limit(self) -> int:
@@ -772,8 +779,9 @@ class ParallaxEngine:
                             "total_processed": new_repos,
                             "total_found": len(repos)
                         })
-                    except Exception as e:
-                        logger.debug(f"Error sending progress callback: {e}")
+                    except (RuntimeError, ConnectionError, OSError, AttributeError):
+                        # Type 2: Recoverable - progress callback failed, continue
+                        logger.debug("Error sending progress callback", exc_info=True)
             else:
                 logger.warning(f"Failed to generate any Parallax view for: {repo_id} (relevance: {r_view is not None}, technical: {t_view is not None})")
         
@@ -788,8 +796,9 @@ class ParallaxEngine:
                     "new_repos": new_repos,
                     "cached_repos": cached_repos
                 })
-            except Exception as e:
-                logger.debug(f"Error sending completion callback: {e}")
+            except (RuntimeError, ConnectionError, OSError, AttributeError):
+                # Type 2: Recoverable - completion callback failed, continue
+                logger.debug("Error sending completion callback", exc_info=True)
         
         return reports
     

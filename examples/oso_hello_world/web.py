@@ -126,41 +126,37 @@ async def login(
     """
     Handle login returning JSON instead of Redirect for better UI/UX.
     """
-    try:
-        db = get_db()
-        app_config = engine.get_app("oso_hello_world") if engine else None
-        
-        user = await authenticate_app_user(
-            db=db,
-            email=email,
-            password=password,
-            collection_name="users"
+    # Type 4: Let errors bubble up to framework handler
+    db = get_db()
+    app_config = engine.get_app("oso_hello_world") if engine else None
+    
+    user = await authenticate_app_user(
+        db=db,
+        email=email,
+        password=password,
+        collection_name="users"
+    )
+    
+    if not user:
+        return JSONResponse(
+            status_code=401,
+            content={"success": False, "detail": "Invalid credentials"}
         )
-        
-        if not user:
-            return JSONResponse(
-                status_code=401,
-                content={"success": False, "detail": "Invalid credentials"}
-            )
-        
-        # Prepare success response
-        response = JSONResponse(content={"success": True, "user_id": str(user["_id"])})
-        
-        # This helper attaches the cookie to the response object
-        await create_app_session(
-            request=request,
-            slug_id="oso_hello_world",
-            user_id=str(user["_id"]),
-            config=app_config,
-            response=response
-        )
-        
-        logger.info(f"✅ User logged in via AJAX: {email}")
-        return response
-            
-    except Exception as e:
-        logger.error(f"❌ Login error: {e}", exc_info=True)
-        return JSONResponse(status_code=500, content={"success": False, "detail": str(e)})
+    
+    # Prepare success response
+    response = JSONResponse(content={"success": True, "user_id": str(user["_id"])})
+    
+    # This helper attaches the cookie to the response object
+    await create_app_session(
+        request=request,
+        slug_id="oso_hello_world",
+        user_id=str(user["_id"]),
+        config=app_config,
+        response=response
+    )
+    
+    logger.info(f"✅ User logged in via AJAX: {email}")
+    return response
 
 @app.get("/logout")
 async def logout(request: Request):
@@ -230,7 +226,8 @@ async def get_oso_status():
             # Simple check
             await app.state.authz_provider.check("test", "test", "test")
             status["connected"] = True
-        except Exception:
+        except (AttributeError, RuntimeError, ConnectionError, ValueError):
+            # Type 2: Recoverable - authz check failed, keep status false (health check)
             pass # Keep false
     return status
 

@@ -124,8 +124,7 @@ async def startup_event():
             logger.debug("No embedding_config found in manifest.json - embedding service not initialized")
     except ImportError as e:
         logger.debug("EmbeddingService dependencies not available", exc_info=True)
-    except Exception as e:
-        logger.exception("Failed to initialize EmbeddingService")
+    # Type 4: Let other exceptions bubble up to framework handler
     
     # Mark app as started
     app.state._started = True
@@ -292,8 +291,7 @@ async def login(
                 )
             except (ValueError, TypeError) as e:
                 logger.warning(f"Failed to create app session: {e}", exc_info=True)
-            except Exception as e:
-                logger.exception("Unexpected error creating app session")
+            # Type 4: Let other exceptions bubble up to framework handler
         
         return response
     else:
@@ -364,8 +362,7 @@ async def register(
                 )
             except (ValueError, TypeError) as e:
                 logger.warning(f"Failed to create app session: {e}", exc_info=True)
-            except Exception as e:
-                logger.exception("Unexpected error creating app session")
+            # Type 4: Let other exceptions bubble up to framework handler
         
         return response
     else:
@@ -439,7 +436,8 @@ async def conversation_view(request: Request, conversation_id: str):
             "_id": ObjectId(conversation_id),
             "user_id": user_id
         })
-    except Exception:
+    except (ValueError, TypeError):
+        # Type 2: Recoverable - invalid ObjectId format, redirect to conversations
         conversation = None
     
     if not conversation:
@@ -512,7 +510,8 @@ async def send_message(request: Request, conversation_id: str, message: str = Fo
             "_id": ObjectId(conversation_id),
             "user_id": user_id
         })
-    except Exception:
+    except (ValueError, TypeError):
+        # Type 3: Invalid ObjectId format - raise HTTPException
         raise HTTPException(status_code=404, detail="Conversation not found")
     
     if not conversation:
@@ -556,36 +555,34 @@ async def send_message(request: Request, conversation_id: str, message: str = Fo
     context_memories = []
     memory_search_details = []
     if memory_service:
-        try:
-            # Search for relevant memories to add as context
-            relevant_memories = memory_service.search(
-                query=message,
-                user_id=user_id,
-                limit=3
-            )
-            if relevant_memories:
-                # Extract memory text from results with details
-                context_memories = []
-                for m in relevant_memories:
-                    if isinstance(m, dict):
-                        # mem0 returns dicts with 'memory' field
-                        memory_text = m.get("memory") or m.get("data", {}).get("memory", "")
-                        if memory_text:
-                            context_memories.append(memory_text)
-                            memory_search_details.append({
-                                "memory": memory_text,
-                                "id": m.get("id") or m.get("_id"),
-                                "score": m.get("score"),
-                                "metadata": m.get("metadata", {})
-                            })
-                    elif isinstance(m, str):
-                        context_memories.append(m)
+        # Type 4: Let memory retrieval errors bubble up to framework handler
+        # Search for relevant memories to add as context
+        relevant_memories = memory_service.search(
+            query=message,
+            user_id=user_id,
+            limit=3
+        )
+        if relevant_memories:
+            # Extract memory text from results with details
+            context_memories = []
+            for m in relevant_memories:
+                if isinstance(m, dict):
+                    # mem0 returns dicts with 'memory' field
+                    memory_text = m.get("memory") or m.get("data", {}).get("memory", "")
+                    if memory_text:
+                        context_memories.append(memory_text)
                         memory_search_details.append({
-                            "memory": m,
-                            "score": None
+                            "memory": memory_text,
+                            "id": m.get("id") or m.get("_id"),
+                            "score": m.get("score"),
+                            "metadata": m.get("metadata", {})
                         })
-        except Exception as e:
-            logger.warning(f"Failed to retrieve memories: {e}")
+                elif isinstance(m, str):
+                    context_memories.append(m)
+                    memory_search_details.append({
+                        "memory": m,
+                        "score": None
+                    })
     
     # Memory storage will happen AFTER AI response is generated
     # (moved below to include assistant response)
@@ -614,17 +611,14 @@ async def send_message(request: Request, conversation_id: str, message: str = Fo
     })
     
     # Get AI response using Azure OpenAI client
-    try:
-        completion = await asyncio.to_thread(
-            client.chat.completions.create,
-            model=deployment_name,
-            messages=messages,
-            max_tokens=1000
-        )
-        ai_response = completion.choices[0].message.content
-    except Exception as e:
-        logger.exception("Azure OpenAI API error")
-        raise HTTPException(status_code=503, detail=f"LLM service error: {str(e)}") from e
+    # Type 4: Let API errors bubble up to framework handler
+    completion = await asyncio.to_thread(
+        client.chat.completions.create,
+        model=deployment_name,
+        messages=messages,
+        max_tokens=1000
+    )
+    ai_response = completion.choices[0].message.content
     
     # Save AI message
     ai_message = {
@@ -639,41 +633,41 @@ async def send_message(request: Request, conversation_id: str, message: str = Fo
     # Store conversation turn in memory (AFTER AI response is generated)
     # Mem0 needs both user message and assistant response to extract meaningful memories
     if memory_service:
-        try:
-            # Build memory messages with full conversation context including assistant response
-            memory_messages = []
-            
-            # Convert full conversation history to message format
-            for msg in history:
-                memory_messages.append({
-                    "role": msg.get("role", "user"),
-                    "content": msg.get("content", "")
-                })
-            
-            # Add current user message
+        # Type 4: Let memory storage errors bubble up to framework handler
+        # Build memory messages with full conversation context including assistant response
+        memory_messages = []
+        
+        # Convert full conversation history to message format
+        for msg in history:
             memory_messages.append({
-                "role": "user",
-                "content": message
+                "role": msg.get("role", "user"),
+                "content": msg.get("content", "")
             })
+        
+        # Add current user message
+        memory_messages.append({
+            "role": "user",
+            "content": message
+        })
+        
+        # Add assistant response (CRITICAL - mem0 needs this to extract memories)
+        memory_messages.append({
+            "role": "assistant",
+            "content": ai_response
+        })
+        
+        # Store in memory asynchronously (fire and forget)
+        async def store_memory():
+            # Type 4: Let background memory storage errors bubble up
+            # Log the actual message content for debugging
+            message_preview = []
+            for i, msg in enumerate(memory_messages):
+                role = msg.get("role", "unknown")
+                content = msg.get("content", "")
+                preview = content[:100] + "..." if len(content) > 100 else content
+                message_preview.append(f"{i+1}. {role}: {preview}")
             
-            # Add assistant response (CRITICAL - mem0 needs this to extract memories)
-            memory_messages.append({
-                "role": "assistant",
-                "content": ai_response
-            })
-            
-            # Store in memory asynchronously (fire and forget)
-            async def store_memory():
-                try:
-                    # Log the actual message content for debugging
-                    message_preview = []
-                    for i, msg in enumerate(memory_messages):
-                        role = msg.get("role", "unknown")
-                        content = msg.get("content", "")
-                        preview = content[:100] + "..." if len(content) > 100 else content
-                        message_preview.append(f"{i+1}. {role}: {preview}")
-                    
-                    logger.info(
+            logger.info(
                         f"🔵 STORING MEMORY - user_id={user_id}, conversation_id={conversation_id}, messages={len(memory_messages)}, collection={memory_service.collection_name}",
                         extra={
                             "user_id": user_id,
@@ -686,125 +680,108 @@ async def send_message(request: Request, conversation_id: str, message: str = Fo
                             "collection_name": memory_service.collection_name
                         }
                     )
-                    
-                    logger.info(f"🔵 About to call memory_service.add() for user_id={user_id}")
-                    result = await asyncio.to_thread(
-                        memory_service.add,
-                        messages=memory_messages,
-                        user_id=str(user_id),  # Ensure it's a string
-                        metadata={
-                            "conversation_id": conversation_id,
-                            "source": "conversations_app"
-                        }
-                    )
-                    logger.info(f"🔵 memory_service.add() completed, result type: {type(result).__name__}, length: {len(result) if isinstance(result, list) else 'N/A'}")
-                    
-                    logger.info(
-                        f"STORAGE RESULT - user_id={user_id}, result_type={type(result).__name__}, result_length={len(result) if isinstance(result, list) else 'N/A'}",
-                        extra={
-                            "user_id": user_id,
-                            "result_type": type(result).__name__,
-                            "result_length": len(result) if isinstance(result, list) else 0,
-                            "result_sample": result[0] if result and isinstance(result, list) and len(result) > 0 else None
-                        }
-                    )
-                    
-                    # Log what Mem0 extracted for visibility
-                    if result and isinstance(result, list) and len(result) > 0:
-                        logger.info(
-                            f"✅ Mem0 extracted {len(result)} memories from conversation for user_id={user_id}",
-                            extra={
-                                "user_id": user_id,
-                                "conversation_id": conversation_id,
-                                "memory_count": len(result),
-                                "messages_count": len(memory_messages),
-                                "memory_ids": [m.get("id") or m.get("_id") for m in result if isinstance(m, dict)]
-                            }
-                        )
-                        
-                        # Extract memory text for real-time update
-                        memory_texts = []
-                        for m in result:
-                            if isinstance(m, dict):
-                                memory_text = m.get("memory") or m.get("data", {}).get("memory", "") or m.get("text", "")
-                                if memory_text:
-                                    memory_texts.append({
-                                        "id": m.get("id") or m.get("_id"),
-                                        "memory": memory_text,
-                                        "metadata": m.get("metadata", {})
-                                    })
-                        
-                        # Small delay before WebSocket broadcast to ensure memories are fully processed
-                        await asyncio.sleep(0.3)  # Reduced delay for faster real-time updates
-                        
-                        # Fetch the actual memories from the service to include full data
-                        try:
-                            # Get fresh memories to include in broadcast
-                            fresh_memories = await asyncio.to_thread(
-                                memory_service.get_all,
-                                user_id=str(user_id),
-                                limit=50  # Get recent memories
-                            )
-                            
-                            # Calculate stats for real-time update
-                            total_memories = len(fresh_memories) if isinstance(fresh_memories, list) else 0
-                            
-                            # Broadcast memory update event via WebSocket with actual memory data
-                            await broadcast_to_app(
-                                "conversations",
-                                {
-                                    "type": "memory_stored",
-                                    "user_id": user_id,
-                                    "conversation_id": conversation_id,
-                                    "memory_count": len(result),
-                                    "total_memories": total_memories,
-                                    "new_memories": memory_texts,  # Newly extracted memories
-                                    "all_memories": fresh_memories[:20] if isinstance(fresh_memories, list) else [],  # Recent memories for UI update
-                                    "stats": {
-                                        "total_memories": total_memories,
-                                        "new_count": len(result),
-                                        "memory_enabled": True,
-                                        "inference_enabled": True
-                                    },
-                                    "message": f"Mem0 extracted {len(result)} memories from conversation",
-                                    "action": "refresh_memories"  # Signal frontend to refresh
-                                },
-                                user_id=user_id
-                            )
-                            logger.info(f"📡 Broadcasted memory update via WebSocket: {len(result)} new memories, {total_memories} total")
-                        except Exception as ws_error:
-                            logger.warning(f"Failed to broadcast memory event: {ws_error}", exc_info=True)
-                    else:
-                        logger.warning(
-                            f"⚠️ Mem0 returned 0 memories for user_id={user_id}. This may be normal if the conversation doesn't contain extractable facts.",
-                            extra={
-                                "user_id": user_id,
-                                "conversation_id": conversation_id,
-                                "messages_count": len(memory_messages),
-                                "user_message": message[:100] if message else None,
-                                "assistant_response": ai_response[:100] if ai_response else None
-                            }
-                        )
-                    
-                    return result
-                except Exception as e:
-                    logger.error(
-                        f"❌ Background memory storage FAILED: {e}",
-                        exc_info=True,
-                        extra={
-                            "user_id": user_id,
-                            "conversation_id": conversation_id,
-                            "error_type": type(e).__name__,
-                            "error_message": str(e),
-                            "traceback": str(e.__traceback__) if hasattr(e, '__traceback__') else None
-                        }
-                    )
-                    return None
             
-            # Schedule in background (fire and forget)
-            asyncio.create_task(store_memory())
-        except Exception as e:
-            logger.warning(f"Failed to schedule memory storage: {e}", exc_info=True)
+            logger.info(f"🔵 About to call memory_service.add() for user_id={user_id}")
+            result = await asyncio.to_thread(
+                memory_service.add,
+                messages=memory_messages,
+                user_id=str(user_id),  # Ensure it's a string
+                metadata={
+                    "conversation_id": conversation_id,
+                    "source": "conversations_app"
+                }
+            )
+            logger.info(f"🔵 memory_service.add() completed, result type: {type(result).__name__}, length: {len(result) if isinstance(result, list) else 'N/A'}")
+            
+            logger.info(
+                f"STORAGE RESULT - user_id={user_id}, result_type={type(result).__name__}, result_length={len(result) if isinstance(result, list) else 'N/A'}",
+                extra={
+                    "user_id": user_id,
+                    "result_type": type(result).__name__,
+                    "result_length": len(result) if isinstance(result, list) else 0,
+                    "result_sample": result[0] if result and isinstance(result, list) and len(result) > 0 else None
+                }
+            )
+            
+            # Log what Mem0 extracted for visibility
+            if result and isinstance(result, list) and len(result) > 0:
+                logger.info(
+                    f"✅ Mem0 extracted {len(result)} memories from conversation for user_id={user_id}",
+                    extra={
+                        "user_id": user_id,
+                        "conversation_id": conversation_id,
+                        "memory_count": len(result),
+                        "messages_count": len(memory_messages),
+                        "memory_ids": [m.get("id") or m.get("_id") for m in result if isinstance(m, dict)]
+                    }
+                )
+                
+                # Extract memory text for real-time update
+                memory_texts = []
+                for m in result:
+                    if isinstance(m, dict):
+                        memory_text = m.get("memory") or m.get("data", {}).get("memory", "") or m.get("text", "")
+                        if memory_text:
+                            memory_texts.append({
+                                "id": m.get("id") or m.get("_id"),
+                                "memory": memory_text,
+                                "metadata": m.get("metadata", {})
+                            })
+                
+                # Small delay before WebSocket broadcast to ensure memories are fully processed
+                await asyncio.sleep(0.3)  # Reduced delay for faster real-time updates
+                
+                # Fetch the actual memories from the service to include full data
+                # Type 4: Let WebSocket broadcast errors bubble up
+                # Get fresh memories to include in broadcast
+                fresh_memories = await asyncio.to_thread(
+                    memory_service.get_all,
+                    user_id=str(user_id),
+                    limit=50  # Get recent memories
+                )
+                
+                # Calculate stats for real-time update
+                total_memories = len(fresh_memories) if isinstance(fresh_memories, list) else 0
+                
+                # Broadcast memory update event via WebSocket with actual memory data
+                await broadcast_to_app(
+                    "conversations",
+                    {
+                        "type": "memory_stored",
+                        "user_id": user_id,
+                        "conversation_id": conversation_id,
+                        "memory_count": len(result),
+                        "total_memories": total_memories,
+                        "new_memories": memory_texts,  # Newly extracted memories
+                        "all_memories": fresh_memories[:20] if isinstance(fresh_memories, list) else [],  # Recent memories for UI update
+                        "stats": {
+                            "total_memories": total_memories,
+                            "new_count": len(result),
+                            "memory_enabled": True,
+                            "inference_enabled": True
+                        },
+                        "message": f"Mem0 extracted {len(result)} memories from conversation",
+                        "action": "refresh_memories"  # Signal frontend to refresh
+                    },
+                    user_id=user_id
+                )
+                logger.info(f"📡 Broadcasted memory update via WebSocket: {len(result)} new memories, {total_memories} total")
+            else:
+                logger.warning(
+                    f"⚠️ Mem0 returned 0 memories for user_id={user_id}. This may be normal if the conversation doesn't contain extractable facts.",
+                    extra={
+                        "user_id": user_id,
+                        "conversation_id": conversation_id,
+                        "messages_count": len(memory_messages),
+                        "user_message": message[:100] if message else None,
+                        "assistant_response": ai_response[:100] if ai_response else None
+                    }
+                )
+            
+            return result
+        
+        # Schedule in background (fire and forget)
+        asyncio.create_task(store_memory())
     
     # Update conversation timestamp
     await db.conversations.update_one(
@@ -851,20 +828,18 @@ async def send_message(request: Request, conversation_id: str, message: str = Fo
         
         # Broadcast memory search event via WebSocket
         if context_memories:
-            try:
-                await broadcast_to_app(
-                    "conversations",
-                    {
-                        "type": "memory_search",
-                        "user_id": user_id,
-                        "query": message,
-                        "memories_found": len(context_memories),
-                        "search_details": memory_search_details[:3]
-                    },
-                    user_id=user_id
-                )
-            except Exception as ws_error:
-                logger.debug(f"Failed to broadcast memory search event: {ws_error}")
+            # Type 4: Let WebSocket broadcast errors bubble up
+            await broadcast_to_app(
+                "conversations",
+                {
+                    "type": "memory_search",
+                    "user_id": user_id,
+                    "query": message,
+                    "memories_found": len(context_memories),
+                    "search_details": memory_search_details[:3]
+                },
+                user_id=user_id
+            )
     
     return JSONResponse(response_data)
 
@@ -887,7 +862,8 @@ async def delete_conversation(request: Request, conversation_id: str):
             "_id": ObjectId(conversation_id),
             "user_id": user_id
         })
-    except Exception:
+    except (ValueError, TypeError):
+        # Type 3: Invalid ObjectId format - raise HTTPException
         raise HTTPException(status_code=404, detail="Conversation not found")
     
     if not conversation:
@@ -931,76 +907,73 @@ async def get_all_memories(request: Request, limit: int = 20):
     
     user_id = str(app_user["_id"])
     
-    try:
-        # Run synchronous get_all in thread pool
-        logger.info(
-            f"🔍 FETCHING MEMORIES - user_id={user_id} (type: {type(user_id).__name__}), limit={limit}",
-            extra={"user_id": user_id, "user_id_type": type(user_id).__name__, "user_id_repr": repr(user_id), "limit": limit}
-        )
-        memories = await asyncio.to_thread(memory_service.get_all, user_id=str(user_id), limit=limit)  # Ensure string
-        logger.info(
-            f"🔍 RETRIEVED MEMORIES - user_id={user_id}, count={len(memories) if isinstance(memories, list) else 0}",
-            extra={
-                "user_id": user_id,
-                "memory_count": len(memories) if isinstance(memories, list) else 0,
-                "sample_memory": memories[0] if memories and isinstance(memories, list) and len(memories) > 0 else None
-            }
-        )
-        
-        # Normalize memory format for frontend
-        # Handle Mem0 v2 API format: memories should already be a list from service layer
-        normalized_memories = []
-        if isinstance(memories, list):
-            for mem in memories:
-                if isinstance(mem, dict):
-                    # Mem0 v2 format: {"id": "...", "memory": "...", "created_at": "...", "updated_at": "...", "metadata": {...}}
-                    # Prioritize "memory" field (v2 format) over nested structures
-                    memory_text = (
-                        mem.get("memory") or  # v2 format - primary
-                        mem.get("text") or   # Alternative text field
-                        (mem.get("data", {}).get("memory") if isinstance(mem.get("data"), dict) else None) or  # Nested format (legacy)
-                        str(mem)  # Fallback
-                    )
-                    
-                    # Extract ID - v2 format uses "id" field
-                    memory_id = mem.get("id") or mem.get("_id") or None
-                    
-                    # Extract metadata - v2 format has direct "metadata" field
-                    metadata = mem.get("metadata", {})
-                    if not isinstance(metadata, dict):
-                        metadata = {}
-                    
-                    if memory_text:  # Only add if we have memory text
-                        normalized_memories.append({
-                            "memory": memory_text,
-                            "id": memory_id,
-                            "metadata": metadata
-                        })
-                elif isinstance(mem, str):
-                    # Handle string format memories
+    # Type 4: Let memory retrieval errors bubble up to framework handler
+    # Run synchronous get_all in thread pool
+    logger.info(
+        f"🔍 FETCHING MEMORIES - user_id={user_id} (type: {type(user_id).__name__}), limit={limit}",
+        extra={"user_id": user_id, "user_id_type": type(user_id).__name__, "user_id_repr": repr(user_id), "limit": limit}
+    )
+    memories = await asyncio.to_thread(memory_service.get_all, user_id=str(user_id), limit=limit)  # Ensure string
+    logger.info(
+        f"🔍 RETRIEVED MEMORIES - user_id={user_id}, count={len(memories) if isinstance(memories, list) else 0}",
+        extra={
+            "user_id": user_id,
+            "memory_count": len(memories) if isinstance(memories, list) else 0,
+            "sample_memory": memories[0] if memories and isinstance(memories, list) and len(memories) > 0 else None
+        }
+    )
+    
+    # Normalize memory format for frontend
+    # Handle Mem0 v2 API format: memories should already be a list from service layer
+    normalized_memories = []
+    if isinstance(memories, list):
+        for mem in memories:
+            if isinstance(mem, dict):
+                # Mem0 v2 format: {"id": "...", "memory": "...", "created_at": "...", "updated_at": "...", "metadata": {...}}
+                # Prioritize "memory" field (v2 format) over nested structures
+                memory_text = (
+                    mem.get("memory") or  # v2 format - primary
+                    mem.get("text") or   # Alternative text field
+                    (mem.get("data", {}).get("memory") if isinstance(mem.get("data"), dict) else None) or  # Nested format (legacy)
+                    str(mem)  # Fallback
+                )
+                
+                # Extract ID - v2 format uses "id" field
+                memory_id = mem.get("id") or mem.get("_id") or None
+                
+                # Extract metadata - v2 format has direct "metadata" field
+                metadata = mem.get("metadata", {})
+                if not isinstance(metadata, dict):
+                    metadata = {}
+                
+                if memory_text:  # Only add if we have memory text
                     normalized_memories.append({
-                        "memory": mem,
-                        "id": None,
-                        "metadata": {}
+                        "memory": memory_text,
+                        "id": memory_id,
+                        "metadata": metadata
                     })
-        
-        logger.info(
-            f"Returning {len(normalized_memories)} normalized memories for user {user_id}",
-            extra={
-                "user_id": user_id,
-                "raw_count": len(memories) if isinstance(memories, list) else 0,
-                "normalized_count": len(normalized_memories)
-            }
-        )
-        
-        return JSONResponse({
-            "success": True,
-            "memories": normalized_memories,
-            "count": len(normalized_memories)
-        })
-    except Exception as e:
-        logger.error(f"Failed to get memories: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve memories: {str(e)}")
+            elif isinstance(mem, str):
+                # Handle string format memories
+                normalized_memories.append({
+                    "memory": mem,
+                    "id": None,
+                    "metadata": {}
+                })
+    
+    logger.info(
+        f"Returning {len(normalized_memories)} normalized memories for user {user_id}",
+        extra={
+            "user_id": user_id,
+            "raw_count": len(memories) if isinstance(memories, list) else 0,
+            "normalized_count": len(normalized_memories)
+        }
+    )
+    
+    return JSONResponse({
+        "success": True,
+        "memories": normalized_memories,
+        "count": len(normalized_memories)
+    })
 
 
 @app.get("/api/memories/search", response_class=JSONResponse)
@@ -1026,57 +999,52 @@ async def search_memories(request: Request, query: str, limit: int = 5, metadata
     
     user_id = str(app_user["_id"])
     
-    try:
-        # Parse metadata filter if provided
-        metadata_filter = None
-        if metadata:
-            try:
-                import json
-                metadata_filter = json.loads(metadata) if isinstance(metadata, str) else metadata
-            except json.JSONDecodeError:
-                raise HTTPException(status_code=400, detail="Invalid metadata format. Expected JSON string.")
-        
-        # Run synchronous search in thread pool with metadata filter
-        results = await asyncio.to_thread(
-            memory_service.search,
-            query=query,
-            user_id=user_id,
-            limit=limit,
-            metadata=metadata_filter
-        )
-        
-        # Normalize results format
-        normalized_results = []
-        if isinstance(results, list):
-            for res in results:
-                if isinstance(res, dict):
-                    memory_text = (
-                        res.get("memory") or 
-                        res.get("data", {}).get("memory") or 
-                        res.get("text") or
-                        str(res)
-                    )
-                    normalized_results.append({
-                        "memory": memory_text,
-                        "id": res.get("id") or res.get("_id"),
-                        "metadata": res.get("metadata", {}),
-                        "score": res.get("score")
-                    })
-                elif isinstance(res, str):
-                    normalized_results.append({"memory": res})
-        
-        return JSONResponse({
-            "success": True,
-            "results": normalized_results,
-            "count": len(normalized_results),
-            "query": query,
-            "metadata_filter": metadata_filter
-        })
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to search memories: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to search memories: {str(e)}")
+    # Type 4: Let memory search errors bubble up to framework handler
+    # Parse metadata filter if provided
+    metadata_filter = None
+    if metadata:
+        try:
+            import json
+            metadata_filter = json.loads(metadata) if isinstance(metadata, str) else metadata
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="Invalid metadata format. Expected JSON string.")
+    
+    # Run synchronous search in thread pool with metadata filter
+    results = await asyncio.to_thread(
+        memory_service.search,
+        query=query,
+        user_id=user_id,
+        limit=limit,
+        metadata=metadata_filter
+    )
+    
+    # Normalize results format
+    normalized_results = []
+    if isinstance(results, list):
+        for res in results:
+            if isinstance(res, dict):
+                memory_text = (
+                    res.get("memory") or 
+                    res.get("data", {}).get("memory") or 
+                    res.get("text") or
+                    str(res)
+                )
+                normalized_results.append({
+                    "memory": memory_text,
+                    "id": res.get("id") or res.get("_id"),
+                    "metadata": res.get("metadata", {}),
+                    "score": res.get("score")
+                })
+            elif isinstance(res, str):
+                normalized_results.append({"memory": res})
+    
+    return JSONResponse({
+        "success": True,
+        "results": normalized_results,
+        "count": len(normalized_results),
+        "query": query,
+        "metadata_filter": metadata_filter
+    })
 
 
 @app.get("/api/memories/{memory_id}", response_class=JSONResponse)
@@ -1099,34 +1067,31 @@ async def get_memory(request: Request, memory_id: str):
     
     user_id = str(app_user["_id"])
     
-    try:
-        # Run synchronous get in thread pool
-        memory = await asyncio.to_thread(memory_service.get, memory_id=memory_id, user_id=user_id)
-        
-        # Normalize memory format
-        if isinstance(memory, dict):
-            memory_text = (
-                memory.get("memory") or 
-                memory.get("data", {}).get("memory") or 
-                memory.get("text") or
-                str(memory)
-            )
-            normalized_memory = {
-                "memory": memory_text,
-                "id": memory.get("id") or memory.get("_id") or memory_id,
-                "metadata": memory.get("metadata", {}),
-                "user_id": memory.get("user_id", user_id)
-            }
-        else:
-            normalized_memory = {"memory": str(memory), "id": memory_id}
-        
-        return JSONResponse({
-            "success": True,
-            "memory": normalized_memory
-        })
-    except Exception as e:
-        logger.error(f"Failed to get memory: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to get memory: {str(e)}")
+    # Type 4: Let memory retrieval errors bubble up to framework handler
+    # Run synchronous get in thread pool
+    memory = await asyncio.to_thread(memory_service.get, memory_id=memory_id, user_id=user_id)
+    
+    # Normalize memory format
+    if isinstance(memory, dict):
+        memory_text = (
+            memory.get("memory") or 
+            memory.get("data", {}).get("memory") or 
+            memory.get("text") or
+            str(memory)
+        )
+        normalized_memory = {
+            "memory": memory_text,
+            "id": memory.get("id") or memory.get("_id") or memory_id,
+            "metadata": memory.get("metadata", {}),
+            "user_id": memory.get("user_id", user_id)
+        }
+    else:
+        normalized_memory = {"memory": str(memory), "id": memory_id}
+    
+    return JSONResponse({
+        "success": True,
+        "memory": normalized_memory
+    })
 
 
 @app.put("/api/memories/{memory_id}", response_class=JSONResponse)
@@ -1149,50 +1114,45 @@ async def update_memory(request: Request, memory_id: str):
     
     user_id = str(app_user["_id"])
     
-    try:
-        # Parse request body
-        body = await request.json()
-        data = body.get("data")
-        metadata = body.get("metadata")
-        
-        if not data:
-            raise HTTPException(status_code=400, detail="Missing 'data' field in request body")
-        
-        # Run synchronous update in thread pool
-        updated_memory = await asyncio.to_thread(
-            memory_service.update,
-            memory_id=memory_id,
-            data=data,
-            user_id=user_id,
-            metadata=metadata
+    # Type 4: Let memory update errors bubble up to framework handler
+    # Parse request body
+    body = await request.json()
+    data = body.get("data")
+    metadata = body.get("metadata")
+    
+    if not data:
+        raise HTTPException(status_code=400, detail="Missing 'data' field in request body")
+    
+    # Run synchronous update in thread pool
+    updated_memory = await asyncio.to_thread(
+        memory_service.update,
+        memory_id=memory_id,
+        data=data,
+        user_id=user_id,
+        metadata=metadata
+    )
+    
+    # Normalize memory format
+    if isinstance(updated_memory, dict):
+        memory_text = (
+            updated_memory.get("memory") or 
+            updated_memory.get("data", {}).get("memory") or 
+            updated_memory.get("text") or
+            str(updated_memory)
         )
-        
-        # Normalize memory format
-        if isinstance(updated_memory, dict):
-            memory_text = (
-                updated_memory.get("memory") or 
-                updated_memory.get("data", {}).get("memory") or 
-                updated_memory.get("text") or
-                str(updated_memory)
-            )
-            normalized_memory = {
-                "memory": memory_text,
-                "id": updated_memory.get("id") or updated_memory.get("_id") or memory_id,
-                "metadata": updated_memory.get("metadata", metadata or {}),
-                "user_id": updated_memory.get("user_id", user_id)
-            }
-        else:
-            normalized_memory = {"memory": str(updated_memory), "id": memory_id}
-        
-        return JSONResponse({
-            "success": True,
-            "memory": normalized_memory
-        })
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to update memory: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to update memory: {str(e)}")
+        normalized_memory = {
+            "memory": memory_text,
+            "id": updated_memory.get("id") or updated_memory.get("_id") or memory_id,
+            "metadata": updated_memory.get("metadata", metadata or {}),
+            "user_id": updated_memory.get("user_id", user_id)
+        }
+    else:
+        normalized_memory = {"memory": str(updated_memory), "id": memory_id}
+    
+    return JSONResponse({
+        "success": True,
+        "memory": normalized_memory
+    })
 
 
 @app.delete("/api/memories/{memory_id}", response_class=JSONResponse)
@@ -1215,17 +1175,14 @@ async def delete_memory(request: Request, memory_id: str):
     
     user_id = str(app_user["_id"])
     
-    try:
-        # Run synchronous delete in thread pool
-        success = await asyncio.to_thread(memory_service.delete, memory_id=memory_id, user_id=user_id)
-        
-        return JSONResponse({
-            "success": success,
-            "message": f"Memory {memory_id} deleted successfully" if success else "Failed to delete memory"
-        })
-    except Exception as e:
-        logger.error(f"Failed to delete memory: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to delete memory: {str(e)}")
+    # Type 4: Let memory deletion errors bubble up to framework handler
+    # Run synchronous delete in thread pool
+    success = await asyncio.to_thread(memory_service.delete, memory_id=memory_id, user_id=user_id)
+    
+    return JSONResponse({
+        "success": success,
+        "message": f"Memory {memory_id} deleted successfully" if success else "Failed to delete memory"
+    })
 
 
 @app.delete("/api/memories", response_class=JSONResponse)
@@ -1250,22 +1207,19 @@ async def delete_all_memories(request: Request):
     
     user_id = str(app_user["_id"])
     
-    try:
-        # Get count before deletion for response
-        all_memories = await asyncio.to_thread(memory_service.get_all, user_id=user_id, limit=1000)
-        memory_count = len(all_memories) if isinstance(all_memories, list) else 0
-        
-        # Run synchronous delete_all in thread pool
-        success = await asyncio.to_thread(memory_service.delete_all, user_id=user_id)
-        
-        return JSONResponse({
-            "success": success,
-            "deleted_count": memory_count,
-            "message": f"Deleted {memory_count} memories for user {user_id}" if success else "Failed to delete memories"
-        })
-    except Exception as e:
-        logger.error(f"Failed to delete all memories: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to delete all memories: {str(e)}")
+    # Type 4: Let memory deletion errors bubble up to framework handler
+    # Get count before deletion for response
+    all_memories = await asyncio.to_thread(memory_service.get_all, user_id=user_id, limit=1000)
+    memory_count = len(all_memories) if isinstance(all_memories, list) else 0
+    
+    # Run synchronous delete_all in thread pool
+    success = await asyncio.to_thread(memory_service.delete_all, user_id=user_id)
+    
+    return JSONResponse({
+        "success": success,
+        "deleted_count": memory_count,
+        "message": f"Deleted {memory_count} memories for user {user_id}" if success else "Failed to delete memories"
+    })
 
 
 @app.get("/api/memories/stats", response_class=JSONResponse)
@@ -1295,7 +1249,8 @@ async def get_memory_stats(request: Request):
         # Get app user - wrap in try-except in case get_app_user fails
         try:
             app_user = await get_current_app_user(request)
-        except Exception as user_error:
+        except (AttributeError, RuntimeError, ValueError, TypeError, KeyError) as user_error:
+            # Type 2: Recoverable - user lookup failed, return default stats
             logger.warning(f"Failed to get app user in stats: {user_error}")
             return JSONResponse(default_stats, status_code=200)
         
@@ -1305,7 +1260,8 @@ async def get_memory_stats(request: Request):
         # Get memory service - wrap in try-except
         try:
             memory_service = engine.get_memory_service("conversations")
-        except Exception as service_error:
+        except (AttributeError, RuntimeError, ValueError, KeyError) as service_error:
+            # Type 2: Recoverable - service lookup failed, return default stats
             logger.warning(f"Failed to get memory service in stats: {service_error}")
             return JSONResponse(default_stats, status_code=200)
         
@@ -1354,7 +1310,8 @@ async def get_memory_stats(request: Request):
                             "sample_user_ids": [doc.get('user_id') for doc in any_docs]
                         }
                     )
-            except Exception as db_error:
+            except (AttributeError, RuntimeError, ConnectionError, ValueError, TypeError) as db_error:
+                # Type 2: Recoverable - MongoDB query failed, continue without debug info
                 logger.warning(f"Could not query MongoDB directly: {db_error}")
             
             # Add timeout to prevent hanging
@@ -1374,7 +1331,8 @@ async def get_memory_stats(request: Request):
         except asyncio.TimeoutError:
             logger.warning(f"Timeout getting memories for stats (user: {user_id})")
             return JSONResponse(default_stats, status_code=200)
-        except Exception as mem_error:
+        except (AttributeError, RuntimeError, ConnectionError, ValueError, TypeError) as mem_error:
+            # Type 2: Recoverable - memory retrieval failed, return default stats
             logger.warning(f"Failed to get memories for stats: {mem_error}")
             return JSONResponse(default_stats, status_code=200)
         
@@ -1394,8 +1352,9 @@ async def get_memory_stats(request: Request):
                             metadata_breakdown[source] = metadata_breakdown.get(source, 0) + 1
                             if metadata.get("conversation_id"):
                                 conversation_memories += 1
-                except Exception:
-                    continue  # Skip invalid memory entries
+                except (KeyError, TypeError, AttributeError):
+                    # Type 2: Recoverable - skip invalid memory entries
+                    continue
             
             # Safely get memory service attributes
             inference_enabled = False
@@ -1403,8 +1362,9 @@ async def get_memory_stats(request: Request):
             try:
                 inference_enabled = getattr(memory_service, 'infer', False)
                 graph_enabled = getattr(memory_service, 'enable_graph', False)
-            except Exception:
-                pass  # Use defaults
+            except AttributeError:
+                # Type 2: Recoverable - use defaults if attributes don't exist
+                pass
             
             return JSONResponse({
                 "success": True,
@@ -1417,12 +1377,13 @@ async def get_memory_stats(request: Request):
                     "metadata_breakdown": metadata_breakdown
                 }
             }, status_code=200)
-        except Exception as process_error:
+        except (ValueError, TypeError, AttributeError, KeyError) as process_error:
+            # Type 2: Recoverable - processing failed, return default stats
             logger.warning(f"Failed to process memory stats: {process_error}")
             return JSONResponse(default_stats, status_code=200)
             
-    except Exception as e:
-        # Catch EVERYTHING - this should never happen but just in case
+    except (AttributeError, RuntimeError, ValueError, TypeError, KeyError) as e:
+        # Type 2: Recoverable - unexpected error, return default stats (bulletproof endpoint)
         logger.error(f"Unexpected error in get_memory_stats: {e}", exc_info=True)
         return JSONResponse(default_stats, status_code=200)
 

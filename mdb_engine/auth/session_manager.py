@@ -344,7 +344,8 @@ class SessionManager:
             if isinstance(session_id, str):
                 try:
                     session_id = ObjectId(session_id)
-                except Exception:
+                except (TypeError, ValueError):
+                    # Type 2: Recoverable - invalid format, return False
                     logger.warning(f"Invalid session_id format: {session_id}")
                     return False
 

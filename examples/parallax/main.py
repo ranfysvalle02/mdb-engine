@@ -153,7 +153,8 @@ async def main():
         
         print("✅ Example completed successfully!")
         
-    except Exception as e:
+    except (AttributeError, RuntimeError, ConnectionError, ValueError, TypeError, KeyError, FileNotFoundError) as e:
+        # Type 2: Recoverable - CLI script error, print and exit gracefully
         print(f"❌ Error: {e}")
         import traceback
         traceback.print_exc()

@@ -252,7 +252,8 @@ Rules:
             # Estimate chat cost (slightly variable for realism)
             chat_cost = 0.0001 + (np.random.random() * 0.00005)
             
-        except Exception as e:
+        except (AttributeError, RuntimeError, ConnectionError, ValueError, TypeError, KeyError) as e:
+            # Type 2: Recoverable - LLM call failed, report error and continue
             error_msg = f"LLM chat call failed: {e}"
             logger.warning(f"⚠️ {error_msg}")
             await shared_state.report_error(error_msg)
@@ -286,7 +287,8 @@ Rules:
             # Estimate embedding cost
             embed_cost = 0.0001 + (np.random.random() * 0.00005)
                 
-        except Exception as e:
+        except (AttributeError, RuntimeError, ConnectionError, ValueError, TypeError, KeyError) as e:
+            # Type 2: Recoverable - embedding failed, report error and continue
             error_msg = f"Embedding failed: {e}"
             logger.warning(f"⚠️ {error_msg}")
             await shared_state.report_error(error_msg)
@@ -319,7 +321,8 @@ Rules:
         # Cost is tracked here for successful attempts
         await shared_state.update_best_guess(TEXT, VECTOR_ERROR, total_cost)
 
-    except Exception as e:
+    except (AttributeError, RuntimeError, ConnectionError, ValueError, TypeError, KeyError) as e:
+        # Type 2: Recoverable - worker error, report and continue
         error_msg = f"Worker Error: {e}"
         logger.error(f"❌ {error_msg}", exc_info=True)
         await shared_state.report_error(error_msg)
@@ -424,7 +427,8 @@ Generate ONE random phrase. Output ONLY the phrase, nothing else."""
                 return random_phrase
             else:
                 return TARGET  # Fallback
-        except Exception as e:
+        except (AttributeError, RuntimeError, ConnectionError, ValueError, TypeError, KeyError) as e:
+            # Type 2: Recoverable - target generation failed, return fallback
             logger.error(f"Failed to generate random target: {e}")
             return TARGET  # Fallback to default
     
@@ -486,7 +490,8 @@ Generate ONE random phrase. Output ONLY the phrase, nothing else."""
             else:
                 return {"status": "error", "error": "Failed to embed target - empty result"}
                 
-        except Exception as e:
+        except (AttributeError, RuntimeError, ConnectionError, ValueError, TypeError, KeyError) as e:
+            # Type 2: Recoverable - embedding failed, return error status
             logger.error(f"Failed to embed target: {e}")
             return {"status": "error", "error": f"Failed to embed target: {e}"}
         
@@ -517,14 +522,12 @@ Generate ONE random phrase. Output ONLY the phrase, nothing else."""
         self.running = False
         
         if self.task:
+            # Type 4: Let errors bubble up
+            self.task.cancel()
+            # Wait for task to actually cancel
             try:
-                self.task.cancel()
-                # Wait for task to actually cancel
-                try:
-                    await asyncio.wait_for(self.task, timeout=1.0)
-                except (asyncio.CancelledError, asyncio.TimeoutError):
-                    pass
-            except Exception:
+                await asyncio.wait_for(self.task, timeout=1.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
                 pass
         
         # Reset shared state to ensure fresh start on next attack
@@ -635,7 +638,8 @@ Generate ONE random phrase. Output ONLY the phrase, nothing else."""
                 # Small delay between batches
                 await asyncio.sleep(0.3)
                 
-        except Exception as e:
+        except (AttributeError, RuntimeError, ConnectionError, ValueError, TypeError, KeyError, asyncio.CancelledError) as e:
+            # Type 2: Recoverable - attack loop error, stop gracefully
             logger.error(f"❌ Error in attack loop: {e}", exc_info=True)
             self.running = False
 

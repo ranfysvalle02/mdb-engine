@@ -217,16 +217,13 @@ async def embed_text(text: str, model: str = "text-embedding-3-small") -> List[f
     # Remove any model prefixes
     clean_model = model.replace("azure/", "").replace("openai/", "")
     
-    try:
-        response = await asyncio.to_thread(
-            client.embeddings.create,
-            model=clean_model,
-            input=text
-        )
-        return response.data[0].embedding
-    except Exception as e:
-        logger.error(f"Failed to generate embedding: {e}", exc_info=True)
-        raise
+    # Type 4: Let embedding generation errors bubble up to framework handler
+    response = await asyncio.to_thread(
+        client.embeddings.create,
+        model=clean_model,
+        input=text
+    )
+    return response.data[0].embedding
 
 
 async def embed_chunks(texts: List[str], model: str = "text-embedding-3-small") -> List[List[float]]:
@@ -235,16 +232,13 @@ async def embed_chunks(texts: List[str], model: str = "text-embedding-3-small") 
     # Remove any model prefixes
     clean_model = model.replace("azure/", "").replace("openai/", "")
     
-    try:
-        response = await asyncio.to_thread(
-            client.embeddings.create,
-            model=clean_model,
-            input=texts
-        )
-        return [item.embedding for item in response.data]
-    except Exception as e:
-        logger.error(f"Failed to generate embeddings: {e}", exc_info=True)
-        raise
+    # Type 4: Let embedding generation errors bubble up to framework handler
+    response = await asyncio.to_thread(
+        client.embeddings.create,
+        model=clean_model,
+        input=texts
+    )
+    return [item.embedding for item in response.data]
 
 
 def chunk_text(text: str, max_tokens: int = 1000, tokenizer_model: str = "gpt-3.5-turbo") -> List[str]:
@@ -354,29 +348,25 @@ async def startup_event():
         
         # Initialize global embedding service for tools
         # Uses manifest.json magic: works with or without memory_config
+        # Type 4: Let EmbeddingService initialization errors bubble up
         global _global_embedding_service
-        try:
-            # Initialize embedding service using manifest.json config
-            app_config = engine.get_app(APP_SLUG)
-            embedding_config = app_config.get("embedding_config", {}) if app_config else {}
-            
-            # Note: Memory service (Mem0MemoryService) handles its own embeddings separately
-            # EmbeddingService is for standalone embedding operations
-            _global_embedding_service = get_embedding_service(config=embedding_config)
-            app_status["components"]["embedding_service"]["status"] = "available"
-            app_status["components"]["embedding_service"]["message"] = "EmbeddingService initialized (from manifest.json)"
-            add_status_log("✅ EmbeddingService initialized (from manifest.json)", "info", "embedding")
-        except Exception as e:
-            logger.warning(f"Failed to initialize EmbeddingService: {e}", exc_info=True)
-            app_status["components"]["embedding_service"]["status"] = "unavailable"
-            app_status["components"]["embedding_service"]["message"] = f"Failed to initialize: {str(e)}"
-            add_status_log(f"⚠️  Failed to initialize EmbeddingService: {e}", "warning", "embedding")
+        # Initialize embedding service using manifest.json config
+        app_config = engine.get_app(APP_SLUG)
+        embedding_config = app_config.get("embedding_config", {}) if app_config else {}
+        
+        # Note: Memory service (Mem0MemoryService) handles its own embeddings separately
+        # EmbeddingService is for standalone embedding operations
+        _global_embedding_service = get_embedding_service(config=embedding_config)
+        app_status["components"]["embedding_service"]["status"] = "available"
+        app_status["components"]["embedding_service"]["message"] = "EmbeddingService initialized (from manifest.json)"
+        add_status_log("✅ EmbeddingService initialized (from manifest.json)", "info", "embedding")
         
         app_status["initialized"] = True
         app_status["status"] = "ready"
         add_status_log("✅ Web application ready!", "info", "startup")
         
-    except Exception as e:
+    except (AttributeError, RuntimeError, ConnectionError, ValueError, TypeError, KeyError) as e:
+        # Type 2: Recoverable - startup failed, log and re-raise (top-level startup handler)
         app_status["status"] = "error"
         app_status["initialized"] = False
         error_msg = f"Startup failed: {str(e)}"
@@ -406,16 +396,14 @@ def get_embedding_service_dependency() -> EmbeddingService:
     """FastAPI dependency to get the global embedding service"""
     global _global_embedding_service
     if not _global_embedding_service:
+        # Type 4: Let embedding service retrieval errors bubble up
         # Try to get it from global engine if available
-        try:
-            from mdb_engine.embeddings.dependencies import _global_engine, _global_app_slug
-            from mdb_engine.embeddings import get_embedding_service
-            if _global_engine and _global_app_slug:
-                app_config = _global_engine.get_app(_global_app_slug)
-                embedding_config = app_config.get("embedding_config", {}) if app_config else {}
-                _global_embedding_service = get_embedding_service(config=embedding_config)
-        except Exception as e:
-            logger.warning(f"Failed to get embedding service from global engine: {e}", exc_info=True)
+        from mdb_engine.embeddings.dependencies import _global_engine, _global_app_slug
+        from mdb_engine.embeddings import get_embedding_service
+        if _global_engine and _global_app_slug:
+            app_config = _global_engine.get_app(_global_app_slug)
+            embedding_config = app_config.get("embedding_config", {}) if app_config else {}
+            _global_embedding_service = get_embedding_service(config=embedding_config)
     
     if not _global_embedding_service:
         raise HTTPException(
@@ -442,8 +430,9 @@ async def _get_vector_search_results_async(query: str, session_id: str, embeddin
                 embedding_config = app_config.get("embedding_config", {}) if app_config else {}
                 
                 _global_embedding_service = get_embedding_service(config=embedding_config)
-        except Exception as e:
-            logger.warning(f"Failed to get embedding service: {e}", exc_info=True)
+        except (AttributeError, RuntimeError, KeyError):
+            # Type 2: Recoverable - service initialization failed, return empty list
+            logger.warning("Failed to get embedding service", exc_info=True)
             return []
     
     if not _global_embedding_service:
@@ -483,8 +472,9 @@ async def _get_vector_search_results_async(query: str, session_id: str, embeddin
         
         results = await _global_db.knowledge_base_sessions.aggregate(pipeline).to_list(length=num_sources)
         return results
-    except Exception as e:
-        logger.error(f"Error in vector search: {e}", exc_info=True)
+    except (AttributeError, RuntimeError, ConnectionError):
+        # Type 2: Recoverable - database/aggregation error, return empty list
+        logger.error("Error in vector search", exc_info=True)
         return []
 
 
@@ -521,10 +511,11 @@ if False:  # Disabled - LangChain removed
             context = "\n---\n".join(context_parts)
             return f"Retrieved from '{embedding_model}':\n{context}"
             
-        except Exception as e:
+        except (AttributeError, RuntimeError, ConnectionError, ValueError, TypeError):
+            # Type 2: Recoverable - search failed, return error string to LLM
             last_retrieved_sources = []
-            logger.error(f"[ERROR] search_knowledge_base: {e}")
-            return f"❌ Search error: {e}"
+            logger.error("[ERROR] search_knowledge_base", exc_info=True)
+            return "❌ Search error occurred. Please try again."
     
     @tool
     async def read_url(url: str, chunk_size: int = 1000, chunk_overlap: int = 150) -> str:
@@ -599,9 +590,10 @@ if False:  # Disabled - LangChain removed
             
             return f"✅ Ingested {result['chunks_created']} chunks from {url} into '{current_session}'."
             
-        except Exception as e:
-            logger.error(f"[ERROR] read_url: {e}", exc_info=True)
-            return f"❌ Ingestion error: {e}"
+        except (ConnectionError, TimeoutError, ValueError, AttributeError, RuntimeError) as e:
+            # Type 2: Recoverable - ingestion failed, return error string to LLM
+            logger.error("[ERROR] read_url", exc_info=True)
+            return f"❌ Ingestion error: {str(e)}"
     
     @tool
     async def update_chunk(chunk_id: str, new_content: str) -> str:
@@ -628,8 +620,9 @@ if False:  # Disabled - LangChain removed
             
             return f"✅ Chunk '{chunk_id}' updated (re-embedded)."
             
-        except Exception as e:
-            return f"❌ Failed to update chunk: {e}"
+        except (ValueError, TypeError, AttributeError, RuntimeError, ConnectionError):
+            # Type 2: Recoverable - update failed, return error string to LLM
+            return "❌ Failed to update chunk. Please check the chunk ID and try again."
     
     @tool
     async def delete_chunk(chunk_id: str) -> str:
@@ -645,8 +638,9 @@ if False:  # Disabled - LangChain removed
                 return f"❌ Could not find chunk '{chunk_id}' to delete."
             return f"✅ Chunk '{chunk_id}' deleted."
             
-        except Exception as e:
-            return f"❌ Failed to delete chunk: {e}"
+        except (ValueError, TypeError, AttributeError, RuntimeError, ConnectionError):
+            # Type 2: Recoverable - delete failed, return error string to LLM
+            return "❌ Failed to delete chunk. Please check the chunk ID and try again."
     
     @tool
     def switch_session(session_id: str) -> str:
@@ -688,8 +682,9 @@ if False:  # Disabled - LangChain removed
                 chat_history[session_id] = []
             return f"✅ Created and switched to new session: **{session_id}**."
             
-        except Exception as e:
-            return f"❌ Failed to create session: {e}"
+        except (ValueError, TypeError, AttributeError, RuntimeError, ConnectionError):
+            # Type 2: Recoverable - session creation failed, return error string to LLM
+            return "❌ Failed to create session. Please try again."
     
     @tool
     async def list_sources() -> str:
@@ -715,8 +710,9 @@ if False:  # Disabled - LangChain removed
                 return f"No sources found in session '{current_session}'."
             return "Sources:\n" + "\n".join(f"- {s}" for s in sources)
             
-        except Exception as e:
-            return f"❌ Error listing sources: {e}"
+        except (AttributeError, RuntimeError, ConnectionError, ValueError, TypeError):
+            # Type 2: Recoverable - listing failed, return error string to LLM
+            return "❌ Error listing sources. Please try again."
     
     @tool
     async def remove_all_sources() -> str:
@@ -732,8 +728,9 @@ if False:  # Disabled - LangChain removed
             )
             return f"🗑 Removed all docs from session '{current_session}' (deleted {result.deleted_count})."
             
-        except Exception as e:
-            return f"❌ Error removing sources: {e}"
+        except (AttributeError, RuntimeError, ConnectionError, ValueError, TypeError):
+            # Type 2: Recoverable - removal failed, return error string to LLM
+            return "❌ Error removing sources. Please try again."
     
     # List of all tools
     LANGCHAIN_TOOLS = [
@@ -793,8 +790,9 @@ async def serve_static_file(file_path: str):
             raise HTTPException(status_code=403, detail="Access denied")
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"[STATIC] Error resolving file path: {e}")
+    except (OSError, ValueError, AttributeError):
+        # Type 2: Recoverable - path resolution failed, return error
+        logger.error("[STATIC] Error resolving file path", exc_info=True)
         raise HTTPException(status_code=400, detail="Invalid file path")
     
     if not file_path_obj.exists() or not file_path_obj.is_file():
@@ -986,7 +984,8 @@ async def run_ingestion_task(
         logger.info(f"[Task {task_id}] {final_message}")
         add_status_log(f"[Task {task_id}] {final_message}", "info", "ingestion")
         
-    except Exception as e:
+    except (ValueError, RuntimeError, ConnectionError, AttributeError, FileNotFoundError) as e:
+        # Type 2: Recoverable - ingestion failed, update task status
         error_message = f"Ingestion failed: {str(e)}"
         logger.error(f"[Task {task_id}] [ERROR] {error_message}", exc_info=True)
         add_status_log(f"[Task {task_id}] [ERROR] {error_message}", "error", "ingestion")
@@ -1155,19 +1154,9 @@ async def chat(
                 "current_session": current_session
             }
         }
-        
-    except Exception as e:
-        logger.error(f"[ERROR] chat endpoint: {e}", exc_info=True)
-        error_detail = str(e)
-        # Provide more helpful error messages for common issues
-        if "azure" in error_detail.lower() or "api key" in error_detail.lower():
-            error_detail = f"Azure OpenAI configuration error: {error_detail}. Please check your AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT environment variables."
-        elif "model" in error_detail.lower() and "not found" in error_detail.lower():
-            error_detail = f"Model configuration error: {error_detail}. Please check your AZURE_OPENAI_DEPLOYMENT_NAME matches your Azure deployment."
-        raise HTTPException(status_code=500, detail=error_detail)
     finally:
         # Restore original session if there was an error
-        if 'original_session' in locals():
+        if 'original_session' in locals() and original_session:
             current_session = original_session
 
 
@@ -1198,8 +1187,9 @@ async def _direct_rag_chat(
                 embedding_config = app_config.get("embedding_config", {}) if app_config else {}
                 
                 _global_embedding_service = get_embedding_service(config=embedding_config)
-        except Exception as e:
-            logger.error(f"Failed to initialize EmbeddingService: {e}", exc_info=True)
+        except (AttributeError, RuntimeError, KeyError, ValueError):
+            # Type 2: Recoverable - service initialization failed, return error
+            logger.error("Failed to initialize EmbeddingService", exc_info=True)
             raise HTTPException(
                 status_code=503,
                 detail="EmbeddingService unavailable. Cannot perform vector search."
@@ -1211,15 +1201,9 @@ async def _direct_rag_chat(
             detail="EmbeddingService unavailable. Cannot perform vector search."
         )
     
+    # Type 4: Let errors bubble up to framework handler
     # Generate query embedding
-    try:
-        query_vector = await _global_embedding_service.embed_chunks([request.query], model=request.embedding_model)
-    except Exception as e:
-        logger.error(f"Failed to generate query embedding: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to generate query embedding: {str(e)}"
-        )
+    query_vector = await _global_embedding_service.embed_chunks([request.query], model=request.embedding_model)
     
     if not query_vector or len(query_vector) == 0:
         raise HTTPException(
@@ -1264,7 +1248,8 @@ async def _direct_rag_chat(
     
     try:
         results = await db.knowledge_base_sessions.aggregate(pipeline).to_list(length=num_sources)
-    except Exception as search_error:
+    except (AttributeError, RuntimeError, ConnectionError, ValueError, TypeError) as search_error:
+        # Type 2: Recoverable - vector search failed, handle dimension mismatch
         error_msg = str(search_error)
         logger.error(f"[RAG] Vector search failed: {error_msg}", exc_info=True)
         
@@ -1364,24 +1349,18 @@ async def _direct_rag_chat(
         messages.append(msg)
     messages.append({"role": "user", "content": user_prompt})
     
-    try:
-        logger.info(f"[RAG] Sending {len(messages)} messages to Azure OpenAI (model: {deployment_name})")
-        logger.debug(f"[RAG] User prompt length: {len(user_prompt)} chars, context length: {len(context)} chars")
-        completion = await asyncio.to_thread(
-            client.chat.completions.create,
-            model=deployment_name,
-            messages=messages,
-            max_tokens=1000
-        )
-        response = completion.choices[0].message.content
-        logger.info(f"[RAG] Received response ({len(response) if response else 0} chars): {response[:200] if response else 'None'}...")
-        return response
-    except Exception as e:
-        logger.error(f"[RAG] LLM chat error: {e}", exc_info=True)
-        # Provide helpful error message
-        if "azure" in str(e).lower():
-            raise Exception(f"Azure OpenAI error: {str(e)}. Please verify your Azure OpenAI configuration (endpoint, API key, deployment name).")
-        raise
+    # Type 4: Let errors bubble up to framework handler
+    logger.info(f"[RAG] Sending {len(messages)} messages to Azure OpenAI (model: {deployment_name})")
+    logger.debug(f"[RAG] User prompt length: {len(user_prompt)} chars, context length: {len(context)} chars")
+    completion = await asyncio.to_thread(
+        client.chat.completions.create,
+        model=deployment_name,
+        messages=messages,
+        max_tokens=1000
+    )
+    response = completion.choices[0].message.content
+    logger.info(f"[RAG] Received response ({len(response) if response else 0} chars): {response[:200] if response else 'None'}...")
+    return response
 
 
 # ============================================================================
@@ -1410,8 +1389,9 @@ async def get_status():
             "logs": recent_logs,
             "total_logs": len(app_status["logs"])
         }
-    except Exception as e:
-        logger.error(f"Error in /status endpoint: {e}", exc_info=True)
+    except (AttributeError, RuntimeError, KeyError) as e:
+        # Type 2: Recoverable - status check failed, return error status
+        logger.error("Error in /status endpoint", exc_info=True)
         return {
             "initialized": False,
             "status": "error",
@@ -1475,8 +1455,9 @@ async def get_diagnostics():
             }
         else:
             diagnostics["installed_packages"] = {"error": f"pip list failed: {result.stderr}"}
-    except Exception as e:
-        diagnostics["installed_packages"] = {"error": str(e)}
+    except (OSError, RuntimeError, ValueError):
+        # Type 2: Recoverable - pip list failed, record error
+        diagnostics["installed_packages"] = {"error": "Failed to get package list"}
     
     # Try to import each package individually to see which ones work
     import_tests = {}
@@ -1499,8 +1480,9 @@ async def get_diagnostics():
             import_tests[display_name] = {"status": "success", "error": None}
         except ImportError as e:
             import_tests[display_name] = {"status": "failed", "error": str(e)}
-        except Exception as e:
-            import_tests[display_name] = {"status": "error", "error": str(e)}
+        except (AttributeError, RuntimeError):
+            # Type 2: Recoverable - import test failed, record error
+            import_tests[display_name] = {"status": "error", "error": "Import test failed"}
     
     diagnostics["import_tests"] = import_tests
     
@@ -1529,8 +1511,9 @@ async def get_state(session_id: str = "default", db=Depends(get_db)):
                 db_sessions_list = [item["value"] for item in db_sessions_list_raw if item.get("value")]
                 if db_sessions_list:
                     db_sessions = set(db_sessions_list)
-        except Exception as e:
-            logger.warning(f"Could not get distinct sessions from DB: {e}")
+        except (AttributeError, RuntimeError, ConnectionError, ValueError, TypeError):
+            # Type 2: Recoverable - DB query failed, continue with default session
+            logger.warning("Could not get distinct sessions from DB", exc_info=True)
             # Continue with default session
         
         # Get sessions from memory
@@ -1570,8 +1553,9 @@ async def get_state(session_id: str = "default", db=Depends(get_db)):
                         model = app_config["embedding_config"].get("default_embedding_model")
                         if model and model not in available_models:
                             available_models.append(model)
-            except Exception as e:
-                logger.warning(f"Could not get embedding model from config: {e}")
+            except (AttributeError, KeyError, TypeError):
+                # Type 2: Recoverable - config read failed, continue without model
+                logger.warning("Could not get embedding model from config", exc_info=True)
         
         # Default to a common embedding model if none found
         if not available_models:
@@ -1622,9 +1606,11 @@ async def get_state(session_id: str = "default", db=Depends(get_db)):
                             await db.knowledge_base_sessions.aggregate(test_pipeline).to_list(length=1)
                             index_queryable = True
                             index_status_str = "READY"
-                        except Exception:
+                        except (AttributeError, RuntimeError, ConnectionError, ValueError):
+                            # Type 2: Recoverable - index test failed, mark as not found
                             index_status_str = "NOT_FOUND"
-                except Exception:
+                except (AttributeError, RuntimeError, ConnectionError, ValueError):
+                    # Type 2: Recoverable - index check failed, mark as not found
                     index_status_str = "NOT_FOUND"
                 
                 index_status[model] = {
@@ -1633,8 +1619,9 @@ async def get_state(session_id: str = "default", db=Depends(get_db)):
                     "index_status": index_status_str,
                     "index_ready": index_queryable and doc_count > 0
                 }
-            except Exception as e:
-                logger.warning(f"Could not get index status for {model}: {e}")
+            except (AttributeError, RuntimeError, ConnectionError, ValueError, TypeError):
+                # Type 2: Recoverable - index status check failed, use defaults
+                logger.warning(f"Could not get index status for {model}", exc_info=True)
                 index_status[model] = {
                     "document_count": 0,
                     "index_queryable": False,
@@ -1650,9 +1637,7 @@ async def get_state(session_id: str = "default", db=Depends(get_db)):
         }
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"Error in /state endpoint: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+    # Type 4: Let other errors bubble up to framework handler
 
 
 @app.get("/index_status")
@@ -1663,110 +1648,106 @@ async def get_index_status(
     db=Depends(get_db)
 ):
     """Get detailed index status for a session"""
+    # Type 4: Let errors bubble up to framework handler
+    # Count documents with embeddings
+    doc_count = await db.knowledge_base_sessions.count_documents({
+        f"metadata.{SESSION_FIELD}": session_id,
+        "embedding": {"$exists": True}
+    })
+    
+    # Check index status using index manager
+    vector_index_name = f"{APP_SLUG}_embedding_vector_index"
+    index_queryable = False
+    index_status_str = "UNKNOWN"
+    
+    # Use index manager to get actual index status
     try:
-        # Count documents with embeddings
-        doc_count = await db.knowledge_base_sessions.count_documents({
-            f"metadata.{SESSION_FIELD}": session_id,
-            "embedding": {"$exists": True}
-        })
-        
-        # Check index status using index manager
-        vector_index_name = f"{APP_SLUG}_embedding_vector_index"
-        index_queryable = False
-        index_status_str = "UNKNOWN"
-        
-        # Use index manager to get actual index status
-        try:
-            collection_wrapper = db.knowledge_base_sessions
-            if hasattr(collection_wrapper, 'index_manager') and collection_wrapper.index_manager:
-                index_info = await collection_wrapper.index_manager.get_search_index(vector_index_name)
-                if index_info:
-                    # Get actual status from MongoDB
-                    status = index_info.get("status", "UNKNOWN")
-                    queryable = index_info.get("queryable", False)
-                    
-                    index_status_str = status.upper()  # BUILDING, READY, FAILED, etc.
-                    index_queryable = queryable
-                    
-                    # Map MongoDB status to our status strings
-                    if status == "READY" and queryable:
-                        index_status_str = "READY"
-                    elif status == "BUILDING":
-                        index_status_str = "BUILDING"
-                    elif status == "FAILED":
-                        index_status_str = "FAILED"
-                    else:
-                        index_status_str = status.upper()
-                else:
-                    index_status_str = "NOT_FOUND"
-            else:
-                # Fallback: try dummy query if index manager not available
-                try:
-                    dummy_vector = [0.0] * 1024
-                    test_pipeline = [
-                        {
-                            "$vectorSearch": {
-                                "index": vector_index_name,
-                                "path": "embedding",
-                                "queryVector": dummy_vector,
-                                "numCandidates": 1,
-                                "limit": 1
-                            }
-                        }
-                    ]
-                    await db.knowledge_base_sessions.aggregate(test_pipeline).to_list(length=1)
-                    index_queryable = True
+        collection_wrapper = db.knowledge_base_sessions
+        if hasattr(collection_wrapper, 'index_manager') and collection_wrapper.index_manager:
+            index_info = await collection_wrapper.index_manager.get_search_index(vector_index_name)
+            if index_info:
+                # Get actual status from MongoDB
+                status = index_info.get("status", "UNKNOWN")
+                queryable = index_info.get("queryable", False)
+                
+                index_status_str = status.upper()  # BUILDING, READY, FAILED, etc.
+                index_queryable = queryable
+                
+                # Map MongoDB status to our status strings
+                if status == "READY" and queryable:
                     index_status_str = "READY"
-                except Exception as e:
-                    error_str = str(e).lower()
-                    if "index" in error_str or "not found" in error_str:
-                        index_status_str = "NOT_FOUND"
-                    else:
-                        index_status_str = "ERROR"
-        except Exception as e:
-            logger.warning(f"Error checking index status: {e}")
-            # Fallback to NOT_FOUND if we can't check
-            index_status_str = "NOT_FOUND"
-        
-        # Auto-create index if missing and we have documents
-        # Note: Index creation is handled by MongoDBEngine during app registration
-        # If status is BUILDING, that means the index is being created - no need to trigger again
-        if index_status_str == "NOT_FOUND" and doc_count > 0 and auto_create:
-            if vector_index_name not in index_creation_in_progress:
-                logger.info(f"Index '{vector_index_name}' not found but {doc_count} documents exist. Index should be created automatically by MongoDBEngine.")
-                index_creation_in_progress.add(vector_index_name)
-                # Don't set status to CREATING - let MongoDBEngine handle it
-                # The next check will show BUILDING or READY when the index is actually being created/ready
-        
-        return {
-            "session_id": session_id,
-            "embedding_model": embedding_model,
-            "document_count": doc_count,
-            "index_name": vector_index_name,
-            "index_queryable": index_queryable,
-            "index_status": index_status_str,
-            "index_ready": index_queryable and doc_count > 0,
-            "ready_for_search": index_queryable and doc_count > 0
-        }
-    except Exception as e:
-        logger.error(f"Error in /index_status endpoint: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+                elif status == "BUILDING":
+                    index_status_str = "BUILDING"
+                elif status == "FAILED":
+                    index_status_str = "FAILED"
+                else:
+                    index_status_str = status.upper()
+            else:
+                index_status_str = "NOT_FOUND"
+        else:
+            # Fallback: try dummy query if index manager not available
+            try:
+                dummy_vector = [0.0] * 1024
+                test_pipeline = [
+                    {
+                        "$vectorSearch": {
+                            "index": vector_index_name,
+                            "path": "embedding",
+                            "queryVector": dummy_vector,
+                            "numCandidates": 1,
+                            "limit": 1
+                        }
+                    }
+                ]
+                await db.knowledge_base_sessions.aggregate(test_pipeline).to_list(length=1)
+                index_queryable = True
+                index_status_str = "READY"
+            except (AttributeError, RuntimeError, ConnectionError, ValueError) as e:
+                # Type 2: Recoverable - index test failed, determine status from error
+                error_str = str(e).lower()
+                if "index" in error_str or "not found" in error_str:
+                    index_status_str = "NOT_FOUND"
+                else:
+                    index_status_str = "ERROR"
+    except (AttributeError, RuntimeError, ConnectionError, ValueError):
+        # Type 2: Recoverable - index check failed, fallback to NOT_FOUND
+        logger.warning("Error checking index status", exc_info=True)
+        # Fallback to NOT_FOUND if we can't check
+        index_status_str = "NOT_FOUND"
+    
+    # Auto-create index if missing and we have documents
+    # Note: Index creation is handled by MongoDBEngine during app registration
+    # If status is BUILDING, that means the index is being created - no need to trigger again
+    if index_status_str == "NOT_FOUND" and doc_count > 0 and auto_create:
+        if vector_index_name not in index_creation_in_progress:
+            logger.info(f"Index '{vector_index_name}' not found but {doc_count} documents exist. Index should be created automatically by MongoDBEngine.")
+            index_creation_in_progress.add(vector_index_name)
+            # Don't set status to CREATING - let MongoDBEngine handle it
+            # The next check will show BUILDING or READY when the index is actually being created/ready
+    
+    return {
+        "session_id": session_id,
+        "embedding_model": embedding_model,
+        "document_count": doc_count,
+        "index_name": vector_index_name,
+        "index_queryable": index_queryable,
+        "index_status": index_status_str,
+        "index_ready": index_queryable and doc_count > 0,
+        "ready_for_search": index_queryable and doc_count > 0
+    }
 
 
 @app.post("/indexes/create")
 async def create_indexes(db=Depends(get_db)):
     """Create or update all vector search indexes"""
-    try:
-        logger.info("Manual index creation requested...")
-        # Index creation is handled by MongoDBEngine during app registration
-        # This endpoint just returns success - indexes are created automatically
-        return {
-            "status": "success",
-            "message": "Index creation is handled automatically by MongoDBEngine. Check index status for progress."
-        }
-    except Exception as e:
-        logger.error(f"Failed to create indexes: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+    # Type 4: Let errors bubble up to framework handler
+    logger.info("Manual index creation requested...")
+    # Index creation is handled by MongoDBEngine during app registration
+    # This endpoint just returns success - indexes are created automatically
+    return {
+        "status": "success",
+        "message": "Index creation is handled automatically by MongoDBEngine. Check index status for progress."
+    }
 
 
 class ClearHistoryRequest(BaseModel):
@@ -1892,8 +1873,8 @@ async def preview_file(file: UploadFile = File(...)):
                     os.environ["DOCLING_DISABLE_OCR"] = "1"
                     converter = DocumentConverter()
                     logger.info(f"[Preview] Using converter with OCR disabled via environment variable")
-                except Exception:
-                    # Last resort: try default but catch the download error
+                except (RuntimeError, AttributeError, ValueError):
+                    # Type 2: Recoverable - OCR disabled converter failed, try default
                     converter = DocumentConverter()
             
             logger.info(f"[Preview] Converting document: {temp_file_path}")
@@ -1910,7 +1891,8 @@ async def preview_file(file: UploadFile = File(...)):
             
             return {"content": doc_text, "filename": file.filename}
             
-        except Exception as conversion_error:
+        except (RuntimeError, ConnectionError, OSError, ValueError, AttributeError) as conversion_error:
+            # Type 2: Recoverable - conversion failed, provide helpful error messages
             error_msg = str(conversion_error)
             logger.error(f"[Preview] Document conversion failed: {error_msg}", exc_info=True)
             
@@ -2010,10 +1992,7 @@ async def preview_url(url: str):
         raise HTTPException(status_code=500, detail=error_msg)
     except HTTPException:
         raise
-    except Exception as e:
-        error_msg = f"Unexpected error: {e}"
-        logger.error(f"[ERROR] {error_msg}\n{traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=error_msg)
+    # Type 4: Let other errors bubble up to framework handler
 
 
 class IngestURLRequest(BaseModel):
@@ -2109,10 +2088,7 @@ async def ingest_url(
     except requests.exceptions.RequestException as e:
         logger.error(f"[ERROR] URL ingestion failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error fetching URL content via Firecrawl: {e}")
-    except Exception as e:
-        error_msg = f"Unexpected error: {e}"
-        logger.error(f"[ERROR] {error_msg}\n{traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=error_msg)
+    # Type 4: Let other errors bubble up to framework handler
 
 
 # ============================================================================
@@ -2172,8 +2148,9 @@ async def get_sources(session_id: str = "default", db=Depends(get_db)):
             count = await collection.count_documents({f"metadata.{SESSION_FIELD}": session_id})
             if count == 0:
                 return []
-        except Exception as e:
-            logger.warning(f"Could not count documents: {e}")
+        except (AttributeError, RuntimeError, ConnectionError, ValueError, TypeError):
+            # Type 2: Recoverable - count query failed, return empty list
+            logger.warning("Could not count documents", exc_info=True)
             return []
         
         pipeline = [
@@ -2199,9 +2176,7 @@ async def get_sources(session_id: str = "default", db=Depends(get_db)):
         return results if results else []
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"Error in /sources endpoint: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+    # Type 4: Let other errors bubble up to framework handler
 
 
 @app.get("/chunks")
@@ -2307,8 +2282,9 @@ async def search_web(request: SearchRequest):
         with DDGS() as ddgs:
             results = [r for r in ddgs.text(request.query, max_results=request.num_results)]
         return {"status": "success", "results": results}
-    except Exception as e:
-        logger.error(f"[ERROR] Web search failed: {e}", exc_info=True)
+    except (ConnectionError, TimeoutError, ValueError, AttributeError, RuntimeError) as e:
+        # Type 2: Recoverable - web search failed, return error
+        logger.error("[ERROR] Web search failed", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Web search error: {str(e)}")
 
 
@@ -2460,9 +2436,10 @@ async def chunk_preview(
             "logs": logs,
             "original_content": content  # Include for visualization
         }
-    except Exception as e:
+    except (ValueError, TypeError, AttributeError, RuntimeError, FileNotFoundError) as e:
+        # Type 2: Recoverable - chunk preview failed, return error
         log_message(f"Chunk preview failed: {str(e)}", "error")
-        logger.error(f"[ERROR] Chunk preview failed: {e}", exc_info=True)
+        logger.error("[ERROR] Chunk preview failed", exc_info=True)
         return {
             "error": str(e),
             "logs": logs

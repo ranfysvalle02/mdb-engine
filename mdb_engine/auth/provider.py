@@ -129,8 +129,9 @@ class CasbinAdapter:
             if result:
                 await self.clear_cache()
             return result
-        except Exception:
-            logger.warning("Failed to add policy", exc_info=True)
+        except (ValueError, RuntimeError, AttributeError, TypeError) as e:
+            # Type 2: Recoverable - return False for Casbin operation errors
+            logger.warning(f"Failed to add policy: {e}", exc_info=True)
             return False
 
     async def add_role_for_user(self, *params) -> bool:
@@ -141,8 +142,9 @@ class CasbinAdapter:
             if result:
                 await self.clear_cache()
             return result
-        except Exception:
-            logger.warning("Failed to add role for user", exc_info=True)
+        except (ValueError, RuntimeError, AttributeError) as e:
+            # Type 2: Recoverable - return False for Casbin operation errors
+            logger.warning(f"Failed to add role for user: {e}", exc_info=True)
             return False
 
     async def save_policy(self) -> bool:
@@ -153,8 +155,9 @@ class CasbinAdapter:
             if result:
                 await self.clear_cache()
             return result
-        except Exception:
-            logger.warning("Failed to save policy", exc_info=True)
+        except (ValueError, RuntimeError, AttributeError) as e:
+            # Type 2: Recoverable - return False for Casbin operation errors
+            logger.warning(f"Failed to save policy: {e}", exc_info=True)
             return False
 
     async def has_policy(self, *params) -> bool:
@@ -163,8 +166,9 @@ class CasbinAdapter:
             # Run in thread pool to prevent blocking
             result = await asyncio.to_thread(self._enforcer.has_policy, *params)
             return result
-        except Exception:
-            logger.warning("Failed to check policy", exc_info=True)
+        except (ValueError, RuntimeError, AttributeError) as e:
+            # Type 2: Recoverable - return False for Casbin operation errors
+            logger.warning(f"Failed to check policy: {e}", exc_info=True)
             return False
 
     async def has_role_for_user(self, *params) -> bool:
@@ -173,8 +177,9 @@ class CasbinAdapter:
             # Run in thread pool to prevent blocking
             result = await asyncio.to_thread(self._enforcer.has_role_for_user, *params)
             return result
-        except Exception:
-            logger.warning("Failed to check role for user", exc_info=True)
+        except (ValueError, RuntimeError, AttributeError) as e:
+            # Type 2: Recoverable - return False for Casbin operation errors
+            logger.warning(f"Failed to check role for user: {e}", exc_info=True)
             return False
 
     async def remove_role_for_user(self, *params) -> bool:
@@ -185,8 +190,9 @@ class CasbinAdapter:
             if result:
                 await self.clear_cache()
             return result
-        except Exception:
-            logger.warning("Failed to remove role for user", exc_info=True)
+        except (ValueError, RuntimeError, AttributeError) as e:
+            # Type 2: Recoverable - return False for Casbin operation errors
+            logger.warning(f"Failed to remove role for user: {e}", exc_info=True)
             return False
 
 

@@ -228,8 +228,8 @@ async def initialize_oso_from_manifest(
                     oso_client.authorize, test_actor, "read", test_resource
                 )
                 logger.debug("✅ OSO Dev Server connection test successful")
-            except Exception as test_error:
-                # Authorization might fail (expected), but connection errors are important
+            except (ConnectionError, TimeoutError, OSError, RuntimeError) as test_error:
+                # Type 2: Recoverable - connection test failed, check if it's a connection error
                 error_str = str(test_error).lower()
                 if (
                     "connection" in error_str

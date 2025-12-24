@@ -519,25 +519,16 @@ async def _handle_search_index(
                 f"with new definition (this may take a few moments)..."
             )
 
-            try:
-                await index_manager.update_search_index(
-                    name=index_name,
-                    definition=definition,
-                    wait_for_ready=True,
-                )
-                logger.info(
-                    f"{log_prefix} ✔️ Successfully updated search index "
-                    f"'{index_name}'. Index is now ready."
-                )
-            except Exception as update_err:
-                logger.error(
-                    f"{log_prefix} ❌ Failed to update search index "
-                    f"'{index_name}': {update_err}. "
-                    f"Index type: {index_type}. "
-                    f"Check Atlas UI for more details. "
-                    f"Index may still be functional with old definition.",
-                    exc_info=True,
-                )
+            # Type 4: Let index update errors bubble up to framework handler
+            await index_manager.update_search_index(
+                name=index_name,
+                definition=definition,
+                wait_for_ready=True,
+            )
+            logger.info(
+                f"{log_prefix} ✔️ Successfully updated search index "
+                f"'{index_name}'. Index is now ready."
+            )
     else:
         logger.info(
             f"{log_prefix} Creating new search index '{index_name}'..."
@@ -659,22 +650,16 @@ async def _handle_hybrid_index(
                 f"{log_prefix} Vector index '{vector_index_name}' "
                 f"definition changed; updating."
             )
-            try:
-                await index_manager.update_search_index(
-                    name=vector_index_name,
-                    definition=vector_definition,
-                    wait_for_ready=True,
-                )
-                logger.info(
-                    f"{log_prefix} ✔️ Successfully updated vector index "
-                    f"'{vector_index_name}'."
-                )
-            except Exception as update_err:
-                logger.error(
-                    f"{log_prefix} ❌ Failed to update vector index "
-                    f"'{vector_index_name}': {update_err}.",
-                    exc_info=True,
-                )
+            # Type 4: Let index update errors bubble up to framework handler
+            await index_manager.update_search_index(
+                name=vector_index_name,
+                definition=vector_definition,
+                wait_for_ready=True,
+            )
+            logger.info(
+                f"{log_prefix} ✔️ Successfully updated vector index "
+                f"'{vector_index_name}'."
+            )
     else:
         logger.info(
             f"{log_prefix} Creating new vector index '{vector_index_name}'..."
@@ -736,22 +721,16 @@ async def _handle_hybrid_index(
                 f"{log_prefix} Text index '{text_index_name}' "
                 f"definition changed; updating."
             )
-            try:
-                await index_manager.update_search_index(
-                    name=text_index_name,
-                    definition=text_definition,
-                    wait_for_ready=True,
-                )
-                logger.info(
-                    f"{log_prefix} ✔️ Successfully updated text index "
-                    f"'{text_index_name}'."
-                )
-            except Exception as update_err:
-                logger.error(
-                    f"{log_prefix} ❌ Failed to update text index "
-                    f"'{text_index_name}': {update_err}.",
-                    exc_info=True,
-                )
+            # Type 4: Let index update errors bubble up to framework handler
+            await index_manager.update_search_index(
+                name=text_index_name,
+                definition=text_definition,
+                wait_for_ready=True,
+            )
+            logger.info(
+                f"{log_prefix} ✔️ Successfully updated text index "
+                f"'{text_index_name}'."
+            )
     else:
         logger.info(
             f"{log_prefix} Creating new text index '{text_index_name}'..."

@@ -86,6 +86,8 @@ lint:
 		echo "⚠️  isort not installed. Install with: pip install -e '.[dev]'"; \
 		exit 1; \
 	fi
+	@echo "Checking exception handling (Grinberg framework)..."
+	@python3 scripts/check_exception_handling.py $$(find mdb_engine -name "*.py" -not -path "*/test*" -not -path "*/__pycache__/*") || (echo "❌ Exception handling violations found. See output above." && exit 1)
 	@echo "✅ All linting checks passed!"
 
 lint-check:
@@ -108,6 +110,8 @@ lint-check:
 		echo "⚠️  isort not installed"; \
 		touch /tmp/isort_output.txt; \
 	fi
+	@echo "Checking exception handling (Grinberg framework)..."
+	@python3 scripts/check_exception_handling.py $$(find mdb_engine -name "*.py" -not -path "*/test*" -not -path "*/__pycache__/*") 2>&1 | tee /tmp/exception_check_output.txt || true
 	@python3 scripts/count_lint_errors.py || true
 
 format:

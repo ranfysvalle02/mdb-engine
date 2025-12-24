@@ -92,8 +92,9 @@ def get_shared_mongo_client(
                 and _shared_client._topology is not None
             ):
                 return _shared_client
-        except Exception:
+        except (AttributeError, RuntimeError):
             # Client was closed or invalid, reset and recreate
+            # Type 2: Recoverable - reset client and continue
             _shared_client = None
 
     # Thread-safe initialization with lock
@@ -107,8 +108,9 @@ def get_shared_mongo_client(
                     and _shared_client._topology is not None
                 ):
                     return _shared_client
-            except Exception:
+            except (AttributeError, RuntimeError):
                 # Client was closed or invalid, reset and recreate
+                # Type 2: Recoverable - reset client and continue
                 _shared_client = None
 
         logger.info(
@@ -234,7 +236,8 @@ async def get_pool_metrics(
                 and registered_client._topology is not None
             ):
                 return await _get_client_pool_metrics(registered_client)
-        except Exception:
+        except (AttributeError, RuntimeError):
+            # Type 2: Recoverable - if this client is invalid, try next one
             continue
 
     # No client available

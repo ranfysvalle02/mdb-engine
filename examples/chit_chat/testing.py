@@ -54,7 +54,8 @@ def test_integration():
     try:
         m = Memory.from_config(config)
         print("✅ Client initialized successfully.")
-    except Exception as e:
+    except (ValueError, TypeError, AttributeError, RuntimeError) as e:
+        # Type 2: Recoverable - initialization failed, exit test
         print(f"❌ Initialization Failed: {e}")
         return
 
@@ -65,7 +66,8 @@ def test_integration():
         # Takes text -> Sends to Azure Embedding (using env vars) -> Stores in MongoDB
         result = m.add("I am testing the environment variable injection fix.", user_id=user_id)
         print(f"✅ Add Result: {result}")
-    except Exception as e:
+    except (ValueError, TypeError, RuntimeError, ConnectionError) as e:
+        # Type 2: Recoverable - add failed, exit test
         print(f"❌ Add Failed: {e}")
         return
 
@@ -75,14 +77,16 @@ def test_integration():
         coll = client[os.getenv("MONGO_DB_NAME")][os.getenv("MONGO_COLLECTION")]
         count = coll.count_documents({"user_id": user_id})
         print(f"✅ MongoDB Count for {user_id}: {count}")
-    except Exception as e:
+    except (ConnectionError, ValueError, TypeError, AttributeError) as e:
+        # Type 2: Recoverable - MongoDB check failed, continue test
         print(f"❌ MongoDB Check Failed: {e}")
 
     print(f"\n--- 4. Retrieving Memory ---")
     try:
         search_results = m.search("What am I testing?", user_id=user_id)
         print(f"✅ Search Results: {search_results}")
-    except Exception as e:
+    except (ValueError, TypeError, RuntimeError, ConnectionError) as e:
+        # Type 2: Recoverable - search failed, continue test
         print(f"❌ Search Failed: {e}")
 
 if __name__ == "__main__":

@@ -184,8 +184,8 @@ class WebSocketConnectionManager:
                         # WebSocket is not in a connected state, mark for cleanup
                         disconnected.append(connection.websocket)
                         continue
-            except Exception:
-                # If we can't check state, try to send anyway (will be caught below)
+            except AttributeError:
+                # Type 2: Recoverable - websocket doesn't have client_state, try to send anyway
                 pass
 
             try:
@@ -214,16 +214,16 @@ class WebSocketConnectionManager:
             message: Message dictionary to send
         """
         # Check WebSocket state before attempting to send
-        try:
-            if hasattr(websocket, "client_state"):
+        if hasattr(websocket, "client_state"):
+            try:
                 state = websocket.client_state.name
                 if state not in ["CONNECTED"]:
                     # WebSocket is not in a connected state, disconnect and return
                     self.disconnect(websocket)
                     return
-        except Exception:
-            # If we can't check state, try to send anyway (will be caught below)
-            pass
+            except AttributeError:
+                # Type 2: Recoverable - websocket doesn't have client_state, try to send anyway
+                pass
 
         try:
             # Add app context for security
@@ -591,25 +591,8 @@ async def _handle_websocket_message(
                 )
 
                 if current_handler:
-                    try:
-                        await current_handler(websocket, data)
-                    except Exception as handler_error:
-                        logger.error(
-                            f"Error in WebSocket message handler for app "
-                            f"'{app_slug}': {handler_error}",
-                            exc_info=True,
-                        )
-                        try:
-                            await manager.send_to_connection(
-                                websocket,
-                                {
-                                    "type": "error",
-                                    "message": "Error processing message",
-                                    "error": str(handler_error),
-                                },
-                            )
-                        except Exception:
-                            pass
+                    # Type 4: Let handler errors bubble up to framework
+                    await current_handler(websocket, data)
                 else:
                     logger.debug(
                         f"Received message on WebSocket for app '{app_slug}' "
@@ -762,7 +745,8 @@ def create_websocket_endpoint(
                                 "timestamp": datetime.utcnow().isoformat(),
                             },
                         )
-                    except Exception:
+                    except (WebSocketDisconnect, ConnectionError, RuntimeError, OSError):
+                        # Type 2: Recoverable - connection error during ping, break loop
                         break
 
                 except (WebSocketDisconnect, RuntimeError, ConnectionError, OSError) as e:

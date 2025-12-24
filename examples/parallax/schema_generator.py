@@ -86,12 +86,14 @@ def create_dynamic_model(
         
         model_fields[field_name] = (python_type, Field(**field_kwargs))
     
+    # Type 4: Let errors bubble up (already raises, just need to catch specific exceptions for logging)
     # Create the model dynamically
     try:
         DynamicModel = create_model(model_name, **model_fields)
         logger.info(f"Created dynamic model: {model_name} with {len(fields)} fields")
         return DynamicModel
-    except Exception as e:
+    except (AttributeError, RuntimeError, ValueError, TypeError, KeyError) as e:
+        # Type 4: Re-raise with context
         logger.error(f"Failed to create dynamic model {model_name}: {e}", exc_info=True)
         raise
 

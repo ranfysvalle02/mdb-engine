@@ -14,6 +14,8 @@ exclude =
 max-complexity = 20
 # Enable specific error codes
 # E722: do not use bare 'except' (enforced for exception handling best practices)
+# Additional Grinberg framework rules are enforced by scripts/check_exception_handling.py
+# See docs/guides/error_handling.md for the four error types framework
 select = E,W,F,B,C,I
 # Disable specific checks (if needed)
 # ignore = 

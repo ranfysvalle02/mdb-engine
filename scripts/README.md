@@ -8,10 +8,19 @@ Custom pre-commit hook that enforces exception handling best practices.
 
 ### What it checks:
 
-1. **Bare except clauses** - Catches `except:` without exception types
-2. **Overly broad Exception catches** - Warns about `except Exception:` without proper handling
-3. **Missing exception context** - Checks for `raise ... from e` pattern
-4. **Missing logger.exception()** - Ensures error handlers use proper logging
+1. **Bare except clauses** - Catches `except:` without exception types (E722)
+2. **Grinberg Type 4 violations** - Catches `except Exception` that only log without recovery
+3. **Grinberg Type 2 violations** - Catches `except Exception` used for recovery (should catch specific exceptions)
+4. **Missing exception context** - Checks for `raise ... from e` pattern when re-raising
+5. **Top-level handler detection** - Allows `except Exception` only in framework-level handlers
+
+This script enforces Miguel Grinberg's four error types framework:
+- **Type 1**: New Recoverable - Handle internally
+- **Type 2**: Bubbled-Up Recoverable - Catch specific exceptions, recover
+- **Type 3**: New Non-Recoverable - Raise exception
+- **Type 4**: Bubbled-Up Non-Recoverable - Do nothing (most common)
+
+See `docs/guides/error_handling.md` for full documentation.
 
 ### Usage:
 

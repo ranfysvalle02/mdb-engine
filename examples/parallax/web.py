@@ -54,19 +54,16 @@ class ConnectionManager:
         logger.info(f"WebSocket disconnected. Total connections: {len(self.active_connections)}")
     
     async def send_personal_message(self, message: dict, websocket: WebSocket):
-        try:
-            await websocket.send_json(message)
-        except Exception as e:
-            logger.error(f"Error sending WebSocket message: {e}")
-            self.disconnect(websocket)
+        # Type 4: Let WebSocket errors bubble up to framework handler
+        await websocket.send_json(message)
     
     async def broadcast(self, message: dict):
         disconnected = []
         for connection in self.active_connections:
             try:
                 await connection.send_json(message)
-            except Exception as e:
-                logger.error(f"Error broadcasting to WebSocket: {e}")
+            except (RuntimeError, ConnectionError, OSError):
+                # Type 2: Recoverable - connection error, mark for cleanup
                 disconnected.append(connection)
         
         # Remove disconnected connections
@@ -148,32 +145,28 @@ async def startup_event():
     set_global_engine(engine, app_slug="parallax")
     
     # Initialize embedding service if configured in manifest.json
-    try:
-        from mdb_engine.embeddings import get_embedding_service
-        app_config = engine.get_app("parallax")
-        embedding_config = app_config.get("embedding_config", {}) if app_config else {}
-        if embedding_config:
-            embedding_service = get_embedding_service(config=embedding_config)
-            logger.info("EmbeddingService initialized from manifest.json")
-        else:
-            logger.debug("No embedding_config found in manifest.json - embedding service not initialized")
-    except Exception as e:
-        logger.warning(f"Failed to initialize EmbeddingService: {e}", exc_info=True)
+    # Type 4: Let EmbeddingService initialization errors bubble up
+    from mdb_engine.embeddings import get_embedding_service
+    app_config = engine.get_app("parallax")
+    embedding_config = app_config.get("embedding_config", {}) if app_config else {}
+    if embedding_config:
+        embedding_service = get_embedding_service(config=embedding_config)
+        logger.info("EmbeddingService initialized from manifest.json")
+    else:
+        logger.debug("No embedding_config found in manifest.json - embedding service not initialized")
     
     # Initialize default watchlist config if it doesn't exist
-    try:
-        existing_config = await db.watchlist_config.find_one({"config_type": "watchlist"})
-        if not existing_config:
-            await db.watchlist_config.insert_one({
-                "config_type": "watchlist",
-                "keywords": WATCHLIST,
-                "scan_limit": 50,  # Default: check top 50 stories
-                "created_at": datetime.utcnow(),
-                "updated_at": datetime.utcnow()
-            })
-            logger.info(f"Initialized default watchlist: {WATCHLIST}, scan_limit: 50")
-    except Exception as e:
-        logger.warning(f"Could not initialize watchlist config: {e}")
+    # Type 4: Let watchlist config initialization errors bubble up
+    existing_config = await db.watchlist_config.find_one({"config_type": "watchlist"})
+    if not existing_config:
+        await db.watchlist_config.insert_one({
+            "config_type": "watchlist",
+            "keywords": WATCHLIST,
+            "scan_limit": 50,  # Default: check top 50 stories
+            "created_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow()
+        })
+        logger.info(f"Initialized default watchlist: {WATCHLIST}, scan_limit: 50")
     
     # Initialize default lens configurations if they don't exist
     try:
@@ -185,8 +178,9 @@ async def startup_event():
                 config["updated_at"] = datetime.utcnow()
                 await db.lens_configs.insert_one(config)
                 logger.info(f"Initialized default lens config: {lens_name}")
-    except Exception as e:
-        logger.warning(f"Could not initialize lens configs: {e}")
+    except (AttributeError, RuntimeError, ConnectionError, ValueError, TypeError):
+        # Type 2: Recoverable - lens config initialization failed, continue without defaults
+        logger.warning("Could not initialize lens configs", exc_info=True)
     
     # Initialize Parallax Engine
     global parallax
@@ -217,7 +211,8 @@ async def startup_event():
         try:
             config = await db.watchlist_config.find_one({"config_type": "watchlist"})
             watchlist = config.get("keywords", WATCHLIST) if config else WATCHLIST
-        except Exception:
+        except (AttributeError, KeyError, TypeError):
+            # Type 2: Recoverable - config read failed, use default watchlist
             watchlist = WATCHLIST
         
         parallax = ParallaxEngine(
@@ -231,8 +226,9 @@ async def startup_event():
         
         # Don't auto-trigger scan on startup - let user click the button
         # This prevents UI issues and gives user control
-    except Exception as e:
-        logger.error(f"Failed to initialize Parallax Engine: {e}", exc_info=True)
+    except (AttributeError, RuntimeError, ConnectionError, ValueError, TypeError, KeyError) as e:
+        # Type 2: Recoverable - startup initialization failed, re-raise with context
+        logger.error("Failed to initialize Parallax Engine", exc_info=True)
         raise RuntimeError(f"Parallax Engine initialization failed: {str(e)}") from e
     
         logger.info("Parallax ready!")
@@ -303,8 +299,9 @@ async def websocket_scan(websocket: WebSocket):
                             {"$set": {"last_scan_timestamp": datetime.utcnow()}},
                             upsert=True
                         )
-                    except Exception as e:
-                        logger.warning(f"Could not update last scan timestamp: {e}")
+                    except (AttributeError, RuntimeError, ConnectionError, ValueError):
+                        # Type 2: Recoverable - timestamp update failed, continue
+                        logger.warning("Could not update last scan timestamp", exc_info=True)
                     
                     # Send final summary
                     await manager.send_personal_message({
@@ -318,17 +315,22 @@ async def websocket_scan(websocket: WebSocket):
                         "type": "error",
                         "message": "Analysis timed out after 5 minutes"
                     }, websocket)
-                except Exception as e:
-                    logger.error(f"Error in WebSocket scan: {e}", exc_info=True)
-                    await manager.send_personal_message({
-                        "type": "error",
-                        "message": f"Scan failed: {str(e)}"
-                    }, websocket)
+                except (RuntimeError, ConnectionError, OSError, AttributeError) as e:
+                    # Type 2: Recoverable - WebSocket send failed, try to send error message
+                    logger.error("Error in WebSocket scan", exc_info=True)
+                    try:
+                        await manager.send_personal_message({
+                            "type": "error",
+                            "message": f"Scan failed: {str(e)}"
+                        }, websocket)
+                    except (RuntimeError, ConnectionError, OSError):
+                        pass  # Can't send error message, connection likely closed
             
     except WebSocketDisconnect:
         manager.disconnect(websocket)
-    except Exception as e:
-        logger.error(f"WebSocket error: {e}", exc_info=True)
+    except (RuntimeError, ConnectionError, OSError, AttributeError):
+        # Type 2: Recoverable - WebSocket error, disconnect gracefully
+        logger.error("WebSocket error", exc_info=True)
         manager.disconnect(websocket)
 
 
@@ -359,8 +361,9 @@ async def trigger_refresh():
                 {"$set": {"last_scan_timestamp": datetime.utcnow()}},
                 upsert=True
             )
-        except Exception as e:
-            logger.warning(f"Could not update last scan timestamp: {e}")
+        except (AttributeError, RuntimeError, ConnectionError, ValueError):
+            # Type 2: Recoverable - timestamp update failed, continue
+            logger.warning("Could not update last scan timestamp", exc_info=True)
         
         if len(reports) == 0:
             logger.info("No new repositories found matching watchlist criteria")
@@ -388,16 +391,7 @@ async def trigger_refresh():
                 "detail": "The analysis took too long. Try reducing the scan limit or check your LLM API configuration."
             }
         )
-    except Exception as e:
-        logger.error(f"Error in Parallax analysis: {e}", exc_info=True)
-        return JSONResponse(
-            status_code=500,
-            content={
-                "success": False,
-                "error": str(e),
-                "detail": f"Failed to analyze feed: {str(e)}"
-            }
-        )
+    # Type 4: Let other errors bubble up to framework handler
 
 
 @app.get("/api/reports/{repo_id:path}", response_class=JSONResponse)
@@ -405,54 +399,48 @@ async def get_report(repo_id: str):
     """Get a single Parallax report by repo_id (supports slashes in repo_id like 'owner/repo')"""
     db = get_db()
     
-    try:
-        # FastAPI automatically URL-decodes the path parameter, so repo_id should be correct
-        # But let's also try URL-decoding just in case
-        import urllib.parse
-        repo_id_decoded = urllib.parse.unquote(repo_id)
-        
-        # Try both the original and decoded version
-        report = await db.parallax_reports.find_one({"repo_id": repo_id_decoded})
-        if not report:
-            report = await db.parallax_reports.find_one({"repo_id": repo_id})
-        
-        if not report:
-            # Log for debugging
-            logger.warning(f"Report not found for repo_id: {repo_id} (decoded: {repo_id_decoded})")
-            # Try to find any reports to see what format they're stored in
-            sample = await db.parallax_reports.find_one({})
-            if sample:
-                logger.debug(f"Sample repo_id format in DB: {sample.get('repo_id')}")
-            return JSONResponse(
-                status_code=404,
-                content={"success": False, "error": f"Report not found for repo_id: {repo_id}"}
-            )
-        
-        # Convert ObjectId to string
-        report_dict = dict(report)
-        report_dict['_id'] = str(report_dict.get('_id', ''))
-        
-        # Mark as fresh if needed
-        scan_config = await db.watchlist_config.find_one({"config_type": "watchlist"})
-        if scan_config and scan_config.get("last_scan_timestamp"):
-            from datetime import datetime
-            last_scan = scan_config["last_scan_timestamp"]
-            if isinstance(last_scan, str):
-                last_scan = datetime.fromisoformat(last_scan.replace('Z', '+00:00'))
-            if last_scan:
-                last_scan_iso = last_scan.isoformat()
-                report_dict["is_fresh"] = report_dict.get("timestamp") and report_dict["timestamp"] > last_scan_iso
-        
-        return {
-            "success": True,
-            "report": report_dict
-        }
-    except Exception as e:
-        logger.error(f"Error fetching report: {e}", exc_info=True)
+    # Type 4: Let errors bubble up to framework handler
+    # FastAPI automatically URL-decodes the path parameter, so repo_id should be correct
+    # But let's also try URL-decoding just in case
+    import urllib.parse
+    repo_id_decoded = urllib.parse.unquote(repo_id)
+    
+    # Try both the original and decoded version
+    report = await db.parallax_reports.find_one({"repo_id": repo_id_decoded})
+    if not report:
+        report = await db.parallax_reports.find_one({"repo_id": repo_id})
+    
+    if not report:
+        # Log for debugging
+        logger.warning(f"Report not found for repo_id: {repo_id} (decoded: {repo_id_decoded})")
+        # Try to find any reports to see what format they're stored in
+        sample = await db.parallax_reports.find_one({})
+        if sample:
+            logger.debug(f"Sample repo_id format in DB: {sample.get('repo_id')}")
         return JSONResponse(
-            status_code=500,
-            content={"success": False, "error": str(e)}
+            status_code=404,
+            content={"success": False, "error": f"Report not found for repo_id: {repo_id}"}
         )
+    
+    # Convert ObjectId to string
+    report_dict = dict(report)
+    report_dict['_id'] = str(report_dict.get('_id', ''))
+    
+    # Mark as fresh if needed
+    scan_config = await db.watchlist_config.find_one({"config_type": "watchlist"})
+    if scan_config and scan_config.get("last_scan_timestamp"):
+        from datetime import datetime
+        last_scan = scan_config["last_scan_timestamp"]
+        if isinstance(last_scan, str):
+            last_scan = datetime.fromisoformat(last_scan.replace('Z', '+00:00'))
+        if last_scan:
+            last_scan_iso = last_scan.isoformat()
+            report_dict["is_fresh"] = report_dict.get("timestamp") and report_dict["timestamp"] > last_scan_iso
+    
+    return {
+        "success": True,
+        "report": report_dict
+    }
 
 
 @app.get("/api/reports", response_class=JSONResponse)
@@ -468,88 +456,79 @@ async def get_reports(limit: int = 50, keyword: str = None, sort_by: str = "date
     """
     db = get_db()
     
-    try:
-        # Apply max_limit if specified
-        if max_limit is not None and limit > max_limit:
-            limit = max_limit
+    # Type 4: Let errors bubble up to framework handler
+    # Apply max_limit if specified
+    if max_limit is not None and limit > max_limit:
+        limit = max_limit
+    
+    # Ensure limit is reasonable (between 1 and 1000)
+    limit = max(1, min(1000, limit))
+    
+    query = {}
+    
+    # If filtering by keyword
+    if keyword:
+        query["matched_keywords"] = {"$in": [keyword]}
+    
+    # Get last scan timestamp to determine freshness
+    scan_config = await db.watchlist_config.find_one({"config_type": "watchlist"})
+    last_scan = None
+    if scan_config and scan_config.get("last_scan_timestamp"):
+        from datetime import datetime
+        last_scan = scan_config["last_scan_timestamp"]
+        # Convert to datetime if it's a string
+        if isinstance(last_scan, str):
+            last_scan = datetime.fromisoformat(last_scan.replace('Z', '+00:00'))
+    
+    # For relevance sorting, we need to fetch more and sort in memory
+    # For date sorting, we can use MongoDB sort
+    if sort_by == "relevance":
+        # Fetch more reports for relevance sorting (need to sort by matched_keywords count)
+        reports = await db.parallax_reports.find(query).to_list(length=limit * 3)
         
-        # Ensure limit is reasonable (between 1 and 1000)
-        limit = max(1, min(1000, limit))
+        # Mark reports as fresh
+        if last_scan:
+            last_scan_iso = last_scan.isoformat()
+            for r in reports:
+                r["is_fresh"] = r.get("timestamp") and r["timestamp"] > last_scan_iso
         
-        query = {}
+        # Sort by relevance: more matched keywords = higher relevance, then by timestamp
+        reports.sort(key=lambda x: (
+            -len(x.get("matched_keywords", [])),  # Negative for descending
+            x.get("relevance", {}).get("relevance_score", 0) if isinstance(x.get("relevance"), dict) else 0,
+            x.get("timestamp", "") if x.get("timestamp") else ""
+        ), reverse=True)
         
-        # If filtering by keyword
-        if keyword:
-            query["matched_keywords"] = {"$in": [keyword]}
+        # Limit after sorting
+        reports = reports[:limit]
+    else:
+        # Determine sort order for date-based sorting
+        sort_order = [("timestamp", -1)]  # Default: newest first
+        if sort_by == "date_asc":
+            sort_order = [("timestamp", 1)]  # Oldest first
         
-        # Get last scan timestamp to determine freshness
-        scan_config = await db.watchlist_config.find_one({"config_type": "watchlist"})
-        last_scan = None
-        if scan_config and scan_config.get("last_scan_timestamp"):
-            from datetime import datetime
-            last_scan = scan_config["last_scan_timestamp"]
-            # Convert to datetime if it's a string
-            if isinstance(last_scan, str):
-                last_scan = datetime.fromisoformat(last_scan.replace('Z', '+00:00'))
+        reports = await db.parallax_reports.find(query).sort(sort_order).limit(limit).to_list(length=limit)
         
-        # For relevance sorting, we need to fetch more and sort in memory
-        # For date sorting, we can use MongoDB sort
-        if sort_by == "relevance":
-            # Fetch more reports for relevance sorting (need to sort by matched_keywords count)
-            reports = await db.parallax_reports.find(query).to_list(length=limit * 3)
-            
-            # Mark reports as fresh
-            if last_scan:
-                last_scan_iso = last_scan.isoformat()
-                for r in reports:
-                    r["is_fresh"] = r.get("timestamp") and r["timestamp"] > last_scan_iso
-            
-            # Sort by relevance: more matched keywords = higher relevance, then by timestamp
-            reports.sort(key=lambda x: (
-                -len(x.get("matched_keywords", [])),  # Negative for descending
-                x.get("relevance", {}).get("relevance_score", 0) if isinstance(x.get("relevance"), dict) else 0,
-                x.get("timestamp", "") if x.get("timestamp") else ""
-            ), reverse=True)
-            
-            # Limit after sorting
-            reports = reports[:limit]
-        else:
-            # Determine sort order for date-based sorting
-            sort_order = [("timestamp", -1)]  # Default: newest first
-            if sort_by == "date_asc":
-                sort_order = [("timestamp", 1)]  # Oldest first
-            
-            reports = await db.parallax_reports.find(query).sort(sort_order).limit(limit).to_list(length=limit)
-            
-            # Mark reports as fresh
-            if last_scan:
-                last_scan_iso = last_scan.isoformat()
-                for r in reports:
-                    r["is_fresh"] = r.get("timestamp") and r["timestamp"] > last_scan_iso
-        
-        # Convert to dict format for JSON serialization
-        reports_data = []
-        for r in reports:
-            # Convert ObjectId to string
-            r_dict = dict(r)
-            r_dict['_id'] = str(r_dict.get('_id', ''))
-            reports_data.append(r_dict)
-        
-        return {
-            "success": True,
-            "reports": reports_data,
-            "count": len(reports_data),
-            "sort_by": sort_by
-        }
-    except Exception as e:
-        logger.error(f"Error fetching reports: {e}", exc_info=True)
-        return JSONResponse(
-            status_code=500,
-            content={
-                "success": False,
-                "error": str(e)
-            }
-        )
+        # Mark reports as fresh
+        if last_scan:
+            last_scan_iso = last_scan.isoformat()
+            for r in reports:
+                r["is_fresh"] = r.get("timestamp") and r["timestamp"] > last_scan_iso
+    
+    # Convert to dict format for JSON serialization
+    reports_data = []
+    for r in reports:
+        # Convert ObjectId to string
+        r_dict = dict(r)
+        r_dict['_id'] = str(r_dict.get('_id', ''))
+        reports_data.append(r_dict)
+    
+    return {
+        "success": True,
+        "reports": reports_data,
+        "count": len(reports_data),
+        "sort_by": sort_by
+    }
 
 
 @app.get("/api/watchlist", response_class=JSONResponse)
@@ -563,31 +542,25 @@ async def get_watchlist():
             content={"success": False, "error": "Parallax Engine not initialized"}
         )
     
-    try:
-        keywords = await parallax.get_watchlist()
-        scan_limit = await parallax.get_scan_limit()
-        min_stars = parallax.min_stars
-        language_filter = parallax.language_filter or ''
-        
-        # Get max_limit from config
-        db = get_db()
-        config = await db.watchlist_config.find_one({"config_type": "watchlist"})
-        max_limit = config.get("max_limit") if config else None
-        
-        return {
-            "success": True,
-            "watchlist": keywords,
-            "scan_limit": scan_limit,
-            "min_stars": min_stars,
-            "language_filter": language_filter,
-            "max_limit": max_limit
-        }
-    except Exception as e:
-        logger.error(f"Error fetching watchlist: {e}")
-        return JSONResponse(
-            status_code=500,
-            content={"success": False, "error": str(e)}
-        )
+    # Type 4: Let errors bubble up to framework handler
+    keywords = await parallax.get_watchlist()
+    scan_limit = await parallax.get_scan_limit()
+    min_stars = parallax.min_stars
+    language_filter = parallax.language_filter or ''
+    
+    # Get max_limit from config
+    db = get_db()
+    config = await db.watchlist_config.find_one({"config_type": "watchlist"})
+    max_limit = config.get("max_limit") if config else None
+    
+    return {
+        "success": True,
+        "watchlist": keywords,
+        "scan_limit": scan_limit,
+        "min_stars": min_stars,
+        "language_filter": language_filter,
+        "max_limit": max_limit
+    }
 
 
 @app.post("/api/watchlist", response_class=JSONResponse)
@@ -601,79 +574,73 @@ async def update_watchlist(request: Request):
             content={"success": False, "error": "Parallax Engine not initialized"}
         )
     
-    try:
-        data = await request.json()
-        keywords = data.get("watchlist", [])
-        scan_limit = data.get("scan_limit")
-        min_stars = data.get("min_stars")
-        language_filter = data.get("language_filter")
-        max_limit = data.get("max_limit")
-        
-        if not isinstance(keywords, list):
+    # Type 4: Let errors bubble up to framework handler
+    data = await request.json()
+    keywords = data.get("watchlist", [])
+    scan_limit = data.get("scan_limit")
+    min_stars = data.get("min_stars")
+    language_filter = data.get("language_filter")
+    max_limit = data.get("max_limit")
+    
+    if not isinstance(keywords, list):
+        return JSONResponse(
+            status_code=400,
+            content={"success": False, "error": "watchlist must be a list"}
+        )
+    
+    if scan_limit is not None:
+        scan_limit = int(scan_limit)
+        if scan_limit < 1 or scan_limit > 500:
             return JSONResponse(
                 status_code=400,
-                content={"success": False, "error": "watchlist must be a list"}
+                content={"success": False, "error": "scan_limit must be between 1 and 500"}
             )
-        
-        if scan_limit is not None:
-            scan_limit = int(scan_limit)
-            if scan_limit < 1 or scan_limit > 500:
-                return JSONResponse(
-                    status_code=400,
-                    content={"success": False, "error": "scan_limit must be between 1 and 500"}
-                )
-        
-        if min_stars is not None:
-            min_stars = int(min_stars)
-            if min_stars < 0 or min_stars > 100000:
-                return JSONResponse(
-                    status_code=400,
-                    content={"success": False, "error": "min_stars must be between 0 and 100000"}
-                )
-        
-        # Validate language filter if provided
-        if language_filter is not None and language_filter:
-            language_filter = str(language_filter).strip().lower()
-            # GitHub supports common language names
-            if not language_filter:
-                language_filter = None
-        
-        # Validate max_limit if provided
-        if max_limit is not None:
-            max_limit = int(max_limit)
-            if max_limit < 1 or max_limit > 1000:
-                return JSONResponse(
-                    status_code=400,
-                    content={"success": False, "error": "max_limit must be between 1 and 1000"}
-                )
-        
-        success = await parallax.update_watchlist(keywords, scan_limit=scan_limit, min_stars=min_stars, language_filter=language_filter)
-        
-        # Update max_limit in watchlist_config if provided
-        if max_limit is not None:
-            db = get_db()
-            await db.watchlist_config.update_one(
-                {"config_type": "watchlist"},
-                {"$set": {"max_limit": max_limit}},
-                upsert=True
-            )
-        if success:
-            return {
-                "success": True,
-                "watchlist": keywords,
-                "scan_limit": parallax.scan_limit,
-                "message": "Watchlist updated successfully"
-            }
-        else:
+    
+    if min_stars is not None:
+        min_stars = int(min_stars)
+        if min_stars < 0 or min_stars > 100000:
             return JSONResponse(
-                status_code=500,
-                content={"success": False, "error": "Failed to update watchlist"}
+                status_code=400,
+                content={"success": False, "error": "min_stars must be between 0 and 100000"}
             )
-    except Exception as e:
-        logger.error(f"Error updating watchlist: {e}", exc_info=True)
+    
+    # Validate language filter if provided
+    if language_filter is not None and language_filter:
+        language_filter = str(language_filter).strip().lower()
+        # GitHub supports common language names
+        if not language_filter:
+            language_filter = None
+    
+    # Validate max_limit if provided
+    if max_limit is not None:
+        max_limit = int(max_limit)
+        if max_limit < 1 or max_limit > 1000:
+            return JSONResponse(
+                status_code=400,
+                content={"success": False, "error": "max_limit must be between 1 and 1000"}
+            )
+    
+    success = await parallax.update_watchlist(keywords, scan_limit=scan_limit, min_stars=min_stars, language_filter=language_filter)
+    
+    # Update max_limit in watchlist_config if provided
+    if max_limit is not None:
+        db = get_db()
+        await db.watchlist_config.update_one(
+            {"config_type": "watchlist"},
+            {"$set": {"max_limit": max_limit}},
+            upsert=True
+        )
+    if success:
+        return {
+            "success": True,
+            "watchlist": keywords,
+            "scan_limit": parallax.scan_limit,
+            "message": "Watchlist updated successfully"
+        }
+    else:
         return JSONResponse(
             status_code=500,
-            content={"success": False, "error": str(e)}
+            content={"success": False, "error": "Failed to update watchlist"}
         )
 
 
@@ -682,25 +649,19 @@ async def get_lenses():
     """Get all lens configurations"""
     db = get_db()
     
-    try:
-        lenses = await db.lens_configs.find({}).to_list(length=10)
-        # Convert ObjectId to string for JSON serialization
-        lenses_data = []
-        for lens in lenses:
-            lens_dict = dict(lens)
-            lens_dict['_id'] = str(lens_dict.get('_id', ''))
-            lenses_data.append(lens_dict)
-        
-        return {
-            "success": True,
-            "lenses": lenses_data
-        }
-    except Exception as e:
-        logger.error(f"Error fetching lenses: {e}", exc_info=True)
-        return JSONResponse(
-            status_code=500,
-            content={"success": False, "error": str(e)}
-        )
+    # Type 4: Let errors bubble up to framework handler
+    lenses = await db.lens_configs.find({}).to_list(length=10)
+    # Convert ObjectId to string for JSON serialization
+    lenses_data = []
+    for lens in lenses:
+        lens_dict = dict(lens)
+        lens_dict['_id'] = str(lens_dict.get('_id', ''))
+        lenses_data.append(lens_dict)
+    
+    return {
+        "success": True,
+        "lenses": lenses_data
+    }
 
 
 @app.get("/api/lenses/{lens_name}", response_class=JSONResponse)
@@ -708,27 +669,21 @@ async def get_lens(lens_name: str):
     """Get a specific lens configuration"""
     db = get_db()
     
-    try:
-        lens = await db.lens_configs.find_one({"lens_name": lens_name})
-        if not lens:
-            return JSONResponse(
-                status_code=404,
-                content={"success": False, "error": f"Lens '{lens_name}' not found"}
-            )
-        
-        lens_dict = dict(lens)
-        lens_dict['_id'] = str(lens_dict.get('_id', ''))
-        
-        return {
-            "success": True,
-            "lens": lens_dict
-        }
-    except Exception as e:
-        logger.error(f"Error fetching lens {lens_name}: {e}", exc_info=True)
+    # Type 4: Let errors bubble up to framework handler
+    lens = await db.lens_configs.find_one({"lens_name": lens_name})
+    if not lens:
         return JSONResponse(
-            status_code=500,
-            content={"success": False, "error": str(e)}
+            status_code=404,
+            content={"success": False, "error": f"Lens '{lens_name}' not found"}
         )
+    
+    lens_dict = dict(lens)
+    lens_dict['_id'] = str(lens_dict.get('_id', ''))
+    
+    return {
+        "success": True,
+        "lens": lens_dict
+    }
 
 
 @app.post("/api/lenses/{lens_name}", response_class=JSONResponse)
@@ -743,49 +698,43 @@ async def update_lens(lens_name: str, request: Request):
             content={"success": False, "error": "Parallax Engine not initialized"}
         )
     
-    try:
-        data = await request.json()
-        
-        # Validate required fields
-        if "schema_fields" not in data:
-            return JSONResponse(
-                status_code=400,
-                content={"success": False, "error": "schema_fields is required"}
-            )
-        
-        # Update the lens config
-        update_data = {
-            "lens_name": lens_name,
-            "prompt_template": data.get("prompt_template", ""),
-            "schema_fields": data.get("schema_fields", []),
-            "updated_at": datetime.utcnow()
-        }
-        
-        result = await db.lens_configs.update_one(
-            {"lens_name": lens_name},
-            {"$set": update_data},
-            upsert=True
-        )
-        
-        # Clear the cache so new config is loaded
-        if hasattr(parallax, 'lens_configs'):
-            parallax.lens_configs.pop(lens_name, None)
-        if hasattr(parallax, 'lens_models'):
-            parallax.lens_models.pop(lens_name, None)
-        
-        logger.info(f"Updated lens configuration: {lens_name}")
-        
-        return {
-            "success": True,
-            "lens": update_data,
-            "message": f"Lens '{lens_name}' updated successfully"
-        }
-    except Exception as e:
-        logger.error(f"Error updating lens {lens_name}: {e}", exc_info=True)
+    # Type 4: Let errors bubble up to framework handler
+    data = await request.json()
+    
+    # Validate required fields
+    if "schema_fields" not in data:
         return JSONResponse(
-            status_code=500,
-            content={"success": False, "error": str(e)}
+            status_code=400,
+            content={"success": False, "error": "schema_fields is required"}
         )
+    
+    # Update the lens config
+    update_data = {
+        "lens_name": lens_name,
+        "prompt_template": data.get("prompt_template", ""),
+        "schema_fields": data.get("schema_fields", []),
+        "updated_at": datetime.utcnow()
+    }
+    
+    result = await db.lens_configs.update_one(
+        {"lens_name": lens_name},
+        {"$set": update_data},
+        upsert=True
+    )
+    
+    # Clear the cache so new config is loaded
+    if hasattr(parallax, 'lens_configs'):
+        parallax.lens_configs.pop(lens_name, None)
+    if hasattr(parallax, 'lens_models'):
+        parallax.lens_models.pop(lens_name, None)
+    
+    logger.info(f"Updated lens configuration: {lens_name}")
+    
+    return {
+        "success": True,
+        "lens": update_data,
+        "message": f"Lens '{lens_name}' updated successfully"
+    }
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -877,8 +826,9 @@ async def dashboard(request: Request, keyword: str = None, sort_by: str = "date_
         
         # Don't auto-trigger scan - let user click the button
         # This prevents infinite reload loops
-    except Exception as e:
-        logger.error(f"Error fetching reports for dashboard: {e}")
+    except (AttributeError, RuntimeError, ConnectionError, ValueError, TypeError, KeyError):
+        # Type 2: Recoverable - dashboard data fetch failed, use defaults
+        logger.error("Error fetching reports for dashboard", exc_info=True)
         reports = []
         watchlist = WATCHLIST
         max_limit = None

@@ -49,11 +49,13 @@ repos:
           - '--exclude=.git,__pycache__,*.pyc,.venv,venv,build,dist'
           # E722 is included in E category and catches bare except clauses
 
-  # Custom exception handling checks
+  # Custom exception handling checks (Grinberg framework)
+  # Enforces four error types: Type 1-4 (recoverable/non-recoverable, new/bubbled-up)
+  # See docs/guides/error_handling.md for details
   - repo: local
     hooks:
       - id: check-exception-handling
-        name: Check Exception Handling Best Practices
+        name: Check Exception Handling Best Practices (Grinberg Framework)
         entry: python scripts/check_exception_handling.py
         language: system
         types: [python]

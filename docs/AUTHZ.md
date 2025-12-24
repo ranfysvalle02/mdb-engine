@@ -865,27 +865,12 @@ class CachedAuthProvider:
 
 ### 3. Fail Closed (Deny by Default)
 
-**✅ Good:**
+Authorization checks should fail closed - deny access on error rather than allowing it. However, follow Grinberg's framework:
 
-```python
-async def check(self, subject: str, resource: str, action: str, user_object=None) -> bool:
-    try:
-        # Check permission
-        return await self._check_permission(subject, resource, action)
-    except Exception as e:
-        logger.error(f"Authorization check failed: {e}")
-        return False  # Fail closed - deny access on error
-```
+- **Type 4 (most common)**: Let authorization errors bubble up to framework handler
+- **Type 2 (if recoverable)**: Catch specific exceptions (e.g., `ConnectionError`, `TimeoutError`) and return `False` to deny access
 
-**❌ Bad:**
-
-```python
-async def check(self, subject: str, resource: str, action: str, user_object=None) -> bool:
-    try:
-        return await self._check_permission(subject, resource, action)
-    except Exception:
-        return True  # Fail open - dangerous!
-```
+**Never catch `Exception`** in authorization logic - it hides bugs and prevents proper error handling. If you need to fail closed, catch specific exceptions you know how to handle, or let the framework handle errors at the top level.
 
 ### 4. Use Context-Aware Authorization
 

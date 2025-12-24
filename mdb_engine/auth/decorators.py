@@ -95,7 +95,8 @@ async def _get_csrf_token(request: Request) -> Optional[str]:
     try:
         form_data = await request.form()
         return form_data.get("csrf_token")
-    except Exception:
+    except (RuntimeError, ValueError):
+        # Type 2: Recoverable - form parsing failed, return None
         return None
 
 

@@ -137,9 +137,10 @@ async def seed_initial_data(
                     f"No documents to seed for collection '{collection_name}' in {app_slug}"
                 )
 
-        except Exception:
+        except (OperationFailure, ConnectionFailure, ServerSelectionTimeoutError) as e:
+            # Type 2: Recoverable - log error and continue with other collections
             logger.exception(
-                f"Failed to seed collection '{collection_name}' for {app_slug}"
+                f"Failed to seed collection '{collection_name}' for {app_slug}: {e}"
             )
             results[collection_name] = 0
 

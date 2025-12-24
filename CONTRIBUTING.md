@@ -49,244 +49,100 @@ flake8 mdb_engine tests
 
 ## Exception Handling Best Practices
 
-**MDB Engine follows Staff Engineer-level exception handling practices.** All exception handling must adhere to these rules:
+**MDB Engine follows Miguel Grinberg's error handling framework.** All exception handling must adhere to these rules, which categorize errors into four types based on their origin and recoverability.
 
-### 1. Never Use Bare Except Clauses ❌
+### The Four Error Types (Grinberg Framework)
 
-```python
-# BAD - Never do this
-try:
-    result = await db.collection.find_one({})
-except:
-    return None
+Errors are categorized by two dimensions:
+1. **Origin**: New (your code) vs. Bubbled-Up (from called function)
+2. **Recoverability**: Recoverable (you can fix it) vs. Non-Recoverable (you can't fix it)
 
-# GOOD - Always specify exception types
-try:
-    result = await db.collection.find_one({})
-except (OperationFailure, ConnectionFailure) as e:
-    logger.exception("Database operation failed")
-    return None
-```
+This creates four error types:
 
-### 2. Catch Specific Exceptions ✅
+1. **Type 1: New Recoverable** - Your code found a problem and can fix it internally
+   - Handle internally, don't raise
+   - Example: Setting a default value when data is missing
 
-Always catch the most specific exception types you can handle:
+2. **Type 2: Bubbled-Up Recoverable** - Error from called function, you can recover
+   - Catch **specific exceptions only**, recover, continue
+   - Example: Creating missing database record when lookup fails
 
-```python
-# BAD - Too broad
-try:
-    token = jwt.decode(token, secret)
-except Exception as e:
-    logger.error(f"Error: {e}")
-    return None
+3. **Type 3: New Non-Recoverable** - Your code found a problem it can't fix
+   - Raise exception, let it bubble up
+   - Example: Required field is missing
 
-# GOOD - Specific exceptions
-try:
-    token = jwt.decode(token, secret)
-except jwt.ExpiredSignatureError:
-    logger.debug("Token expired")
-    return None
-except jwt.InvalidTokenError as e:
-    logger.warning(f"Invalid token: {e}")
-    return None
-except Exception as e:
-    logger.exception("Unexpected error decoding token")
-    raise  # Re-raise unexpected errors
-```
+4. **Type 4: Bubbled-Up Non-Recoverable** - Error from called function, you can't recover
+   - **Do nothing** - let it bubble up to framework handler
+   - Example: Database connection failure in business logic
 
-### 3. Preserve Exception Context 🔗
+**Key Principle**: Most code should be Type 4 - don't catch exceptions unless you can recover. Let the framework handle errors at the top level.
 
-Always use `raise ... from e` when re-raising exceptions:
+### Why This Matters
 
-```python
-# BAD - Loses exception context
-try:
-    result = await collection.insert_one(doc)
-except OperationFailure as e:
-    logger.error(f"Error: {e}")
-    raise MongoDBEngineError("Insert failed")
+Following this framework results in:
+- **Cleaner code**: Less exception handling boilerplate
+- **Better debugging**: Exceptions bubble up with full context
+- **Framework integration**: Errors are handled consistently at the top level
+- **Fewer bugs**: You don't accidentally hide errors in your own code
 
-# GOOD - Preserves exception chain
-try:
-    result = await collection.insert_one(doc)
-except OperationFailure as e:
-    logger.exception("Database operation failed")
-    raise MongoDBEngineError(
-        "Failed to insert document",
-        context={"operation": "insert_one"}
-    ) from e
-```
+### The Dangers of Catching `Exception`
 
-### 4. Use logger.exception() for Error Logging 📝
+**Never catch `except Exception` unless you're at the top-level framework handler.** Here's why:
 
-Always use `logger.exception()` in exception handlers for full tracebacks:
+1. **Hides Bugs in Your Own Code**: If you catch `Exception`, you'll catch bugs like `AttributeError`, `TypeError`, `KeyError` that indicate problems in your code. These should crash the application so you can fix them.
 
-```python
-# BAD - Missing traceback
-except Exception as e:
-    logger.error(f"Error: {e}")
+2. **Makes Debugging Harder**: When exceptions are caught and logged without context, you lose the stack trace and the ability to see where the error actually occurred.
 
-# GOOD - Full traceback automatically included
-except Exception as e:
-    logger.exception("Operation failed")
-```
+3. **Prevents Framework from Handling Errors**: Frameworks like FastAPI have top-level exception handlers that:
+   - Log errors with full stack traces
+   - Return appropriate HTTP error responses
+   - Roll back database transactions
+   - Provide consistent error handling across the application
 
-### 5. MongoDB-Specific Exception Handling 🗄️
+4. **Violates the Principle of Least Surprise**: Other developers expect exceptions to bubble up. Catching `Exception` breaks this expectation.
 
-For MongoDB operations, catch specific MongoDB exceptions:
+5. **Only Catches What You Can Recover From**: If you can't actually recover from an error, catching it is pointless. Let it bubble up to a level that can handle it.
 
-```python
-from pymongo.errors import OperationFailure, AutoReconnect, ConnectionFailure, ServerSelectionTimeoutError
-from mdb_engine.exceptions import MongoDBEngineError
+### When `except Exception` is Acceptable
 
-try:
-    result = await collection.insert_one(document)
-except (OperationFailure, AutoReconnect) as e:
-    logger.exception("Database operation failed")
-    raise MongoDBEngineError(
-        "Failed to insert document",
-        context={"operation": "insert_one"}
-    ) from e
-except (ConnectionFailure, ServerSelectionTimeoutError) as e:
-    logger.exception("Database connection failed")
-    raise MongoDBEngineError(
-        "Connection failed",
-        context={"operation": "insert_one"}
-    ) from e
-except Exception as e:
-    logger.exception("Unexpected error")
-    raise MongoDBEngineError(
-        "Unexpected error inserting document",
-        context={"operation": "insert_one"}
-    ) from e
-```
+`except Exception` is **ONLY** allowed at:
+- **Framework-level exception handlers**: FastAPI's `@app.exception_handler(Exception)`, Flask's error handlers
+- **Top-level CLI handlers**: `if __name__ == '__main__': try/except Exception` blocks
+- **Application entry points**: Where the application starts and needs to prevent crashes
 
-### 6. Authentication Exception Handling 🔐
+These are the "safety nets" that prevent the application from crashing. All other code should let exceptions bubble up.
 
-For JWT and authentication operations:
+### Decision-Making Guide
 
-```python
-import jwt
+When deciding how to handle an error, ask:
 
-try:
-    payload = jwt.decode(token, secret, algorithms=["HS256"])
-except jwt.ExpiredSignatureError:
-    logger.debug("Token expired")
-    return None
-except jwt.InvalidTokenError as e:
-    logger.warning(f"Invalid token: {e}")
-    return None
-except (ValueError, TypeError) as e:
-    logger.exception("Validation error decoding token")
-    return None
-except Exception as e:
-    logger.exception("Unexpected error decoding token")
-    raise  # Re-raise unexpected errors
-```
+1. **Is this error from my code or a function I called?**
+   - My code → Type 1 or Type 3
+   - Called function → Type 2 or Type 4
 
-### 7. Don't Swallow Exceptions Silently 🚫
+2. **Can I actually recover from this error?**
+   - Yes → Type 1 or Type 2 (catch specific exceptions)
+   - No → Type 3 or Type 4 (raise or do nothing)
 
-Always log or re-raise exceptions:
+3. **What specific exceptions can I recover from?**
+   - Only catch exceptions you know how to handle
+   - Never catch `Exception` unless at top-level
 
-```python
-# BAD - Silent failure
-try:
-    result = await operation()
-except Exception:
-    pass
+For detailed examples and patterns, see [`docs/guides/error_handling.md`](docs/guides/error_handling.md).
 
-# GOOD - Log or re-raise
-try:
-    result = await operation()
-except SpecificException as e:
-    logger.exception("Operation failed")
-    return None  # Or handle appropriately
-except Exception as e:
-    logger.exception("Unexpected error")
-    raise  # Re-raise unexpected errors
-```
+### Additional Guidelines
 
-### 8. Use Custom Exceptions for Domain Errors 🎯
+- **Never use bare `except:` clauses** - Always specify exception types
+- **Preserve exception context** - Use `raise ... from e` when re-raising exceptions
+- **Use `logger.exception()`** - Provides full tracebacks automatically
+- **Use custom exceptions** - `MongoDBEngineError` and subclasses for domain errors
+- **Don't swallow exceptions silently** - Always log or re-raise
 
-Use `MongoDBEngineError` and its subclasses for domain-specific errors:
+For MongoDB operations, catch specific exceptions like `OperationFailure`, `ConnectionFailure`, `ServerSelectionTimeoutError` from `pymongo.errors`.
 
-```python
-from mdb_engine.exceptions import MongoDBEngineError, InitializationError, ConfigurationError
+For authentication operations, catch specific exceptions like `jwt.ExpiredSignatureError`, `jwt.InvalidTokenError`, etc.
 
-# For initialization errors
-raise InitializationError(
-    "Failed to connect to MongoDB",
-    mongo_uri=self.mongo_uri,
-    db_name=self.db_name
-) from e
-
-# For configuration errors
-raise ConfigurationError(
-    "Invalid configuration",
-    config_key="database_url",
-    config_value=value
-) from e
-
-# For general engine errors
-raise MongoDBEngineError(
-    "Operation failed",
-    context={"operation": "insert_one", "collection": "users"}
-) from e
-```
-
-### Exception Handling Patterns
-
-#### Pattern 1: Operations That Should Fail Fast
-
-```python
-async def insert_one(self, document: Dict[str, Any]) -> InsertOneResult:
-    try:
-        return await self._collection.insert_one(document)
-    except (OperationFailure, AutoReconnect) as e:
-        logger.exception("Database operation failed")
-        raise MongoDBEngineError(
-            "Failed to insert document",
-            context={"operation": "insert_one"}
-        ) from e
-    except Exception as e:
-        logger.exception("Unexpected error")
-        raise MongoDBEngineError(
-            "Unexpected error inserting document",
-            context={"operation": "insert_one"}
-        ) from e
-```
-
-#### Pattern 2: Operations That Can Return None/False
-
-```python
-async def find_one(self, filter: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    try:
-        return await self._collection.find_one(filter)
-    except (OperationFailure, ConnectionFailure) as e:
-        logger.exception("Database operation failed")
-        return None
-    except Exception as e:
-        logger.exception("Unexpected error")
-        # Re-raise unexpected errors
-        raise MongoDBEngineError(
-            "Unexpected error retrieving document",
-            context={"operation": "find_one"}
-        ) from e
-```
-
-#### Pattern 3: Optional Dependencies
-
-```python
-try:
-    from some_optional_library import Feature
-    FEATURE_AVAILABLE = True
-except ImportError:
-    FEATURE_AVAILABLE = False
-    logger.debug("Optional dependency not available")
-except Exception as e:
-    logger.warning("Failed to import optional feature", exc_info=True)
-    FEATURE_AVAILABLE = False
-```
+See [`docs/guides/error_handling.md`](docs/guides/error_handling.md) for detailed patterns and examples.
 
 ## Pre-commit Hooks
 

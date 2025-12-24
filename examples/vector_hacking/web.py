@@ -120,87 +120,79 @@ async def startup_event():
     db = engine.get_scoped_db("vector_hacking")
     
     # Initialize vector hacking service with Azure OpenAI client and EmbeddingService
-    try:
-        # Create Azure OpenAI client
-        api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-01")
-        endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
-        key = os.getenv("AZURE_OPENAI_API_KEY")
-        deployment_name = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4o")
+    # Type 4: Let service initialization errors bubble up to framework handler
+    # Create Azure OpenAI client
+    api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-01")
+    endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+    key = os.getenv("AZURE_OPENAI_API_KEY")
+    deployment_name = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4o")
+    
+    if not endpoint or not key:
+        logger.error("Azure OpenAI not configured! Set AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY environment variables.")
+        raise RuntimeError("Azure OpenAI not configured - required for vector hacking")
+    
+    openai_client = AzureOpenAI(
+        api_version=api_version,
+        azure_endpoint=endpoint,
+        api_key=key
+    )
+    
+    # Get EmbeddingService - try memory service first, fallback to standalone
+    app_config = engine.get_app("vector_hacking")
+    embedding_model = "text-embedding-3-small"
+    temperature = 0.8
+    
+    # Detect if using Azure OpenAI
+    is_azure = bool(os.getenv("AZURE_OPENAI_ENDPOINT") and os.getenv("AZURE_OPENAI_API_KEY"))
+    
+    # Get embedding model and temperature from manifest.json config
+    if app_config:
+        if "embedding_config" in app_config:
+            config_embedding_model = app_config["embedding_config"].get("default_embedding_model")
+            # If using Azure OpenAI, prefer Azure-compatible models
+            if config_embedding_model:
+                if is_azure and not config_embedding_model.startswith(("text-embedding", "ada")):
+                    logger.warning(f"Embedding model '{config_embedding_model}' may not be compatible with Azure OpenAI. Using '{embedding_model}' instead.")
+                else:
+                    embedding_model = config_embedding_model
+    
+    # Try memory service first (if memory_config is enabled)
+    memory_service = engine.get_memory_service("vector_hacking")
+    if memory_service:
+        # Type 4: Let EmbeddingService creation errors bubble up
+        # Note: EmbeddingService doesn't use memory_service - it's standalone
+        # Use get_embedding_service helper instead
+        from mdb_engine.embeddings import get_embedding_service
+        embedding_service = get_embedding_service(config={})
+        logger.info("EmbeddingService initialized with mem0 (via memory service)")
+    
+    # Fallback: initialize standalone using manifest.json config
+    if not memory_service:
+        embedding_config = app_config.get("embedding_config", {}) if app_config else {}
         
-        if not endpoint or not key:
-            logger.error("Azure OpenAI not configured! Set AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY environment variables.")
-            raise RuntimeError("Azure OpenAI not configured - required for vector hacking")
+        config = {}
+        # Use the embedding_model we determined above (which already handles Azure compatibility)
+        config["default_embedding_model"] = embedding_model
         
-        openai_client = AzureOpenAI(
-            api_version=api_version,
-            azure_endpoint=endpoint,
-            api_key=key
-        )
-        
-        # Get EmbeddingService - try memory service first, fallback to standalone
-        app_config = engine.get_app("vector_hacking")
-        embedding_model = "text-embedding-3-small"
-        temperature = 0.8
-        
-        # Detect if using Azure OpenAI
-        is_azure = bool(os.getenv("AZURE_OPENAI_ENDPOINT") and os.getenv("AZURE_OPENAI_API_KEY"))
-        
-        # Get embedding model and temperature from manifest.json config
-        if app_config:
-            if "embedding_config" in app_config:
-                config_embedding_model = app_config["embedding_config"].get("default_embedding_model")
-                # If using Azure OpenAI, prefer Azure-compatible models
-                if config_embedding_model:
-                    if is_azure and not config_embedding_model.startswith(("text-embedding", "ada")):
-                        logger.warning(f"Embedding model '{config_embedding_model}' may not be compatible with Azure OpenAI. Using '{embedding_model}' instead.")
-                    else:
-                        embedding_model = config_embedding_model
-        
-        # Try memory service first (if memory_config is enabled)
-        memory_service = engine.get_memory_service("vector_hacking")
-        if memory_service:
-            try:
-                # Note: EmbeddingService doesn't use memory_service - it's standalone
-                # Use get_embedding_service helper instead
-                from mdb_engine.embeddings import get_embedding_service
-                embedding_service = get_embedding_service(config={})
-                logger.info("EmbeddingService initialized with mem0 (via memory service)")
-            except Exception as e:
-                logger.warning(f"Failed to create EmbeddingService from memory service: {e}, trying standalone")
-                memory_service = None  # Fall through to standalone initialization
-        
-        # Fallback: initialize standalone using manifest.json config
-        if not memory_service:
-            embedding_config = app_config.get("embedding_config", {}) if app_config else {}
-            
-            config = {}
-            # Use the embedding_model we determined above (which already handles Azure compatibility)
-            config["default_embedding_model"] = embedding_model
-            
-            from mdb_engine.embeddings import get_embedding_service
-            embedding_service = get_embedding_service(config=config)
-            logger.info(f"EmbeddingService initialized standalone (from manifest.json, model: {embedding_model})")
-        
-        logger.info(f"Vector hacking config: chat={deployment_name}, embedding={embedding_model}, temp={temperature}")
-        
-        # Initialize vector hacking service
-        vector_hacking_service = VectorHackingService(
-            mongo_uri=mongo_uri,
-            db_name=db_name,
-            write_scope="vector_hacking",
-            read_scopes=["vector_hacking"],
-            openai_client=openai_client,
-            embedding_service=embedding_service,
-            deployment_name=deployment_name,
-            embedding_model=embedding_model,
-            temperature=temperature
-        )
-        logger.info("Vector hacking service initialized with Azure OpenAI and EmbeddingService")
-    except Exception as e:
-        logger.error(f"Failed to initialize vector hacking service: {e}")
-        import traceback
-        traceback.print_exc()
-        vector_hacking_service = None
+        from mdb_engine.embeddings import get_embedding_service
+        embedding_service = get_embedding_service(config=config)
+        logger.info(f"EmbeddingService initialized standalone (from manifest.json, model: {embedding_model})")
+    
+    logger.info(f"Vector hacking config: chat={deployment_name}, embedding={embedding_model}, temp={temperature}")
+    
+    # Initialize vector hacking service
+    vector_hacking_service = VectorHackingService(
+        mongo_uri=mongo_uri,
+        db_name=db_name,
+        write_scope="vector_hacking",
+        read_scopes=["vector_hacking"],
+        openai_client=openai_client,
+        embedding_service=embedding_service,
+        deployment_name=deployment_name,
+        embedding_model=embedding_model,
+        temperature=temperature
+    )
+    logger.info("Vector hacking service initialized with Azure OpenAI and EmbeddingService")
     
     logger.info("Web application ready!")
 
@@ -213,7 +205,8 @@ async def shutdown_event():
     if vector_hacking_service:
         try:
             await vector_hacking_service.stop_attack()
-        except Exception:
+        except (RuntimeError, AttributeError):
+            # Type 2: Recoverable - service may not be initialized, continue cleanup
             pass
     
     if engine:
@@ -243,18 +236,19 @@ async def root(request: Request):
             # Render the index page using the service's template rendering
             html_content = await vector_hacking_service.render_index()
             return HTMLResponse(content=html_content)
-        except Exception as e:
-            logger.error(f"Error rendering index: {e}")
-            # Fallback to direct template rendering
+        except (AttributeError, RuntimeError):
+            # Type 2: Recoverable - service not available, try fallback template
             try:
                 return templates.TemplateResponse(request, "index.html")
-            except Exception:
+            except (RuntimeError, FileNotFoundError):
+                # Type 2: Recoverable - template not found, return basic HTML
                 return HTMLResponse(content="<h1>Vector Hacking Demo</h1><p>Template rendering failed. Check logs.</p>")
     else:
         # Fallback if service not available
         try:
             return templates.TemplateResponse(request, "index.html")
-        except Exception:
+        except (RuntimeError, FileNotFoundError):
+            # Type 2: Recoverable - template not found, return basic HTML
             return HTMLResponse(content="<h1>Vector Hacking Demo</h1><p>Vector hacking service not initialized. Please check configuration.</p>")
 
 
@@ -274,19 +268,16 @@ async def start_attack(request: Optional[StartAttackRequest] = None):
             detail="Vector hacking service not initialized. Check LLM service configuration."
         )
     
-    try:
-        # Get parameters from request
-        target = request.target if request and request.target else None
-        generate_random = request.generate_random if request else False
-        
-        result = await vector_hacking_service.start_attack(
-            custom_target=target,
-            generate_random=generate_random
-        )
-        return result
-    except Exception as e:
-        logger.error(f"Error starting attack: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    # Type 4: Let errors bubble up to framework handler
+    # Get parameters from request
+    target = request.target if request and request.target else None
+    generate_random = request.generate_random if request else False
+    
+    result = await vector_hacking_service.start_attack(
+        custom_target=target,
+        generate_random=generate_random
+    )
+    return result
 
 
 @app.post("/stop", response_class=JSONResponse)
@@ -298,12 +289,9 @@ async def stop_attack():
             detail="Vector hacking service not initialized"
         )
     
-    try:
-        result = await vector_hacking_service.stop_attack()
-        return result
-    except Exception as e:
-        logger.error(f"Error stopping attack: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    # Type 4: Let errors bubble up to framework handler
+    result = await vector_hacking_service.stop_attack()
+    return result
 
 
 
@@ -318,14 +306,9 @@ async def get_attack_status():
             "error": "Vector hacking service not initialized. Check LLM service configuration."
         }
     
-    try:
-        status_data = await vector_hacking_service.get_status()
-        return status_data
-    except Exception as e:
-        logger.error(f"Error getting status: {e}")
-        return {
-            "status": "error",
-            "running": False,
+    # Type 4: Let errors bubble up to framework handler
+    status_data = await vector_hacking_service.get_status()
+    return status_data
             "error": str(e)
         }
 
@@ -339,12 +322,9 @@ async def generate_random_target():
             detail="Vector hacking service not initialized"
         )
     
-    try:
-        target = await vector_hacking_service.generate_random_target()
-        return {"target": target, "status": "generated"}
-    except Exception as e:
-        logger.error(f"Error generating random target: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    # Type 4: Let errors bubble up to framework handler
+    target = await vector_hacking_service.generate_random_target()
+    return {"target": target, "status": "generated"}
 
 
 @app.post("/api/reset", response_class=JSONResponse)
@@ -360,19 +340,16 @@ async def reset_attack(request: Optional[StartAttackRequest] = None):
             detail="Vector hacking service not initialized"
         )
     
-    try:
-        # Get parameters from request
-        new_target = request.target if request and request.target else None
-        generate_random = request.generate_random if request else False
-        
-        result = await vector_hacking_service.reset_attack(
-            new_target=new_target,
-            generate_random=generate_random
-        )
-        return result
-    except Exception as e:
-        logger.error(f"Error resetting attack: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    # Type 4: Let errors bubble up to framework handler
+    # Get parameters from request
+    new_target = request.target if request and request.target else None
+    generate_random = request.generate_random if request else False
+    
+    result = await vector_hacking_service.reset_attack(
+        new_target=new_target,
+        generate_random=generate_random
+    )
+    return result
 
 
 @app.post("/api/restart", response_class=JSONResponse)
@@ -389,19 +366,16 @@ async def restart_attack():
             detail="Vector hacking service not initialized"
         )
     
-    try:
-        # Simple reset - stop current attack and clear all state
-        await vector_hacking_service.stop_attack()
-        await vector_hacking_service.reset_attack()
-        
-        return {
-            "status": "ready",
-            "reload": True,
-            "message": "State reset. Page will reload."
-        }
-    except Exception as e:
-        logger.error(f"Error restarting attack: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    # Type 4: Let errors bubble up to framework handler
+    # Simple reset - stop current attack and clear all state
+    await vector_hacking_service.stop_attack()
+    await vector_hacking_service.reset_attack()
+    
+    return {
+        "status": "ready",
+        "reload": True,
+        "message": "State reset. Page will reload."
+    }
 
 
 @app.get("/api/health", response_class=JSONResponse)
