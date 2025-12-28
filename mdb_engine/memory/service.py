@@ -144,9 +144,7 @@ def _build_embedder_config(
     provider: str, embedding_model: str, app_slug: str
 ) -> Dict[str, Any]:
     """Build embedder configuration for mem0."""
-    clean_embedding_model = embedding_model.replace("azure/", "").replace(
-        "openai/", ""
-    )
+    clean_embedding_model = embedding_model.replace("azure/", "").replace("openai/", "")
     if provider == "azure":
         azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
         azure_api_key = os.getenv("AZURE_OPENAI_API_KEY")
@@ -200,9 +198,7 @@ def _build_llm_config(
     """Build LLM configuration for mem0."""
     clean_chat_model = chat_model.replace("azure/", "").replace("openai/", "")
     if provider == "azure":
-        deployment_name = (
-            os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME") or clean_chat_model
-        )
+        deployment_name = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME") or clean_chat_model
         clean_chat_model = deployment_name
 
         azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
@@ -253,9 +249,7 @@ def _build_llm_config(
     return config
 
 
-def _initialize_memory_instance(
-    mem0_config: Dict[str, Any], app_slug: str
-) -> tuple:
+def _initialize_memory_instance(mem0_config: Dict[str, Any], app_slug: str) -> tuple:
     """Initialize Mem0 Memory instance and return (instance, init_method)."""
     logger.debug(
         "Initializing Mem0 Memory with config structure",
@@ -431,7 +425,10 @@ class Mem0MemoryService:
 
             # Build mem0 config with MongoDB as vector store
             mem0_config = _build_vector_store_config(
-                self.db_name, self.collection_name, self.mongo_uri, self.embedding_model_dims
+                self.db_name,
+                self.collection_name,
+                self.mongo_uri,
+                self.embedding_model_dims,
             )
 
             # Configure mem0 embedder
@@ -467,7 +464,9 @@ class Mem0MemoryService:
 
         try:
             # Initialize Mem0 Memory instance
-            self.memory, init_method = _initialize_memory_instance(mem0_config, app_slug)
+            self.memory, init_method = _initialize_memory_instance(
+                mem0_config, app_slug
+            )
 
             # Verify the memory instance has required methods
             if not hasattr(self.memory, "get_all"):
@@ -510,7 +509,14 @@ class Mem0MemoryService:
                     ),
                 },
             )
-        except (ImportError, AttributeError, TypeError, ValueError, RuntimeError, KeyError) as e:
+        except (
+            ImportError,
+            AttributeError,
+            TypeError,
+            ValueError,
+            RuntimeError,
+            KeyError,
+        ) as e:
             logger.error(
                 f"Failed to initialize Mem0 Memory Service for app '{app_slug}': {e}",
                 exc_info=True,
@@ -620,9 +626,7 @@ class Mem0MemoryService:
             if not isinstance(result, list):
                 result = [result] if result else []
 
-            result_length = (
-                len(result) if isinstance(result, list) else 0
-            )
+            result_length = len(result) if isinstance(result, list) else 0
             logger.debug(
                 f"Raw result from mem0.add(): type={type(result)}, "
                 f"length={result_length}",

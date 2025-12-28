@@ -492,7 +492,14 @@ class EmbeddingService:
             vectors = await self.embedding_provider.embed(chunks, model=model)
             logger.info(f"Generated {len(vectors)} embeddings")
             return vectors
-        except (AttributeError, TypeError, ValueError, RuntimeError, ConnectionError, OSError) as e:
+        except (
+            AttributeError,
+            TypeError,
+            ValueError,
+            RuntimeError,
+            ConnectionError,
+            OSError,
+        ) as e:
             logger.error(f"Error generating embeddings: {e}", exc_info=True)
             raise EmbeddingServiceError(f"Embedding generation failed: {str(e)}") from e
 
@@ -558,7 +565,14 @@ class EmbeddingService:
         # Step 2: Generate embeddings (batch for efficiency)
         try:
             vectors = await self.embed_chunks(chunks, model=embedding_model)
-        except (AttributeError, TypeError, ValueError, RuntimeError, ConnectionError, OSError) as e:
+        except (
+            AttributeError,
+            TypeError,
+            ValueError,
+            RuntimeError,
+            ConnectionError,
+            OSError,
+        ) as e:
             logger.error(f"Failed to generate embeddings for {source_id}: {e}")
             raise EmbeddingServiceError(f"Embedding generation failed: {str(e)}") from e
 

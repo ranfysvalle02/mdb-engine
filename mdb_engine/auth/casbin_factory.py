@@ -104,9 +104,7 @@ async def create_casbin_enforcer(
     return enforcer
 
 
-async def _create_default_roles(
-    enforcer: "casbin.AsyncEnforcer", roles: list
-) -> None:
+async def _create_default_roles(enforcer: "casbin.AsyncEnforcer", roles: list) -> None:
     """
     Create default roles in Casbin (as grouping rules).
 
@@ -186,7 +184,14 @@ async def initialize_casbin_from_manifest(
             "Install with: pip install mdb-engine[casbin]"
         )
         return None
-    except (ImportError, AttributeError, TypeError, ValueError, RuntimeError, KeyError) as e:
+    except (
+        ImportError,
+        AttributeError,
+        TypeError,
+        ValueError,
+        RuntimeError,
+        KeyError,
+    ) as e:
         logger.error(
             f"Error initializing Casbin provider for app '{app_slug}': {e}",
             exc_info=True,

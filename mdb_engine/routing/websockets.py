@@ -500,18 +500,14 @@ def get_message_handler(
     return _message_handlers.get(app_slug, {}).get(endpoint_name)
 
 
-async def _accept_websocket_connection(
-    websocket: Any, app_slug: str
-) -> None:
+async def _accept_websocket_connection(websocket: Any, app_slug: str) -> None:
     """Accept WebSocket connection with error handling."""
     try:
         await websocket.accept()
         print(f"✅ [WEBSOCKET ACCEPTED] App: '{app_slug}'")
         logger.info(f"✅ WebSocket accepted for app '{app_slug}'")
     except Exception as accept_error:
-        print(
-            f"❌ [WEBSOCKET ACCEPT FAILED] App: '{app_slug}', Error: {accept_error}"
-        )
+        print(f"❌ [WEBSOCKET ACCEPT FAILED] App: '{app_slug}', Error: {accept_error}")
         logger.error(
             f"❌ Failed to accept WebSocket for app '{app_slug}': {accept_error}",
             exc_info=True,
@@ -547,7 +543,13 @@ async def _authenticate_websocket_connection(
             f"WebSocket connection rejected for app '{app_slug}' - authentication failed"
         )
         raise
-    except (ValueError, TypeError, AttributeError, KeyError, RuntimeError) as auth_error:
+    except (
+        ValueError,
+        TypeError,
+        AttributeError,
+        KeyError,
+        RuntimeError,
+    ) as auth_error:
         logger.error(
             f"Unexpected error during WebSocket authentication for app "
             f"'{app_slug}': {auth_error}",
@@ -558,9 +560,7 @@ async def _authenticate_websocket_connection(
                 code=1011, reason="Internal server error during authentication"
             )
         except (WebSocketDisconnect, RuntimeError, ConnectionError, OSError) as e:
-            logger.debug(
-                f"WebSocket already closed during auth error cleanup: {e}"
-            )
+            logger.debug(f"WebSocket already closed during auth error cleanup: {e}")
         raise WebSocketDisconnect(code=1011)
 
 
@@ -585,9 +585,7 @@ async def _handle_websocket_message(
                     return True
 
                 current_handler = (
-                    handler
-                    if handler
-                    else get_message_handler(app_slug, endpoint_name)
+                    handler if handler else get_message_handler(app_slug, endpoint_name)
                 )
 
                 if current_handler:
@@ -745,11 +743,21 @@ def create_websocket_endpoint(
                                 "timestamp": datetime.utcnow().isoformat(),
                             },
                         )
-                    except (WebSocketDisconnect, ConnectionError, RuntimeError, OSError):
+                    except (
+                        WebSocketDisconnect,
+                        ConnectionError,
+                        RuntimeError,
+                        OSError,
+                    ):
                         # Type 2: Recoverable - connection error during ping, break loop
                         break
 
-                except (WebSocketDisconnect, RuntimeError, ConnectionError, OSError) as e:
+                except (
+                    WebSocketDisconnect,
+                    RuntimeError,
+                    ConnectionError,
+                    OSError,
+                ) as e:
                     error_msg = str(e).lower()
                     if any(
                         keyword in error_msg

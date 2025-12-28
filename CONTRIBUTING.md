@@ -5,6 +5,7 @@ Thank you for your interest in contributing to MDB Engine! This document provide
 ## Table of Contents
 
 - [Code Style](#code-style)
+- [Makefile](#makefile)
 - [Exception Handling Best Practices](#exception-handling-best-practices)
 - [Pre-commit Hooks](#pre-commit-hooks)
 - [Testing](#testing)
@@ -31,7 +32,29 @@ pip install pre-commit
 pre-commit install
 ```
 
-### Manual Formatting
+### Using the Makefile (Recommended)
+
+The Makefile provides convenient commands for common development tasks:
+
+```bash
+# Format code (black + isort)
+make format
+
+# Run linting checks (fails on errors)
+make lint
+
+# Run linting checks (non-failing, for CI)
+make lint-check
+
+# Run quick quality check (lint + unit tests)
+make check
+```
+
+See the [Makefile section](#makefile) below for all available commands.
+
+### Manual Formatting (Alternative)
+
+If you prefer to run tools directly:
 
 ```bash
 # Format code
@@ -40,11 +63,69 @@ black --line-length=100 .
 # Sort imports
 isort --profile black --line-length=100 .
 
-# Run linting (recommended - uses Makefile)
-make lint-check
+# Run flake8 directly
+flake8 mdb_engine tests scripts
+```
 
-# Or run flake8 directly
-flake8 mdb_engine tests
+## Makefile
+
+The project includes a comprehensive Makefile that simplifies common development tasks. **We recommend using Makefile commands as the primary method** for running tests, formatting code, and checking code quality.
+
+### Available Commands
+
+```bash
+# Installation
+make install          # Install package and dependencies
+make install-dev      # Install package with dev dependencies
+
+# Testing
+make test             # Run all tests (unit + integration)
+make test-unit        # Run unit tests only (fast, no MongoDB)
+make test-integration # Run integration tests only (requires Docker)
+make test-coverage    # Run tests with coverage report (terminal)
+make test-coverage-html # Run tests with HTML coverage report
+
+# Code Quality
+make lint             # Run linters (flake8, isort check) - fails on errors
+make lint-check       # Run linters (non-failing, for CI)
+make format           # Format code (black, isort)
+make check            # Run lint + unit tests (quick quality check)
+
+# Cleanup
+make clean            # Remove build artifacts and caches
+make clean-pyc        # Remove Python cache files
+make clean-cache      # Remove pytest cache
+```
+
+### Common Workflows
+
+**Quick quality check before committing:**
+```bash
+make check
+```
+
+**Run tests with coverage:**
+```bash
+make test-coverage-html
+# Open htmlcov/index.html in your browser
+```
+
+**Format and lint before PR:**
+```bash
+make format
+make lint
+```
+
+**Full test suite:**
+```bash
+make test
+```
+
+### Help
+
+View all available commands:
+```bash
+make help
 ```
 
 ## Exception Handling Best Practices
@@ -179,18 +260,39 @@ git commit --no-verify -m "Emergency fix (bypassing hooks)"
 
 ### Running Tests
 
+**We recommend using Makefile commands** for running tests. They provide consistent configuration and are easier to use:
+
+```bash
+# Run all tests (unit + integration)
+make test
+
+# Run unit tests only (fast, no MongoDB required)
+make test-unit
+
+# Run integration tests only (requires Docker)
+make test-integration
+
+# Run tests with coverage report (terminal)
+make test-coverage
+
+# Run tests with HTML coverage report
+make test-coverage-html
+# Then open htmlcov/index.html in your browser
+```
+
+**Alternative: Direct pytest commands**
+
+If you need more control, you can run pytest directly:
+
 ```bash
 # Run all tests
-pytest
-
-# Run with coverage
-pytest --cov=mdb_engine --cov-report=html
+pytest tests/ -v
 
 # Run specific test file
-pytest tests/unit/test_engine.py
+pytest tests/unit/test_engine.py -v
 
-# Run with verbose output
-pytest -v
+# Run with specific marker
+pytest -m unit -v
 ```
 
 ### Writing Tests

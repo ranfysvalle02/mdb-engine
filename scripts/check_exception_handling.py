@@ -217,7 +217,9 @@ class ExceptionHandlerChecker(ast.NodeVisitor):
         if is_exception_catch and self.current_function:
             function_name = (
                 self.current_function.name
-                if isinstance(self.current_function, (ast.FunctionDef, ast.AsyncFunctionDef))
+                if isinstance(
+                    self.current_function, (ast.FunctionDef, ast.AsyncFunctionDef)
+                )
                 else None
             )
             if function_name and function_name in self.top_level_handlers:
@@ -297,7 +299,9 @@ class ExceptionHandlerChecker(ast.NodeVisitor):
             function_name = (
                 self.current_function.name
                 if self.current_function
-                and isinstance(self.current_function, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and isinstance(
+                    self.current_function, (ast.FunctionDef, ast.AsyncFunctionDef)
+                )
                 else None
             )
             # MongoDB operations should catch MongoDB-specific exceptions

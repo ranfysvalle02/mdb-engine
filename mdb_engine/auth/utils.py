@@ -351,7 +351,14 @@ async def login_user(
             "token_metadata": token_metadata,
         }
 
-    except (ValueError, TypeError, AttributeError, KeyError, RuntimeError, ConnectionError) as e:
+    except (
+        ValueError,
+        TypeError,
+        AttributeError,
+        KeyError,
+        RuntimeError,
+        ConnectionError,
+    ) as e:
         logger.error(f"Error in login_user: {e}", exc_info=True)
         return {"success": False, "error": "Login failed. Please try again."}
 
@@ -491,7 +498,14 @@ async def register_user(
             "token_metadata": token_metadata,
         }
 
-    except (ValueError, TypeError, AttributeError, KeyError, RuntimeError, ConnectionError) as e:
+    except (
+        ValueError,
+        TypeError,
+        AttributeError,
+        KeyError,
+        RuntimeError,
+        ConnectionError,
+    ) as e:
         logger.error(f"Error in register_user: {e}", exc_info=True)
         return {"success": False, "error": "Registration failed. Please try again."}
 
@@ -586,7 +600,14 @@ async def logout_user(
 
         return response
 
-    except (ValueError, TypeError, AttributeError, KeyError, RuntimeError, ConnectionError) as e:
+    except (
+        ValueError,
+        TypeError,
+        AttributeError,
+        KeyError,
+        RuntimeError,
+        ConnectionError,
+    ) as e:
         logger.error(f"Error in logout_user: {e}", exc_info=True)
         # Still clear cookies even if revocation fails
         clear_auth_cookies(response, request)

@@ -19,24 +19,70 @@ cd mdb-runtime
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 
-# Install the package in development mode
-pip install -e ".[dev,test]"
+# Install the package in development mode (recommended)
+make install-dev
+
+# Or install manually:
+# pip install -e ".[dev,test]"
 
 # Install pre-commit hooks
 pre-commit install
 ```
 
+## Makefile
+
+The project includes a comprehensive Makefile that simplifies development workflows. **We recommend using Makefile commands** for consistency and ease of use.
+
+### Quick Start
+
+After installation, verify your setup:
+
+```bash
+# Quick quality check (lint + unit tests)
+make check
+```
+
+### Common Commands
+
+```bash
+# View all available commands
+make help
+
+# Installation
+make install          # Install package and dependencies
+make install-dev      # Install package with dev dependencies
+
+# Testing
+make test             # Run all tests
+make test-unit        # Run unit tests only
+make test-integration # Run integration tests only
+make test-coverage-html # Run tests with HTML coverage report
+
+# Code Quality
+make format           # Format code (black + isort)
+make lint             # Run linting checks (fails on errors)
+make lint-check       # Run linting checks (non-failing)
+make check            # Quick quality check (lint + unit tests)
+
+# Cleanup
+make clean            # Remove build artifacts and caches
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md#makefile) for detailed Makefile documentation.
+
 ## Verify Setup
 
 ```bash
-# Run pre-commit hooks manually to verify
-pre-commit run --all-files
+# Install development dependencies (includes test tools)
+make install-dev
 
-# Run tests
-pytest
+# Run quick quality check (lint + unit tests)
+make check
 
-# Check exception handling
-python scripts/check_exception_handling.py mdb_engine/
+# Or verify individual components:
+pre-commit run --all-files  # Pre-commit hooks
+make test-unit             # Unit tests
+make lint                  # Linting checks
 ```
 
 ## Pre-commit Hooks
@@ -72,6 +118,15 @@ git commit --no-verify -m "Emergency fix"
 
 ## Code Formatting
 
+**Recommended: Use the Makefile**
+
+```bash
+# Format code (black + isort)
+make format
+```
+
+**Alternative: Direct commands**
+
 ```bash
 # Format code
 black --line-length=100 .
@@ -85,9 +140,26 @@ black --check --line-length=100 .
 
 ## Linting
 
+**Recommended: Use the Makefile**
+
+```bash
+# Run linting checks (fails on errors)
+make lint
+
+# Run linting checks (non-failing, for CI)
+make lint-check
+```
+
+The `lint` command runs:
+- flake8 (code quality)
+- isort (import sorting check)
+- Exception handling checker (Grinberg framework compliance)
+
+**Alternative: Direct commands**
+
 ```bash
 # Run flake8
-flake8 mdb_engine tests
+flake8 mdb_engine tests scripts
 
 # Run with specific error codes
 flake8 --select=E,W,F mdb_engine
@@ -110,19 +182,44 @@ find mdb_engine -name "*.py" -not -path "*/test*" | xargs python scripts/check_e
 
 ## Testing
 
+**Recommended: Use the Makefile**
+
+```bash
+# Run all tests (unit + integration)
+make test
+
+# Run unit tests only (fast, no MongoDB required)
+make test-unit
+
+# Run integration tests only (requires Docker)
+make test-integration
+
+# Run tests with coverage report (terminal)
+make test-coverage
+
+# Run tests with HTML coverage report
+make test-coverage-html
+# Then open htmlcov/index.html in your browser
+```
+
+**Alternative: Direct pytest commands**
+
 ```bash
 # Run all tests
-pytest
-
-# Run with coverage
-pytest --cov=mdb_engine --cov-report=html
+pytest tests/ -v
 
 # Run specific test file
-pytest tests/unit/test_engine.py
+pytest tests/unit/test_engine.py -v
 
 # Run with verbose output
 pytest -v -s
 ```
+
+### Test Coverage
+
+The Makefile tracks coverage for core modules (`mdb_engine/core` and `mdb_engine/database`) with a minimum threshold of 70%. Coverage reports are generated in:
+- Terminal: `make test-coverage`
+- HTML: `make test-coverage-html` (opens `htmlcov/index.html`)
 
 ## Common Issues
 

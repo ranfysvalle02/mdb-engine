@@ -80,9 +80,7 @@ def _create_managed_task(
     except RuntimeError:
         # No event loop running - skip task creation
         # This can happen in synchronous contexts (e.g., tests, sync code)
-        logger.debug(
-            f"Skipping background task '{task_name}' - no event loop running"
-        )
+        logger.debug(f"Skipping background task '{task_name}' - no event loop running")
 
 
 # --- END HELPER FUNCTION ---
@@ -158,7 +156,11 @@ class AsyncAtlasIndexManager:
             ) from e
 
     def _check_definition_changed(
-        self, definition: Dict[str, Any], latest_def: Dict[str, Any], index_type: str, name: str
+        self,
+        definition: Dict[str, Any],
+        latest_def: Dict[str, Any],
+        index_type: str,
+        name: str,
     ) -> Tuple[bool, str]:
         """Check if index definition has changed."""
         definition_changed = False
@@ -181,8 +183,11 @@ class AsyncAtlasIndexManager:
         return definition_changed, change_reason
 
     async def _handle_existing_index(
-        self, existing_index: Dict[str, Any], definition: Dict[str, Any],
-        index_type: str, name: str
+        self,
+        existing_index: Dict[str, Any],
+        definition: Dict[str, Any],
+        index_type: str,
+        name: str,
     ) -> bool:
         """Handle existing index - check for changes and update if needed."""
         logger.info(f"Search index '{name}' already exists.")
@@ -225,9 +230,7 @@ class AsyncAtlasIndexManager:
     ) -> None:
         """Create a new search index."""
         try:
-            logger.info(
-                f"Creating new search index '{name}' of type '{index_type}'..."
-            )
+            logger.info(f"Creating new search index '{name}' of type '{index_type}'...")
             search_index_model = SearchIndexModel(
                 definition=definition, name=name, type=index_type
             )
@@ -296,9 +299,7 @@ class AsyncAtlasIndexManager:
                 context={"index_name": name, "operation": "create_search_index"},
             ) from e
         except (OperationFailure, InvalidOperation) as e:
-            logger.exception(
-                f"Error during search index creation/check for '{name}'"
-            )
+            logger.exception(f"Error during search index creation/check for '{name}'")
             raise MongoDBEngineError(
                 f"Error creating/checking search index '{name}'",
                 context={"index_name": name, "operation": "create_search_index"},
@@ -587,7 +588,9 @@ class AsyncAtlasIndexManager:
             # Wait for index to be ready (MongoDB indexes are usually immediate, but we verify)
             if wait_for_ready:
                 try:
-                    is_ready = await self._wait_for_regular_index_ready(name, timeout=30)
+                    is_ready = await self._wait_for_regular_index_ready(
+                        name, timeout=30
+                    )
                     if not is_ready:
                         logger.warning(
                             f"Regular index '{name}' may not be fully ready yet, "
@@ -603,7 +606,11 @@ class AsyncAtlasIndexManager:
             return name
         except OperationFailure as e:
             # Handle index build aborted (e.g., database being dropped during teardown)
-            if e.code == 276 or "IndexBuildAborted" in str(e) or "dropDatabase" in str(e):
+            if (
+                e.code == 276
+                or "IndexBuildAborted" in str(e)
+                or "dropDatabase" in str(e)
+            ):
                 logger.debug(
                     f"Skipping regular index creation '{index_name}': "
                     f"index build aborted (likely during database drop/teardown): {e}"
@@ -674,7 +681,9 @@ class AsyncAtlasIndexManager:
                 context={"index_name": name, "operation": "drop_index"},
             ) from e
         except InvalidOperation as e:
-            logger.debug(f"Cannot drop regular index '{name}': MongoDB client is closed")
+            logger.debug(
+                f"Cannot drop regular index '{name}': MongoDB client is closed"
+            )
             raise MongoDBEngineError(
                 f"Cannot drop regular index '{name}': MongoDB client is closed",
                 context={"index_name": name, "operation": "drop_index"},
@@ -689,7 +698,9 @@ class AsyncAtlasIndexManager:
             return []
         except InvalidOperation:
             # Client is closed (e.g., during shutdown/teardown)
-            logger.debug("Skipping list_indexes: MongoDB client is closed (likely during shutdown)")
+            logger.debug(
+                "Skipping list_indexes: MongoDB client is closed (likely during shutdown)"
+            )
             return []
 
     async def get_index(self, name: str) -> Optional[Dict[str, Any]]:
@@ -1438,7 +1449,11 @@ class ScopedMongoWrapper:
                         ScopedMongoWrapper._app_id_index_cache[collection_name] = (
                             has_index
                         )
-                except (ConnectionFailure, ServerSelectionTimeoutError, InvalidOperation) as e:
+                except (
+                    ConnectionFailure,
+                    ServerSelectionTimeoutError,
+                    InvalidOperation,
+                ) as e:
                     # Handle connection errors gracefully (e.g., during shutdown)
                     logger.debug(
                         f"Skipping app_id index creation for '{collection_name}': "
@@ -1564,7 +1579,11 @@ class ScopedMongoWrapper:
                         ScopedMongoWrapper._app_id_index_cache[collection_name] = (
                             has_index
                         )
-                except (ConnectionFailure, ServerSelectionTimeoutError, InvalidOperation) as e:
+                except (
+                    ConnectionFailure,
+                    ServerSelectionTimeoutError,
+                    InvalidOperation,
+                ) as e:
                     # Handle connection errors gracefully (e.g., during shutdown)
                     logger.debug(
                         f"Skipping app_id index creation for '{collection_name}': "
@@ -1623,7 +1642,11 @@ class ScopedMongoWrapper:
                     return True
                 except OperationFailure as e:
                     # Handle index build aborted (e.g., database being dropped during teardown)
-                    if e.code == 276 or "IndexBuildAborted" in str(e) or "dropDatabase" in str(e):
+                    if (
+                        e.code == 276
+                        or "IndexBuildAborted" in str(e)
+                        or "dropDatabase" in str(e)
+                    ):
                         logger.debug(
                             f"Skipping app_id index creation on {collection.name}: "
                             f"index build aborted (likely during database drop/teardown): {e}"
@@ -1633,13 +1656,19 @@ class ScopedMongoWrapper:
             return True
         except OperationFailure as e:
             # Handle index build aborted (e.g., database being dropped during teardown)
-            if e.code == 276 or "IndexBuildAborted" in str(e) or "dropDatabase" in str(e):
+            if (
+                e.code == 276
+                or "IndexBuildAborted" in str(e)
+                or "dropDatabase" in str(e)
+            ):
                 logger.debug(
                     f"Skipping app_id index creation on {collection.name}: "
                     f"index build aborted (likely during database drop/teardown): {e}"
                 )
                 return False
-            logger.debug(f"OperationFailure ensuring app_id index on {collection.name}: {e}")
+            logger.debug(
+                f"OperationFailure ensuring app_id index on {collection.name}: {e}"
+            )
             return False
         except (ConnectionFailure, ServerSelectionTimeoutError, InvalidOperation) as e:
             # Handle connection errors gracefully (e.g., during shutdown)

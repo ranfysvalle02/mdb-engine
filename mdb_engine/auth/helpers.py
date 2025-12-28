@@ -49,7 +49,14 @@ async def initialize_token_management(app, db):
         app.state.session_manager = session_mgr
         logger.info("Session manager initialized")
 
-    except (ImportError, AttributeError, TypeError, ValueError, RuntimeError, KeyError) as e:
+    except (
+        ImportError,
+        AttributeError,
+        TypeError,
+        ValueError,
+        RuntimeError,
+        KeyError,
+    ) as e:
         logger.error(f"Error initializing token management: {e}", exc_info=True)
         # Don't raise - allow app to start without token management (backward compatibility)
         logger.warning(

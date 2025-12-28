@@ -39,6 +39,7 @@ dependencies = [
     "numpy>=1.0.0,<2.0.0",
     "openai>=1.0.0",  # Required for embedding providers
     "azure-identity>=1.15.0",  # Required for mem0's azure_openai provider
+    "click>=8.0.0",  # CLI tool
 ]
 
 [project.optional-dependencies]
@@ -71,8 +72,32 @@ all = [
     "oso-cloud>=0.1.0",
 ]
 
+[project.scripts]
+mdb = "mdb_engine.cli.main:cli"
+
 [project.urls]
 Homepage = "https://github.com/yourusername/mdb-engine"
 Documentation = "https://github.com/yourusername/mdb-engine#readme"
 Repository = "https://github.com/yourusername/mdb-engine"
 Issues = "https://github.com/yourusername/mdb-engine/issues"
+
+[tool.coverage.run]
+source = ["mdb_engine"]
+omit = [
+    "*/tests/*",
+    "*/__pycache__/*",
+    "*/__init__.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod",
+]
+fail_under = 70

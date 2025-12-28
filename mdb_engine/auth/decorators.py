@@ -328,7 +328,13 @@ def auto_token_setup(func: Optional[Callable[..., Awaitable[Any]]] = None):
                     )
 
                     return response
-                except (ValueError, TypeError, AttributeError, KeyError, RuntimeError) as e:
+                except (
+                    ValueError,
+                    TypeError,
+                    AttributeError,
+                    KeyError,
+                    RuntimeError,
+                ) as e:
                     logger.error(f"Error in auto_token_setup: {e}", exc_info=True)
                     # Return original result if token setup fails
                     return result

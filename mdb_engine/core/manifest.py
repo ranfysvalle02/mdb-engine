@@ -640,8 +640,7 @@ MANIFEST_SCHEMA_V2 = {
                     "minimum": 60,
                     "default": 900,
                     "description": (
-                        "Access token TTL in seconds "
-                        "(default: 900 = 15 minutes)."
+                        "Access token TTL in seconds " "(default: 900 = 15 minutes)."
                     ),
                 },
                 "refresh_token_ttl": {
@@ -649,8 +648,7 @@ MANIFEST_SCHEMA_V2 = {
                     "minimum": 3600,
                     "default": 604800,
                     "description": (
-                        "Refresh token TTL in seconds "
-                        "(default: 604800 = 7 days)."
+                        "Refresh token TTL in seconds " "(default: 604800 = 7 days)."
                     ),
                 },
                 "token_rotation": {
@@ -709,16 +707,12 @@ MANIFEST_SCHEMA_V2 = {
                         "cookie_httponly": {
                             "type": "boolean",
                             "default": True,
-                            "description": (
-                                "HttpOnly cookie flag (default: true)."
-                            ),
+                            "description": ("HttpOnly cookie flag (default: true)."),
                         },
                         "csrf_protection": {
                             "type": "boolean",
                             "default": True,
-                            "description": (
-                                "Enable CSRF protection (default: true)."
-                            ),
+                            "description": ("Enable CSRF protection (default: true)."),
                         },
                         "rate_limiting": {
                             "type": "object",
@@ -803,30 +797,24 @@ MANIFEST_SCHEMA_V2 = {
                                     "type": "boolean",
                                     "default": True,
                                     "description": (
-                                        "Require lowercase letters "
-                                        "(default: true)"
+                                        "Require lowercase letters " "(default: true)"
                                     ),
                                 },
                                 "require_numbers": {
                                     "type": "boolean",
                                     "default": True,
-                                    "description": (
-                                        "Require numbers (default: true)"
-                                    ),
+                                    "description": ("Require numbers (default: true)"),
                                 },
                                 "require_special": {
                                     "type": "boolean",
                                     "default": False,
                                     "description": (
-                                        "Require special characters "
-                                        "(default: false)"
+                                        "Require special characters " "(default: false)"
                                     ),
                                 },
                             },
                             "additionalProperties": False,
-                            "description": (
-                                "Password policy configuration"
-                            ),
+                            "description": ("Password policy configuration"),
                         },
                         "session_fingerprinting": {
                             "type": "object",
@@ -952,29 +940,23 @@ MANIFEST_SCHEMA_V2 = {
                                     "type": "boolean",
                                     "default": True,
                                     "description": (
-                                        "Enable token fingerprinting "
-                                        "(default: true)"
+                                        "Enable token fingerprinting " "(default: true)"
                                     ),
                                 },
                                 "bind_to_device": {
                                     "type": "boolean",
                                     "default": True,
                                     "description": (
-                                        "Bind tokens to device ID "
-                                        "(default: true)"
+                                        "Bind tokens to device ID " "(default: true)"
                                     ),
                                 },
                             },
                             "additionalProperties": False,
-                            "description": (
-                                "Token fingerprinting configuration"
-                            ),
+                            "description": ("Token fingerprinting configuration"),
                         },
                     },
                     "additionalProperties": False,
-                    "description": (
-                        "Security settings for token management."
-                    ),
+                    "description": ("Security settings for token management."),
                 },
                 "auto_setup": {
                     "type": "boolean",
@@ -1437,7 +1419,7 @@ MANIFEST_SCHEMA_V2 = {
             "description": "Email of the developer who owns this app",
         },
     },
-    "required": [],
+    "required": ["slug", "name"],
     "definitions": {
         "indexDefinition": {
             "type": "object",
@@ -1779,7 +1761,7 @@ MANIFEST_SCHEMA_V1 = {
             "description": "Email of the developer who owns this app",
         },
     },
-    "required": [],
+    "required": ["slug", "name"],
     "definitions": {
         # Reuse same indexDefinition from V2
         "indexDefinition": MANIFEST_SCHEMA_V2["definitions"]["indexDefinition"]
@@ -1814,7 +1796,7 @@ def get_schema_version(manifest_data: Dict[str, Any]) -> str:
             raise ValueError(
                 f"Invalid schema_version format: {version}. Expected format: 'major.minor'"
             )
-    return str(version)
+        return str(version)
 
     # Heuristic: If manifest has new fields, assume 2.0, otherwise 1.0
     v2_fields = ["auth", "collection_settings"]
@@ -2016,7 +1998,9 @@ async def _validate_manifest_async(
         error_paths = []
         error_messages = []
         if isinstance(e, ValidationError):
-            error_paths = [f".{'.'.join(str(p) for p in error.path)}" for error in e.context or [e]]
+            error_paths = [
+                f".{'.'.join(str(p) for p in error.path)}" for error in e.context or [e]
+            ]
             error_messages = [error.message for error in e.context or [e]]
         else:
             error_messages = [str(e)]
@@ -2260,11 +2244,7 @@ def _validate_regular_index(
     if isinstance(keys, dict):
         is_id_index = len(keys) == 1 and "_id" in keys
     elif isinstance(keys, list):
-        is_id_index = (
-            len(keys) == 1
-            and len(keys[0]) >= 1
-            and keys[0][0] == "_id"
-        )
+        is_id_index = len(keys) == 1 and len(keys[0]) >= 1 and keys[0][0] == "_id"
 
     if is_id_index:
         return (
@@ -2348,9 +2328,7 @@ def _validate_text_index(
     if isinstance(keys, dict):
         has_text = any(v == "text" or v == "TEXT" for v in keys.values())
     elif isinstance(keys, list):
-        has_text = any(
-            len(k) >= 2 and (k[1] == "text" or k[1] == "TEXT") for k in keys
-        )
+        has_text = any(len(k) >= 2 and (k[1] == "text" or k[1] == "TEXT") for k in keys)
     if not has_text:
         return (
             False,
@@ -2710,13 +2688,13 @@ class ManifestValidator:
     @staticmethod
     def get_schema_version(manifest: Dict[str, Any]) -> str:
         """
-        Get schema version from manifest.
+            Get schema version from manifest.
 
-        Args:
-    manifest: Manifest dictionary
+            Args:
+        manifest: Manifest dictionary
 
-        Returns:
-            Schema version string (e.g., "1.0", "2.0")
+            Returns:
+                Schema version string (e.g., "1.0", "2.0")
         """
         return get_schema_version(manifest)
 

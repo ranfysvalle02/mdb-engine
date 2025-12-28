@@ -211,18 +211,27 @@ logger.info("Operation completed")  # Includes correlation_id automatically
 
 ## Testing
 
-Run the test suite:
+Run the test suite using the Makefile (recommended):
 
 ```bash
 # Install test dependencies
-pip install -e ".[test]"
+make install-dev
 
 # Run all tests
-pytest
+make test
 
-# Run with coverage
-pytest --cov=mdb_engine --cov-report=html
+# Run unit tests only (fast, no MongoDB required)
+make test-unit
+
+# Run with coverage report
+make test-coverage-html
+# Then open htmlcov/index.html in your browser
 ```
+
+For more detailed testing information, see:
+- [Testing Guide](guides/testing.md) - Comprehensive testing documentation
+- [tests/README.md](../tests/README.md) - Test structure and examples
+- [CONTRIBUTING.md](../CONTRIBUTING.md#testing) - Testing guidelines for contributors
 
 ## Package Structure
 

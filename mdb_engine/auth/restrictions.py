@@ -108,9 +108,7 @@ async def _get_sub_auth_user(
 async def _get_authenticated_user(
     request: Request,
     slug_id: str,
-    get_app_config_func: Optional[
-        Callable[[Request, str, Dict], Awaitable[Dict]]
-    ],
+    get_app_config_func: Optional[Callable[[Request, str, Dict], Awaitable[Dict]]],
     get_app_db_func: Optional[Callable[[Request], Awaitable[Any]]],
 ) -> Optional[Dict[str, Any]]:
     """Get authenticated user from platform or sub-auth."""

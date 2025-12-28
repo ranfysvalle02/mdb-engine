@@ -20,46 +20,75 @@ tests/
 
 ## Running Tests
 
+**We recommend using Makefile commands** for running tests. They provide consistent configuration and are easier to use.
+
 ### Install Test Dependencies
 
 ```bash
+# Install with test dependencies
+make install-dev
+
+# Or manually:
 pip install -e ".[test]"
 ```
 
 ### Run All Tests
 
 ```bash
-pytest
+# Using Makefile (recommended)
+make test
+
+# Or directly with pytest
+pytest tests/ -v
 ```
 
 ### Run Unit Tests Only
 
 ```bash
-pytest tests/unit/
+# Using Makefile (recommended)
+make test-unit
+
+# Or directly with pytest
+pytest tests/unit/ -v -m "not integration"
 ```
 
 ### Run Integration Tests Only
 
 ```bash
-pytest tests/integration/ -m integration
+# Using Makefile (recommended)
+# Note: Requires Docker
+make test-integration
+
+# Or directly with pytest
+pytest tests/integration/ -v -m integration
 ```
 
 ### Run with Coverage
 
 ```bash
-pytest --cov=mdb_engine --cov-report=html
+# Terminal coverage report (recommended)
+make test-coverage
+
+# HTML coverage report (recommended)
+make test-coverage-html
+# Then open htmlcov/index.html in your browser
+
+# Or directly with pytest
+pytest --cov=mdb_engine/core --cov=mdb_engine/database --cov-report=html
 ```
 
 ### Run Specific Test File
 
 ```bash
-pytest tests/unit/test_engine.py
+# Direct pytest command (Makefile doesn't support file-specific runs)
+pytest tests/unit/test_engine.py -v
 ```
 
 ### Run Specific Test
 
 ```bash
-pytest tests/unit/test_engine.py::TestMongoDBEngineInitialization::test_engine_initialization_success
+# Direct pytest command
+pytest tests/unit/test_engine.py::TestMongoDBEngineInitialization::test_engine_initialization_success -v
 ```
 
 ## Test Markers
@@ -110,25 +139,71 @@ async def test_real_mongodb_connection():
     pass
 ```
 
+## Makefile Commands
+
+The Makefile provides convenient commands for all testing operations:
+
+```bash
+# View all available commands
+make help
+
+# Testing commands
+make test             # Run all tests (unit + integration)
+make test-unit        # Run unit tests only (fast, no MongoDB)
+make test-integration # Run integration tests only (requires Docker)
+make test-coverage    # Run tests with coverage report (terminal)
+make test-coverage-html # Run tests with HTML coverage report
+
+# Quick quality check (lint + unit tests)
+make check
+```
+
+### When to Use Each Command
+
+- **`make test-unit`**: Fast feedback during development (no external dependencies)
+- **`make test-integration`**: Full integration testing (requires Docker)
+- **`make test-coverage-html`**: Before committing/PR (visual coverage report)
+- **`make check`**: Quick quality check before committing (lint + unit tests)
+
 ## Continuous Integration
 
 Tests should be run in CI/CD pipelines:
 
 ```yaml
 # Example GitHub Actions
-- name: Run tests
-  run: |
-    pip install -e ".[test]"
-    pytest --cov=mdb_engine --cov-report=xml
+- name: Install dependencies
+  run: make install-dev
+
+- name: Run tests with coverage
+  run: make test-coverage
+
+# Or for HTML coverage report:
+- name: Run tests with HTML coverage
+  run: make test-coverage-html
+
+- name: Upload coverage
+  uses: codecov/codecov-action@v3
+  with:
+    files: ./htmlcov/index.html
 ```
 
 ## Test Coverage Goals
 
-- Target: 80%+ coverage
-- Critical paths: 90%+ coverage
-- Focus areas:
+- **Minimum threshold**: 70% (enforced by Makefile)
+- **Target**: 80%+ coverage
+- **Critical paths**: 90%+ coverage
+- **Coverage modules**: 
+  - `mdb_engine/core` - Core engine functionality
+  - `mdb_engine/database` - Database abstraction and scoping
+- **Focus areas**:
   - MongoDBEngine initialization and lifecycle
   - Manifest validation
   - Database scoping
   - Error handling
+
+### Coverage Reports
+
+Coverage reports are generated in:
+- **Terminal**: `make test-coverage` - Shows coverage summary in terminal
+- **HTML**: `make test-coverage-html` - Generates `htmlcov/index.html` with detailed line-by-line coverage
 

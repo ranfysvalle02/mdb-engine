@@ -216,6 +216,7 @@ class TestScopedDataIsolation:
         app2_collection = db.get_collection("multi_scope_app2_shared_collection")
 
         import asyncio
+
         await asyncio.sleep(0.1)  # Brief wait for writes to be visible
 
         # Read from app1's collection (should see app1's doc)

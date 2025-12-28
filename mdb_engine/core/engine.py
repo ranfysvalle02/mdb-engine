@@ -16,25 +16,22 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
-from pymongo.errors import (ConnectionFailure, InvalidOperation,
-                            OperationFailure, ServerSelectionTimeoutError)
 
 if TYPE_CHECKING:
     from ..auth import AuthorizationProvider
+    from .types import ManifestDict
 
 # Import engine components
-from ..constants import (DEFAULT_MAX_IDLE_TIME_MS, DEFAULT_MAX_POOL_SIZE,
-                         DEFAULT_MIN_POOL_SIZE,
-                         DEFAULT_SERVER_SELECTION_TIMEOUT_MS)
+from ..constants import DEFAULT_MAX_POOL_SIZE, DEFAULT_MIN_POOL_SIZE
 from ..database import ScopedMongoWrapper
-from ..exceptions import InitializationError
-from ..indexes import run_index_creation_for_collection
 from ..observability import (HealthChecker, check_engine_health,
-                             check_mongodb_health, check_pool_health,
-                             clear_app_context)
+                             check_mongodb_health, check_pool_health)
 from ..observability import get_logger as get_contextual_logger
-from ..observability import record_operation, set_app_context
+from .app_registration import AppRegistrationManager
+from .connection import ConnectionManager
+from .index_management import IndexManager
 from .manifest import ManifestParser, ManifestValidator
+from .service_initialization import ServiceInitializer
 
 logger = logging.getLogger(__name__)
 # Use contextual logger for better observability
@@ -80,18 +77,22 @@ class MongoDBEngine:
         self.max_pool_size = max_pool_size
         self.min_pool_size = min_pool_size
 
-        # Engine state
-        self._mongo_client: Optional[AsyncIOMotorClient] = None
-        self._mongo_db: Optional[AsyncIOMotorDatabase] = None
-        self._initialized: bool = False
-        self._apps: Dict[str, Dict[str, Any]] = {}
-        self._memory_services: Dict[str, Any] = (
-            {}
-        )  # App slug -> Mem0MemoryService instance
+        # Initialize component managers
+        self._connection_manager = ConnectionManager(
+            mongo_uri=mongo_uri,
+            db_name=db_name,
+            max_pool_size=max_pool_size,
+            min_pool_size=min_pool_size,
+        )
 
         # Validators
         self.manifest_validator = ManifestValidator()
         self.manifest_parser = ManifestParser()
+
+        # Initialize managers (will be set up after connection is established)
+        self._app_registration_manager: Optional[AppRegistrationManager] = None
+        self._index_manager: Optional[IndexManager] = None
+        self._service_initializer: Optional[ServiceInitializer] = None
 
     async def initialize(self) -> None:
         """
@@ -107,108 +108,23 @@ class MongoDBEngine:
                 for backward compatibility)
             RuntimeError: If initialization fails (for backward compatibility)
         """
-        import time
+        # Initialize connection
+        await self._connection_manager.initialize()
 
-        start_time = time.time()
-
-        if self._initialized:
-            logger.warning(
-                "MongoDBEngine already initialized. Skipping re-initialization."
-            )
-            return
-
-        contextual_logger.info(
-            "Initializing MongoDBEngine",
-            extra={
-                "mongo_uri": self.mongo_uri,
-                "db_name": self.db_name,
-                "max_pool_size": self.max_pool_size,
-                "min_pool_size": self.min_pool_size,
-            },
+        # Set up component managers
+        self._app_registration_manager = AppRegistrationManager(
+            mongo_db=self._connection_manager.mongo_db,
+            manifest_validator=self.manifest_validator,
+            manifest_parser=self.manifest_parser,
         )
 
-        try:
-            # Connect to MongoDB
-            self._mongo_client = AsyncIOMotorClient(
-                self.mongo_uri,
-                serverSelectionTimeoutMS=DEFAULT_SERVER_SELECTION_TIMEOUT_MS,
-                appname="MDB_ENGINE",
-                maxPoolSize=self.max_pool_size,
-                minPoolSize=self.min_pool_size,
-                maxIdleTimeMS=DEFAULT_MAX_IDLE_TIME_MS,
-                retryWrites=True,
-                retryReads=True,
-            )
+        self._index_manager = IndexManager(mongo_db=self._connection_manager.mongo_db)
 
-            # Verify connection
-            await self._mongo_client.admin.command("ping")
-            self._mongo_db = self._mongo_client[self.db_name]
-
-            # Register client for pool metrics monitoring (best practice: track all clients)
-            try:
-                from ..database.connection import register_client_for_metrics
-
-                register_client_for_metrics(self._mongo_client)
-            except ImportError:
-                pass  # Optional feature
-
-            self._initialized = True
-            duration_ms = (time.time() - start_time) * 1000
-            record_operation("engine.initialize", duration_ms, success=True)
-            contextual_logger.info(
-                "MongoDBEngine initialized successfully",
-                extra={
-                    "db_name": self.db_name,
-                    "pool_size": f"{self.min_pool_size}-{self.max_pool_size}",
-                    "duration_ms": round(duration_ms, 2),
-                },
-            )
-        except (ConnectionFailure, ServerSelectionTimeoutError) as e:
-            duration_ms = (time.time() - start_time) * 1000
-            record_operation("engine.initialize", duration_ms, success=False)
-            contextual_logger.critical(
-                "MongoDB connection failed",
-                extra={
-                    "error_type": type(e).__name__,
-                    "error": str(e),
-                    "duration_ms": round(duration_ms, 2),
-                },
-                exc_info=True,
-            )
-            # Raise InitializationError but it's a subclass of RuntimeError
-            # for backward compatibility
-            raise InitializationError(
-                f"Failed to connect to MongoDB: {e}",
-                mongo_uri=self.mongo_uri,
-                db_name=self.db_name,
-                context={
-                    "error_type": type(e).__name__,
-                    "max_pool_size": self.max_pool_size,
-                    "min_pool_size": self.min_pool_size,
-                },
-            ) from e
-        except (TypeError, ValueError, AttributeError, KeyError) as e:
-            # Programming errors - these should not happen
-            duration_ms = (time.time() - start_time) * 1000
-            record_operation("engine.initialize", duration_ms, success=False)
-            contextual_logger.critical(
-                "MongoDBEngine initialization failed",
-                extra={
-                    "error_type": type(e).__name__,
-                    "error": str(e),
-                    "duration_ms": round(duration_ms, 2),
-                },
-                exc_info=True,
-            )
-            # Maintain backward compatibility: InitializationError is a RuntimeError
-            raise InitializationError(
-                f"MongoDBEngine initialization failed: {e}",
-                mongo_uri=self.mongo_uri,
-                db_name=self.db_name,
-                context={
-                    "error_type": type(e).__name__,
-                },
-            ) from e
+        self._service_initializer = ServiceInitializer(
+            mongo_uri=self.mongo_uri,
+            db_name=self.db_name,
+            get_scoped_db_fn=self.get_scoped_db,
+        )
 
     @property
     def mongo_client(self) -> AsyncIOMotorClient:
@@ -221,14 +137,7 @@ class MongoDBEngine:
         Raises:
             RuntimeError: If engine is not initialized
         """
-        if not self._initialized:
-            raise RuntimeError(
-                "MongoDBEngine not initialized. Call initialize() first.",
-            )
-        assert (
-            self._mongo_client is not None
-        ), "MongoDB client should not be None after initialization"
-        return self._mongo_client
+        return self._connection_manager.mongo_client
 
     @property
     def mongo_db(self) -> AsyncIOMotorDatabase:
@@ -241,14 +150,12 @@ class MongoDBEngine:
         Raises:
             RuntimeError: If engine is not initialized
         """
-        if not self._initialized:
-            raise RuntimeError(
-                "MongoDBEngine not initialized. Call initialize() first.",
-            )
-        assert (
-            self._mongo_db is not None
-        ), "MongoDB database should not be None after initialization"
-        return self._mongo_db
+        return self._connection_manager.mongo_db
+
+    @property
+    def _initialized(self) -> bool:
+        """Check if engine is initialized."""
+        return self._connection_manager.initialized
 
     def get_scoped_db(
         self,
@@ -297,14 +204,14 @@ class MongoDBEngine:
             write_scope = app_slug
 
         return ScopedMongoWrapper(
-            real_db=self._mongo_db,
+            real_db=self._connection_manager.mongo_db,
             read_scopes=read_scopes,
             write_scope=write_scope,
             auto_index=auto_index,
         )
 
     async def validate_manifest(
-        self, manifest: Dict[str, Any]
+        self, manifest: "ManifestDict"
     ) -> Tuple[bool, Optional[str], Optional[List[str]]]:
         """
         Validate a manifest against the schema.
@@ -319,33 +226,13 @@ class MongoDBEngine:
             - error_message: Human-readable error message if invalid, None if valid
             - error_paths: List of JSON paths with validation errors, None if valid
         """
-        import time
-
-        start_time = time.time()
-        slug = manifest.get("slug", "unknown")
-
-        try:
-            result = self.manifest_validator.validate(manifest)
-            duration_ms = (time.time() - start_time) * 1000
-            is_valid = result[0]
-            record_operation(
-                "engine.validate_manifest",
-                duration_ms,
-                success=is_valid,
-                experiment_slug=slug,
+        if not self._app_registration_manager:
+            raise RuntimeError(
+                "MongoDBEngine not initialized. Call initialize() first."
             )
-            return result
-        except Exception:
-            duration_ms = (time.time() - start_time) * 1000
-            record_operation(
-                "engine.validate_manifest",
-                duration_ms,
-                success=False,
-                experiment_slug=slug,
-            )
-            raise
+        return await self._app_registration_manager.validate_manifest(manifest)
 
-    async def load_manifest(self, path: Path) -> Dict[str, Any]:
+    async def load_manifest(self, path: Path) -> "ManifestDict":
         """
         Load and validate a manifest from a file.
 
@@ -359,10 +246,14 @@ class MongoDBEngine:
             FileNotFoundError: If file doesn't exist
             ValueError: If validation fails
         """
-        return await self.manifest_parser.load_from_file(path, validate=True)
+        if not self._app_registration_manager:
+            raise RuntimeError(
+                "MongoDBEngine not initialized. Call initialize() first."
+            )
+        return await self._app_registration_manager.load_manifest(path)
 
     async def register_app(
-        self, manifest: Dict[str, Any], create_indexes: bool = True
+        self, manifest: "ManifestDict", create_indexes: bool = True
     ) -> bool:
         """
         Register an app from its manifest.
@@ -383,348 +274,54 @@ class MongoDBEngine:
         Raises:
             RuntimeError: If engine is not initialized.
         """
-        import time
-
-        start_time = time.time()
-
-        if not self._initialized:
+        if not self._app_registration_manager:
             raise RuntimeError(
                 "MongoDBEngine not initialized. Call initialize() first."
             )
 
-        slug: Optional[str] = manifest.get("slug")
-        if not slug:
-            contextual_logger.error(
-                "Cannot register app: missing 'slug' in manifest",
-                extra={"operation": "register_app"},
-            )
-            return False
+        # Create callbacks for service initialization
+        async def create_indexes_callback(slug: str, manifest: "ManifestDict") -> None:
+            if self._index_manager and create_indexes:
+                await self._index_manager.create_app_indexes(slug, manifest)
 
-        # Set app context for logging
-        set_app_context(app_slug=slug)
+        async def seed_data_callback(slug: str, initial_data: Dict[str, Any]) -> None:
+            if self._service_initializer:
+                await self._service_initializer.seed_initial_data(slug, initial_data)
 
-        try:
-            # Normalize manifest: convert Python tuples to lists for JSON schema compatibility
-            # This allows Python code to use tuples (e.g., [("field1", 1)]) while JSON schema
-            # expects lists (e.g., [["field1", 1]]). Normalization happens at the API boundary
-            # to keep validation logic clean and schema-agnostic.
-            from .manifest import _convert_tuples_to_lists
-            normalized_manifest = _convert_tuples_to_lists(manifest)
-
-            # Validate manifest
-            is_valid, error, paths = await self.validate_manifest(normalized_manifest)
-            if not is_valid:
-                duration_ms = (time.time() - start_time) * 1000
-                logger.error(
-                    f"[{slug}] ❌ Manifest validation FAILED: {error}. "
-                    f"Error paths: {paths}. "
-                    f"This blocks app registration and index creation!"
+        async def initialize_memory_callback(
+            slug: str, memory_config: Dict[str, Any]
+        ) -> None:
+            if self._service_initializer:
+                await self._service_initializer.initialize_memory_service(
+                    slug, memory_config
                 )
-                record_operation(
-                    "engine.register_experiment",
-                    duration_ms,
-                    success=False,
-                    experiment_slug=slug,
+
+        async def register_websockets_callback(
+            slug: str, websockets_config: Dict[str, Any]
+        ) -> None:
+            if self._service_initializer:
+                await self._service_initializer.register_websockets(
+                    slug, websockets_config
                 )
-                contextual_logger.error(
-                    "Experiment registration blocked: Manifest validation failed",
-                    extra={
-                        "experiment_slug": slug,
-                        "validation_error": error,
-                        "error_paths": paths,
-                        "duration_ms": round(duration_ms, 2),
-                    },
+
+        async def setup_observability_callback(
+            slug: str,
+            manifest: "ManifestDict",
+            observability_config: Dict[str, Any],
+        ) -> None:
+            if self._service_initializer:
+                await self._service_initializer.setup_observability(
+                    slug, manifest, observability_config
                 )
-                return False
 
-            # Use normalized manifest for rest of registration
-            manifest = normalized_manifest
-
-            # Store app config in memory
-            self._apps[slug] = manifest
-
-            # Persist app config to MongoDB
-            try:
-                await self._mongo_db.apps_config.replace_one(
-                    {"slug": slug},
-                    manifest,
-                    upsert=True
-                )
-            except (ConnectionFailure, ServerSelectionTimeoutError, OperationFailure) as e:
-                logger.warning(
-                    f"Failed to persist app '{slug}' to MongoDB: {e}",
-                    exc_info=True
-                )
-                # Continue even if persistence fails - app is still registered in memory
-            except InvalidOperation as e:
-                logger.debug(f"Cannot persist app '{slug}': MongoDB client is closed: {e}")
-                # Continue - app is still registered in memory
-
-            # Invalidate auth config cache for this app
-            try:
-                from ..auth.integration import invalidate_auth_config_cache
-
-                invalidate_auth_config_cache(slug)
-            except (AttributeError, ImportError, RuntimeError) as e:
-                logger.debug(f"Could not invalidate auth config cache for {slug}: {e}")
-
-            # Create indexes if requested
-            if create_indexes and "managed_indexes" in manifest:
-                logger.info(
-                    f"[{slug}] Creating managed indexes "
-                    f"(create_indexes={create_indexes}, has_managed_indexes=True)"
-                )
-                await self._create_app_indexes(slug, manifest)
-            elif create_indexes:
-                logger.debug(f"[{slug}] Skipping index creation: no 'managed_indexes' in manifest")
-            else:
-                logger.debug(f"[{slug}] Skipping index creation: create_indexes=False")
-
-            # Seed initial data if configured
-            if "initial_data" in manifest:
-                await self._seed_initial_data(slug, manifest["initial_data"])
-
-            # Initialize Memory service if configured (works standalone with
-            # MongoDB, configured via .env)
-            memory_config = manifest.get("memory_config")
-            if memory_config and memory_config.get("enabled", False):
-                await self._initialize_memory_service(slug, memory_config)
-
-            duration_ms = (time.time() - start_time) * 1000
-            # Register WebSocket endpoints if configured
-            websockets_config = manifest.get("websockets")
-            if websockets_config:
-                await self._register_websockets(slug, websockets_config)
-
-            # Set up observability (health checks, metrics, logging)
-            observability_config = manifest.get("observability", {})
-            if observability_config:
-                await self._setup_observability(slug, manifest, observability_config)
-
-            record_operation(
-                "engine.register_app", duration_ms, success=True, app_slug=slug
-            )
-            contextual_logger.info(
-                "App registered successfully",
-                extra={
-                    "app_slug": slug,
-                    "create_indexes": create_indexes,
-                    "memory_enabled": bool(
-                        memory_config and memory_config.get("enabled", False)
-                    ),
-                    "websockets_configured": bool(websockets_config),
-                    "duration_ms": round(duration_ms, 2),
-                },
-            )
-            return True
-        finally:
-            clear_app_context()
-
-    async def _initialize_memory_service(
-        self, slug: str, memory_config: Dict[str, Any]
-    ) -> None:
-        """
-        Initialize Mem0 memory service for an app.
-
-        Memory support is OPTIONAL - only processes if dependencies are available.
-        mem0 handles embeddings and LLM via environment variables (.env).
-
-        Args:
-            slug: App slug
-            memory_config: Memory configuration from manifest (already validated)
-        """
-
-        # Try to import Memory service (optional dependency)
-        try:
-            from ..memory import Mem0MemoryService, Mem0MemoryServiceError
-        except ImportError as e:
-            contextual_logger.warning(
-                f"Memory configuration found for app '{slug}' but "
-                f"dependencies are not available: {e}. "
-                f"Memory support will be disabled for this app. Install with: "
-                f"pip install mem0ai"
-            )
-            return
-
-        contextual_logger.info(
-            f"Initializing Mem0 memory service for app '{slug}'",
-            extra={
-                "app_slug": slug,
-                "collection_name": memory_config.get(
-                    "collection_name", f"{slug}_memories"
-                ),
-                "enable_graph": memory_config.get("enable_graph", False),
-                "embedding_model_dims": memory_config.get("embedding_model_dims", 1536),
-                "infer": memory_config.get("infer", True),
-            },
+        return await self._app_registration_manager.register_app(
+            manifest=manifest,
+            create_indexes_callback=create_indexes_callback if create_indexes else None,
+            seed_data_callback=seed_data_callback,
+            initialize_memory_callback=initialize_memory_callback,
+            register_websockets_callback=register_websockets_callback,
+            setup_observability_callback=setup_observability_callback,
         )
-
-        try:
-            # Extract memory config (exclude 'enabled')
-            # Also include embedding_model, chat_model, temperature from memory_config if provided
-            service_config = {
-                k: v
-                for k, v in memory_config.items()
-                if k != "enabled"
-                and k
-                in [
-                    "collection_name",
-                    "embedding_model_dims",
-                    "enable_graph",
-                    "infer",
-                    "async_mode",
-                    "embedding_model",
-                    "chat_model",
-                    "temperature",
-                ]
-            }
-
-            # Set default collection name if not provided
-            if "collection_name" not in service_config:
-                service_config["collection_name"] = f"{slug}_memories"
-            else:
-                # Ensure collection name is prefixed with app slug (as per manifest description)
-                # This ensures mem0 uses the same collection naming convention as mdb-engine
-                collection_name = service_config["collection_name"]
-                if not collection_name.startswith(f"{slug}_"):
-                    service_config["collection_name"] = f"{slug}_{collection_name}"
-                    contextual_logger.info(
-                        f"Prefixed memory collection name: "
-                        f"'{collection_name}' -> "
-                        f"'{service_config['collection_name']}'",
-                        extra={
-                            "app_slug": slug,
-                            "original": collection_name,
-                            "prefixed": service_config["collection_name"],
-                        },
-                    )
-
-            # Create Memory service with MongoDB integration
-            # mem0 handles embeddings and LLM via environment variables (.env)
-            memory_service = Mem0MemoryService(
-                mongo_uri=self.mongo_uri,
-                db_name=self.db_name,
-                app_slug=slug,
-                config=service_config,
-            )
-            self._memory_services[slug] = memory_service
-
-            contextual_logger.info(
-                f"Mem0 memory service initialized for app '{slug}'",
-                extra={"app_slug": slug},
-            )
-        except Mem0MemoryServiceError as e:
-            contextual_logger.error(
-                f"Failed to initialize memory service for app '{slug}': {e}",
-                extra={"app_slug": slug, "error": str(e)},
-                exc_info=True,
-            )
-        except (ImportError, AttributeError, TypeError, ValueError) as e:
-            contextual_logger.error(
-                f"Error initializing memory service for app '{slug}': {e}",
-                extra={"app_slug": slug, "error": str(e)},
-                exc_info=True,
-            )
-
-    async def _register_websockets(
-        self, slug: str, websockets_config: Dict[str, Any]
-    ) -> None:
-        """
-        Register WebSocket endpoints for an app.
-
-        WebSocket support is OPTIONAL - only processes if dependencies are available.
-
-        Args:
-            slug: App slug
-            websockets_config: WebSocket configuration from manifest
-        """
-        # Try to import WebSocket support (optional dependency)
-        try:
-            from ..routing.websockets import get_websocket_manager
-        except ImportError as e:
-            contextual_logger.warning(
-                f"WebSocket configuration found for app '{slug}' but "
-                f"dependencies are not available: {e}. "
-                f"WebSocket support will be disabled for this app. "
-                f"Install FastAPI with WebSocket support."
-            )
-            return
-
-        contextual_logger.info(
-            f"Registering WebSocket endpoints for app '{slug}'",
-            extra={"app_slug": slug, "endpoint_count": len(websockets_config)},
-        )
-
-        # Store WebSocket configuration for later route registration
-        # Note: Actual FastAPI route registration happens when the app is mounted
-        # This method just validates and stores the configuration
-        if not hasattr(self, "_websocket_configs"):
-            self._websocket_configs = {}
-
-        self._websocket_configs[slug] = websockets_config
-
-        # Pre-initialize WebSocket managers
-        for endpoint_name, endpoint_config in websockets_config.items():
-            path = endpoint_config.get("path", f"/{endpoint_name}")
-            # get_websocket_manager is async, so we need to await it
-            try:
-                await get_websocket_manager(slug)
-            except (ImportError, AttributeError, RuntimeError) as e:
-                contextual_logger.warning(
-                    f"Could not initialize WebSocket manager for {slug}: {e}"
-                )
-                continue
-            contextual_logger.debug(
-                f"Configured WebSocket endpoint '{endpoint_name}' at path '{path}'",
-                extra={"app_slug": slug, "endpoint": endpoint_name, "path": path},
-            )
-
-    async def _seed_initial_data(
-        self, slug: str, initial_data: Dict[str, List[Dict[str, Any]]]
-    ) -> None:
-        """
-        Seed initial data into collections for an app.
-
-        Args:
-            slug: App slug
-            initial_data: Dictionary mapping collection names to arrays of documents
-        """
-        try:
-            from .seeding import seed_initial_data
-
-            db = self.get_scoped_db(slug)
-            results = await seed_initial_data(db, slug, initial_data)
-
-            total_inserted = sum(results.values())
-            if total_inserted > 0:
-                contextual_logger.info(
-                    f"Seeded initial data for app '{slug}'",
-                    extra={
-                        "app_slug": slug,
-                        "collections_seeded": len(
-                            [c for c, count in results.items() if count > 0]
-                        ),
-                        "total_documents": total_inserted,
-                    },
-                )
-            else:
-                contextual_logger.debug(
-                    f"No initial data seeded for app '{slug}' "
-                    f"(collections already had data or were empty)",
-                    extra={"app_slug": slug},
-                )
-        except (
-            OperationFailure,
-            ConnectionFailure,
-            ServerSelectionTimeoutError,
-            ValueError,
-            TypeError,
-        ) as e:
-            contextual_logger.error(
-                f"Failed to seed initial data for app '{slug}': {e}",
-                extra={"app_slug": slug, "error": str(e)},
-                exc_info=True,
-            )
 
     def get_websocket_config(self, slug: str) -> Optional[Dict[str, Any]]:
         """
@@ -736,8 +333,8 @@ class MongoDBEngine:
         Returns:
             WebSocket configuration dict or None if not configured
         """
-        if hasattr(self, "_websocket_configs"):
-            return self._websocket_configs.get(slug)
+        if self._service_initializer:
+            return self._service_initializer.get_websocket_config(slug)
         return None
 
     def register_websocket_routes(self, app: Any, slug: str) -> None:
@@ -870,131 +467,6 @@ class MongoDBEngine:
                 traceback.print_exc()
                 raise
 
-    async def _create_app_indexes(self, slug: str, manifest: Dict[str, Any]) -> None:
-        """
-        Create managed indexes for an app.
-
-        Args:
-            slug: App slug
-            manifest: App manifest
-        """
-        # Import validate_managed_indexes from manifest module
-        from .manifest import validate_managed_indexes
-
-        managed_indexes = manifest.get("managed_indexes", {})
-        logger.info(
-            f"[{slug}] _create_app_indexes called. managed_indexes keys: "
-            f"{list(managed_indexes.keys()) if managed_indexes else 'None'}"
-        )
-        if not managed_indexes:
-            logger.warning(
-                f"[{slug}] No 'managed_indexes' found in manifest. "
-                f"Skipping index creation."
-            )
-            return
-
-        # Validate indexes
-        logger.info(
-            f"[{slug}] Validating {len(managed_indexes)} collection(s) "
-            f"with managed indexes..."
-        )
-        is_valid, error = validate_managed_indexes(managed_indexes)
-        logger.info(
-            f"[{slug}] Index validation result: is_valid={is_valid}, "
-            f"error={error}"
-        )
-        if not is_valid:
-            logger.error(
-                f"[{slug}] ❌ Invalid 'managed_indexes' configuration: {error}. "
-                f"Skipping index creation."
-            )
-            return
-
-        # Create indexes for each collection
-        logger.info(
-            f"[{slug}] Processing {len(managed_indexes)} collection(s) "
-            f"with managed indexes"
-        )
-        for collection_base_name, indexes in managed_indexes.items():
-            logger.info(
-                f"[{slug}] Processing collection '{collection_base_name}' "
-                f"with {len(indexes)} index definition(s)"
-            )
-            if not collection_base_name or not isinstance(indexes, list):
-                logger.warning(
-                    f"[{slug}] Invalid 'managed_indexes' for "
-                    f"'{collection_base_name}': "
-                    f"collection_base_name={collection_base_name}, "
-                    f"indexes={indexes}"
-                )
-                continue
-
-            prefixed_collection_name = f"{slug}_{collection_base_name}"
-            prefixed_defs = []
-            logger.debug(
-                f"[{slug}] Prefixed collection name: '{prefixed_collection_name}'"
-            )
-
-            for idx_def in indexes:
-                idx_n = idx_def.get("name")
-                idx_type = idx_def.get("type")
-                logger.debug(
-                    f"[{slug}] Processing index def: name={idx_n}, "
-                    f"type={idx_type}, def={idx_def}"
-                )
-                if not idx_n or not idx_type:
-                    logger.warning(
-                        f"[{slug}] Skipping malformed index def in "
-                        f"'{collection_base_name}': "
-                        f"name={idx_n}, type={idx_type}"
-                    )
-                    continue
-
-                idx_copy = idx_def.copy()
-                idx_copy["name"] = f"{slug}_{idx_n}"
-                prefixed_defs.append(idx_copy)
-                logger.debug(f"[{slug}] Added prefixed index: '{idx_copy['name']}'")
-
-            if not prefixed_defs:
-                logger.warning(
-                    f"[{slug}] No valid index definitions for "
-                    f"'{collection_base_name}'. Skipping."
-                )
-                continue
-
-            logger.info(
-                f"[{slug}] Creating {len(prefixed_defs)} index(es) for "
-                f"'{prefixed_collection_name}'..."
-            )
-            try:
-                await run_index_creation_for_collection(
-                    db=self._mongo_db,
-                    slug=slug,
-                    collection_name=prefixed_collection_name,
-                    index_definitions=prefixed_defs,
-                )
-                # Wait a bit after all indexes are created to ensure they're all ready
-                import asyncio
-                await asyncio.sleep(1.0)  # Extra wait after all indexes are created
-                logger.info(
-                    f"[{slug}] ✅ Completed index creation for "
-                    f"'{prefixed_collection_name}'"
-                )
-            except (
-                OperationFailure,
-                ConnectionFailure,
-                ServerSelectionTimeoutError,
-                InvalidOperation,
-                ValueError,
-                TypeError,
-            ) as e:
-                logger.error(
-                    f"[{slug}] Error creating indexes for '{prefixed_collection_name}': {e}",
-                    exc_info=True,
-                )
-                # Re-raise to surface errors in tests
-                raise
-
     async def reload_apps(self) -> int:
         """
         Reload all active apps from the database.
@@ -1010,111 +482,16 @@ class MongoDBEngine:
         Raises:
             RuntimeError: If engine is not initialized.
         """
-        if not self._initialized:
+        if not self._app_registration_manager:
             raise RuntimeError(
                 "MongoDBEngine not initialized. Call initialize() first."
             )
 
-        logger.info("Reloading active apps from database...")
+        return await self._app_registration_manager.reload_apps(
+            register_app_callback=self.register_app
+        )
 
-        try:
-            # Fetch active apps
-            active_cfgs = (
-                await self._mongo_db.apps_config.find({"status": "active"})
-                .limit(500)
-                .to_list(None)
-            )
-
-            logger.info(f"Found {len(active_cfgs)} active app(s).")
-
-            # Clear existing registrations
-            self._apps.clear()
-
-            # Register each app
-            registered_count = 0
-            for cfg in active_cfgs:
-                success = await self.register_app(cfg, create_indexes=True)
-                if success:
-                    registered_count += 1
-
-            logger.info(f"✔️ App reload complete. {registered_count} app(s) registered.")
-            return registered_count
-        except (
-            OperationFailure,
-            ConnectionFailure,
-            ServerSelectionTimeoutError,
-            ValueError,
-            TypeError,
-            KeyError,
-        ) as e:
-            logger.error(f"❌ Error reloading apps: {e}", exc_info=True)
-            return 0
-
-    async def _setup_observability(
-        self, slug: str, manifest: Dict[str, Any], observability_config: Dict[str, Any]
-    ) -> None:
-        """
-        Set up observability features (health checks, metrics, logging) from manifest.
-
-        Args:
-            slug: App slug
-            manifest: Full manifest dictionary
-            observability_config: Observability configuration from manifest
-        """
-        try:
-            # Set up health checks
-            health_config = observability_config.get("health_checks", {})
-            if health_config.get("enabled", True):
-                # Health check endpoint will be registered by the app itself
-                # We just log the configuration
-                endpoint = health_config.get("endpoint", "/health")
-                contextual_logger.info(
-                    f"Health checks configured for {slug}",
-                    extra={
-                        "endpoint": endpoint,
-                        "interval_seconds": health_config.get("interval_seconds", 30),
-                    },
-                )
-
-            # Set up metrics
-            metrics_config = observability_config.get("metrics", {})
-            if metrics_config.get("enabled", True):
-                contextual_logger.info(
-                    f"Metrics collection configured for {slug}",
-                    extra={
-                        "operation_metrics": metrics_config.get(
-                            "collect_operation_metrics", True
-                        ),
-                        "performance_metrics": metrics_config.get(
-                            "collect_performance_metrics", True
-                        ),
-                        "custom_metrics": metrics_config.get("custom_metrics", []),
-                    },
-                )
-
-            # Set up logging
-            logging_config = observability_config.get("logging", {})
-            if logging_config:
-                log_level = logging_config.get("level", "INFO")
-                log_format = logging_config.get("format", "json")
-                contextual_logger.info(
-                    f"Logging configured for {slug}",
-                    extra={
-                        "level": log_level,
-                        "format": log_format,
-                        "include_request_id": logging_config.get(
-                            "include_request_id", True
-                        ),
-                    },
-                )
-                # Logging configuration is applied by the app's startup code
-
-        except (ImportError, AttributeError, TypeError, ValueError, KeyError) as e:
-            contextual_logger.warning(
-                f"Could not set up observability for {slug}: {e}", exc_info=True
-            )
-
-    def get_app(self, slug: str) -> Optional[Dict[str, Any]]:
+    def get_app(self, slug: str) -> Optional["ManifestDict"]:
         """
         Get app configuration by slug.
 
@@ -1124,9 +501,13 @@ class MongoDBEngine:
         Returns:
             App manifest dict or None if not found
         """
-        return self._apps.get(slug)
+        if not self._app_registration_manager:
+            raise RuntimeError(
+                "MongoDBEngine not initialized. Call initialize() first."
+            )
+        return self._app_registration_manager.get_app(slug)
 
-    async def get_manifest(self, slug: str) -> Optional[Dict[str, Any]]:
+    async def get_manifest(self, slug: str) -> Optional["ManifestDict"]:
         """
         Get app manifest by slug (async alias for get_app).
 
@@ -1136,7 +517,11 @@ class MongoDBEngine:
         Returns:
             App manifest dict or None if not found
         """
-        return self._apps.get(slug)
+        if not self._app_registration_manager:
+            raise RuntimeError(
+                "MongoDBEngine not initialized. Call initialize() first."
+            )
+        return await self._app_registration_manager.get_manifest(slug)
 
     def get_database(self) -> AsyncIOMotorDatabase:
         """
@@ -1167,26 +552,26 @@ class MongoDBEngine:
                 )
             ```
         """
-        try:
-            service = self._memory_services.get(slug)
-            # Verify the service is still valid (has required attributes)
-            if service is not None:
-                # Quick health check - ensure it has the memory attribute
-                if not hasattr(service, "memory"):
-                    contextual_logger.warning(
-                        f"Memory service for '{slug}' is missing 'memory' "
-                        f"attribute, returning None",
-                        extra={"app_slug": slug},
-                    )
-                    return None
-            return service
-        except (KeyError, AttributeError, TypeError) as e:
-            contextual_logger.error(
-                f"Error retrieving memory service for '{slug}': {e}",
-                exc_info=True,
-                extra={"app_slug": slug, "error": str(e)},
+        if self._service_initializer:
+            return self._service_initializer.get_memory_service(slug)
+        return None
+
+    @property
+    def _apps(self) -> Dict[str, Any]:
+        """
+        Get the apps dictionary (for backward compatibility with tests).
+
+        Returns:
+            Dictionary of registered apps
+
+        Raises:
+            RuntimeError: If engine is not initialized
+        """
+        if not self._app_registration_manager:
+            raise RuntimeError(
+                "MongoDBEngine not initialized. Call initialize() first."
             )
-            return None
+        return self._app_registration_manager._apps
 
     def list_apps(self) -> List[str]:
         """
@@ -1195,7 +580,11 @@ class MongoDBEngine:
         Returns:
             List of app slugs
         """
-        return list(self._apps.keys())
+        if not self._app_registration_manager:
+            raise RuntimeError(
+                "MongoDBEngine not initialized. Call initialize() first."
+            )
+        return self._app_registration_manager.list_apps()
 
     async def shutdown(self) -> None:
         """
@@ -1208,34 +597,13 @@ class MongoDBEngine:
 
         This method is idempotent - it's safe to call multiple times.
         """
-        import time
+        if self._service_initializer:
+            self._service_initializer.clear_services()
 
-        start_time = time.time()
+        if self._app_registration_manager:
+            self._app_registration_manager.clear_apps()
 
-        if not self._initialized:
-            return
-
-        contextual_logger.info("Shutting down MongoDBEngine...")
-
-        # Close MongoDB connection
-        if self._mongo_client:
-            self._mongo_client.close()
-            contextual_logger.info("MongoDB connection closed.")
-
-        self._initialized = False
-        app_count = len(self._apps)
-        self._apps.clear()
-        self._memory_services.clear()
-
-        duration_ms = (time.time() - start_time) * 1000
-        record_operation("engine.shutdown", duration_ms, success=True)
-        contextual_logger.info(
-            "MongoDBEngine shutdown complete",
-            extra={
-                "app_count": app_count,
-                "duration_ms": round(duration_ms, 2),
-            },
-        )
+        await self._connection_manager.shutdown()
 
     def __enter__(self) -> "MongoDBEngine":
         """
@@ -1311,7 +679,9 @@ class MongoDBEngine:
 
         # Register health checks
         health_checker.register_check(lambda: check_engine_health(self))
-        health_checker.register_check(lambda: check_mongodb_health(self._mongo_client))
+        health_checker.register_check(
+            lambda: check_mongodb_health(self._connection_manager.mongo_client)
+        )
 
         # Add pool health check if available (but don't fail overall health if it's just a warning)
         try:
@@ -1323,7 +693,9 @@ class MongoDBEngine:
                 # This follows MongoDB best practice: monitor the actual client
                 # being used
                 async def get_metrics():
-                    metrics = await get_pool_metrics(self._mongo_client)
+                    metrics = await get_pool_metrics(
+                        self._connection_manager.mongo_client
+                    )
                     # Add MongoDBEngine's pool configuration if not already in metrics
                     if metrics.get("status") == "connected":
                         if (

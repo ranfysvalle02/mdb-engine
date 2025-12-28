@@ -280,6 +280,7 @@ We welcome contributions! Please read our [Contributing Guide](CONTRIBUTING.md) 
 
 - Exception handling best practices (Staff Engineer level)
 - Code style guidelines
+- Makefile commands for development
 - Pre-commit hooks setup
 - Testing requirements
 - Pull request process
@@ -289,9 +290,22 @@ We welcome contributions! Please read our [Contributing Guide](CONTRIBUTING.md) 
 - Pre-commit hooks must pass before submitting PRs
 - Tests must be included for new features
 
+**Quick Start for Contributors:**
+```bash
+# Install development dependencies
+make install-dev
+
+# Run quick quality check (lint + unit tests)
+make check
+
+# View all available commands
+make help
+```
+
 **Quick Links:**
 - [Contributing Guide](CONTRIBUTING.md)
 - [Development Setup](SETUP.md)
+- [Testing Guide](docs/guides/testing.md)
 - [Documentation](docs/README.md)
 - [Quick Start Guide](docs/QUICK_START.md)
 

@@ -77,9 +77,7 @@ def _convert_user_id_to_objectid(user_id: Any) -> Tuple[Any, Optional[str]]:
 
     if isinstance(user_id, str):
         # Check if it's a valid ObjectId string (24 hex characters)
-        if len(user_id) == 24 and all(
-            c in "0123456789abcdefABCDEF" for c in user_id
-        ):
+        if len(user_id) == 24 and all(c in "0123456789abcdefABCDEF" for c in user_id):
             try:
                 return ObjectId(user_id), None
             except (TypeError, ValueError):
@@ -305,7 +303,14 @@ async def _try_demo_mode(
 
         return demo_user
 
-    except (ValueError, TypeError, AttributeError, RuntimeError, ConnectionError, KeyError) as e:
+    except (
+        ValueError,
+        TypeError,
+        AttributeError,
+        RuntimeError,
+        ConnectionError,
+        KeyError,
+    ) as e:
         logger.error(f"Demo mode failed for {slug_id}: {e}", exc_info=True)
         return None
 
@@ -692,7 +697,14 @@ async def get_platform_demo_user(
 
         return None
 
-    except (ValueError, TypeError, AttributeError, RuntimeError, ConnectionError, KeyError) as e:
+    except (
+        ValueError,
+        TypeError,
+        AttributeError,
+        RuntimeError,
+        ConnectionError,
+        KeyError,
+    ) as e:
         logger.error(f"Error getting platform demo user: {e}", exc_info=True)
         return None
 
@@ -756,7 +768,14 @@ async def _link_platform_demo_user(
             return user_doc
 
         return None
-    except (ValueError, TypeError, AttributeError, RuntimeError, ConnectionError, KeyError) as e:
+    except (
+        ValueError,
+        TypeError,
+        AttributeError,
+        RuntimeError,
+        ConnectionError,
+        KeyError,
+    ) as e:
         logger.error(
             f"ensure_demo_users_exist: Error auto-linking platform demo "
             f"user for '{slug_id}': {e}",
@@ -856,9 +875,7 @@ async def _create_demo_user_from_config(
 
     # Hash password with bcrypt
     try:
-        password_hash = bcrypt.hashpw(
-            password.encode("utf-8"), bcrypt.gensalt()
-        )
+        password_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt())
     except (ValueError, TypeError, AttributeError) as e:
         logger.error(
             f"Error hashing password for demo user {email}: {e}", exc_info=True
@@ -1162,7 +1179,14 @@ async def get_or_create_demo_user_for_request(
                             KeyError,
                         ) as e:
                             logger.warning(f"Could not auto-create demo user: {e}")
-    except (ValueError, TypeError, AttributeError, RuntimeError, ConnectionError, KeyError) as e:
+    except (
+        ValueError,
+        TypeError,
+        AttributeError,
+        RuntimeError,
+        ConnectionError,
+        KeyError,
+    ) as e:
         logger.debug(f"Could not check platform demo user: {e}")
 
     return None
@@ -1227,7 +1251,14 @@ async def get_or_create_demo_user(
                 f"get_or_create_demo_user: ensure_demo_users_exist returned "
                 f"empty list for '{slug_id}'"
             )
-    except (ValueError, TypeError, AttributeError, RuntimeError, ConnectionError, KeyError) as e:
+    except (
+        ValueError,
+        TypeError,
+        AttributeError,
+        RuntimeError,
+        ConnectionError,
+        KeyError,
+    ) as e:
         logger.error(
             f"get_or_create_demo_user: Could not ensure demo users exist for '{slug_id}': {e}",
             exc_info=True,
@@ -1253,7 +1284,14 @@ async def get_or_create_demo_user(
         if demo_user:
             demo_user["app_user_id"] = str(demo_user.get("_id"))
             return demo_user
-    except (ValueError, TypeError, AttributeError, RuntimeError, ConnectionError, KeyError) as e:
+    except (
+        ValueError,
+        TypeError,
+        AttributeError,
+        RuntimeError,
+        ConnectionError,
+        KeyError,
+    ) as e:
         logger.debug(f"Could not find demo user: {e}")
 
     return None

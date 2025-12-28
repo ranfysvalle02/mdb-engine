@@ -99,6 +99,7 @@ async def _handle_regular_index(
 
         # Wait for index to be ready and verify it was actually created
         import asyncio
+
         max_wait = 10  # Wait up to 10 seconds for index to be ready
         poll_interval = 0.5
         waited = 0
@@ -145,7 +146,7 @@ async def _handle_regular_index(
     ) as e:
         logger.error(
             f"{log_prefix} ❌ Failed to create regular index '{index_name}': {e}",
-            exc_info=True
+            exc_info=True,
         )
         raise
 
@@ -369,8 +370,7 @@ async def _handle_geospatial_index(
         or (isinstance(k, tuple) and len(k) >= 2 and k[1] in geo_types)
         for k in geo_keys
     ) or any(
-        v in geo_types
-        for k, v in (keys.items() if isinstance(keys, dict) else [])
+        v in geo_types for k, v in (keys.items() if isinstance(keys, dict) else [])
     )
 
     if not has_geo:
@@ -433,9 +433,7 @@ async def _handle_search_index(
 
     fields = definition.get("fields", [])
     has_app_id_filter = any(
-        isinstance(f, dict)
-        and f.get("type") == "filter"
-        and f.get("path") == "app_id"
+        isinstance(f, dict) and f.get("type") == "filter" and f.get("path") == "app_id"
         for f in fields
     )
     if not has_app_id_filter:
@@ -456,9 +454,7 @@ async def _handle_search_index(
         normalized_expected = normalize_json_def(definition)
 
         if normalized_current == normalized_expected:
-            logger.info(
-                f"{log_prefix} Search index '{index_name}' definition matches."
-            )
+            logger.info(f"{log_prefix} Search index '{index_name}' definition matches.")
             if (
                 not existing_index.get("queryable")
                 and existing_index.get("status") != "FAILED"
@@ -498,22 +494,14 @@ async def _handle_search_index(
             )
 
             current_paths = [
-                f.get("path", "?")
-                for f in current_fields
-                if isinstance(f, dict)
+                f.get("path", "?") for f in current_fields if isinstance(f, dict)
             ]
             expected_paths = [
-                f.get("path", "?")
-                for f in expected_fields
-                if isinstance(f, dict)
+                f.get("path", "?") for f in expected_fields if isinstance(f, dict)
             ]
 
-            logger.info(
-                f"{log_prefix} Current index filter fields: {current_paths}"
-            )
-            logger.info(
-                f"{log_prefix} Expected index filter fields: {expected_paths}"
-            )
+            logger.info(f"{log_prefix} Current index filter fields: {current_paths}")
+            logger.info(f"{log_prefix} Expected index filter fields: {expected_paths}")
             logger.info(
                 f"{log_prefix} Updating index '{index_name}' "
                 f"with new definition (this may take a few moments)..."
@@ -530,18 +518,14 @@ async def _handle_search_index(
                 f"'{index_name}'. Index is now ready."
             )
     else:
-        logger.info(
-            f"{log_prefix} Creating new search index '{index_name}'..."
-        )
+        logger.info(f"{log_prefix} Creating new search index '{index_name}'...")
         await index_manager.create_search_index(
             name=index_name,
             definition=definition,
             index_type=index_type,
             wait_for_ready=True,
         )
-        logger.info(
-            f"{log_prefix} ✔️ Created new '{index_type}' index '{index_name}'."
-        )
+        logger.info(f"{log_prefix} ✔️ Created new '{index_type}' index '{index_name}'.")
 
 
 async def _handle_hybrid_index(
@@ -607,9 +591,7 @@ async def _handle_hybrid_index(
         f"{log_prefix} Processing vector index '{vector_index_name}' "
         f"for hybrid search..."
     )
-    existing_vector_index = await index_manager.get_search_index(
-        vector_index_name
-    )
+    existing_vector_index = await index_manager.get_search_index(vector_index_name)
     if existing_vector_index:
         current_vector_def = existing_vector_index.get(
             "latestDefinition", existing_vector_index.get("definition")
@@ -661,27 +643,21 @@ async def _handle_hybrid_index(
                 f"'{vector_index_name}'."
             )
     else:
-        logger.info(
-            f"{log_prefix} Creating new vector index '{vector_index_name}'..."
-        )
+        logger.info(f"{log_prefix} Creating new vector index '{vector_index_name}'...")
         await index_manager.create_search_index(
             name=vector_index_name,
             definition=vector_definition,
             index_type="vectorSearch",
             wait_for_ready=True,
         )
-        logger.info(
-            f"{log_prefix} ✔️ Created vector index '{vector_index_name}'."
-        )
+        logger.info(f"{log_prefix} ✔️ Created vector index '{vector_index_name}'.")
 
     # Process text index
     logger.info(
         f"{log_prefix} Processing text index '{text_index_name}' "
         f"for hybrid search..."
     )
-    existing_text_index = await index_manager.get_search_index(
-        text_index_name
-    )
+    existing_text_index = await index_manager.get_search_index(text_index_name)
     if existing_text_index:
         current_text_def = existing_text_index.get(
             "latestDefinition", existing_text_index.get("definition")
@@ -704,18 +680,14 @@ async def _handle_hybrid_index(
                 await index_manager._wait_for_search_index_ready(
                     text_index_name, index_manager.DEFAULT_SEARCH_TIMEOUT
                 )
-                logger.info(
-                    f"{log_prefix} Text index '{text_index_name}' now ready."
-                )
+                logger.info(f"{log_prefix} Text index '{text_index_name}' now ready.")
             elif existing_text_index.get("status") == "FAILED":
                 logger.error(
                     f"{log_prefix} Text index '{text_index_name}' is in FAILED "
                     f"state. Check Atlas UI for detailed error messages."
                 )
             else:
-                logger.info(
-                    f"{log_prefix} Text index '{text_index_name}' is ready."
-                )
+                logger.info(f"{log_prefix} Text index '{text_index_name}' is ready.")
         else:
             logger.warning(
                 f"{log_prefix} Text index '{text_index_name}' "
@@ -732,18 +704,14 @@ async def _handle_hybrid_index(
                 f"'{text_index_name}'."
             )
     else:
-        logger.info(
-            f"{log_prefix} Creating new text index '{text_index_name}'..."
-        )
+        logger.info(f"{log_prefix} Creating new text index '{text_index_name}'...")
         await index_manager.create_search_index(
             name=text_index_name,
             definition=text_definition,
             index_type="search",
             wait_for_ready=True,
         )
-        logger.info(
-            f"{log_prefix} ✔️ Created text index '{text_index_name}'."
-        )
+        logger.info(f"{log_prefix} ✔️ Created text index '{text_index_name}'.")
 
     logger.info(
         f"{log_prefix} ✔️ Hybrid search indexes ready: "
@@ -869,6 +837,7 @@ async def run_index_creation_for_collection(
                 )
                 # Wait for index to be ready after creation
                 import asyncio
+
                 await asyncio.sleep(0.5)  # Give MongoDB time to make index visible
             elif index_type == INDEX_TYPE_TTL:
                 await _handle_ttl_index(
@@ -897,9 +866,7 @@ async def run_index_creation_for_collection(
             else:
                 from ..constants import SUPPORTED_INDEX_TYPES
 
-                supported_types_str = ", ".join(
-                    f"'{t}'" for t in SUPPORTED_INDEX_TYPES
-                )
+                supported_types_str = ", ".join(f"'{t}'" for t in SUPPORTED_INDEX_TYPES)
                 logger.warning(
                     f"{log_prefix} Unknown index type '{index_type}' "
                     f"for index '{index_name}'. "

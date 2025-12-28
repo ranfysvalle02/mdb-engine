@@ -167,7 +167,7 @@ class TestSeedInitialData:
             "test_collection": [{"name": "Test 1", "date": "2024-01-01T12:00:00Z"}]
         }
 
-        with patch("mdb_engine.core.seeding.parse_date") as mock_parse:
+        with patch("dateutil.parser.parse") as mock_parse:
             # Mock dateutil.parser.parse
             try:
                 from dateutil.parser import parse as parse_date_real
@@ -181,6 +181,136 @@ class TestSeedInitialData:
 
             # Verify parse_date was called (if dateutil available)
             # The actual conversion happens inside the function
+
+    @pytest.mark.asyncio
+    async def test_seed_handles_datetime_parsing_errors(self, mock_mongo_collection):
+        """Test handling datetime parsing errors (lines 102, 105-110)."""
+        mock_db = MagicMock()
+        mock_db.app_seeding_metadata = mock_mongo_collection
+        mock_db.test_collection = mock_mongo_collection
+
+        mock_mongo_collection.find_one = AsyncMock(return_value=None)
+        mock_mongo_collection.count_documents = AsyncMock(return_value=0)
+        mock_mongo_collection.insert_one = AsyncMock(
+            return_value=MagicMock(inserted_id="meta_id")
+        )
+
+        # Test invalid datetime string (will fail to parse)
+        initial_data = {
+            "test_collection": [
+                {"name": "Test 1", "date": "invalid-date-string"},
+                {"name": "Test 2", "date": {"$date": "invalid-extended-json"}},
+            ]
+        }
+
+        # Mock insert_many to capture what was actually inserted - must be AsyncMock
+        inserted_docs = []
+
+        async def capture_insert(docs, **kwargs):
+            inserted_docs.extend(docs)
+            return MagicMock(inserted_ids=["id1", "id2"])
+
+        mock_mongo_collection.insert_many = AsyncMock(side_effect=capture_insert)
+
+        await seed_initial_data(mock_db, "test_app", initial_data)
+
+        # Should complete without error - invalid dates kept as strings
+        assert len(inserted_docs) == 2
+        # The invalid date strings should remain as strings (not converted)
+        assert inserted_docs[0]["date"] == "invalid-date-string"
+        assert inserted_docs[1]["date"] == {"$date": "invalid-extended-json"}
+
+    @pytest.mark.asyncio
+    async def test_seed_handles_value_error_datetime_parsing(
+        self, mock_mongo_collection
+    ):
+        """Test handling ValueError during datetime parsing (line 102)."""
+        mock_db = MagicMock()
+        mock_db.app_seeding_metadata = mock_mongo_collection
+        mock_db.test_collection = mock_mongo_collection
+
+        mock_mongo_collection.find_one = AsyncMock(return_value=None)
+        mock_mongo_collection.count_documents = AsyncMock(return_value=0)
+        mock_mongo_collection.insert_one = AsyncMock(
+            return_value=MagicMock(inserted_id="meta_id")
+        )
+
+        # Mock insert_many to capture what was inserted
+        inserted_docs = []
+
+        def capture_insert(docs, **kwargs):
+            inserted_docs.extend(docs)
+            return MagicMock(inserted_ids=["id1"])
+
+        mock_mongo_collection.insert_many = AsyncMock(side_effect=capture_insert)
+
+        # Test ValueError during datetime parsing (invalid format)
+        initial_data = {
+            "test_collection": [
+                {"name": "Test 1", "date": "2023-13-45"}  # Invalid date format
+            ]
+        }
+
+        await seed_initial_data(mock_db, "test_app", initial_data)
+
+        # Should complete without error - invalid date kept as string
+        assert len(inserted_docs) == 1
+        assert inserted_docs[0]["date"] == "2023-13-45"  # Kept as string
+
+    @pytest.mark.asyncio
+    async def test_seed_handles_metadata_update_errors(self, mock_mongo_collection):
+        """Test handling errors when updating seeding metadata (lines 167-175)."""
+        from pymongo.errors import ConnectionFailure, OperationFailure
+
+        mock_db = MagicMock()
+        mock_db.app_seeding_metadata = mock_mongo_collection
+        mock_db.test_collection = mock_mongo_collection
+
+        mock_mongo_collection.find_one = AsyncMock(return_value=None)
+        mock_mongo_collection.count_documents = AsyncMock(return_value=0)
+        mock_mongo_collection.insert_many = AsyncMock(
+            return_value=MagicMock(inserted_ids=["id1"])
+        )
+        mock_mongo_collection.insert_one = AsyncMock(
+            return_value=MagicMock(inserted_id="meta_id")
+        )
+
+        initial_data = {"test_collection": [{"name": "Test 1"}]}
+
+        # Test OperationFailure
+        mock_mongo_collection.update_one = AsyncMock(
+            side_effect=OperationFailure("Update failed")
+        )
+        results = await seed_initial_data(mock_db, "test_app", initial_data)
+        assert results["test_collection"] == 1  # Should still return results
+
+        # Test ConnectionFailure
+        mock_mongo_collection.update_one = AsyncMock(
+            side_effect=ConnectionFailure("Connection failed")
+        )
+        results = await seed_initial_data(mock_db, "test_app", initial_data)
+        assert results["test_collection"] == 1
+
+        # Test ValueError
+        mock_mongo_collection.update_one = AsyncMock(
+            side_effect=ValueError("Invalid value")
+        )
+        results = await seed_initial_data(mock_db, "test_app", initial_data)
+        assert results["test_collection"] == 1
+
+        # Test TypeError
+        mock_mongo_collection.update_one = AsyncMock(
+            side_effect=TypeError("Invalid type")
+        )
+        results = await seed_initial_data(mock_db, "test_app", initial_data)
+        assert results["test_collection"] == 1
+
+        # Test KeyError
+        mock_mongo_collection.update_one = AsyncMock(
+            side_effect=KeyError("Missing key")
+        )
+        results = await seed_initial_data(mock_db, "test_app", initial_data)
+        assert results["test_collection"] == 1
 
     @pytest.mark.asyncio
     async def test_seed_handles_errors_gracefully(self, mock_mongo_collection):

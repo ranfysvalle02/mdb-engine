@@ -51,6 +51,73 @@ def mock_mongo_client() -> MagicMock:
     client = MagicMock(spec=AsyncIOMotorClient)
     client.admin = MagicMock()
     client.admin.command = AsyncMock(return_value={"ok": 1})
+
+    # Mock database access via __getitem__
+    # When assigned to __getitem__, Python calls it as type(client).__getitem__(client, db_name)
+    # So we need to accept self as first arg and db_name as second
+    def get_database(self, db_name):
+        # self is the client instance (we can ignore it since we have closure over client)
+        # db_name is the database name we want
+
+        db = MagicMock(spec=AsyncIOMotorDatabase)
+        db.client = client
+
+        # Mock collection access with async methods
+        def get_collection(name: str):
+            collection = MagicMock(spec=AsyncIOMotorCollection)
+            collection.name = name
+            collection.database = db
+            collection.replace_one = AsyncMock(
+                return_value=MagicMock(modified_count=1, upserted_id="test_id")
+            )
+            collection.find_one = AsyncMock(return_value=None)
+            collection.find = AsyncMock(
+                return_value=AsyncMock(to_list=AsyncMock(return_value=[]))
+            )
+            collection.insert_one = AsyncMock(
+                return_value=MagicMock(inserted_id="test_id")
+            )
+            collection.insert_many = AsyncMock(
+                return_value=MagicMock(inserted_ids=["id1", "id2"])
+            )
+            collection.update_one = AsyncMock(return_value=MagicMock(modified_count=1))
+            collection.update_many = AsyncMock(return_value=MagicMock(modified_count=2))
+            collection.delete_one = AsyncMock(return_value=MagicMock(deleted_count=1))
+            collection.delete_many = AsyncMock(return_value=MagicMock(deleted_count=2))
+            collection.count_documents = AsyncMock(return_value=0)
+            collection.aggregate = AsyncMock(
+                return_value=AsyncMock(to_list=AsyncMock(return_value=[]))
+            )
+            collection.list_indexes = AsyncMock(
+                return_value=AsyncMock(to_list=AsyncMock(return_value=[]))
+            )
+            collection.create_index = AsyncMock(return_value="test_index")
+            collection.drop_index = AsyncMock()
+            return collection
+
+        # Use MockDatabaseWrapper pattern for dynamic collection access
+        class MockDatabaseWrapper:
+            def __init__(self, mock_db, get_collection_func, db_name: str):
+                object.__setattr__(self, "_mock_db", mock_db)
+                object.__setattr__(self, "_get_collection", get_collection_func)
+                object.__setattr__(self, "client", mock_db.client)
+                # Store name as a real attribute (not a mock)
+                object.__setattr__(self, "name", db_name)
+
+            def __getattr__(self, name):
+                if name.startswith("_"):
+                    raise AttributeError(
+                        f"'{type(self).__name__}' object has no attribute '{name}'"
+                    )
+                return self._get_collection(name)
+
+            def __getitem__(self, name):
+                return self._get_collection(name)
+
+        return MockDatabaseWrapper(db, get_collection, db_name)
+
+    # Configure __getitem__ to use our function
+    client.__getitem__ = get_database
     return client
 
 
@@ -99,6 +166,7 @@ def mock_mongo_database(mock_mongo_client: MagicMock) -> MagicMock:
     # Create a simple wrapper that properly handles __getattr__
     class MockDatabaseWrapper:
         """Wrapper that allows __getattr__ for dynamic collection access."""
+
         def __init__(self, mock_db, get_collection_func):
             # Use object.__setattr__ to bypass __setattr__ during init
             object.__setattr__(self, "_mock_db", mock_db)
@@ -109,7 +177,9 @@ def mock_mongo_database(mock_mongo_client: MagicMock) -> MagicMock:
 
         def __getattr__(self, name):
             if name.startswith("_"):
-                raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+                raise AttributeError(
+                    f"'{type(self).__name__}' object has no attribute '{name}'"
+                )
             # Return collection for any attribute access
             return self._get_collection(name)
 
@@ -185,8 +255,9 @@ async def mongodb_engine(
     mock_mongo_client: MagicMock, mongodb_engine_config: Dict[str, Any]
 ) -> AsyncGenerator[MongoDBEngine, None]:
     """Create a MongoDBEngine instance with mocked MongoDB client."""
+    # Patch AsyncIOMotorClient in connection module where it's actually used
     with patch(
-        "mdb_engine.core.engine.AsyncIOMotorClient", return_value=mock_mongo_client
+        "mdb_engine.core.connection.AsyncIOMotorClient", return_value=mock_mongo_client
     ):
         engine = MongoDBEngine(**mongodb_engine_config)
         await engine.initialize()
@@ -298,6 +369,65 @@ def invalid_manifest() -> Dict[str, Any]:
         "name": "",  # Empty name
         "status": "invalid_status",  # Invalid enum value
     }
+
+
+@pytest.fixture
+def sample_websocket_config() -> Dict[str, Any]:
+    """Provide a sample WebSocket configuration for testing."""
+    return {
+        "endpoint1": {
+            "path": "/ws/endpoint1",
+            "auth": {"required": True},
+            "ping_interval": 30,
+        },
+        "endpoint2": {
+            "path": "/ws/endpoint2",
+            "require_auth": False,  # Backward compatibility format
+            "ping_interval": 20,
+        },
+    }
+
+
+@pytest.fixture
+def sample_observability_config() -> Dict[str, Any]:
+    """Provide a sample observability configuration for testing."""
+    return {
+        "health_checks": {
+            "enabled": True,
+            "endpoint": "/health",
+            "interval_seconds": 30,
+        },
+        "metrics": {
+            "enabled": True,
+            "collect_operation_metrics": True,
+            "collect_performance_metrics": True,
+            "custom_metrics": ["custom_metric1", "custom_metric2"],
+        },
+        "logging": {
+            "level": "INFO",
+            "format": "json",
+            "include_request_id": True,
+        },
+    }
+
+
+@pytest.fixture
+def mock_fastapi_app() -> MagicMock:
+    """Create a mock FastAPI application for testing."""
+    app = MagicMock()
+    app.routes = []
+    app.include_router = MagicMock()
+    return app
+
+
+@pytest.fixture
+def mock_memory_service() -> MagicMock:
+    """Create a mock memory service for testing."""
+    service = MagicMock()
+    service.memory = MagicMock()
+    service.add = AsyncMock(return_value=[])
+    service.search = AsyncMock(return_value=[])
+    return service
 
 
 # ============================================================================

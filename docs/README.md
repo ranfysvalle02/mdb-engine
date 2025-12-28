@@ -10,6 +10,7 @@ Welcome to the MDB Engine documentation. This directory contains comprehensive d
 
 ### Guides
 - **[Authorization Guide](AUTHZ.md)** - Authentication and authorization
+- **[Testing Guide](guides/testing.md)** - Comprehensive testing documentation
 - **[Contributing Guide](../CONTRIBUTING.md)** - How to contribute to the project
 
 ### API Documentation
@@ -24,6 +25,7 @@ Welcome to the MDB Engine documentation. This directory contains comprehensive d
 - [Main README](../README.md)
 - [Contributing Guidelines](../CONTRIBUTING.md)
 - [Development Setup](../SETUP.md)
+- [Test Suite](../tests/README.md) - Test structure and examples
 
 ## Documentation Standards
 

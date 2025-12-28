@@ -88,7 +88,13 @@ async def create_oso_cloud_client(
                 logger.info(f"   Using OSO Dev Server at: {url}")
             return oso_client
 
-        except (ValueError, TypeError, AttributeError, RuntimeError, ConnectionError) as e:
+        except (
+            ValueError,
+            TypeError,
+            AttributeError,
+            RuntimeError,
+            ConnectionError,
+        ) as e:
             last_error = e
             if attempt < max_retries - 1:
                 logger.warning(

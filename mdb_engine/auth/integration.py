@@ -143,18 +143,21 @@ async def _setup_authorization_provider(
                 logger.debug(
                     f"Casbin provider not created for {slug_id} (may not be installed)"
                 )
-        except (ImportError, AttributeError, TypeError, ValueError, RuntimeError, KeyError) as e:
-            logger.warning(
-                f"Could not auto-create Casbin provider for {slug_id}: {e}"
-            )
+        except (
+            ImportError,
+            AttributeError,
+            TypeError,
+            ValueError,
+            RuntimeError,
+            KeyError,
+        ) as e:
+            logger.warning(f"Could not auto-create Casbin provider for {slug_id}: {e}")
     elif provider == "oso":
         # Auto-create OSO Cloud provider
         try:
             from .oso_factory import initialize_oso_from_manifest
 
-            authz_provider = await initialize_oso_from_manifest(
-                engine, slug_id, config
-            )
+            authz_provider = await initialize_oso_from_manifest(engine, slug_id, config)
             if authz_provider:
                 app.state.authz_provider = authz_provider
                 logger.info(
@@ -181,9 +184,7 @@ async def _setup_authorization_provider(
                 exc_info=True,
             )
     elif provider == "custom":
-        logger.info(
-            f"Custom provider specified for {slug_id} - manual setup required"
-        )
+        logger.info(f"Custom provider specified for {slug_id} - manual setup required")
 
 
 async def _setup_demo_users(
@@ -338,10 +339,15 @@ async def _setup_token_management(
                 )
 
             logger.info(f"Token management initialized for {slug_id}")
-        except (ImportError, AttributeError, TypeError, ValueError, RuntimeError, KeyError) as e:
-            logger.warning(
-                f"Could not initialize token management for {slug_id}: {e}"
-            )
+        except (
+            ImportError,
+            AttributeError,
+            TypeError,
+            ValueError,
+            RuntimeError,
+            KeyError,
+        ) as e:
+            logger.warning(f"Could not initialize token management for {slug_id}: {e}")
             # Continue without token management (backward compatibility)
 
 
@@ -368,10 +374,7 @@ async def _setup_security_middleware(
                 logger.info(f"Security middleware added for {slug_id}")
             except (RuntimeError, ValueError) as e:
                 error_msg = str(e).lower()
-                if (
-                    "cannot add middleware" in error_msg
-                    or "middleware" in error_msg
-                ):
+                if "cannot add middleware" in error_msg or "middleware" in error_msg:
                     # App has already started - this is expected with lifespan context managers
                     # The middleware is optional for security, so we just log
                     # a debug message
@@ -385,9 +388,7 @@ async def _setup_security_middleware(
                         f"Could not set up security middleware for {slug_id}: {e}"
                     )
         except (AttributeError, TypeError, ValueError, RuntimeError, ImportError) as e:
-            logger.warning(
-                f"Could not set up security middleware for {slug_id}: {e}"
-            )
+            logger.warning(f"Could not set up security middleware for {slug_id}: {e}")
 
 
 async def _setup_cors_and_observability(
@@ -485,10 +486,7 @@ async def _setup_cors_and_observability(
                 logger.info(f"Stale session cleanup middleware added for {slug_id}")
             except (RuntimeError, ValueError) as e:
                 error_msg = str(e).lower()
-                if (
-                    "cannot add middleware" in error_msg
-                    or "middleware" in error_msg
-                ):
+                if "cannot add middleware" in error_msg or "middleware" in error_msg:
                     logger.debug(
                         f"Stale session middleware not added for {slug_id} - "
                         f"app middleware stack already initialized. "

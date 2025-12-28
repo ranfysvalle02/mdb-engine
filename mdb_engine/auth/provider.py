@@ -284,7 +284,13 @@ class OsoAdapter:
                     del self._cache[oldest_key]
 
             return result
-        except (AttributeError, TypeError, ValueError, RuntimeError, ConnectionError) as e:
+        except (
+            AttributeError,
+            TypeError,
+            ValueError,
+            RuntimeError,
+            ConnectionError,
+        ) as e:
             logger.error(
                 f"OSO 'authorize' check failed for ({subject}, {resource}, {action}): {e}",
                 exc_info=True,
@@ -417,7 +423,13 @@ class OsoAdapter:
             if result:
                 await self.clear_cache()
             return result
-        except (AttributeError, TypeError, ValueError, RuntimeError, ConnectionError) as e:
+        except (
+            AttributeError,
+            TypeError,
+            ValueError,
+            RuntimeError,
+            ConnectionError,
+        ) as e:
             logger.warning(f"Failed to add role for user: {e}", exc_info=True)
             return False
 
@@ -471,7 +483,13 @@ class OsoAdapter:
                 # For now, return True as a placeholder
                 logger.debug("OSO Cloud: has_policy check not fully implemented")
                 return True
-        except (AttributeError, TypeError, ValueError, RuntimeError, ConnectionError) as e:
+        except (
+            AttributeError,
+            TypeError,
+            ValueError,
+            RuntimeError,
+            ConnectionError,
+        ) as e:
             logger.warning(f"Failed to check policy: {e}", exc_info=True)
             return False
 
@@ -506,7 +524,13 @@ class OsoAdapter:
                 # For now, return True as a placeholder
                 logger.debug("OSO Cloud: has_role_for_user check not fully implemented")
                 return True
-        except (AttributeError, TypeError, ValueError, RuntimeError, ConnectionError) as e:
+        except (
+            AttributeError,
+            TypeError,
+            ValueError,
+            RuntimeError,
+            ConnectionError,
+        ) as e:
             logger.warning(f"Failed to check role for user: {e}", exc_info=True)
             return False
 
@@ -535,6 +559,12 @@ class OsoAdapter:
             if result:
                 await self.clear_cache()
             return result
-        except (AttributeError, TypeError, ValueError, RuntimeError, ConnectionError) as e:
+        except (
+            AttributeError,
+            TypeError,
+            ValueError,
+            RuntimeError,
+            ConnectionError,
+        ) as e:
             logger.warning(f"Failed to remove role for user: {e}", exc_info=True)
             return False

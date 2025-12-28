@@ -44,6 +44,7 @@ class TestIndexManagement:
 
         # Wait a moment for indexes to be ready (MongoDB indexes are created asynchronously)
         import asyncio
+
         await asyncio.sleep(0.5)
 
         indexes = await real_collection.list_indexes().to_list(length=100)
@@ -54,9 +55,9 @@ class TestIndexManagement:
 
         # Index names are prefixed with slug: "index_test_test_index"
         prefixed_index_name = "index_test_test_index"
-        assert prefixed_index_name in index_names, (
-            f"Index '{prefixed_index_name}' not found. Available indexes: {index_names}"
-        )
+        assert (
+            prefixed_index_name in index_names
+        ), f"Index '{prefixed_index_name}' not found. Available indexes: {index_names}"
 
         # Verify index keys
         test_index = next(idx for idx in indexes if idx["name"] == prefixed_index_name)

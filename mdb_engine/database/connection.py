@@ -143,7 +143,12 @@ def get_shared_mongo_client(
             # This avoids blocking during synchronous initialization
 
             return _shared_client
-        except (ConnectionFailure, ServerSelectionTimeoutError, ValueError, TypeError) as e:
+        except (
+            ConnectionFailure,
+            ServerSelectionTimeoutError,
+            ValueError,
+            TypeError,
+        ) as e:
             logger.error(f"Failed to create shared MongoDB client: {e}", exc_info=True)
             _shared_client = None
             raise
