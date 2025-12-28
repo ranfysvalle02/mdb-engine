@@ -8,12 +8,12 @@ Tests the manifest validation system including:
 - Error reporting
 """
 
+import pytest
+
 from mdb_engine.core.manifest import (ManifestParser, ManifestValidator,
                                       get_schema_version, migrate_manifest,
                                       validate_index_definition,
                                       validate_managed_indexes)
-
-import pytest
 
 
 class TestManifestSchemaVersion:

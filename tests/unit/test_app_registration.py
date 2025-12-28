@@ -6,10 +6,10 @@ Tests app registration, validation, callbacks, and reload functionality.
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from mdb_engine.core.app_registration import AppRegistrationManager
 from mdb_engine.core.manifest import ManifestParser, ManifestValidator
-
-import pytest
 
 
 @pytest.fixture

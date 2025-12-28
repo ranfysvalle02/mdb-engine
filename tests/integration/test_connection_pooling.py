@@ -4,9 +4,9 @@ Integration tests for connection pooling and error handling.
 Tests connection pool limits, timeouts, and health checks.
 """
 
-from mdb_engine.exceptions import InitializationError
-
 import pytest
+
+from mdb_engine.exceptions import InitializationError
 
 
 @pytest.mark.integration

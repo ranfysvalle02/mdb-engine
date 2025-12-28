@@ -6,11 +6,10 @@ Tests index creation, validation, and error handling.
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo.errors import (ConnectionFailure, InvalidOperation,
                             OperationFailure, ServerSelectionTimeoutError)
-
-import pytest
 
 from mdb_engine.core.index_management import IndexManager
 

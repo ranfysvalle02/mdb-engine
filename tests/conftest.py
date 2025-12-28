@@ -13,10 +13,9 @@ import os
 from typing import Any, AsyncGenerator, Dict
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from motor.motor_asyncio import (AsyncIOMotorClient, AsyncIOMotorCollection,
                                  AsyncIOMotorDatabase)
-
-import pytest
 
 # Set test secret key before importing engine components
 if "FLASK_SECRET_KEY" not in os.environ:

@@ -6,12 +6,11 @@ Tests data scoping, query filtering, and isolation logic.
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from motor.motor_asyncio import AsyncIOMotorCollection
 
 from mdb_engine.database.scoped_wrapper import (ScopedCollectionWrapper,
                                                 ScopedMongoWrapper)
-
-import pytest
 
 
 @pytest.mark.unit
@@ -1472,14 +1471,30 @@ class TestAutoIndexManager:
         # First call - creates index
         await auto_manager.ensure_index_for_query({"name": "test"})
 
-        # Wait for task to complete and cleanup
-        await asyncio.sleep(0.1)
+        # Wait for the actual task to complete
+        if index_name in auto_manager._pending_tasks:
+            await auto_manager._pending_tasks[index_name]
+        # Give it a bit more time to ensure cleanup
+        await asyncio.sleep(0.05)
+
+        # Verify first call created the index
+        assert mock_index_manager.create_index.call_count == 1
 
         # Mark index as failed in cache (simulating need to retry)
-        auto_manager._creation_cache[index_name] = False
+        # This simulates a scenario where the index creation appeared to succeed
+        # but then failed, or we need to retry for some reason
+        async with auto_manager._lock:
+            auto_manager._creation_cache[index_name] = False
+            # Ensure pending task is cleaned up
+            auto_manager._pending_tasks.pop(index_name, None)
 
         # Second call with same query - should create new task since previous completed
         await auto_manager.ensure_index_for_query({"name": "test"})
+
+        # Wait for the second task to complete
+        if index_name in auto_manager._pending_tasks:
+            await auto_manager._pending_tasks[index_name]
+        await asyncio.sleep(0.05)
 
         # Verify create_index was called twice (first attempt and retry)
         assert mock_index_manager.create_index.call_count == 2

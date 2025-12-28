@@ -6,10 +6,9 @@ Tests Collection wrapper class methods.
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from pymongo.errors import (AutoReconnect, ConnectionFailure, InvalidOperation,
                             OperationFailure)
-
-import pytest
 
 from mdb_engine.database.abstraction import Collection
 from mdb_engine.exceptions import MongoDBEngineError

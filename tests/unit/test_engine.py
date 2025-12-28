@@ -10,10 +10,10 @@ Tests the core orchestration engine functionality including:
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from mdb_engine.core.engine import MongoDBEngine
 from mdb_engine.exceptions import InitializationError
-
-import pytest
 
 
 class TestMongoDBEngineInitialization:

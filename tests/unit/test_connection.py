@@ -6,10 +6,10 @@ Tests connection initialization, error handling, and metrics registration.
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from mdb_engine.core.connection import ConnectionManager
 from mdb_engine.exceptions import InitializationError
-
-import pytest
 
 
 @pytest.fixture

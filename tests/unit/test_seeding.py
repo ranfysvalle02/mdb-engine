@@ -11,9 +11,9 @@ Tests the initial data seeding system including:
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from mdb_engine.core.seeding import seed_initial_data
-
 import pytest
+
+from mdb_engine.core.seeding import seed_initial_data
 
 
 @pytest.mark.unit

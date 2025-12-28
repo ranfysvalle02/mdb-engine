@@ -981,6 +981,8 @@ class AutoIndexManager:
                 task = self._pending_tasks[index_name]
                 if not task.done():
                     return  # Index creation already in progress
+                # Task is done, clean it up to allow retry if needed
+                self._pending_tasks.pop(index_name, None)
 
             # Create task and track it
             # Cleanup happens in _create_index_safely's finally block

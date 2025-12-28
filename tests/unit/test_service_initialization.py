@@ -11,10 +11,10 @@ Tests service initialization functionality including:
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from mdb_engine.core.service_initialization import ServiceInitializer
 from mdb_engine.database.scoped_wrapper import ScopedMongoWrapper
-
-import pytest
 
 
 @pytest.fixture
