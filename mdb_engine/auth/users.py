@@ -106,7 +106,7 @@ async def _validate_and_decode_session_token(
     try:
         from .jwt import decode_jwt_token
 
-        payload = decode_jwt_token(session_token, SECRET_KEY)
+        payload = decode_jwt_token(session_token, str(SECRET_KEY))
 
         # Verify it's for this app
         if payload.get("app_slug") != slug_id:
@@ -368,7 +368,7 @@ async def create_app_session(
 
     # Sign token
     # Ensure SECRET_KEY is a string (not bytes) for jwt.encode
-    secret_key = SECRET_KEY
+    secret_key = str(SECRET_KEY)
     if isinstance(secret_key, bytes):
         secret_key = secret_key.decode("utf-8")
     elif not isinstance(secret_key, str):

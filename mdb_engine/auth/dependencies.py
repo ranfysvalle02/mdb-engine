@@ -15,6 +15,7 @@ from typing import Any, Dict, Mapping, Optional, Tuple
 import jwt
 from fastapi import Cookie, Depends, HTTPException, Request, status
 
+from ..exceptions import ConfigurationError
 from .jwt import decode_jwt_token, extract_token_metadata
 # Import from local modules
 from .provider import AuthorizationProvider
@@ -23,14 +24,67 @@ from .token_store import TokenBlacklist
 
 logger = logging.getLogger(__name__)
 
-# Load SECRET_KEY from environment; crucial for JWT security.
-SECRET_KEY = os.environ.get("FLASK_SECRET_KEY")
-if not SECRET_KEY:
-    logger.critical(
-        "❌ SECURITY WARNING: FLASK_SECRET_KEY environment variable not set. "
-        "Using insecure default. DO NOT USE IN PRODUCTION."
-    )
-    SECRET_KEY = "a_very_bad_dev_secret_key_12345"  # Insecure default
+_SECRET_KEY_CACHE: Optional[str] = None
+
+
+def _get_secret_key() -> str:
+    """
+    Get and validate SECRET_KEY from environment (lazy evaluation).
+
+    Raises:
+        ConfigurationError: If SECRET_KEY is not set or too weak
+    """
+    global _SECRET_KEY_CACHE
+
+    if _SECRET_KEY_CACHE is not None:
+        return _SECRET_KEY_CACHE
+
+    secret_key = os.environ.get("FLASK_SECRET_KEY") or os.environ.get("SECRET_KEY")
+
+    if not secret_key:
+        raise ConfigurationError(
+            "FLASK_SECRET_KEY environment variable is required for JWT token security. "
+            "Set a strong secret key (minimum 32 characters, cryptographically random). "
+            "Example: export FLASK_SECRET_KEY=$(python -c "
+            "'import secrets; print(secrets.token_urlsafe(32))')",
+            config_key="FLASK_SECRET_KEY",
+        )
+
+    if len(secret_key) < 32:
+        logger.warning(
+            f"SECRET_KEY is only {len(secret_key)} characters. "
+            "Recommendation: Use at least 32 characters for production."
+        )
+
+    _SECRET_KEY_CACHE = secret_key
+    return _SECRET_KEY_CACHE
+
+
+class _SecretKey:
+    """Lazy-validated secret key that behaves like a string."""
+
+    def __str__(self) -> str:
+        return _get_secret_key()
+
+    def __repr__(self) -> str:
+        return f"<SECRET_KEY (validated on access)>"
+
+    def __eq__(self, other: Any) -> bool:
+        return str(self) == str(other) if other else False
+
+    def __ne__(self, other: Any) -> bool:
+        return not self.__eq__(other)
+
+    def __hash__(self) -> int:
+        return hash(str(self))
+
+
+def _get_secret_key_value() -> str:
+    """Get SECRET_KEY as a string value (for use in function calls)."""
+    return _get_secret_key()
+
+
+SECRET_KEY = _SecretKey()
 
 
 def _validate_next_url(next_url: Optional[str]) -> str:
@@ -101,7 +155,7 @@ async def get_current_user(
 
     try:
         # Extract token metadata first to get jti
-        metadata = extract_token_metadata(token, SECRET_KEY)
+        metadata = extract_token_metadata(token, str(SECRET_KEY))
         jti = metadata.get("jti") if metadata else None
 
         # Check blacklist if available
@@ -125,7 +179,7 @@ async def get_current_user(
                         )
                         return None
 
-        payload = decode_jwt_token(token, SECRET_KEY)
+        payload = decode_jwt_token(token, str(SECRET_KEY))
 
         # Verify token type (should be access token for backward compatibility, or no type)
         token_type = payload.get("type")
@@ -173,7 +227,7 @@ async def get_current_user_from_request(request: Request) -> Optional[Dict[str, 
 
     try:
         # Extract token metadata first to get jti
-        metadata = extract_token_metadata(token, SECRET_KEY)
+        metadata = extract_token_metadata(token, str(SECRET_KEY))
         jti = metadata.get("jti") if metadata else None
 
         # Check blacklist if available
@@ -198,7 +252,7 @@ async def get_current_user_from_request(request: Request) -> Optional[Dict[str, 
                         )
                         return None
 
-        payload = decode_jwt_token(token, SECRET_KEY)
+        payload = decode_jwt_token(token, str(SECRET_KEY))
 
         # Verify token type (should be access token for backward compatibility, or no type)
         token_type = payload.get("type")
@@ -265,7 +319,7 @@ async def get_refresh_token(
                     )
                     return None
 
-        payload = decode_jwt_token(refresh_token, SECRET_KEY)
+        payload = decode_jwt_token(refresh_token, str(SECRET_KEY))
 
         # Verify token type
         token_type = payload.get("type")
@@ -628,7 +682,7 @@ async def refresh_access_token(
 
         # Generate new token pair
         access_token, new_refresh_token, token_metadata = generate_token_pair(
-            user_data, SECRET_KEY, device_info=device_info
+            user_data, str(SECRET_KEY), device_info=device_info
         )
 
         # If rotation enabled, revoke old refresh token

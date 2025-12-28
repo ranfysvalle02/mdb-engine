@@ -26,7 +26,8 @@ pip install pyjwt casbin  # For JWT and Casbin support
 ### Environment Variables
 
 ```bash
-# Required: Secret key for JWT signing
+# Required: Secret key for JWT signing (must be set, engine will fail to start if missing)
+# Generate a secure key: python -c 'import secrets; print(secrets.token_urlsafe(32))'
 export FLASK_SECRET_KEY="your-secret-key-here"
 
 # Optional: Token TTL (seconds)
@@ -543,7 +544,7 @@ async def login(credentials: dict):
 ## Best Practices
 
 1. **Always use HTTPS in production** - JWT tokens should only be transmitted over HTTPS
-2. **Set strong SECRET_KEY** - Use a cryptographically secure random key
+2. **Set strong SECRET_KEY (Required)** - The engine requires `FLASK_SECRET_KEY` to be set. Use a cryptographically secure random key (minimum 32 characters). The engine will fail to start if this is not configured.
 3. **Use token blacklisting** - Implement token revocation for logout and security
 4. **Monitor sessions** - Track active sessions and clean up inactive ones
 5. **Implement refresh tokens** - Use refresh tokens for long-lived sessions

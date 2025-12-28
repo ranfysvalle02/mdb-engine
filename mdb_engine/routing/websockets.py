@@ -404,20 +404,11 @@ async def authenticate_websocket(
                 return None, None  # Signal auth failure
             return None, None
 
-        # Decode JWT token
-        import os
-
+        from ..auth.dependencies import SECRET_KEY
         from ..auth.jwt import decode_jwt_token
 
-        # Get SECRET_KEY from environment (same as used in auth dependencies)
-        secret_key = (
-            os.environ.get("FLASK_SECRET_KEY")
-            or os.environ.get("SECRET_KEY")
-            or "a_very_bad_dev_secret_key_12345"
-        )
-
         try:
-            payload = decode_jwt_token(token, secret_key)
+            payload = decode_jwt_token(token, str(SECRET_KEY))
             user_id = payload.get("sub") or payload.get("user_id")
             user_email = payload.get("email")
 

@@ -295,7 +295,7 @@ async def login_user(
         # Generate token pair
         access_token, refresh_token, token_metadata = generate_token_pair(
             user_data,
-            SECRET_KEY,
+            str(SECRET_KEY),
             device_info=device_info,
             access_token_ttl=access_token_ttl,
             refresh_token_ttl=refresh_token_ttl,
@@ -464,7 +464,7 @@ async def register_user(
         }
 
         access_token, refresh_token, token_metadata = generate_token_pair(
-            user_data, SECRET_KEY, device_info=device_info
+            user_data, str(SECRET_KEY), device_info=device_info
         )
 
         session_mgr = await get_session_manager(request)
@@ -539,7 +539,7 @@ async def _revoke_token_from_cookie(
 
     from .jwt import extract_token_metadata
 
-    metadata = extract_token_metadata(token, SECRET_KEY)
+    metadata = extract_token_metadata(token, str(SECRET_KEY))
     if metadata:
         jti = metadata.get("jti")
         if jti:
@@ -568,7 +568,7 @@ async def _revoke_session(request: Request) -> None:
 
     from .jwt import extract_token_metadata
 
-    metadata = extract_token_metadata(refresh_token, SECRET_KEY)
+    metadata = extract_token_metadata(refresh_token, str(SECRET_KEY))
     if metadata:
         refresh_jti = metadata.get("jti")
         if refresh_jti:

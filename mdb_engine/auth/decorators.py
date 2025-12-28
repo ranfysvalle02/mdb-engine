@@ -293,7 +293,7 @@ def auto_token_setup(func: Optional[Callable[..., Awaitable[Any]]] = None):
 
                     # Generate token pair
                     access_token, refresh_token, token_metadata = generate_token_pair(
-                        user_data, SECRET_KEY, device_info=device_info
+                        user_data, str(SECRET_KEY), device_info=device_info
                     )
 
                     # Create session if available

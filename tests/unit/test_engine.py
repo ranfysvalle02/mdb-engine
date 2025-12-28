@@ -870,8 +870,13 @@ class TestMongoDBEngineHealthMetrics:
     @pytest.mark.asyncio
     async def test_get_health_status_import_error_handled(self, mongodb_engine):
         """Test get_health_status handles ImportError when registering pool check."""
-        mock_health_result = MagicMock()
-        mock_health_result.status.value = "healthy"
+        from mdb_engine.observability.health import HealthCheckResult, HealthStatus
+
+        mock_health_result = HealthCheckResult(
+            name="test",
+            status=HealthStatus.HEALTHY,
+            message="Test check",
+        )
 
         with patch(
             "mdb_engine.core.engine.check_engine_health",
@@ -882,41 +887,43 @@ class TestMongoDBEngineHealthMetrics:
                 return_value=mock_health_result,
             ):
                 # Simulate ImportError when trying to import get_pool_metrics
-                # The import happens inside the try block, so we need to patch it
-                # at the import location
-                with patch(
-                    "mdb_engine.database.connection.get_pool_metrics",
-                    side_effect=ImportError("No module"),
-                ):
-                    # Actually, we need to simulate the import failing, not the function call
-                    # Let's patch the import statement itself
-                    import sys
+                # The import happens at line 688: from ..database.connection import get_pool_metrics
+                # Patch the import to raise ImportError
+                import sys
 
-                    original_connection = sys.modules.get(
-                        "mdb_engine.database.connection"
-                    )
-                    try:
-                        # Temporarily remove the module to cause ImportError
-                        if "mdb_engine.database.connection" in sys.modules:
-                            del sys.modules["mdb_engine.database.connection"]
+                # Create a mock module that raises ImportError when get_pool_metrics is accessed
+                class MockModule:
+                    def __getattr__(self, name):
+                        if name == "get_pool_metrics":
+                            raise ImportError("No module")
+                        raise AttributeError(f"module has no attribute '{name}'")
 
-                        # Should not raise, just skip pool check
-                        # (ImportError is caught at line 734)
-                        result = await mongodb_engine.get_health_status()
-                        assert result is not None
-                        assert result["status"] == "healthy"
-                    finally:
-                        # Restore module
-                        if original_connection:
-                            sys.modules["mdb_engine.database.connection"] = (
-                                original_connection
-                            )
+                # Replace the module temporarily
+                original_module = sys.modules.get("mdb_engine.database.connection")
+                sys.modules["mdb_engine.database.connection"] = MockModule()
+
+                try:
+                    # Should not raise, just skip pool check
+                    result = await mongodb_engine.get_health_status()
+                    assert result is not None
+                    assert result["status"] == "healthy"
+                finally:
+                    # Restore original module
+                    if original_module is not None:
+                        sys.modules["mdb_engine.database.connection"] = original_module
+                    elif "mdb_engine.database.connection" in sys.modules:
+                        del sys.modules["mdb_engine.database.connection"]
 
     @pytest.mark.asyncio
     async def test_get_health_status_pool_check_import_error(self, mongodb_engine):
         """Test get_health_status handles ImportError when pool check import fails."""
-        mock_health_result = MagicMock()
-        mock_health_result.status.value = "healthy"
+        from mdb_engine.observability.health import HealthCheckResult, HealthStatus
+
+        mock_health_result = HealthCheckResult(
+            name="test",
+            status=HealthStatus.HEALTHY,
+            message="Test check",
+        )
 
         with patch(
             "mdb_engine.core.engine.check_engine_health",
@@ -926,15 +933,31 @@ class TestMongoDBEngineHealthMetrics:
                 "mdb_engine.core.engine.check_mongodb_health",
                 return_value=mock_health_result,
             ):
-                # Simulate ImportError when trying to register pool check
-                with patch(
-                    "mdb_engine.core.engine.check_pool_health",
-                    side_effect=ImportError("No module"),
-                ):
+                # Simulate ImportError by replacing the module with one that raises ImportError
+                import sys
+
+                # Create a mock module that raises ImportError when get_pool_metrics is accessed
+                class MockModule:
+                    def __getattr__(self, name):
+                        if name == "get_pool_metrics":
+                            raise ImportError("No module")
+                        raise AttributeError(f"module has no attribute '{name}'")
+
+                # Replace the module temporarily
+                original_module = sys.modules.get("mdb_engine.database.connection")
+                sys.modules["mdb_engine.database.connection"] = MockModule()
+
+                try:
                     # Should not raise, just skip pool check
                     result = await mongodb_engine.get_health_status()
                     assert result is not None
                     assert result["status"] == "healthy"
+                finally:
+                    # Restore original module
+                    if original_module is not None:
+                        sys.modules["mdb_engine.database.connection"] = original_module
+                    elif "mdb_engine.database.connection" in sys.modules:
+                        del sys.modules["mdb_engine.database.connection"]
 
 
 class TestMongoDBEngineCallbackErrors:

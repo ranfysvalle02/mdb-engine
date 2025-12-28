@@ -73,6 +73,8 @@ Stop manually running `createIndex` in the Mongo shell. Define your indexes in y
 ```bash
 pip install mdb-engine
 
+# Set required environment variable for JWT security
+export FLASK_SECRET_KEY=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')
 ```
 
 ### 1. Define Your Manifest
@@ -202,6 +204,59 @@ async def protected_route(
 * **OSO Support:** Use `"provider": "oso"` for OSO/Polar-based authorization
 * **Custom Models:** Provide custom Casbin model files or use built-in RBAC/ACL
 * **Manual Setup:** Override auto-creation by setting `app.state.authz_provider` manually
+
+### 🛡️ Security Helpers (Optional)
+
+MDB_ENGINE provides optional security helpers and decorators that you can opt-in to use. These are **not enforced** by default - the engine provides the building blocks, you choose which security features to enable.
+
+**Optional Decorators:**
+
+* **`@rate_limit_auth`** - Rate limiting for authentication endpoints
+  ```python
+  from mdb_engine.auth import rate_limit_auth
+  
+  @app.post("/login")
+  @rate_limit_auth(max_attempts=5, window_seconds=300)
+  async def login(credentials: dict):
+      return await authenticate(credentials)
+  ```
+
+* **`@token_security`** - CSRF protection and HTTPS enforcement
+  ```python
+  from mdb_engine.auth import token_security
+  
+  @app.post("/sensitive")
+  @token_security(enforce_https=True, check_csrf=True)
+  async def sensitive_operation(user: dict = Depends(get_current_user)):
+      return {"data": "sensitive"}
+  ```
+
+* **`@require_auth`** - Authentication requirement decorator
+  ```python
+  from mdb_engine.auth import require_auth
+  
+  @app.get("/dashboard")
+  @require_auth(redirect_to="/login")
+  async def dashboard(request: Request):
+      user = request.state.user
+      return {"user": user}
+  ```
+
+**Optional Middleware:**
+
+* **`SecurityMiddleware`** - Security headers and CSRF token management
+  ```python
+  from mdb_engine.auth import SecurityMiddleware
+  
+  app.add_middleware(
+      SecurityMiddleware,
+      require_https=True,
+      csrf_protection=True,
+      security_headers=True
+  )
+  ```
+
+These helpers are **opt-in** - use them when you need additional security layers beyond the core engine functionality.
 
 ### 📡 Built-in WebSockets
 

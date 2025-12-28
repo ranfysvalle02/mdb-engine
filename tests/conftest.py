@@ -9,12 +9,17 @@ This module provides:
 """
 
 import asyncio
+import os
 from typing import Any, AsyncGenerator, Dict
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from motor.motor_asyncio import (AsyncIOMotorClient, AsyncIOMotorCollection,
                                  AsyncIOMotorDatabase)
+
+# Set test secret key before importing engine components
+if "FLASK_SECRET_KEY" not in os.environ:
+    os.environ["FLASK_SECRET_KEY"] = "test_secret_key_for_testing_only_" + "x" * 32
 
 # Import engine components for testing
 from mdb_engine.core.engine import MongoDBEngine
