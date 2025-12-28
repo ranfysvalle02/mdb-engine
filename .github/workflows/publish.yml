@@ -4,14 +4,6 @@ on:
   release:
     types: [published]
   workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version to publish (e.g., 0.1.7)'
-        required: false
-      test_pypi:
-        description: 'Publish to TestPyPI instead'
-        type: boolean
-        default: false
 
 jobs:
   publish:
@@ -39,15 +31,7 @@ jobs:
       - name: Check package
         run: python -m twine check dist/*
 
-      - name: Publish to TestPyPI (if requested)
-        if: ${{ inputs.test_pypi == true }}
-        env:
-          TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.TEST_PYPI_API_TOKEN }}
-        run: python -m twine upload --repository testpypi dist/*
-
       - name: Publish to PyPI
-        if: ${{ inputs.test_pypi != true }}
         env:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}

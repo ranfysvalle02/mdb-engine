@@ -6,17 +6,15 @@ This guide shows you the **least effort** way to publish `mdb-engine` to PyPI.
 
 1. **PyPI Account**: Create an account at https://pypi.org/account/register/
 2. **API Token**: Generate a token at https://pypi.org/manage/account/token/
-   - For TestPyPI: https://test.pypi.org/manage/account/token/
    - **Important**: Copy the token immediately - you won't see it again!
 
 ## Option 1: Automated Publishing via GitHub (Recommended - Least Effort)
 
 ### Setup (One-time)
 
-1. **Add GitHub Secrets**:
+1. **Add GitHub Secret**:
    - Go to your GitHub repo → Settings → Secrets and variables → Actions
    - Add secret: `PYPI_API_TOKEN` with your PyPI token
-   - (Optional) Add secret: `TEST_PYPI_API_TOKEN` for TestPyPI testing
 
 2. **Update package metadata** (if not done):
    - Edit `setup.py` and `pyproject.toml`:
@@ -42,24 +40,8 @@ The GitHub Action will automatically build and publish to PyPI when the release 
 
 **Method B: Manual Workflow Trigger**
 - Go to Actions → "Publish to PyPI" → Run workflow
-- Optionally check "Publish to TestPyPI instead" to test first
 
 ## Option 2: Manual Publishing (Local)
-
-### Quick Test on TestPyPI
-
-```bash
-# Set your TestPyPI token
-export TEST_PYPI_API_TOKEN=your_test_pypi_token_here
-
-# Build and publish to TestPyPI
-make publish-test
-
-# Test installation
-pip install -i https://test.pypi.org/simple/ mdb-engine
-```
-
-### Publish to Production PyPI
 
 ```bash
 # Set your PyPI token
@@ -78,12 +60,8 @@ make build
 # Check built packages
 make build-check
 
-# Publish to TestPyPI
-export TEST_PYPI_API_TOKEN=your_token
-make publish-test
-
 # Publish to PyPI
-export PYPI_API_TOKEN=your_token
+export PYPI_API_TOKEN=your_pypi_token_here
 make publish
 ```
 
@@ -101,7 +79,6 @@ Before publishing, update the version in **both** files:
 - [ ] Linting passes: `make lint`
 - [ ] Build succeeds: `make build`
 - [ ] Package check passes: `make build-check`
-- [ ] (Optional) Test on TestPyPI first
 
 ## Troubleshooting
 
@@ -110,9 +87,21 @@ Before publishing, update the version in **both** files:
 - Check: https://pypi.org/project/mdb-engine/
 - If taken, update `name` in `setup.py` and `pyproject.toml`
 
-**"Invalid token"**
-- Make sure you're using the correct token (PyPI vs TestPyPI)
-- Tokens start with `pypi-` for PyPI or `pypi-AgEI...` for TestPyPI
+**"403 Forbidden" or "Invalid token"**
+- **Most common cause**: You ran `twine upload` directly without credentials
+- **Solution**: Use the Makefile command which handles authentication:
+  ```bash
+  export PYPI_API_TOKEN=your_pypi_token_here
+  make publish
+  ```
+- Make sure you're using a valid PyPI token from https://pypi.org/manage/account/token/
+- Tokens start with `pypi-`
+- If using command directly, you must provide credentials:
+  ```bash
+  python -m twine upload dist/* \
+    --username __token__ \
+    --password your_pypi_token_here
+  ```
 
 **"Version already exists"**
 - Bump the version number and try again
