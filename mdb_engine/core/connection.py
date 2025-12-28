@@ -14,12 +14,9 @@ from typing import Optional
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError
 
-from ..constants import (
-    DEFAULT_MAX_IDLE_TIME_MS,
-    DEFAULT_MAX_POOL_SIZE,
-    DEFAULT_MIN_POOL_SIZE,
-    DEFAULT_SERVER_SELECTION_TIMEOUT_MS,
-)
+from ..constants import (DEFAULT_MAX_IDLE_TIME_MS, DEFAULT_MAX_POOL_SIZE,
+                         DEFAULT_MIN_POOL_SIZE,
+                         DEFAULT_SERVER_SELECTION_TIMEOUT_MS)
 from ..exceptions import InitializationError
 from ..observability import get_logger as get_contextual_logger
 from ..observability import record_operation
@@ -76,7 +73,9 @@ class ConnectionManager:
         start_time = time.time()
 
         if self._initialized:
-            logger.warning("ConnectionManager already initialized. Skipping re-initialization.")
+            logger.warning(
+                "ConnectionManager already initialized. Skipping re-initialization."
+            )
             return
 
         contextual_logger.info(

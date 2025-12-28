@@ -147,7 +147,9 @@ def create_embedding_dependency(app_slug: str, engine: Optional[Any] = None):
                     "embedding dependencies are installed.",
                 )
             else:
-                raise RuntimeError(f"Embedding service not available for app '{app_slug}'")
+                raise RuntimeError(
+                    f"Embedding service not available for app '{app_slug}'"
+                )
         return embedding_service
 
     return _get_embedding_service

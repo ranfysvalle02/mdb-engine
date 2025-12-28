@@ -164,7 +164,9 @@ def generate_token_pair(
         "jti": access_jti,
         "device_id": device_id,
     }
-    access_token = encode_jwt_token(access_payload, secret_key, expires_in=access_token_ttl)
+    access_token = encode_jwt_token(
+        access_payload, secret_key, expires_in=access_token_ttl
+    )
 
     # Generate refresh token
     refresh_jti = str(uuid.uuid4())
@@ -175,7 +177,9 @@ def generate_token_pair(
         "email": user_data.get("email"),
         "device_id": device_id,
     }
-    refresh_token = encode_jwt_token(refresh_payload, secret_key, expires_in=refresh_token_ttl)
+    refresh_token = encode_jwt_token(
+        refresh_payload, secret_key, expires_in=refresh_token_ttl
+    )
 
     # Token metadata
     token_metadata = {

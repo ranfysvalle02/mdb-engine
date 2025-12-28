@@ -28,7 +28,9 @@ class TestMongoDBEngineIntegration:
         await engine.shutdown()
         assert engine._initialized is False
 
-    async def test_register_app_with_real_db(self, real_mongodb_engine, sample_manifest):
+    async def test_register_app_with_real_db(
+        self, real_mongodb_engine, sample_manifest
+    ):
         """Test app registration with real MongoDB."""
         engine = real_mongodb_engine
 
@@ -43,7 +45,9 @@ class TestMongoDBEngineIntegration:
         assert stored_app is not None
         assert stored_app["slug"] == sample_manifest["slug"]
 
-    async def test_get_app_after_registration(self, real_mongodb_engine, sample_manifest):
+    async def test_get_app_after_registration(
+        self, real_mongodb_engine, sample_manifest
+    ):
         """Test getting registered app from engine."""
         engine = real_mongodb_engine
 
@@ -117,7 +121,9 @@ class TestMongoDBEngineIntegration:
 
         mongo_uri = mongodb_connection_string
 
-        async with MongoDBEngine(mongo_uri=mongo_uri, db_name="test_context_db") as engine:
+        async with MongoDBEngine(
+            mongo_uri=mongo_uri, db_name="test_context_db"
+        ) as engine:
             assert engine._initialized is True
 
         # After context exit, should be shut down

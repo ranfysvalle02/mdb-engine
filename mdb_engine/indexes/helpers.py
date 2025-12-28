@@ -11,7 +11,9 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 logger = logging.getLogger(__name__)
 
 
-def normalize_keys(keys: Union[Dict[str, Any], List[Tuple[str, Any]]]) -> List[Tuple[str, Any]]:
+def normalize_keys(
+    keys: Union[Dict[str, Any], List[Tuple[str, Any]]]
+) -> List[Tuple[str, Any]]:
     """
     Normalize index keys to a consistent format.
 

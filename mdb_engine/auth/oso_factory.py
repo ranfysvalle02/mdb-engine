@@ -50,7 +50,9 @@ async def create_oso_cloud_client(
 
         logger.debug("✅ Imported Oso from oso_cloud")
     except ImportError:
-        raise ImportError("OSO Cloud SDK not installed. Install with: pip install oso-cloud")
+        raise ImportError(
+            "OSO Cloud SDK not installed. Install with: pip install oso-cloud"
+        )
 
     # Get API key from parameter or environment
     if not api_key:
@@ -79,7 +81,9 @@ async def create_oso_cloud_client(
 
             # Note: OSO client creation doesn't actually connect to the server
             # The connection happens on first API call, so we'll catch errors then
-            logger.info(f"✅ OSO Cloud client created successfully (URL: {url or 'default'})")
+            logger.info(
+                f"✅ OSO Cloud client created successfully (URL: {url or 'default'})"
+            )
             if url:
                 logger.info(f"   Using OSO Dev Server at: {url}")
             return oso_client
@@ -133,15 +137,21 @@ async def setup_initial_oso_facts(
             try:
                 user = role_assignment.get("user")
                 role = role_assignment.get("role")
-                resource = role_assignment.get("resource", "documents")  # Default to "documents"
+                resource = role_assignment.get(
+                    "resource", "documents"
+                )  # Default to "documents"
 
                 if user and role:
                     # For OSO Cloud, we add has_role facts with resource context
                     # This supports resource-based authorization
                     await authz_provider.add_role_for_user(user, role, resource)
-                    logger.debug(f"Added role '{role}' for user '{user}' on resource '{resource}'")
+                    logger.debug(
+                        f"Added role '{role}' for user '{user}' on resource '{resource}'"
+                    )
             except (ValueError, TypeError, AttributeError, RuntimeError) as e:
-                logger.warning(f"Failed to add initial role assignment {role_assignment}: {e}")
+                logger.warning(
+                    f"Failed to add initial role assignment {role_assignment}: {e}"
+                )
 
     # Note: initial_policies are not used - we use has_role facts instead
     # The policy derives permissions from roles, not from explicit grants_permission facts
@@ -171,7 +181,9 @@ async def initialize_oso_from_manifest(
 
         # Only proceed if provider is oso
         if provider != "oso":
-            logger.debug(f"Provider is '{provider}', not 'oso' - skipping OSO initialization")
+            logger.debug(
+                f"Provider is '{provider}', not 'oso' - skipping OSO initialization"
+            )
             return None
 
         logger.info(f"Initializing OSO Cloud provider for app '{app_slug}'...")
@@ -218,12 +230,18 @@ async def initialize_oso_from_manifest(
                 test_actor = Value("User", "test")
                 test_resource = Value("Document", "test")
                 # This might fail, but it tests if the server is responding
-                await asyncio.to_thread(oso_client.authorize, test_actor, "read", test_resource)
+                await asyncio.to_thread(
+                    oso_client.authorize, test_actor, "read", test_resource
+                )
                 logger.debug("✅ OSO Dev Server connection test successful")
             except (TimeoutError, OSError, RuntimeError) as test_error:
                 # Type 2: Recoverable - connection test failed, check if it's a connection error
                 error_str = str(test_error).lower()
-                if "connection" in error_str or "refused" in error_str or "timeout" in error_str:
+                if (
+                    "connection" in error_str
+                    or "refused" in error_str
+                    or "timeout" in error_str
+                ):
                     logger.warning(
                         f"⚠️  OSO Dev Server connection test failed - "
                         f"server might not be ready: {test_error}"
@@ -271,7 +289,9 @@ async def initialize_oso_from_manifest(
                 )
                 logger.info("✅ Initial OSO facts set up successfully")
             except (ValueError, TypeError, AttributeError, RuntimeError) as e:
-                logger.warning(f"⚠️  Failed to set up initial OSO facts: {e}", exc_info=True)
+                logger.warning(
+                    f"⚠️  Failed to set up initial OSO facts: {e}", exc_info=True
+                )
                 # Continue anyway - adapter is still usable
 
         logger.info(f"✅ OSO Cloud provider initialized for app '{app_slug}'")

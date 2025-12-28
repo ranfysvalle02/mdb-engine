@@ -10,7 +10,8 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List
 
-from pymongo.errors import ConnectionFailure, OperationFailure, ServerSelectionTimeoutError
+from pymongo.errors import (ConnectionFailure, OperationFailure,
+                            ServerSelectionTimeoutError)
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +47,9 @@ async def seed_initial_data(
     # Get existing seeding metadata
     seeding_metadata = await metadata_collection.find_one({"app_slug": app_slug})
     seeded_collections = (
-        set(seeding_metadata.get("seeded_collections", [])) if seeding_metadata else set()
+        set(seeding_metadata.get("seeded_collections", []))
+        if seeding_metadata
+        else set()
     )
 
     for collection_name, documents in initial_data.items():
@@ -87,7 +90,9 @@ async def seed_initial_data(
                         # Try to parse ISO format datetime strings
                         try:
                             # Check if it looks like a datetime string
-                            if "T" in value and ("Z" in value or "+" in value or "-" in value[-6:]):
+                            if "T" in value and (
+                                "Z" in value or "+" in value or "-" in value[-6:]
+                            ):
                                 # Try parsing as ISO format
                                 from dateutil.parser import parse as parse_date
 
@@ -105,7 +110,10 @@ async def seed_initial_data(
                             pass
 
                 # Add created_at if not present and document doesn't have timestamp fields
-                if "created_at" not in prepared_doc and "date_created" not in prepared_doc:
+                if (
+                    "created_at" not in prepared_doc
+                    and "date_created" not in prepared_doc
+                ):
                     prepared_doc["created_at"] = datetime.utcnow()
 
                 prepared_docs.append(prepared_doc)
@@ -136,7 +144,9 @@ async def seed_initial_data(
             Exception,
         ) as e:
             # Type 2: Recoverable - log error and continue with other collections
-            logger.exception(f"Failed to seed collection '{collection_name}' for {app_slug}: {e}")
+            logger.exception(
+                f"Failed to seed collection '{collection_name}' for {app_slug}: {e}"
+            )
             results[collection_name] = 0
 
     # Update seeding metadata
@@ -162,6 +172,8 @@ async def seed_initial_data(
         TypeError,
         KeyError,
     ) as e:
-        logger.warning(f"Failed to update seeding metadata for {app_slug}: {e}", exc_info=True)
+        logger.warning(
+            f"Failed to update seeding metadata for {app_slug}: {e}", exc_info=True
+        )
 
     return results

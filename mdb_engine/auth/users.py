@@ -22,7 +22,8 @@ from fastapi import Request
 from fastapi.responses import Response
 
 try:
-    from pymongo.errors import ConnectionFailure, OperationFailure, ServerSelectionTimeoutError
+    from pymongo.errors import (ConnectionFailure, OperationFailure,
+                                ServerSelectionTimeoutError)
 except ImportError:
     ConnectionFailure = Exception
     OperationFailure = Exception
@@ -153,7 +154,9 @@ async def get_app_user(
     db,
     config: Optional[Dict[str, Any]] = None,
     allow_demo_fallback: bool = False,
-    get_app_config_func: Optional[Callable[[Request, str, Dict], Awaitable[Dict]]] = None,
+    get_app_config_func: Optional[
+        Callable[[Request, str, Dict], Awaitable[Dict]]
+    ] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Get app-level user from session cookie.
@@ -276,7 +279,9 @@ async def _try_demo_mode(
             f"(MONGO_URI={MONGO_URI}, DB_NAME={DB_NAME})"
         )
 
-        demo_user = await get_or_create_demo_user(db, slug_id, config, MONGO_URI, DB_NAME)
+        demo_user = await get_or_create_demo_user(
+            db, slug_id, config, MONGO_URI, DB_NAME
+        )
 
         if not demo_user:
             logger.warning(
@@ -316,7 +321,9 @@ async def create_app_session(
     user_id: str,
     config: Optional[Dict[str, Any]] = None,
     response: Optional[Response] = None,
-    get_app_config_func: Optional[Callable[[Request, str, Dict], Awaitable[Dict]]] = None,
+    get_app_config_func: Optional[
+        Callable[[Request, str, Dict], Awaitable[Dict]]
+    ] = None,
 ) -> str:
     """
     Create a app-specific session token and set cookie.
@@ -380,7 +387,9 @@ async def create_app_session(
         cookie_name = f"{session_cookie_name}_{slug_id}"
 
         # Determine secure cookie setting
-        should_use_secure = request.url.scheme == "https" or os.getenv("G_NOME_ENV") == "production"
+        should_use_secure = (
+            request.url.scheme == "https" or os.getenv("G_NOME_ENV") == "production"
+        )
 
         response.set_cookie(
             key=cookie_name,
@@ -504,7 +513,12 @@ async def create_app_user(
         from bson.objectid import ObjectId
 
         # Validate email format
-        if not email or not isinstance(email, str) or "@" not in email or "." not in email:
+        if (
+            not email
+            or not isinstance(email, str)
+            or "@" not in email
+            or "." not in email
+        ):
             logger.warning(f"Invalid email format: {email}")
             return None
 
@@ -573,7 +587,9 @@ async def get_or_create_anonymous_user(
     slug_id: str,
     db,
     config: Optional[Dict[str, Any]] = None,
-    get_app_config_func: Optional[Callable[[Request, str, Dict], Awaitable[Dict]]] = None,
+    get_app_config_func: Optional[
+        Callable[[Request, str, Dict], Awaitable[Dict]]
+    ] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Get or create an anonymous user for anonymous_session strategy.
@@ -639,7 +655,9 @@ async def get_or_create_anonymous_user(
     return user
 
 
-async def get_platform_demo_user(mongo_uri: str, db_name: str) -> Optional[Dict[str, Any]]:
+async def get_platform_demo_user(
+    mongo_uri: str, db_name: str
+) -> Optional[Dict[str, Any]]:
     """
     Get platform demo user information from top-level database.
 
@@ -651,7 +669,8 @@ async def get_platform_demo_user(mongo_uri: str, db_name: str) -> Optional[Dict[
         Dict with demo user info (email, password from config, user_id) or None if not available
     """
     try:
-        from ..config import DEMO_EMAIL_DEFAULT, DEMO_ENABLED, DEMO_PASSWORD_DEFAULT
+        from ..config import (DEMO_EMAIL_DEFAULT, DEMO_ENABLED,
+                              DEMO_PASSWORD_DEFAULT)
 
         if not DEMO_ENABLED or not DEMO_EMAIL_DEFAULT:
             return None
@@ -697,10 +716,14 @@ async def _link_platform_demo_user(
     import datetime
 
     try:
-        logger.debug(f"ensure_demo_users_exist: Auto-linking platform demo user for '{slug_id}'")
+        logger.debug(
+            f"ensure_demo_users_exist: Auto-linking platform demo user for '{slug_id}'"
+        )
         platform_demo = await get_platform_demo_user(mongo_uri, db_name)
         if not platform_demo:
-            logger.warning(f"ensure_demo_users_exist: Platform demo user not found for '{slug_id}'")
+            logger.warning(
+                f"ensure_demo_users_exist: Platform demo user not found for '{slug_id}'"
+            )
             return None
 
         # Check if app demo user already exists for platform demo
@@ -714,10 +737,13 @@ async def _link_platform_demo_user(
         platform_password = platform_demo.get("password", "demo123")
         password_hash = None
         try:
-            password_hash = bcrypt.hashpw(platform_password.encode("utf-8"), bcrypt.gensalt())
+            password_hash = bcrypt.hashpw(
+                platform_password.encode("utf-8"), bcrypt.gensalt()
+            )
         except (ValueError, TypeError, AttributeError) as e:
             logger.error(
-                f"Error hashing password for platform demo user " f"{platform_demo['email']}: {e}",
+                f"Error hashing password for platform demo user "
+                f"{platform_demo['email']}: {e}",
                 exc_info=True,
             )
             return None
@@ -767,7 +793,9 @@ def _validate_demo_user_config(
 
     extra_data = demo_user_config.get("extra_data", {})
     if not isinstance(extra_data, dict):
-        logger.warning(f"Invalid extra_data for demo user config (not a dict): {extra_data}")
+        logger.warning(
+            f"Invalid extra_data for demo user config (not a dict): {extra_data}"
+        )
         extra_data = {}
 
     return {
@@ -797,10 +825,14 @@ async def _resolve_demo_user_email_password(
                 if not password:
                     password = platform_demo["password"]
             else:
-                logger.warning(f"No email specified and platform demo not available for {slug_id}")
+                logger.warning(
+                    f"No email specified and platform demo not available for {slug_id}"
+                )
                 return None, None
         else:
-            logger.warning(f"No email specified and cannot access platform demo for {slug_id}")
+            logger.warning(
+                f"No email specified and cannot access platform demo for {slug_id}"
+            )
             return None, None
 
     # Validate email format
@@ -845,7 +877,9 @@ async def _create_demo_user_from_config(
     try:
         password_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt())
     except (ValueError, TypeError, AttributeError) as e:
-        logger.error(f"Error hashing password for demo user {email}: {e}", exc_info=True)
+        logger.error(
+            f"Error hashing password for demo user {email}: {e}", exc_info=True
+        )
         return None
 
     # Create user document
@@ -911,7 +945,9 @@ async def _create_demo_user_from_config(
 
         user_doc["_id"] = result.inserted_id if not custom_id else custom_id
         user_doc["app_user_id"] = str(user_doc["_id"])
-        logger.info(f"Created demo user {email} for {slug_id} with _id={user_doc['_id']}")
+        logger.info(
+            f"Created demo user {email} for {slug_id} with _id={user_doc['_id']}"
+        )
         return user_doc
     except (
         OperationFailure,
@@ -994,7 +1030,9 @@ async def ensure_demo_users_exist(
     for demo_user_config in demo_users_config:
         try:
             # Validate config structure
-            validated_config, error = _validate_demo_user_config(demo_user_config, slug_id)
+            validated_config, error = _validate_demo_user_config(
+                demo_user_config, slug_id
+            )
             if not validated_config:
                 if error:
                     logger.warning(error)
@@ -1058,7 +1096,9 @@ async def get_or_create_demo_user_for_request(
     slug_id: str,
     db,
     config: Optional[Dict[str, Any]] = None,
-    get_app_config_func: Optional[Callable[[Request, str, Dict], Awaitable[Dict]]] = None,
+    get_app_config_func: Optional[
+        Callable[[Request, str, Dict], Awaitable[Dict]]
+    ] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Get or create a demo user for the current request context.
@@ -1106,7 +1146,9 @@ async def get_or_create_demo_user_for_request(
                         # Check if app demo user exists
                         # Use getattr to access collection (works with ScopedMongoWrapper and AppDB)
                         collection = getattr(db, collection_name)
-                        app_demo = await collection.find_one({"email": DEMO_EMAIL_DEFAULT})
+                        app_demo = await collection.find_one(
+                            {"email": DEMO_EMAIL_DEFAULT}
+                        )
 
                         if app_demo:
                             app_demo["app_user_id"] = str(app_demo["_id"])
@@ -1116,11 +1158,15 @@ async def get_or_create_demo_user_for_request(
                         try:
                             from ..config import DB_NAME, MONGO_URI
 
-                            await ensure_demo_users_exist(db, slug_id, config, MONGO_URI, DB_NAME)
+                            await ensure_demo_users_exist(
+                                db, slug_id, config, MONGO_URI, DB_NAME
+                            )
                             # Use getattr to access collection (works with
                             # ScopedMongoWrapper and AppDB)
                             collection = getattr(db, collection_name)
-                            app_demo = await collection.find_one({"email": DEMO_EMAIL_DEFAULT})
+                            app_demo = await collection.find_one(
+                                {"email": DEMO_EMAIL_DEFAULT}
+                            )
                             if app_demo:
                                 app_demo["app_user_id"] = str(app_demo["_id"])
                                 return app_demo
@@ -1186,7 +1232,9 @@ async def get_or_create_demo_user(
             f"db_name={'provided' if db_name else 'not provided'})"
         )
 
-        demo_users = await ensure_demo_users_exist(db, slug_id, config, mongo_uri, db_name)
+        demo_users = await ensure_demo_users_exist(
+            db, slug_id, config, mongo_uri, db_name
+        )
 
         if demo_users and len(demo_users) > 0:
             # Return the first demo user (usually the primary one)
@@ -1321,7 +1369,9 @@ async def ensure_demo_users_for_actor(
             with open(manifest_path, "r") as f:
                 config = json.load(f)
         except json.JSONDecodeError as e:
-            logger.error(f"Invalid JSON in manifest.json for {slug_id}: {e}", exc_info=True)
+            logger.error(
+                f"Invalid JSON in manifest.json for {slug_id}: {e}", exc_info=True
+            )
             return []
 
         # Ensure demo users exist
@@ -1345,7 +1395,9 @@ async def ensure_demo_users_for_actor(
         KeyError,
         PermissionError,
     ) as e:
-        logger.error(f"Error ensuring demo users for actor {slug_id}: {e}", exc_info=True)
+        logger.error(
+            f"Error ensuring demo users for actor {slug_id}: {e}", exc_info=True
+        )
         return []
 
 
@@ -1373,7 +1425,9 @@ async def sync_app_user_to_casbin(
     try:
         # Check if provider is CasbinAdapter
         if not hasattr(authz_provider, "_enforcer"):
-            logger.debug("sync_app_user_to_casbin: Provider is not CasbinAdapter, skipping")
+            logger.debug(
+                "sync_app_user_to_casbin: Provider is not CasbinAdapter, skipping"
+            )
             return False
 
         enforcer = authz_provider._enforcer
@@ -1394,7 +1448,9 @@ async def sync_app_user_to_casbin(
         # Check if role assignment already exists
         existing_roles = await enforcer.get_roles_for_user(subject)
         if role in existing_roles:
-            logger.debug(f"sync_app_user_to_casbin: User {subject} already has role {role}")
+            logger.debug(
+                f"sync_app_user_to_casbin: User {subject} already has role {role}"
+            )
             return True
 
         # Add grouping policy: user -> role
@@ -1423,11 +1479,15 @@ async def sync_app_user_to_casbin(
         ConnectionError,
         KeyError,
     ) as e:
-        logger.error(f"sync_app_user_to_casbin: Error syncing user to Casbin: {e}", exc_info=True)
+        logger.error(
+            f"sync_app_user_to_casbin: Error syncing user to Casbin: {e}", exc_info=True
+        )
         return False
 
 
-def get_app_user_role(user: Dict[str, Any], config: Optional[Dict[str, Any]] = None) -> str:
+def get_app_user_role(
+    user: Dict[str, Any], config: Optional[Dict[str, Any]] = None
+) -> str:
     """
     Determine Casbin role for app-level user.
 

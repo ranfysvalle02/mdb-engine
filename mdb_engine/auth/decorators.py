@@ -70,7 +70,10 @@ def _is_production_environment() -> bool:
     """Check if running in production environment."""
     import os
 
-    return os.getenv("G_NOME_ENV") == "production" or os.getenv("ENVIRONMENT") == "production"
+    return (
+        os.getenv("G_NOME_ENV") == "production"
+        or os.getenv("ENVIRONMENT") == "production"
+    )
 
 
 def _validate_https(request: Request) -> None:
@@ -186,13 +189,17 @@ def rate_limit_auth(
 
             # Use provided values or config values or defaults
             if max_attempts is None:
-                max_attempts_val = rate_limit_config.get("max_attempts") if rate_limit_config else 5
+                max_attempts_val = (
+                    rate_limit_config.get("max_attempts") if rate_limit_config else 5
+                )
             else:
                 max_attempts_val = max_attempts
 
             if window_seconds is None:
                 window_seconds_val = (
-                    rate_limit_config.get("window_seconds") if rate_limit_config else 300
+                    rate_limit_config.get("window_seconds")
+                    if rate_limit_config
+                    else 300
                 )
             else:
                 window_seconds_val = window_seconds

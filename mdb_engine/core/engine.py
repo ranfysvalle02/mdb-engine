@@ -24,12 +24,8 @@ if TYPE_CHECKING:
 # Import engine components
 from ..constants import DEFAULT_MAX_POOL_SIZE, DEFAULT_MIN_POOL_SIZE
 from ..database import ScopedMongoWrapper
-from ..observability import (
-    HealthChecker,
-    check_engine_health,
-    check_mongodb_health,
-    check_pool_health,
-)
+from ..observability import (HealthChecker, check_engine_health,
+                             check_mongodb_health, check_pool_health)
 from ..observability import get_logger as get_contextual_logger
 from .app_registration import AppRegistrationManager
 from .connection import ConnectionManager
@@ -198,7 +194,9 @@ class MongoDBEngine:
             >>> doc = await db.my_collection.find_one({"name": "test"})
         """
         if not self._initialized:
-            raise RuntimeError("MongoDBEngine not initialized. Call initialize() first.")
+            raise RuntimeError(
+                "MongoDBEngine not initialized. Call initialize() first."
+            )
 
         if read_scopes is None:
             read_scopes = [app_slug]
@@ -229,7 +227,9 @@ class MongoDBEngine:
             - error_paths: List of JSON paths with validation errors, None if valid
         """
         if not self._app_registration_manager:
-            raise RuntimeError("MongoDBEngine not initialized. Call initialize() first.")
+            raise RuntimeError(
+                "MongoDBEngine not initialized. Call initialize() first."
+            )
         return await self._app_registration_manager.validate_manifest(manifest)
 
     async def load_manifest(self, path: Path) -> "ManifestDict":
@@ -247,10 +247,14 @@ class MongoDBEngine:
             ValueError: If validation fails
         """
         if not self._app_registration_manager:
-            raise RuntimeError("MongoDBEngine not initialized. Call initialize() first.")
+            raise RuntimeError(
+                "MongoDBEngine not initialized. Call initialize() first."
+            )
         return await self._app_registration_manager.load_manifest(path)
 
-    async def register_app(self, manifest: "ManifestDict", create_indexes: bool = True) -> bool:
+    async def register_app(
+        self, manifest: "ManifestDict", create_indexes: bool = True
+    ) -> bool:
         """
         Register an app from its manifest.
 
@@ -271,7 +275,9 @@ class MongoDBEngine:
             RuntimeError: If engine is not initialized.
         """
         if not self._app_registration_manager:
-            raise RuntimeError("MongoDBEngine not initialized. Call initialize() first.")
+            raise RuntimeError(
+                "MongoDBEngine not initialized. Call initialize() first."
+            )
 
         # Create callbacks for service initialization
         async def create_indexes_callback(slug: str, manifest: "ManifestDict") -> None:
@@ -282,15 +288,21 @@ class MongoDBEngine:
             if self._service_initializer:
                 await self._service_initializer.seed_initial_data(slug, initial_data)
 
-        async def initialize_memory_callback(slug: str, memory_config: Dict[str, Any]) -> None:
+        async def initialize_memory_callback(
+            slug: str, memory_config: Dict[str, Any]
+        ) -> None:
             if self._service_initializer:
-                await self._service_initializer.initialize_memory_service(slug, memory_config)
+                await self._service_initializer.initialize_memory_service(
+                    slug, memory_config
+                )
 
         async def register_websockets_callback(
             slug: str, websockets_config: Dict[str, Any]
         ) -> None:
             if self._service_initializer:
-                await self._service_initializer.register_websockets(slug, websockets_config)
+                await self._service_initializer.register_websockets(
+                    slug, websockets_config
+                )
 
         async def setup_observability_callback(
             slug: str,
@@ -416,9 +428,15 @@ class MongoDBEngine:
                 # Include the router in the app
                 app.include_router(ws_router)
 
-                print(f"✅ Registered WebSocket route '{path}' for app '{slug}' using APIRouter")
-                print(f"   Handler type: {type(handler).__name__}, Callable: {callable(handler)}")
-                print(f"   Route name: {slug}_{endpoint_name}, Auth required: {require_auth}")
+                print(
+                    f"✅ Registered WebSocket route '{path}' for app '{slug}' using APIRouter"
+                )
+                print(
+                    f"   Handler type: {type(handler).__name__}, Callable: {callable(handler)}"
+                )
+                print(
+                    f"   Route name: {slug}_{endpoint_name}, Auth required: {require_auth}"
+                )
                 print(f"   Route path: {path}, Full route count: {len(app.routes)}")
                 contextual_logger.info(
                     f"✅ Registered WebSocket route '{path}' for app '{slug}' "
@@ -441,7 +459,9 @@ class MongoDBEngine:
                         "error": str(e),
                     },
                 )
-                print(f"❌ Failed to register WebSocket route '{path}' for app '{slug}': {e}")
+                print(
+                    f"❌ Failed to register WebSocket route '{path}' for app '{slug}': {e}"
+                )
                 import traceback
 
                 traceback.print_exc()
@@ -463,7 +483,9 @@ class MongoDBEngine:
             RuntimeError: If engine is not initialized.
         """
         if not self._app_registration_manager:
-            raise RuntimeError("MongoDBEngine not initialized. Call initialize() first.")
+            raise RuntimeError(
+                "MongoDBEngine not initialized. Call initialize() first."
+            )
 
         return await self._app_registration_manager.reload_apps(
             register_app_callback=self.register_app
@@ -480,7 +502,9 @@ class MongoDBEngine:
             App manifest dict or None if not found
         """
         if not self._app_registration_manager:
-            raise RuntimeError("MongoDBEngine not initialized. Call initialize() first.")
+            raise RuntimeError(
+                "MongoDBEngine not initialized. Call initialize() first."
+            )
         return self._app_registration_manager.get_app(slug)
 
     async def get_manifest(self, slug: str) -> Optional["ManifestDict"]:
@@ -494,7 +518,9 @@ class MongoDBEngine:
             App manifest dict or None if not found
         """
         if not self._app_registration_manager:
-            raise RuntimeError("MongoDBEngine not initialized. Call initialize() first.")
+            raise RuntimeError(
+                "MongoDBEngine not initialized. Call initialize() first."
+            )
         return await self._app_registration_manager.get_manifest(slug)
 
     def get_database(self) -> AsyncIOMotorDatabase:
@@ -542,7 +568,9 @@ class MongoDBEngine:
             RuntimeError: If engine is not initialized
         """
         if not self._app_registration_manager:
-            raise RuntimeError("MongoDBEngine not initialized. Call initialize() first.")
+            raise RuntimeError(
+                "MongoDBEngine not initialized. Call initialize() first."
+            )
         return self._app_registration_manager._apps
 
     def list_apps(self) -> List[str]:
@@ -553,7 +581,9 @@ class MongoDBEngine:
             List of app slugs
         """
         if not self._app_registration_manager:
-            raise RuntimeError("MongoDBEngine not initialized. Call initialize() first.")
+            raise RuntimeError(
+                "MongoDBEngine not initialized. Call initialize() first."
+            )
         return self._app_registration_manager.list_apps()
 
     async def shutdown(self) -> None:
@@ -663,12 +693,20 @@ class MongoDBEngine:
                 # This follows MongoDB best practice: monitor the actual client
                 # being used
                 async def get_metrics():
-                    metrics = await get_pool_metrics(self._connection_manager.mongo_client)
+                    metrics = await get_pool_metrics(
+                        self._connection_manager.mongo_client
+                    )
                     # Add MongoDBEngine's pool configuration if not already in metrics
                     if metrics.get("status") == "connected":
-                        if "max_pool_size" not in metrics or metrics.get("max_pool_size") is None:
+                        if (
+                            "max_pool_size" not in metrics
+                            or metrics.get("max_pool_size") is None
+                        ):
                             metrics["max_pool_size"] = self.max_pool_size
-                        if "min_pool_size" not in metrics or metrics.get("min_pool_size") is None:
+                        if (
+                            "min_pool_size" not in metrics
+                            or metrics.get("min_pool_size") is None
+                        ):
                             metrics["min_pool_size"] = self.min_pool_size
                     return metrics
 
@@ -681,7 +719,8 @@ class MongoDBEngine:
                     usage = details.get("pool_usage_percent", 0)
                     if usage <= 90 and details.get("status") == "connected":
                         # Not critical, downgrade to degraded
-                        from ..observability.health import HealthCheckResult, HealthStatus
+                        from ..observability.health import (HealthCheckResult,
+                                                            HealthStatus)
 
                         return HealthCheckResult(
                             name=result.name,

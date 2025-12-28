@@ -125,7 +125,9 @@ def validate_password_strength(
         return False, ["Password is required"]
 
     if config:
-        min_length = min_length if min_length is not None else config.get("min_length", 8)
+        min_length = (
+            min_length if min_length is not None else config.get("min_length", 8)
+        )
         require_uppercase = (
             require_uppercase
             if require_uppercase is not None
@@ -137,10 +139,14 @@ def validate_password_strength(
             else config.get("require_lowercase", True)
         )
         require_numbers = (
-            require_numbers if require_numbers is not None else config.get("require_numbers", True)
+            require_numbers
+            if require_numbers is not None
+            else config.get("require_numbers", True)
         )
         require_special = (
-            require_special if require_special is not None else config.get("require_special", False)
+            require_special
+            if require_special is not None
+            else config.get("require_special", False)
         )
     else:
         min_length = min_length if min_length is not None else 8
@@ -472,7 +478,9 @@ async def register_user(
             )
 
         response = _create_registration_response(user_doc, redirect_url)
-        set_auth_cookies(response, access_token, refresh_token, request=request, config=config)
+        set_auth_cookies(
+            response, access_token, refresh_token, request=request, config=config
+        )
 
         response.set_cookie(
             key="device_id",
@@ -502,7 +510,9 @@ async def register_user(
         return {"success": False, "error": "Registration failed. Please try again."}
 
 
-async def _get_user_id_from_request(request: Request, user_id: Optional[str]) -> Optional[str]:
+async def _get_user_id_from_request(
+    request: Request, user_id: Optional[str]
+) -> Optional[str]:
     """Extract user_id from request if not provided."""
     if user_id:
         return user_id

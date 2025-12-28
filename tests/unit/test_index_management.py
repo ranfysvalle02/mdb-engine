@@ -8,12 +8,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from motor.motor_asyncio import AsyncIOMotorDatabase
-from pymongo.errors import (
-    ConnectionFailure,
-    InvalidOperation,
-    OperationFailure,
-    ServerSelectionTimeoutError,
-)
+from pymongo.errors import (ConnectionFailure, InvalidOperation,
+                            OperationFailure, ServerSelectionTimeoutError)
 
 from mdb_engine.core.index_management import IndexManager
 
@@ -70,7 +66,9 @@ class TestIndexManager:
         # Should complete without error (validation failed)
 
     @pytest.mark.asyncio
-    async def test_create_app_indexes_invalid_collection_name(self, mock_mongo_database):
+    async def test_create_app_indexes_invalid_collection_name(
+        self, mock_mongo_database
+    ):
         """Test create_app_indexes with invalid collection name (lines 91-98)."""
         manager = IndexManager(mock_mongo_database)
         manifest = {
@@ -134,7 +132,9 @@ class TestIndexManager:
         # Should skip collection with no valid definitions
 
     @pytest.mark.asyncio
-    async def test_create_app_indexes_success(self, mock_mongo_database, sample_manifest):
+    async def test_create_app_indexes_success(
+        self, mock_mongo_database, sample_manifest
+    ):
         """Test successful index creation (lines 137-149)."""
         manager = IndexManager(mock_mongo_database)
 
@@ -152,7 +152,9 @@ class TestIndexManager:
                 assert mock_create.called
 
     @pytest.mark.asyncio
-    async def test_create_app_indexes_operation_failure(self, mock_mongo_database, sample_manifest):
+    async def test_create_app_indexes_operation_failure(
+        self, mock_mongo_database, sample_manifest
+    ):
         """Test handling OperationFailure during index creation (lines 150-163)."""
         manager = IndexManager(mock_mongo_database)
 
@@ -188,7 +190,9 @@ class TestIndexManager:
                     await manager.create_app_indexes("test_app", sample_manifest)
 
     @pytest.mark.asyncio
-    async def test_create_app_indexes_timeout_error(self, mock_mongo_database, sample_manifest):
+    async def test_create_app_indexes_timeout_error(
+        self, mock_mongo_database, sample_manifest
+    ):
         """Test handling ServerSelectionTimeoutError during index creation."""
         manager = IndexManager(mock_mongo_database)
 
@@ -205,7 +209,9 @@ class TestIndexManager:
                     await manager.create_app_indexes("test_app", sample_manifest)
 
     @pytest.mark.asyncio
-    async def test_create_app_indexes_invalid_operation(self, mock_mongo_database, sample_manifest):
+    async def test_create_app_indexes_invalid_operation(
+        self, mock_mongo_database, sample_manifest
+    ):
         """Test handling InvalidOperation during index creation."""
         manager = IndexManager(mock_mongo_database)
 
@@ -222,7 +228,9 @@ class TestIndexManager:
                     await manager.create_app_indexes("test_app", sample_manifest)
 
     @pytest.mark.asyncio
-    async def test_create_app_indexes_value_error(self, mock_mongo_database, sample_manifest):
+    async def test_create_app_indexes_value_error(
+        self, mock_mongo_database, sample_manifest
+    ):
         """Test handling ValueError during index creation."""
         manager = IndexManager(mock_mongo_database)
 
@@ -239,7 +247,9 @@ class TestIndexManager:
                     await manager.create_app_indexes("test_app", sample_manifest)
 
     @pytest.mark.asyncio
-    async def test_create_app_indexes_type_error(self, mock_mongo_database, sample_manifest):
+    async def test_create_app_indexes_type_error(
+        self, mock_mongo_database, sample_manifest
+    ):
         """Test handling TypeError during index creation."""
         manager = IndexManager(mock_mongo_database)
 

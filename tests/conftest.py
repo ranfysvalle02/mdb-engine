@@ -14,7 +14,8 @@ from typing import Any, AsyncGenerator, Dict
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorCollection, AsyncIOMotorDatabase
+from motor.motor_asyncio import (AsyncIOMotorClient, AsyncIOMotorCollection,
+                                 AsyncIOMotorDatabase)
 
 # Set test secret key before importing engine components
 if "FLASK_SECRET_KEY" not in os.environ:
@@ -22,7 +23,8 @@ if "FLASK_SECRET_KEY" not in os.environ:
 
 # Import engine components for testing
 from mdb_engine.core.engine import MongoDBEngine
-from mdb_engine.database.scoped_wrapper import ScopedCollectionWrapper, ScopedMongoWrapper
+from mdb_engine.database.scoped_wrapper import (ScopedCollectionWrapper,
+                                                ScopedMongoWrapper)
 
 # ============================================================================
 # ASYNC FIXTURES
@@ -74,9 +76,15 @@ def mock_mongo_client() -> MagicMock:
                 return_value=MagicMock(modified_count=1, upserted_id="test_id")
             )
             collection.find_one = AsyncMock(return_value=None)
-            collection.find = AsyncMock(return_value=AsyncMock(to_list=AsyncMock(return_value=[])))
-            collection.insert_one = AsyncMock(return_value=MagicMock(inserted_id="test_id"))
-            collection.insert_many = AsyncMock(return_value=MagicMock(inserted_ids=["id1", "id2"]))
+            collection.find = AsyncMock(
+                return_value=AsyncMock(to_list=AsyncMock(return_value=[]))
+            )
+            collection.insert_one = AsyncMock(
+                return_value=MagicMock(inserted_id="test_id")
+            )
+            collection.insert_many = AsyncMock(
+                return_value=MagicMock(inserted_ids=["id1", "id2"])
+            )
             collection.update_one = AsyncMock(return_value=MagicMock(modified_count=1))
             collection.update_many = AsyncMock(return_value=MagicMock(modified_count=2))
             collection.delete_one = AsyncMock(return_value=MagicMock(deleted_count=1))
@@ -130,16 +138,22 @@ def mock_mongo_database(mock_mongo_client: MagicMock) -> MagicMock:
         collection = MagicMock(spec=AsyncIOMotorCollection)
         collection.name = name
         collection.database = db
-        collection.find = AsyncMock(return_value=AsyncMock(to_list=AsyncMock(return_value=[])))
+        collection.find = AsyncMock(
+            return_value=AsyncMock(to_list=AsyncMock(return_value=[]))
+        )
         collection.find_one = AsyncMock(return_value=None)
         collection.insert_one = AsyncMock(return_value=MagicMock(inserted_id="test_id"))
-        collection.insert_many = AsyncMock(return_value=MagicMock(inserted_ids=["id1", "id2"]))
+        collection.insert_many = AsyncMock(
+            return_value=MagicMock(inserted_ids=["id1", "id2"])
+        )
         collection.update_one = AsyncMock(return_value=MagicMock(modified_count=1))
         collection.update_many = AsyncMock(return_value=MagicMock(modified_count=2))
         collection.delete_one = AsyncMock(return_value=MagicMock(deleted_count=1))
         collection.delete_many = AsyncMock(return_value=MagicMock(deleted_count=2))
         collection.count_documents = AsyncMock(return_value=0)
-        collection.aggregate = AsyncMock(return_value=AsyncMock(to_list=AsyncMock(return_value=[])))
+        collection.aggregate = AsyncMock(
+            return_value=AsyncMock(to_list=AsyncMock(return_value=[]))
+        )
         collection.list_indexes = AsyncMock(
             return_value=AsyncMock(to_list=AsyncMock(return_value=[]))
         )
@@ -168,7 +182,9 @@ def mock_mongo_database(mock_mongo_client: MagicMock) -> MagicMock:
 
         def __getattr__(self, name):
             if name.startswith("_"):
-                raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+                raise AttributeError(
+                    f"'{type(self).__name__}' object has no attribute '{name}'"
+                )
             # Return collection for any attribute access
             return self._get_collection(name)
 
@@ -199,17 +215,25 @@ def mock_mongo_collection() -> MagicMock:
     """Create a mock MongoDB collection."""
     collection = MagicMock(spec=AsyncIOMotorCollection)
     collection.name = "test_collection"
-    collection.find = AsyncMock(return_value=AsyncMock(to_list=AsyncMock(return_value=[])))
+    collection.find = AsyncMock(
+        return_value=AsyncMock(to_list=AsyncMock(return_value=[]))
+    )
     collection.find_one = AsyncMock(return_value=None)
     collection.insert_one = AsyncMock(return_value=MagicMock(inserted_id="test_id"))
-    collection.insert_many = AsyncMock(return_value=MagicMock(inserted_ids=["id1", "id2"]))
+    collection.insert_many = AsyncMock(
+        return_value=MagicMock(inserted_ids=["id1", "id2"])
+    )
     collection.update_one = AsyncMock(return_value=MagicMock(modified_count=1))
     collection.update_many = AsyncMock(return_value=MagicMock(modified_count=2))
     collection.delete_one = AsyncMock(return_value=MagicMock(deleted_count=1))
     collection.delete_many = AsyncMock(return_value=MagicMock(deleted_count=2))
     collection.count_documents = AsyncMock(return_value=0)
-    collection.aggregate = AsyncMock(return_value=AsyncMock(to_list=AsyncMock(return_value=[])))
-    collection.list_indexes = AsyncMock(return_value=AsyncMock(to_list=AsyncMock(return_value=[])))
+    collection.aggregate = AsyncMock(
+        return_value=AsyncMock(to_list=AsyncMock(return_value=[]))
+    )
+    collection.list_indexes = AsyncMock(
+        return_value=AsyncMock(to_list=AsyncMock(return_value=[]))
+    )
     collection.create_index = AsyncMock(return_value="test_index")
     collection.drop_index = AsyncMock()
     return collection
@@ -237,7 +261,9 @@ async def mongodb_engine(
 ) -> AsyncGenerator[MongoDBEngine, None]:
     """Create a MongoDBEngine instance with mocked MongoDB client."""
     # Patch AsyncIOMotorClient in connection module where it's actually used
-    with patch("mdb_engine.core.connection.AsyncIOMotorClient", return_value=mock_mongo_client):
+    with patch(
+        "mdb_engine.core.connection.AsyncIOMotorClient", return_value=mock_mongo_client
+    ):
         engine = MongoDBEngine(**mongodb_engine_config)
         await engine.initialize()
         yield engine
@@ -245,7 +271,9 @@ async def mongodb_engine(
 
 
 @pytest.fixture
-async def uninitialized_mongodb_engine(mongodb_engine_config: Dict[str, Any]) -> MongoDBEngine:
+async def uninitialized_mongodb_engine(
+    mongodb_engine_config: Dict[str, Any]
+) -> MongoDBEngine:
     """Create an uninitialized MongoDBEngine instance."""
     return MongoDBEngine(**mongodb_engine_config)
 
@@ -278,7 +306,9 @@ async def scoped_collection(
     mock_mongo_collection: MagicMock, scoped_db_config: Dict[str, Any]
 ) -> ScopedCollectionWrapper:
     """Create a ScopedCollectionWrapper instance with mocked collection."""
-    return ScopedCollectionWrapper(real_collection=mock_mongo_collection, **scoped_db_config)
+    return ScopedCollectionWrapper(
+        real_collection=mock_mongo_collection, **scoped_db_config
+    )
 
 
 # ============================================================================
@@ -418,13 +448,16 @@ def assert_experiment_id_in_document(doc: Dict[str, Any], expected_scope: str) -
     ), f"Expected experiment_id={expected_scope}, got {doc.get('experiment_id')}"
 
 
-def assert_filter_has_experiment_scope(filter_dict: Dict[str, Any], expected_scopes: list) -> None:
+def assert_filter_has_experiment_scope(
+    filter_dict: Dict[str, Any], expected_scopes: list
+) -> None:
     """Assert that a filter includes experiment_id scoping."""
     if "$and" in filter_dict:
         # Check if any $and condition has experiment_id
         and_conditions = filter_dict["$and"]
         has_scope = any(
-            isinstance(cond, dict) and "experiment_id" in cond for cond in and_conditions
+            isinstance(cond, dict) and "experiment_id" in cond
+            for cond in and_conditions
         )
         assert has_scope, "Filter missing experiment_id scope in $and conditions"
     elif "experiment_id" in filter_dict:
@@ -496,7 +529,9 @@ def mongodb_container():
     try:
         from testcontainers.mongodb import MongoDbContainer
     except ImportError:
-        pytest.skip("testcontainers not installed. Install with: pip install -e '.[test]'")
+        pytest.skip(
+            "testcontainers not installed. Install with: pip install -e '.[test]'"
+        )
 
     # Use MongoDB Atlas Local image (matches examples)
     with MongoDbContainer(image="mongodb/mongodb-atlas-local:latest") as container:

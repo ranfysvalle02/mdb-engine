@@ -23,7 +23,9 @@ def _check_websockets_available():
         try:
             from fastapi import WebSocket
 
-            _websockets_module = __import__(".websockets", fromlist=[""], package=__name__)
+            _websockets_module = __import__(
+                ".websockets", fromlist=[""], package=__name__
+            )
             _websockets_available = True
         except (ImportError, AttributeError):
             _websockets_available = False

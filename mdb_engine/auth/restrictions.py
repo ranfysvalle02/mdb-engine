@@ -27,7 +27,9 @@ from .users import get_app_user
 logger = logging.getLogger(__name__)
 
 
-def is_demo_user(user: Optional[Dict[str, Any]] = None, email: Optional[str] = None) -> bool:
+def is_demo_user(
+    user: Optional[Dict[str, Any]] = None, email: Optional[str] = None
+) -> bool:
     """
     Check if a user is a demo user.
 
@@ -83,7 +85,9 @@ async def _get_sub_auth_user(
         if not (config and users_config.get("enabled", False)):
             return None
 
-        app_user = await get_app_user(request, slug_id, db, config, allow_demo_fallback=False)
+        app_user = await get_app_user(
+            request, slug_id, db, config, allow_demo_fallback=False
+        )
         if not app_user:
             return None
 
@@ -115,7 +119,9 @@ async def _get_authenticated_user(
 
     # Try sub-auth if platform auth didn't work
     if get_app_db_func and get_app_config_func:
-        return await _get_sub_auth_user(request, slug_id, get_app_config_func, get_app_db_func)
+        return await _get_sub_auth_user(
+            request, slug_id, get_app_config_func, get_app_db_func
+        )
 
     return None
 
@@ -152,7 +158,9 @@ def _validate_dependencies(
 
 async def require_non_demo_user(
     request: Request,
-    get_app_config_func: Optional[Callable[[Request, str, Dict], Awaitable[Dict]]] = None,
+    get_app_config_func: Optional[
+        Callable[[Request, str, Dict], Awaitable[Dict]]
+    ] = None,
     get_app_db_func: Optional[Callable[[Request], Awaitable[Any]]] = None,
 ) -> Dict[str, Any]:
     """
@@ -181,7 +189,9 @@ async def require_non_demo_user(
     if get_app_db_func and get_app_config_func:
         _validate_dependencies(get_app_config_func, get_app_db_func)
 
-    user = await _get_authenticated_user(request, slug_id, get_app_config_func, get_app_db_func)
+    user = await _get_authenticated_user(
+        request, slug_id, get_app_config_func, get_app_db_func
+    )
 
     # Check if user is demo
     if user and is_demo_user(user):
@@ -205,7 +215,9 @@ async def require_non_demo_user(
 
 async def block_demo_users(
     request: Request,
-    get_app_config_func: Optional[Callable[[Request, str, Dict], Awaitable[Dict]]] = None,
+    get_app_config_func: Optional[
+        Callable[[Request, str, Dict], Awaitable[Dict]]
+    ] = None,
     get_app_db_func: Optional[Callable[[Request], Awaitable[Any]]] = None,
 ):
     """
@@ -241,11 +253,15 @@ async def block_demo_users(
 
     # Check sub-auth if platform auth didn't work
     if not user and get_app_db_func and get_app_config_func and slug_id:
-        user = await _get_sub_auth_user(request, slug_id, get_app_config_func, get_app_db_func)
+        user = await _get_sub_auth_user(
+            request, slug_id, get_app_config_func, get_app_db_func
+        )
 
     # Block if demo user (only if user exists)
     if user and is_demo_user(user):
-        logger.info(f"Demo user '{user.get('email')}' blocked from accessing: {request.url.path}")
+        logger.info(
+            f"Demo user '{user.get('email')}' blocked from accessing: {request.url.path}"
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Demo users cannot access this endpoint. Demo mode is read-only.",

@@ -9,7 +9,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from motor.motor_asyncio import AsyncIOMotorCollection
 
-from mdb_engine.database.scoped_wrapper import ScopedCollectionWrapper, ScopedMongoWrapper
+from mdb_engine.database.scoped_wrapper import (ScopedCollectionWrapper,
+                                                ScopedMongoWrapper)
 
 
 @pytest.mark.unit
@@ -37,7 +38,9 @@ class TestScopedCollectionWrapper:
         assert inserted_doc["value"] == 100
 
     @pytest.mark.asyncio
-    async def test_scoped_insert_one_preserves_original_document(self, mock_mongo_collection):
+    async def test_scoped_insert_one_preserves_original_document(
+        self, mock_mongo_collection
+    ):
         """Test that insert_one doesn't mutate the original document."""
         wrapper = ScopedCollectionWrapper(
             real_collection=mock_mongo_collection,
@@ -193,7 +196,9 @@ class TestScopedCollectionWrapper:
         assert {"app_id": {"$in": ["test_app"]}} in and_conditions
 
     @pytest.mark.asyncio
-    async def test_scoped_count_documents_filters_by_app_id(self, mock_mongo_collection):
+    async def test_scoped_count_documents_filters_by_app_id(
+        self, mock_mongo_collection
+    ):
         """Test that count_documents filters by app_id."""
         wrapper = ScopedCollectionWrapper(
             real_collection=mock_mongo_collection,
@@ -304,7 +309,9 @@ class TestScopedMongoWrapper:
         # Should be the same instance (cached)
         assert collection1 is collection2
 
-    @pytest.mark.skip(reason="Hard to mock MagicMock to return non-collection - edge case")
+    @pytest.mark.skip(
+        reason="Hard to mock MagicMock to return non-collection - edge case"
+    )
     def test_get_collection_not_collection_error(self, mock_mongo_database):
         """Test get_collection raises error for non-collection (lines 1514-1518)."""
         # This test is skipped because MagicMock always returns MagicMock instances
@@ -346,7 +353,9 @@ class TestScopedMongoWrapper:
             assert wrapper.get_collection("test_collection") is collection
 
     @pytest.mark.asyncio
-    async def test_get_collection_connection_failure_during_index(self, mock_mongo_database):
+    async def test_get_collection_connection_failure_during_index(
+        self, mock_mongo_database
+    ):
         """Test get_collection handles connection failure during index check (lines 1545-1560)."""
         from pymongo.errors import ConnectionFailure
 
@@ -365,7 +374,9 @@ class TestScopedMongoWrapper:
 
         # Mock client admin command to raise ConnectionFailure
         mock_client = MagicMock()
-        mock_client.admin.command = AsyncMock(side_effect=ConnectionFailure("Connection failed"))
+        mock_client.admin.command = AsyncMock(
+            side_effect=ConnectionFailure("Connection failed")
+        )
         mock_mongo_database.client = mock_client
 
         # Clear cache to ensure fresh check
@@ -377,7 +388,9 @@ class TestScopedMongoWrapper:
         assert isinstance(collection, ScopedCollectionWrapper)
 
     @pytest.mark.asyncio
-    async def test_get_collection_operation_failure_during_index(self, mock_mongo_database):
+    async def test_get_collection_operation_failure_during_index(
+        self, mock_mongo_database
+    ):
         """Test get_collection handles OperationFailure during index creation (lines 1577-1583)."""
         from pymongo.errors import OperationFailure
 
@@ -537,7 +550,9 @@ class TestScopedCollectionWrapperErrorHandling:
             write_scope="test_app",
         )
 
-        mock_mongo_collection.find_one = AsyncMock(side_effect=ConnectionFailure("Connection lost"))
+        mock_mongo_collection.find_one = AsyncMock(
+            side_effect=ConnectionFailure("Connection lost")
+        )
 
         with pytest.raises(ConnectionFailure):
             await wrapper.find_one({"name": "Test"})
@@ -697,7 +712,9 @@ class TestScopedCollectionWrapperEdgeCases:
         assert "$vectorSearch" in modified_pipeline[0]
         # But it should have a filter with app_id
         assert "filter" in modified_pipeline[0]["$vectorSearch"]
-        assert modified_pipeline[0]["$vectorSearch"]["filter"]["app_id"] == {"$in": ["test_app"]}
+        assert modified_pipeline[0]["$vectorSearch"]["filter"]["app_id"] == {
+            "$in": ["test_app"]
+        }
 
     @pytest.mark.asyncio
     async def test_scoped_aggregate_empty_pipeline(self, mock_mongo_collection):
@@ -721,7 +738,9 @@ class TestScopedCollectionWrapperEdgeCases:
         assert modified_pipeline[0]["$match"]["app_id"] == {"$in": ["test_app"]}
 
     @pytest.mark.asyncio
-    async def test_scoped_count_documents_with_auto_indexing(self, mock_mongo_collection):
+    async def test_scoped_count_documents_with_auto_indexing(
+        self, mock_mongo_collection
+    ):
         """Test count_documents() with auto-indexing (lines 1242-1244)."""
         # Create a mock AutoIndexManager
         mock_auto_index_manager = MagicMock()
@@ -833,7 +852,9 @@ class TestAsyncAtlasIndexManager:
             )
 
     @pytest.mark.asyncio
-    async def test_index_manager_ensure_collection_connection_error(self, mock_mongo_collection):
+    async def test_index_manager_ensure_collection_connection_error(
+        self, mock_mongo_collection
+    ):
         """Test handling connection errors when ensuring collection exists."""
         from pymongo.errors import ConnectionFailure
 
@@ -852,7 +873,9 @@ class TestAsyncAtlasIndexManager:
             await manager._ensure_collection_exists()
 
     @pytest.mark.asyncio
-    async def test_index_manager_ensure_collection_operation_error(self, mock_mongo_collection):
+    async def test_index_manager_ensure_collection_operation_error(
+        self, mock_mongo_collection
+    ):
         """Test handling operation errors when ensuring collection exists."""
         from pymongo.errors import OperationFailure
 
@@ -871,15 +894,21 @@ class TestAsyncAtlasIndexManager:
             await manager._ensure_collection_exists()
 
     @pytest.mark.asyncio
-    async def test_index_manager_check_definition_changed_vector(self, mock_mongo_collection):
+    async def test_index_manager_check_definition_changed_vector(
+        self, mock_mongo_collection
+    ):
         """Test checking definition changes for vector search index."""
         from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager
 
         manager = AsyncAtlasIndexManager(mock_mongo_collection)
 
         # Test vector search with changed fields
-        definition = {"fields": [{"type": "vector", "path": "embedding", "numDimensions": 1536}]}
-        latest_def = {"fields": [{"type": "vector", "path": "embedding", "numDimensions": 768}]}
+        definition = {
+            "fields": [{"type": "vector", "path": "embedding", "numDimensions": 1536}]
+        }
+        latest_def = {
+            "fields": [{"type": "vector", "path": "embedding", "numDimensions": 768}]
+        }
 
         changed, reason = manager._check_definition_changed(
             definition, latest_def, "vectorsearch", "test_idx"
@@ -897,7 +926,9 @@ class TestAsyncAtlasIndexManager:
         assert changed is False
 
     @pytest.mark.asyncio
-    async def test_index_manager_check_definition_changed_search(self, mock_mongo_collection):
+    async def test_index_manager_check_definition_changed_search(
+        self, mock_mongo_collection
+    ):
         """Test checking definition changes for search index."""
         from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager
 
@@ -921,7 +952,9 @@ class TestAsyncAtlasIndexManager:
         assert changed is False
 
     @pytest.mark.asyncio
-    async def test_index_manager_check_definition_changed_mismatch(self, mock_mongo_collection):
+    async def test_index_manager_check_definition_changed_mismatch(
+        self, mock_mongo_collection
+    ):
         """Test checking definition changes with mismatched index type."""
         from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager
 
@@ -938,7 +971,9 @@ class TestAsyncAtlasIndexManager:
         assert changed is False
 
     @pytest.mark.asyncio
-    async def test_index_manager_ensure_collection_collection_invalid(self, mock_mongo_collection):
+    async def test_index_manager_ensure_collection_collection_invalid(
+        self, mock_mongo_collection
+    ):
         """Test handling CollectionInvalid when ensuring collection exists (lines 132-145)."""
         from pymongo.errors import CollectionInvalid
 
@@ -956,7 +991,9 @@ class TestAsyncAtlasIndexManager:
         await manager._ensure_collection_exists()
 
         # Test other CollectionInvalid error
-        mock_database.create_collection = AsyncMock(side_effect=CollectionInvalid("Other error"))
+        mock_database.create_collection = AsyncMock(
+            side_effect=CollectionInvalid("Other error")
+        )
         manager = AsyncAtlasIndexManager(mock_mongo_collection)
         from mdb_engine.exceptions import MongoDBEngineError
 
@@ -964,7 +1001,9 @@ class TestAsyncAtlasIndexManager:
             await manager._ensure_collection_exists()
 
     @pytest.mark.asyncio
-    async def test_handle_existing_index_definition_changed(self, mock_mongo_collection):
+    async def test_handle_existing_index_definition_changed(
+        self, mock_mongo_collection
+    ):
         """Test _handle_existing_index when definition has changed (lines 194-204)."""
         from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager
 
@@ -1077,7 +1116,8 @@ class TestAutoIndexManager:
 
     def test_extract_index_fields_from_filter_empty(self, mock_mongo_collection):
         """Test _extract_index_fields_from_filter with empty filter (lines 791-792)."""
-        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager, AutoIndexManager
+        from mdb_engine.database.scoped_wrapper import (AsyncAtlasIndexManager,
+                                                        AutoIndexManager)
 
         index_manager = AsyncAtlasIndexManager(mock_mongo_collection)
         auto_manager = AutoIndexManager(mock_mongo_collection, index_manager)
@@ -1092,7 +1132,8 @@ class TestAutoIndexManager:
         """Test _extract_index_fields_from_filter with equality matches (lines 815-817)."""
         from pymongo import ASCENDING
 
-        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager, AutoIndexManager
+        from mdb_engine.database.scoped_wrapper import (AsyncAtlasIndexManager,
+                                                        AutoIndexManager)
 
         index_manager = AsyncAtlasIndexManager(mock_mongo_collection)
         auto_manager = AutoIndexManager(mock_mongo_collection, index_manager)
@@ -1108,7 +1149,8 @@ class TestAutoIndexManager:
         """Test _extract_index_fields_from_filter with operators (lines 800-805)."""
         from pymongo import ASCENDING
 
-        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager, AutoIndexManager
+        from mdb_engine.database.scoped_wrapper import (AsyncAtlasIndexManager,
+                                                        AutoIndexManager)
 
         index_manager = AsyncAtlasIndexManager(mock_mongo_collection)
         auto_manager = AutoIndexManager(mock_mongo_collection, index_manager)
@@ -1137,7 +1179,8 @@ class TestAutoIndexManager:
         """Test _extract_index_fields_from_filter with nested $and (lines 807-811)."""
         from pymongo import ASCENDING
 
-        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager, AutoIndexManager
+        from mdb_engine.database.scoped_wrapper import (AsyncAtlasIndexManager,
+                                                        AutoIndexManager)
 
         index_manager = AsyncAtlasIndexManager(mock_mongo_collection)
         auto_manager = AutoIndexManager(mock_mongo_collection, index_manager)
@@ -1161,7 +1204,8 @@ class TestAutoIndexManager:
 
     def test_extract_index_fields_from_filter_or_skipped(self, mock_mongo_collection):
         """Test _extract_index_fields_from_filter skips $or (lines 812-814)."""
-        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager, AutoIndexManager
+        from mdb_engine.database.scoped_wrapper import (AsyncAtlasIndexManager,
+                                                        AutoIndexManager)
 
         index_manager = AsyncAtlasIndexManager(mock_mongo_collection)
         auto_manager = AutoIndexManager(mock_mongo_collection, index_manager)
@@ -1176,11 +1220,14 @@ class TestAutoIndexManager:
 
         assert result == []
 
-    def test_extract_index_fields_from_filter_duplicates_removed(self, mock_mongo_collection):
+    def test_extract_index_fields_from_filter_duplicates_removed(
+        self, mock_mongo_collection
+    ):
         """Test _extract_index_fields_from_filter removes duplicates (line 824)."""
         from pymongo import ASCENDING
 
-        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager, AutoIndexManager
+        from mdb_engine.database.scoped_wrapper import (AsyncAtlasIndexManager,
+                                                        AutoIndexManager)
 
         index_manager = AsyncAtlasIndexManager(mock_mongo_collection)
         auto_manager = AutoIndexManager(mock_mongo_collection, index_manager)
@@ -1196,7 +1243,8 @@ class TestAutoIndexManager:
 
     def test_extract_sort_fields_empty(self, mock_mongo_collection):
         """Test _extract_sort_fields with empty sort (lines 834-835)."""
-        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager, AutoIndexManager
+        from mdb_engine.database.scoped_wrapper import (AsyncAtlasIndexManager,
+                                                        AutoIndexManager)
 
         index_manager = AsyncAtlasIndexManager(mock_mongo_collection)
         auto_manager = AutoIndexManager(mock_mongo_collection, index_manager)
@@ -1209,7 +1257,8 @@ class TestAutoIndexManager:
 
     def test_extract_sort_fields_dict(self, mock_mongo_collection):
         """Test _extract_sort_fields with dict format (lines 837-838)."""
-        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager, AutoIndexManager
+        from mdb_engine.database.scoped_wrapper import (AsyncAtlasIndexManager,
+                                                        AutoIndexManager)
 
         index_manager = AsyncAtlasIndexManager(mock_mongo_collection)
         auto_manager = AutoIndexManager(mock_mongo_collection, index_manager)
@@ -1221,7 +1270,8 @@ class TestAutoIndexManager:
 
     def test_extract_sort_fields_list(self, mock_mongo_collection):
         """Test _extract_sort_fields with list format (lines 839-840)."""
-        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager, AutoIndexManager
+        from mdb_engine.database.scoped_wrapper import (AsyncAtlasIndexManager,
+                                                        AutoIndexManager)
 
         index_manager = AsyncAtlasIndexManager(mock_mongo_collection)
         auto_manager = AutoIndexManager(mock_mongo_collection, index_manager)
@@ -1233,7 +1283,8 @@ class TestAutoIndexManager:
 
     def test_extract_sort_fields_invalid_type(self, mock_mongo_collection):
         """Test _extract_sort_fields with invalid type (lines 841-842)."""
-        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager, AutoIndexManager
+        from mdb_engine.database.scoped_wrapper import (AsyncAtlasIndexManager,
+                                                        AutoIndexManager)
 
         index_manager = AsyncAtlasIndexManager(mock_mongo_collection)
         auto_manager = AutoIndexManager(mock_mongo_collection, index_manager)
@@ -1243,7 +1294,8 @@ class TestAutoIndexManager:
 
     def test_generate_index_name_empty(self, mock_mongo_collection):
         """Test _generate_index_name with empty fields (lines 846-847)."""
-        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager, AutoIndexManager
+        from mdb_engine.database.scoped_wrapper import (AsyncAtlasIndexManager,
+                                                        AutoIndexManager)
 
         index_manager = AsyncAtlasIndexManager(mock_mongo_collection)
         auto_manager = AutoIndexManager(mock_mongo_collection, index_manager)
@@ -1255,7 +1307,8 @@ class TestAutoIndexManager:
         """Test _generate_index_name with single field."""
         from pymongo import ASCENDING, DESCENDING
 
-        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager, AutoIndexManager
+        from mdb_engine.database.scoped_wrapper import (AsyncAtlasIndexManager,
+                                                        AutoIndexManager)
 
         index_manager = AsyncAtlasIndexManager(mock_mongo_collection)
         auto_manager = AutoIndexManager(mock_mongo_collection, index_manager)
@@ -1270,7 +1323,8 @@ class TestAutoIndexManager:
         """Test _generate_index_name with multiple fields."""
         from pymongo import ASCENDING, DESCENDING
 
-        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager, AutoIndexManager
+        from mdb_engine.database.scoped_wrapper import (AsyncAtlasIndexManager,
+                                                        AutoIndexManager)
 
         index_manager = AsyncAtlasIndexManager(mock_mongo_collection)
         auto_manager = AutoIndexManager(mock_mongo_collection, index_manager)
@@ -1284,7 +1338,9 @@ class TestAutoIndexManager:
         assert result == "auto_name_asc_age_desc"
 
     @pytest.mark.asyncio
-    async def test_ensure_index_for_query_task_deduplication(self, mock_mongo_collection):
+    async def test_ensure_index_for_query_task_deduplication(
+        self, mock_mongo_collection
+    ):
         """Test that concurrent ensure_index_for_query calls don't create duplicate tasks."""
         import asyncio
 
@@ -1373,7 +1429,9 @@ class TestAutoIndexManager:
         auto_manager._query_counts[index_name] = 10
 
         # Start first call (will create task)
-        task1 = asyncio.create_task(auto_manager.ensure_index_for_query({"name": "test"}))
+        task1 = asyncio.create_task(
+            auto_manager.ensure_index_for_query({"name": "test"})
+        )
 
         # Wait a tiny bit to ensure task is created
         await asyncio.sleep(0.01)
@@ -1446,7 +1504,9 @@ class TestAsyncAtlasIndexManagerCreateIndex:
     """Test AsyncAtlasIndexManager index creation error handling."""
 
     @pytest.mark.asyncio
-    async def test_create_new_search_index_index_already_exists(self, mock_mongo_collection):
+    async def test_create_new_search_index_index_already_exists(
+        self, mock_mongo_collection
+    ):
         """Test _create_new_search_index handles IndexAlreadyExists race condition."""
         from pymongo.errors import OperationFailure
 
@@ -1456,7 +1516,9 @@ class TestAsyncAtlasIndexManagerCreateIndex:
 
         # Mock create_search_index to raise OperationFailure with IndexAlreadyExists
         mock_mongo_collection.create_search_index = AsyncMock(
-            side_effect=OperationFailure("IndexAlreadyExists: Index 'test_idx' already exists")
+            side_effect=OperationFailure(
+                "IndexAlreadyExists: Index 'test_idx' already exists"
+            )
         )
 
         # Should not raise - just logs warning
@@ -1465,7 +1527,9 @@ class TestAsyncAtlasIndexManagerCreateIndex:
         )
 
     @pytest.mark.asyncio
-    async def test_create_new_search_index_operation_failure(self, mock_mongo_collection):
+    async def test_create_new_search_index_operation_failure(
+        self, mock_mongo_collection
+    ):
         """Test _create_new_search_index raises OperationFailure for other errors."""
         from pymongo.errors import OperationFailure
 
@@ -1551,7 +1615,9 @@ class TestAsyncAtlasIndexManagerCreateIndex:
                 "mdb_engine.database.scoped_wrapper.AsyncAtlasIndexManager.get_search_index",
                 side_effect=get_search_index_side_effect,
             ):
-                with pytest.raises(MongoDBEngineError, match="Failed to create/check search index"):
+                with pytest.raises(
+                    MongoDBEngineError, match="Failed to create/check search index"
+                ):
                     await manager.create_search_index(
                         "test_idx", {"mappings": {"dynamic": True}}, "vectorsearch"
                     )
@@ -1660,7 +1726,9 @@ class TestAsyncAtlasIndexManagerCreateIndex:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_get_search_index_server_selection_timeout(self, mock_mongo_collection):
+    async def test_get_search_index_server_selection_timeout(
+        self, mock_mongo_collection
+    ):
         """Test get_search_index handles ServerSelectionTimeoutError (returns None)."""
         from pymongo.errors import ServerSelectionTimeoutError
 
@@ -1704,7 +1772,9 @@ class TestAsyncAtlasIndexManagerCreateIndex:
             await manager.get_search_index("test_idx")
 
     @pytest.mark.asyncio
-    async def test_get_search_index_returns_none_when_not_found(self, mock_mongo_collection):
+    async def test_get_search_index_returns_none_when_not_found(
+        self, mock_mongo_collection
+    ):
         """Test get_search_index returns None when index not found (line 318)."""
         from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager
 
@@ -1746,7 +1816,9 @@ class TestAsyncAtlasIndexManagerCreateIndex:
             assert any("test_idx" in str(call) for call in log_calls)
 
     @pytest.mark.asyncio
-    async def test_create_search_index_existing_index_ready(self, mock_mongo_collection):
+    async def test_create_search_index_existing_index_ready(
+        self, mock_mongo_collection
+    ):
         """Test create_search_index when existing index is ready (lines 273-277)."""
         from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager
 
@@ -1834,7 +1906,9 @@ class TestAsyncAtlasIndexManagerCreateIndex:
                         mock_wait.assert_called_once_with("test_idx", 600)
 
     @pytest.mark.asyncio
-    async def test_create_search_index_existing_index_not_ready(self, mock_mongo_collection):
+    async def test_create_search_index_existing_index_not_ready(
+        self, mock_mongo_collection
+    ):
         """Test create_search_index when existing index is not ready (lines 273-277)."""
         from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager
 
@@ -1932,7 +2006,9 @@ class TestAsyncAtlasIndexManagerCreateIndex:
         manager = AsyncAtlasIndexManager(mock_mongo_collection)
 
         mock_cursor = MagicMock()
-        mock_cursor.to_list = AsyncMock(side_effect=ConnectionFailure("Connection error"))
+        mock_cursor.to_list = AsyncMock(
+            side_effect=ConnectionFailure("Connection error")
+        )
         mock_mongo_collection.list_search_indexes = MagicMock(return_value=mock_cursor)
 
         result = await manager.list_search_indexes()

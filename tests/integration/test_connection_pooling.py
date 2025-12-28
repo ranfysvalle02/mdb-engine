@@ -127,7 +127,9 @@ class TestConnectionPooling:
         """Test that invalid connection URI raises InitializationError."""
         from mdb_engine.core.engine import MongoDBEngine
 
-        engine = MongoDBEngine(mongo_uri="mongodb://invalid-host:27017/", db_name="invalid_test_db")
+        engine = MongoDBEngine(
+            mongo_uri="mongodb://invalid-host:27017/", db_name="invalid_test_db"
+        )
 
         with pytest.raises(InitializationError):
             await engine.initialize()

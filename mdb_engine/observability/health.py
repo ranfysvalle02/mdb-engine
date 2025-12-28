@@ -11,7 +11,8 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
 
-from pymongo.errors import ConnectionFailure, OperationFailure, ServerSelectionTimeoutError
+from pymongo.errors import (ConnectionFailure, OperationFailure,
+                            ServerSelectionTimeoutError)
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +86,9 @@ class HealthChecker:
                 ConnectionError,
                 OSError,
             ) as e:
-                logger.error(f"Health check {check_func.__name__} failed: {e}", exc_info=True)
+                logger.error(
+                    f"Health check {check_func.__name__} failed: {e}", exc_info=True
+                )
                 results.append(
                     HealthCheckResult(
                         name=check_func.__name__,
@@ -134,7 +137,9 @@ async def check_mongodb_health(
 
     try:
         # Try to ping MongoDB with timeout
-        await asyncio.wait_for(mongo_client.admin.command("ping"), timeout=timeout_seconds)
+        await asyncio.wait_for(
+            mongo_client.admin.command("ping"), timeout=timeout_seconds
+        )
 
         return HealthCheckResult(
             name="mongodb",

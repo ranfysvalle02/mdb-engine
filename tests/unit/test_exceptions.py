@@ -4,12 +4,8 @@ Unit tests for custom exceptions.
 Tests exception hierarchy and error messages.
 """
 
-from mdb_engine.exceptions import (
-    ConfigurationError,
-    InitializationError,
-    ManifestValidationError,
-    MongoDBEngineError,
-)
+from mdb_engine.exceptions import (ConfigurationError, InitializationError,
+                                   ManifestValidationError, MongoDBEngineError)
 
 
 class TestExceptionHierarchy:

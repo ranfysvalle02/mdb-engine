@@ -43,7 +43,9 @@ def get_casbin_model(model_type: str = "rbac") -> str:
         if model_path.exists():
             return model_path.read_text()
         else:
-            logger.warning(f"Casbin model file not found: {model_type}, using default RBAC model")
+            logger.warning(
+                f"Casbin model file not found: {model_type}, using default RBAC model"
+            )
             return DEFAULT_RBAC_MODEL
 
 
@@ -153,7 +155,9 @@ async def initialize_casbin_from_manifest(
         # Get authorization config
         authorization = auth_policy.get("authorization", {})
         model = authorization.get("model", "rbac")
-        policies_collection = authorization.get("policies_collection", "casbin_policies")
+        policies_collection = authorization.get(
+            "policies_collection", "casbin_policies"
+        )
         default_roles = authorization.get("default_roles", [])
 
         # Get database from engine

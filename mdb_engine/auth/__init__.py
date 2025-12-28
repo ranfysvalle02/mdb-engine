@@ -7,77 +7,46 @@ This module is part of MDB_ENGINE - MongoDB Engine.
 """
 
 # Casbin Factory
-from .casbin_factory import (
-    create_casbin_enforcer,
-    get_casbin_model,
-    initialize_casbin_from_manifest,
-)
-
+from .casbin_factory import (create_casbin_enforcer, get_casbin_model,
+                             initialize_casbin_from_manifest)
 # Cookie utilities
-from .cookie_utils import clear_auth_cookies, get_secure_cookie_settings, set_auth_cookies
-
+from .cookie_utils import (clear_auth_cookies, get_secure_cookie_settings,
+                           set_auth_cookies)
 # Decorators
-from .decorators import auto_token_setup, rate_limit_auth, require_auth, token_security
-from .dependencies import (
-    SECRET_KEY,
-    _validate_next_url,
-    get_authz_provider,
-    get_current_user,
-    get_current_user_from_request,
-    get_current_user_or_redirect,
-    get_refresh_token,
-    get_session_manager,
-    get_token_blacklist,
-    refresh_access_token,
-    require_admin,
-    require_admin_or_developer,
-    require_permission,
-)
+from .decorators import (auto_token_setup, rate_limit_auth, require_auth,
+                         token_security)
+from .dependencies import (SECRET_KEY, _validate_next_url, get_authz_provider,
+                           get_current_user, get_current_user_from_request,
+                           get_current_user_or_redirect, get_refresh_token,
+                           get_session_manager, get_token_blacklist,
+                           refresh_access_token, require_admin,
+                           require_admin_or_developer, require_permission)
 from .helpers import initialize_token_management
-
 # Integration
 from .integration import get_auth_config, setup_auth_from_manifest
-from .jwt import decode_jwt_token, encode_jwt_token, extract_token_metadata, generate_token_pair
-
+from .jwt import (decode_jwt_token, encode_jwt_token, extract_token_metadata,
+                  generate_token_pair)
 # Middleware
 from .middleware import SecurityMiddleware, create_security_middleware
-from .provider import AUTHZ_CACHE_TTL, AuthorizationProvider, CasbinAdapter, OsoAdapter
+from .provider import (AUTHZ_CACHE_TTL, AuthorizationProvider, CasbinAdapter,
+                       OsoAdapter)
 from .restrictions import block_demo_users, is_demo_user, require_non_demo_user
 from .session_manager import SessionManager
-from .token_lifecycle import (
-    get_time_until_expiry,
-    get_token_age,
-    get_token_expiry_time,
-    get_token_info,
-    is_token_expiring_soon,
-    should_refresh_token,
-    validate_token_version,
-)
-
+from .token_lifecycle import (get_time_until_expiry, get_token_age,
+                              get_token_expiry_time, get_token_info,
+                              is_token_expiring_soon, should_refresh_token,
+                              validate_token_version)
 # Token management
 from .token_store import TokenBlacklist
-from .users import (
-    authenticate_app_user,
-    create_app_session,
-    create_app_user,
-    ensure_demo_users_exist,
-    ensure_demo_users_for_actor,
-    get_app_user,
-    get_app_user_role,
-    get_or_create_anonymous_user,
-    get_or_create_demo_user,
-    get_or_create_demo_user_for_request,
-    sync_app_user_to_casbin,
-)
-
+from .users import (authenticate_app_user, create_app_session, create_app_user,
+                    ensure_demo_users_exist, ensure_demo_users_for_actor,
+                    get_app_user, get_app_user_role,
+                    get_or_create_anonymous_user, get_or_create_demo_user,
+                    get_or_create_demo_user_for_request,
+                    sync_app_user_to_casbin)
 # Utilities
-from .utils import (
-    get_device_info,
-    login_user,
-    logout_user,
-    register_user,
-    validate_password_strength,
-)
+from .utils import (get_device_info, login_user, logout_user, register_user,
+                    validate_password_strength)
 
 __all__ = [
     # Provider

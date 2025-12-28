@@ -13,7 +13,8 @@ from typing import Any, Dict, List, Optional
 from bson.objectid import ObjectId
 
 try:
-    from pymongo.errors import ConnectionFailure, OperationFailure, ServerSelectionTimeoutError
+    from pymongo.errors import (ConnectionFailure, OperationFailure,
+                                ServerSelectionTimeoutError)
 except ImportError:
     ConnectionFailure = Exception
     OperationFailure = Exception
@@ -119,7 +120,9 @@ class SessionManager:
                 # Remove oldest inactive session
                 await self.cleanup_inactive_sessions(user_id)
                 # Check again
-                active_sessions = await self.get_user_sessions(user_id, active_only=True)
+                active_sessions = await self.get_user_sessions(
+                    user_id, active_only=True
+                )
                 if len(active_sessions) >= self.max_sessions:
                     # Force remove oldest session
                     if active_sessions:
@@ -165,7 +168,9 @@ class SessionManager:
             ValueError,
             TypeError,
         ) as e:
-            logger.error(f"Error creating session for user {user_id}: {e}", exc_info=True)
+            logger.error(
+                f"Error creating session for user {user_id}: {e}", exc_info=True
+            )
             return None
 
     async def update_session_activity(
@@ -200,10 +205,14 @@ class SessionManager:
             ValueError,
             TypeError,
         ) as e:
-            logger.error(f"Error updating session activity for {refresh_jti}: {e}", exc_info=True)
+            logger.error(
+                f"Error updating session activity for {refresh_jti}: {e}", exc_info=True
+            )
             return False
 
-    async def get_session_by_refresh_token(self, refresh_jti: str) -> Optional[Dict[str, Any]]:
+    async def get_session_by_refresh_token(
+        self, refresh_jti: str
+    ) -> Optional[Dict[str, Any]]:
         """
         Get session by refresh token JWT ID.
 
@@ -214,7 +223,9 @@ class SessionManager:
             Session document or None if not found
         """
         try:
-            session = await self.collection.find_one({"refresh_jti": refresh_jti, "active": True})
+            session = await self.collection.find_one(
+                {"refresh_jti": refresh_jti, "active": True}
+            )
             return session
         except (
             OperationFailure,
@@ -256,7 +267,9 @@ class SessionManager:
             stored_fingerprint = session.get("session_fingerprint")
 
             if not stored_fingerprint:
-                strict_mode = strict if strict is not None else self.fingerprinting_strict
+                strict_mode = (
+                    strict if strict is not None else self.fingerprinting_strict
+                )
                 return not strict_mode
 
             return stored_fingerprint == current_fingerprint
@@ -300,7 +313,9 @@ class SessionManager:
             if active_only:
                 query["active"] = True
 
-            sessions = await self.collection.find(query).sort("last_seen", -1).to_list(None)
+            sessions = (
+                await self.collection.find(query).sort("last_seen", -1).to_list(None)
+            )
             return sessions
         except (
             OperationFailure,
@@ -309,7 +324,9 @@ class SessionManager:
             ValueError,
             TypeError,
         ) as e:
-            logger.error(f"Error getting sessions for user {user_id}: {e}", exc_info=True)
+            logger.error(
+                f"Error getting sessions for user {user_id}: {e}", exc_info=True
+            )
             return []
 
     async def revoke_session(self, session_id: Any) -> bool:
@@ -383,7 +400,9 @@ class SessionManager:
             ValueError,
             TypeError,
         ) as e:
-            logger.error(f"Error revoking sessions for user {user_id}: {e}", exc_info=True)
+            logger.error(
+                f"Error revoking sessions for user {user_id}: {e}", exc_info=True
+            )
             return 0
 
     async def cleanup_inactive_sessions(self, user_id: Optional[str] = None) -> int:

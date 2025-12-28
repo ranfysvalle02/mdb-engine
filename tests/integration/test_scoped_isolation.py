@@ -154,7 +154,9 @@ class TestScopedDataIsolation:
             db = engine.get_scoped_db(app_slug)
             collection = db.test_collection
             for j in range(5):
-                await collection.insert_one({"app": app_slug, "index": j, "data": f"data_{j}"})
+                await collection.insert_one(
+                    {"app": app_slug, "index": j, "data": f"data_{j}"}
+                )
 
         # Run concurrent writes
         await asyncio.gather(*[write_data(app) for app in apps])

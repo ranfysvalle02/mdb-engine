@@ -218,7 +218,9 @@ class AzureOpenAIEmbeddingProvider(BaseEmbeddingProvider):
             OSError,
         ) as e:
             logger.error(f"Azure OpenAI embedding failed: {e}")
-            raise EmbeddingServiceError(f"Azure OpenAI embedding failed: {str(e)}") from e
+            raise EmbeddingServiceError(
+                f"Azure OpenAI embedding failed: {str(e)}"
+            ) from e
 
 
 def _detect_provider_from_env() -> str:
@@ -279,16 +281,24 @@ class EmbeddingProvider:
         else:
             # Auto-detect provider from environment variables
             provider_type = _detect_provider_from_env()
-            default_model = (config or {}).get("default_embedding_model", "text-embedding-3-small")
+            default_model = (config or {}).get(
+                "default_embedding_model", "text-embedding-3-small"
+            )
 
             if provider_type == "azure":
-                self.embedding_provider = AzureOpenAIEmbeddingProvider(default_model=default_model)
+                self.embedding_provider = AzureOpenAIEmbeddingProvider(
+                    default_model=default_model
+                )
                 logger.info(
                     f"Auto-detected Azure OpenAI embedding provider (model: {default_model})"
                 )
             else:
-                self.embedding_provider = OpenAIEmbeddingProvider(default_model=default_model)
-                logger.info(f"Auto-detected OpenAI embedding provider (model: {default_model})")
+                self.embedding_provider = OpenAIEmbeddingProvider(
+                    default_model=default_model
+                )
+                logger.info(
+                    f"Auto-detected OpenAI embedding provider (model: {default_model})"
+                )
 
         # Store config for potential future use
         self.config = config or {}
@@ -604,7 +614,9 @@ class EmbeddingService:
                 result = await collection.insert_many(documents_to_insert)
                 inserted_count = len(result.inserted_ids)
 
-            logger.info(f"Successfully inserted {inserted_count} documents for source: {source_id}")
+            logger.info(
+                f"Successfully inserted {inserted_count} documents for source: {source_id}"
+            )
 
             return {
                 "chunks_created": len(chunks),
@@ -620,7 +632,9 @@ class EmbeddingService:
             KeyError,
             ConnectionError,
         ) as e:
-            logger.error(f"Failed to store documents for {source_id}: {e}", exc_info=True)
+            logger.error(
+                f"Failed to store documents for {source_id}: {e}", exc_info=True
+            )
             raise EmbeddingServiceError(f"Storage failed: {str(e)}") from e
 
     async def process_text(

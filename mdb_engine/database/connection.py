@@ -26,12 +26,8 @@ import threading
 from typing import Any, Dict, Optional
 
 from motor.motor_asyncio import AsyncIOMotorClient
-from pymongo.errors import (
-    ConnectionFailure,
-    InvalidOperation,
-    OperationFailure,
-    ServerSelectionTimeoutError,
-)
+from pymongo.errors import (ConnectionFailure, InvalidOperation,
+                            OperationFailure, ServerSelectionTimeoutError)
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +87,10 @@ def get_shared_mongo_client(
         # Verify client is still connected
         try:
             # Non-blocking check - if client was closed, it will be None or invalid
-            if hasattr(_shared_client, "_topology") and _shared_client._topology is not None:
+            if (
+                hasattr(_shared_client, "_topology")
+                and _shared_client._topology is not None
+            ):
                 return _shared_client
         except (AttributeError, RuntimeError):
             # Client was closed or invalid, reset and recreate
@@ -104,7 +103,10 @@ def get_shared_mongo_client(
         # Double-check pattern: another thread may have initialized while we waited
         if _shared_client is not None:
             try:
-                if hasattr(_shared_client, "_topology") and _shared_client._topology is not None:
+                if (
+                    hasattr(_shared_client, "_topology")
+                    and _shared_client._topology is not None
+                ):
                     return _shared_client
             except (AttributeError, RuntimeError):
                 # Client was closed or invalid, reset and recreate
@@ -234,7 +236,10 @@ async def get_pool_metrics(
     for registered_client in _registered_clients:
         try:
             # Verify client is still valid
-            if hasattr(registered_client, "_topology") and registered_client._topology is not None:
+            if (
+                hasattr(registered_client, "_topology")
+                and registered_client._topology is not None
+            ):
                 return await _get_client_pool_metrics(registered_client)
         except (AttributeError, RuntimeError):
             # Type 2: Recoverable - if this client is invalid, try next one
@@ -333,7 +338,9 @@ async def _get_client_pool_metrics(client: AsyncIOMotorClient) -> Dict[str, Any]
         if max_pool_size and current_connections is not None:
             usage_percent = (current_connections / max_pool_size) * 100
             metrics["pool_usage_percent"] = round(usage_percent, 2)
-            metrics["active_connections"] = current_connections  # Alias for compatibility
+            metrics["active_connections"] = (
+                current_connections  # Alias for compatibility
+            )
 
             # Warn if pool usage is high
             if usage_percent > 80:

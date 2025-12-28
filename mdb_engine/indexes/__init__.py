@@ -8,7 +8,6 @@ This module is part of MDB_ENGINE - MongoDB Engine.
 
 # Re-export index managers from database module for convenience
 from ..database.scoped_wrapper import AsyncAtlasIndexManager, AutoIndexManager
-
 # Export high-level management functions
 from .manager import normalize_json_def, run_index_creation_for_collection
 

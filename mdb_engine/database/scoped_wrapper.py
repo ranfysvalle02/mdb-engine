@@ -27,31 +27,24 @@ a familiar (Motor-like) developer experience with automatic index optimization.
 import asyncio
 import logging
 import time
-from typing import Any, ClassVar, Coroutine, Dict, List, Mapping, Optional, Tuple, Union
+from typing import (Any, ClassVar, Coroutine, Dict, List, Mapping, Optional,
+                    Tuple, Union)
 
-from motor.motor_asyncio import AsyncIOMotorCollection, AsyncIOMotorCursor, AsyncIOMotorDatabase
+from motor.motor_asyncio import (AsyncIOMotorCollection, AsyncIOMotorCursor,
+                                 AsyncIOMotorDatabase)
 from pymongo import ASCENDING, DESCENDING, TEXT
-from pymongo.errors import (
-    AutoReconnect,
-    CollectionInvalid,
-    ConnectionFailure,
-    InvalidOperation,
-    OperationFailure,
-    ServerSelectionTimeoutError,
-)
+from pymongo.errors import (AutoReconnect, CollectionInvalid,
+                            ConnectionFailure, InvalidOperation,
+                            OperationFailure, ServerSelectionTimeoutError)
 from pymongo.operations import SearchIndexModel
-from pymongo.results import DeleteResult, InsertManyResult, InsertOneResult, UpdateResult
+from pymongo.results import (DeleteResult, InsertManyResult, InsertOneResult,
+                             UpdateResult)
 
 # Import constants
-from ..constants import (
-    AUTO_INDEX_HINT_THRESHOLD,
-    DEFAULT_DROP_TIMEOUT,
-    DEFAULT_POLL_INTERVAL,
-    DEFAULT_SEARCH_TIMEOUT,
-    MAX_INDEX_FIELDS,
-)
+from ..constants import (AUTO_INDEX_HINT_THRESHOLD, DEFAULT_DROP_TIMEOUT,
+                         DEFAULT_POLL_INTERVAL, DEFAULT_SEARCH_TIMEOUT,
+                         MAX_INDEX_FIELDS)
 from ..exceptions import MongoDBEngineError
-
 # Import observability
 from ..observability import record_operation
 
@@ -67,7 +60,9 @@ GEO2DSPHERE = "2dsphere"
 
 
 # --- HELPER FUNCTION FOR MANAGED TASK CREATION ---
-def _create_managed_task(coro: Coroutine[Any, Any, Any], task_name: Optional[str] = None) -> None:
+def _create_managed_task(
+    coro: Coroutine[Any, Any, Any], task_name: Optional[str] = None
+) -> None:
     """
     Creates a background task using asyncio.create_task().
 
@@ -121,7 +116,9 @@ class AsyncAtlasIndexManager:
         motor.motor_asyncio.AsyncIOMotorCollection.
         """
         if not isinstance(real_collection, AsyncIOMotorCollection):
-            raise TypeError(f"Expected AsyncIOMotorCollection, got {type(real_collection)}")
+            raise TypeError(
+                f"Expected AsyncIOMotorCollection, got {type(real_collection)}"
+            )
         self._collection = real_collection
 
     async def _ensure_collection_exists(self) -> None:
@@ -137,7 +134,9 @@ class AsyncAtlasIndexManager:
                     f"Continuing index creation."
                 )
             else:
-                logger.exception("Failed to ensure collection exists - CollectionInvalid error")
+                logger.exception(
+                    "Failed to ensure collection exists - CollectionInvalid error"
+                )
                 raise MongoDBEngineError(
                     f"Failed to create prerequisite collection '{self._collection.name}'",
                     context={"collection_name": self._collection.name},
@@ -209,7 +208,9 @@ class AsyncAtlasIndexManager:
             )
             return False  # Will wait below
         elif existing_index.get("queryable"):
-            logger.info(f"Search index '{name}' is already queryable and definition is up-to-date.")
+            logger.info(
+                f"Search index '{name}' is already queryable and definition is up-to-date."
+            )
             return True
         elif existing_index.get("status") == "FAILED":
             logger.error(
@@ -230,15 +231,20 @@ class AsyncAtlasIndexManager:
         """Create a new search index."""
         try:
             logger.info(f"Creating new search index '{name}' of type '{index_type}'...")
-            search_index_model = SearchIndexModel(definition=definition, name=name, type=index_type)
+            search_index_model = SearchIndexModel(
+                definition=definition, name=name, type=index_type
+            )
             await self._collection.create_search_index(model=search_index_model)
             logger.info(f"Search index '{name}' build has been submitted.")
         except OperationFailure as e:
             if "IndexAlreadyExists" in str(e) or "DuplicateIndexName" in str(e):
-                logger.warning(f"Race condition: Index '{name}' was created by another process.")
+                logger.warning(
+                    f"Race condition: Index '{name}' was created by another process."
+                )
             else:
                 logger.error(
-                    f"OperationFailure during search index creation " f"for '{name}': {e.details}"
+                    f"OperationFailure during search index creation "
+                    f"for '{name}': {e.details}"
                 )
                 raise e
 
@@ -277,13 +283,17 @@ class AsyncAtlasIndexManager:
             return True
 
         except OperationFailure as e:
-            logger.exception(f"OperationFailure during search index creation/check for '{name}'")
+            logger.exception(
+                f"OperationFailure during search index creation/check for '{name}'"
+            )
             raise MongoDBEngineError(
                 f"Failed to create/check search index '{name}'",
                 context={"index_name": name, "operation": "create_search_index"},
             ) from e
         except (ConnectionFailure, ServerSelectionTimeoutError) as e:
-            logger.exception(f"Connection error during search index creation/check for '{name}'")
+            logger.exception(
+                f"Connection error during search index creation/check for '{name}'"
+            )
             raise MongoDBEngineError(
                 f"Connection failed while creating/checking search index '{name}'",
                 context={"index_name": name, "operation": "create_search_index"},
@@ -352,7 +362,9 @@ class AsyncAtlasIndexManager:
         except OperationFailure as e:
             # Handle race condition where index was already dropped
             if "IndexNotFound" in str(e):
-                logger.info(f"Search index '{name}' was already deleted (race condition).")
+                logger.info(
+                    f"Search index '{name}' was already deleted (race condition)."
+                )
                 return True
             logger.exception(f"OperationFailure dropping search index '{name}'")
             raise MongoDBEngineError(
@@ -415,13 +427,19 @@ class AsyncAtlasIndexManager:
         queryable or fails.
         """
         start_time = time.time()
-        logger.info(f"Waiting up to {timeout}s for search index '{name}' to become queryable...")
+        logger.info(
+            f"Waiting up to {timeout}s for search index '{name}' to become queryable..."
+        )
 
         while True:
             elapsed = time.time() - start_time
             if elapsed > timeout:
-                logger.error(f"Timeout: Index '{name}' did not become queryable within {timeout}s.")
-                raise TimeoutError(f"Index '{name}' did not become queryable within {timeout}s.")
+                logger.error(
+                    f"Timeout: Index '{name}' did not become queryable within {timeout}s."
+                )
+                raise TimeoutError(
+                    f"Index '{name}' did not become queryable within {timeout}s."
+                )
 
             index_info = None
             try:
@@ -453,7 +471,9 @@ class AsyncAtlasIndexManager:
                 queryable = index_info.get("queryable")
                 if queryable:
                     # Success!
-                    logger.info(f"Search index '{name}' is queryable (Status: {status}).")
+                    logger.info(
+                        f"Search index '{name}' is queryable (Status: {status})."
+                    )
                     return True
 
                 # Not ready yet, log and wait
@@ -475,10 +495,14 @@ class AsyncAtlasIndexManager:
         Private helper to poll until an index is successfully dropped.
         """
         start_time = time.time()
-        logger.info(f"Waiting up to {timeout}s for search index '{name}' to be dropped...")
+        logger.info(
+            f"Waiting up to {timeout}s for search index '{name}' to be dropped..."
+        )
         while True:
             if time.time() - start_time > timeout:
-                logger.error(f"Timeout: Index '{name}' was not dropped within {timeout}s.")
+                logger.error(
+                    f"Timeout: Index '{name}' was not dropped within {timeout}s."
+                )
                 raise TimeoutError(f"Index '{name}' was not dropped within {timeout}s.")
 
             index_info = await self.get_search_index(name)
@@ -564,7 +588,9 @@ class AsyncAtlasIndexManager:
             # Wait for index to be ready (MongoDB indexes are usually immediate, but we verify)
             if wait_for_ready:
                 try:
-                    is_ready = await self._wait_for_regular_index_ready(name, timeout=30)
+                    is_ready = await self._wait_for_regular_index_ready(
+                        name, timeout=30
+                    )
                     if not is_ready:
                         logger.warning(
                             f"Regular index '{name}' may not be fully ready yet, "
@@ -580,7 +606,11 @@ class AsyncAtlasIndexManager:
             return name
         except OperationFailure as e:
             # Handle index build aborted (e.g., database being dropped during teardown)
-            if e.code == 276 or "IndexBuildAborted" in str(e) or "dropDatabase" in str(e):
+            if (
+                e.code == 276
+                or "IndexBuildAborted" in str(e)
+                or "dropDatabase" in str(e)
+            ):
                 logger.debug(
                     f"Skipping regular index creation '{index_name}': "
                     f"index build aborted (likely during database drop/teardown): {e}"
@@ -620,7 +650,9 @@ class AsyncAtlasIndexManager:
             kwargs["name"] = name
         return await self.create_index(keys, **kwargs)
 
-    async def create_geo_index(self, field: str, name: Optional[str] = None, **kwargs: Any) -> str:
+    async def create_geo_index(
+        self, field: str, name: Optional[str] = None, **kwargs: Any
+    ) -> str:
         """Helper to create a standard 2dsphere index."""
         keys = [(field, GEO2DSPHERE)]
         if name:
@@ -649,7 +681,9 @@ class AsyncAtlasIndexManager:
                 context={"index_name": name, "operation": "drop_index"},
             ) from e
         except InvalidOperation as e:
-            logger.debug(f"Cannot drop regular index '{name}': MongoDB client is closed")
+            logger.debug(
+                f"Cannot drop regular index '{name}': MongoDB client is closed"
+            )
             raise MongoDBEngineError(
                 f"Cannot drop regular index '{name}': MongoDB client is closed",
                 context={"index_name": name, "operation": "drop_index"},
@@ -664,7 +698,9 @@ class AsyncAtlasIndexManager:
             return []
         except InvalidOperation:
             # Client is closed (e.g., during shutdown/teardown)
-            logger.debug("Skipping list_indexes: MongoDB client is closed (likely during shutdown)")
+            logger.debug(
+                "Skipping list_indexes: MongoDB client is closed (likely during shutdown)"
+            )
             return []
 
     async def get_index(self, name: str) -> Optional[Dict[str, Any]]:
@@ -738,7 +774,9 @@ class AutoIndexManager:
         "_pending_tasks",
     )
 
-    def __init__(self, collection: AsyncIOMotorCollection, index_manager: AsyncAtlasIndexManager):
+    def __init__(
+        self, collection: AsyncIOMotorCollection, index_manager: AsyncAtlasIndexManager
+    ):
         self._collection = collection
         self._index_manager = index_manager
         # Cache of index creation decisions (index_name -> bool)
@@ -774,7 +812,8 @@ class AutoIndexManager:
             if isinstance(value, dict):
                 # Handle operators like $gt, $gte, $lt, $lte, $ne, $in, $exists
                 if any(
-                    op in value for op in ["$gt", "$gte", "$lt", "$lte", "$ne", "$in", "$exists"]
+                    op in value
+                    for op in ["$gt", "$gte", "$lt", "$lte", "$ne", "$in", "$exists"]
                 ):
                     # These operators benefit from indexes
                     index_fields.append((field_name, ASCENDING))
@@ -849,7 +888,9 @@ class AutoIndexManager:
 
             # Create the index
             keys = all_fields
-            await self._index_manager.create_index(keys, name=index_name, background=True)
+            await self._index_manager.create_index(
+                keys, name=index_name, background=True
+            )
             async with self._lock:
                 self._creation_cache[index_name] = True
             logger.info(
@@ -945,7 +986,9 @@ class AutoIndexManager:
 
             # Create task and track it
             # Cleanup happens in _create_index_safely's finally block
-            task = asyncio.create_task(self._create_index_safely(index_name, all_fields))
+            task = asyncio.create_task(
+                self._create_index_safely(index_name, all_fields)
+            )
             self._pending_tasks[index_name] = task
 
 
@@ -1038,7 +1081,9 @@ class ScopedCollectionWrapper:
             )
         return self._auto_index_manager
 
-    def _inject_read_filter(self, filter: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
+    def _inject_read_filter(
+        self, filter: Optional[Mapping[str, Any]] = None
+    ) -> Dict[str, Any]:
         """
         Combines the user's filter with our mandatory scope filter.
 
@@ -1054,7 +1099,9 @@ class ScopedCollectionWrapper:
         # If filter exists, combine them robustly with $and
         return {"$and": [filter, scope_filter]}
 
-    async def insert_one(self, document: Mapping[str, Any], *args, **kwargs) -> InsertOneResult:
+    async def insert_one(
+        self, document: Mapping[str, Any], *args, **kwargs
+    ) -> InsertOneResult:
         """
         Injects the app_id before writing.
 
@@ -1138,7 +1185,9 @@ class ScopedCollectionWrapper:
             # app_id index is always ensured separately
             if self.auto_index_manager:
                 sort = kwargs.get("sort")
-                await self.auto_index_manager.ensure_index_for_query(filter=filter, sort=sort)
+                await self.auto_index_manager.ensure_index_for_query(
+                    filter=filter, sort=sort
+                )
 
             scoped_filter = self._inject_read_filter(filter)
             result = await self._collection.find_one(scoped_filter, *args, **kwargs)
@@ -1178,14 +1227,18 @@ class ScopedCollectionWrapper:
             # Create a task to ensure index (fire and forget, managed to prevent accumulation)
             async def _safe_index_task():
                 try:
-                    await self.auto_index_manager.ensure_index_for_query(filter=filter, sort=sort)
+                    await self.auto_index_manager.ensure_index_for_query(
+                        filter=filter, sort=sort
+                    )
                 except (
                     OperationFailure,
                     ConnectionFailure,
                     ServerSelectionTimeoutError,
                     InvalidOperation,
                 ) as e:
-                    logger.debug(f"Auto-index creation failed for query (non-critical): {e}")
+                    logger.debug(
+                        f"Auto-index creation failed for query (non-critical): {e}"
+                    )
 
             _create_managed_task(_safe_index_task(), task_name="auto_index_check")
 
@@ -1210,14 +1263,20 @@ class ScopedCollectionWrapper:
         Note: This only scopes the *filter*, not the update operation.
         """
         scoped_filter = self._inject_read_filter(filter)
-        return await self._collection.update_many(scoped_filter, update, *args, **kwargs)
+        return await self._collection.update_many(
+            scoped_filter, update, *args, **kwargs
+        )
 
-    async def delete_one(self, filter: Mapping[str, Any], *args, **kwargs) -> DeleteResult:
+    async def delete_one(
+        self, filter: Mapping[str, Any], *args, **kwargs
+    ) -> DeleteResult:
         """Applies the read scope to the filter."""
         scoped_filter = self._inject_read_filter(filter)
         return await self._collection.delete_one(scoped_filter, *args, **kwargs)
 
-    async def delete_many(self, filter: Mapping[str, Any], *args, **kwargs) -> DeleteResult:
+    async def delete_many(
+        self, filter: Mapping[str, Any], *args, **kwargs
+    ) -> DeleteResult:
         """Applies the read scope to the filter."""
         scoped_filter = self._inject_read_filter(filter)
         return await self._collection.delete_many(scoped_filter, *args, **kwargs)
@@ -1236,7 +1295,9 @@ class ScopedCollectionWrapper:
         scoped_filter = self._inject_read_filter(filter)
         return await self._collection.count_documents(scoped_filter, *args, **kwargs)
 
-    def aggregate(self, pipeline: List[Dict[str, Any]], *args, **kwargs) -> AsyncIOMotorCursor:
+    def aggregate(
+        self, pipeline: List[Dict[str, Any]], *args, **kwargs
+    ) -> AsyncIOMotorCursor:
         """
         Injects a scope filter into the pipeline. For normal pipelines, we prepend
         a $match stage. However, if the first stage is $vectorSearch, we embed
@@ -1415,13 +1476,17 @@ class ScopedMongoWrapper:
                             f"connection is closed (likely during shutdown)"
                         )
                         async with ScopedMongoWrapper._app_id_index_lock:
-                            ScopedMongoWrapper._app_id_index_cache.pop(collection_name, None)
+                            ScopedMongoWrapper._app_id_index_cache.pop(
+                                collection_name, None
+                            )
                         return
 
                     has_index = await self._ensure_app_id_index(real_collection)
                     # Update cache with result (inside lock for thread-safety)
                     async with ScopedMongoWrapper._app_id_index_lock:
-                        ScopedMongoWrapper._app_id_index_cache[collection_name] = has_index
+                        ScopedMongoWrapper._app_id_index_cache[collection_name] = (
+                            has_index
+                        )
                 except (
                     ConnectionFailure,
                     ServerSelectionTimeoutError,
@@ -1434,19 +1499,25 @@ class ScopedMongoWrapper:
                     )
                     # Remove from cache on error so we can retry later
                     async with ScopedMongoWrapper._app_id_index_lock:
-                        ScopedMongoWrapper._app_id_index_cache.pop(collection_name, None)
+                        ScopedMongoWrapper._app_id_index_cache.pop(
+                            collection_name, None
+                        )
                 except OperationFailure as e:
                     # Index creation failed for other reasons (non-critical)
                     logger.debug(f"App_id index creation failed (non-critical): {e}")
                     # Remove from cache on error so we can retry later
                     async with ScopedMongoWrapper._app_id_index_lock:
-                        ScopedMongoWrapper._app_id_index_cache.pop(collection_name, None)
+                        ScopedMongoWrapper._app_id_index_cache.pop(
+                            collection_name, None
+                        )
 
             # Check cache first (quick check before lock)
             if collection_name not in ScopedMongoWrapper._app_id_index_cache:
                 # Fire and forget - task will check lock internally
                 # (managed to prevent accumulation)
-                _create_managed_task(_safe_app_id_index_check(), task_name="app_id_index_check")
+                _create_managed_task(
+                    _safe_app_id_index_check(), task_name="app_id_index_check"
+                )
 
         # Store it in the cache for this instance using the *prefixed_name*
         self._wrapper_cache[prefixed_name] = wrapper
@@ -1536,12 +1607,16 @@ class ScopedMongoWrapper:
                             f"connection is closed (likely during shutdown)"
                         )
                         async with ScopedMongoWrapper._app_id_index_lock:
-                            ScopedMongoWrapper._app_id_index_cache.pop(collection_name, None)
+                            ScopedMongoWrapper._app_id_index_cache.pop(
+                                collection_name, None
+                            )
                         return
 
                     has_index = await self._ensure_app_id_index(real_collection)
                     async with ScopedMongoWrapper._app_id_index_lock:
-                        ScopedMongoWrapper._app_id_index_cache[collection_name] = has_index
+                        ScopedMongoWrapper._app_id_index_cache[collection_name] = (
+                            has_index
+                        )
                 except (
                     ConnectionFailure,
                     ServerSelectionTimeoutError,
@@ -1553,16 +1628,22 @@ class ScopedMongoWrapper:
                         f"connection error (likely during shutdown): {e}"
                     )
                     async with ScopedMongoWrapper._app_id_index_lock:
-                        ScopedMongoWrapper._app_id_index_cache.pop(collection_name, None)
+                        ScopedMongoWrapper._app_id_index_cache.pop(
+                            collection_name, None
+                        )
                 except OperationFailure as e:
                     # Index creation failed for other reasons (non-critical)
                     logger.debug(f"App_id index creation failed (non-critical): {e}")
                     async with ScopedMongoWrapper._app_id_index_lock:
-                        ScopedMongoWrapper._app_id_index_cache.pop(collection_name, None)
+                        ScopedMongoWrapper._app_id_index_cache.pop(
+                            collection_name, None
+                        )
 
             if collection_name not in ScopedMongoWrapper._app_id_index_cache:
                 # Use managed task creation to prevent accumulation
-                _create_managed_task(_safe_app_id_index_check(), task_name="app_id_index_check")
+                _create_managed_task(
+                    _safe_app_id_index_check(), task_name="app_id_index_check"
+                )
 
         # Store it in the cache
         self._wrapper_cache[prefixed_name] = wrapper
@@ -1599,7 +1680,11 @@ class ScopedMongoWrapper:
                     return True
                 except OperationFailure as e:
                     # Handle index build aborted (e.g., database being dropped during teardown)
-                    if e.code == 276 or "IndexBuildAborted" in str(e) or "dropDatabase" in str(e):
+                    if (
+                        e.code == 276
+                        or "IndexBuildAborted" in str(e)
+                        or "dropDatabase" in str(e)
+                    ):
                         logger.debug(
                             f"Skipping app_id index creation on {collection.name}: "
                             f"index build aborted (likely during database drop/teardown): {e}"
@@ -1609,13 +1694,19 @@ class ScopedMongoWrapper:
             return True
         except OperationFailure as e:
             # Handle index build aborted (e.g., database being dropped during teardown)
-            if e.code == 276 or "IndexBuildAborted" in str(e) or "dropDatabase" in str(e):
+            if (
+                e.code == 276
+                or "IndexBuildAborted" in str(e)
+                or "dropDatabase" in str(e)
+            ):
                 logger.debug(
                     f"Skipping app_id index creation on {collection.name}: "
                     f"index build aborted (likely during database drop/teardown): {e}"
                 )
                 return False
-            logger.debug(f"OperationFailure ensuring app_id index on {collection.name}: {e}")
+            logger.debug(
+                f"OperationFailure ensuring app_id index on {collection.name}: {e}"
+            )
             return False
         except (ConnectionFailure, ServerSelectionTimeoutError, InvalidOperation) as e:
             # Handle connection errors gracefully (e.g., during shutdown)

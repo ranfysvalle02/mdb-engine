@@ -9,11 +9,9 @@ Tests metrics collection functionality including:
 
 import threading
 
-from mdb_engine.observability.metrics import (
-    MetricsCollector,
-    get_metrics_collector,
-    record_operation,
-)
+from mdb_engine.observability.metrics import (MetricsCollector,
+                                              get_metrics_collector,
+                                              record_operation)
 
 
 class TestMetricsCollectorThreadSafety:
@@ -38,7 +36,8 @@ class TestMetricsCollectorThreadSafety:
                 )
 
         threads = [
-            threading.Thread(target=record_operations, args=(i,)) for i in range(num_threads)
+            threading.Thread(target=record_operations, args=(i,))
+            for i in range(num_threads)
         ]
 
         for thread in threads:
@@ -154,7 +153,10 @@ class TestMetricsCollectorThreadSafety:
             except Exception as e:
                 errors.append(e)
 
-        threads = [threading.Thread(target=reset_and_record, args=(i,)) for i in range(num_threads)]
+        threads = [
+            threading.Thread(target=reset_and_record, args=(i,))
+            for i in range(num_threads)
+        ]
 
         for thread in threads:
             thread.start()

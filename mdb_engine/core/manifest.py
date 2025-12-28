@@ -36,14 +36,9 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from jsonschema import SchemaError, ValidationError, validate
 
-from ..constants import (
-    CURRENT_SCHEMA_VERSION,
-    DEFAULT_SCHEMA_VERSION,
-    MAX_TTL_SECONDS,
-    MAX_VECTOR_DIMENSIONS,
-    MIN_TTL_SECONDS,
-    MIN_VECTOR_DIMENSIONS,
-)
+from ..constants import (CURRENT_SCHEMA_VERSION, DEFAULT_SCHEMA_VERSION,
+                         MAX_TTL_SECONDS, MAX_VECTOR_DIMENSIONS,
+                         MIN_TTL_SECONDS, MIN_VECTOR_DIMENSIONS)
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +87,9 @@ def _get_manifest_hash(manifest_data: Dict[str, Any]) -> str:
 
     # Normalize manifest by removing metadata fields that don't affect validation
     normalized = {
-        k: v for k, v in manifest_data.items() if k not in ["_id", "_updated", "_created", "url"]
+        k: v
+        for k, v in manifest_data.items()
+        if k not in ["_id", "_updated", "_created", "url"]
     }
     normalized_str = json.dumps(normalized, sort_keys=True)
     return hashlib.sha256(normalized_str.encode()).hexdigest()[:16]
@@ -487,7 +484,8 @@ MANIFEST_SCHEMA_V2 = {
                                         "type": "string",
                                         "default": "user",
                                         "description": (
-                                            "Role for demo user in app " "(default: 'user')"
+                                            "Role for demo user in app "
+                                            "(default: 'user')"
                                         ),
                                     },
                                     "auto_create": {
@@ -592,13 +590,17 @@ MANIFEST_SCHEMA_V2 = {
                     "type": "integer",
                     "minimum": 60,
                     "default": 900,
-                    "description": ("Access token TTL in seconds " "(default: 900 = 15 minutes)."),
+                    "description": (
+                        "Access token TTL in seconds " "(default: 900 = 15 minutes)."
+                    ),
                 },
                 "refresh_token_ttl": {
                     "type": "integer",
                     "minimum": 3600,
                     "default": 604800,
-                    "description": ("Refresh token TTL in seconds " "(default: 604800 = 7 days)."),
+                    "description": (
+                        "Refresh token TTL in seconds " "(default: 604800 = 7 days)."
+                    ),
                 },
                 "token_rotation": {
                     "type": "boolean",
@@ -613,7 +615,8 @@ MANIFEST_SCHEMA_V2 = {
                     "minimum": 1,
                     "default": 10,
                     "description": (
-                        "Maximum number of concurrent sessions per user " "(default: 10)."
+                        "Maximum number of concurrent sessions per user "
+                        "(default: 10)."
                     ),
                 },
                 "session_inactivity_timeout": {
@@ -632,7 +635,8 @@ MANIFEST_SCHEMA_V2 = {
                             "type": "boolean",
                             "default": False,
                             "description": (
-                                "Require HTTPS in production " "(default: false, auto-detected)."
+                                "Require HTTPS in production "
+                                "(default: false, auto-detected)."
                             ),
                         },
                         "cookie_secure": {
@@ -714,7 +718,9 @@ MANIFEST_SCHEMA_V2 = {
                                 },
                             },
                             "additionalProperties": False,
-                            "description": ("Rate limiting configuration per endpoint type."),
+                            "description": (
+                                "Rate limiting configuration per endpoint type."
+                            ),
                         },
                         "password_policy": {
                             "type": "object",
@@ -741,7 +747,9 @@ MANIFEST_SCHEMA_V2 = {
                                 "require_lowercase": {
                                     "type": "boolean",
                                     "default": True,
-                                    "description": ("Require lowercase letters " "(default: true)"),
+                                    "description": (
+                                        "Require lowercase letters " "(default: true)"
+                                    ),
                                 },
                                 "require_numbers": {
                                     "type": "boolean",
@@ -766,21 +774,24 @@ MANIFEST_SCHEMA_V2 = {
                                     "type": "boolean",
                                     "default": True,
                                     "description": (
-                                        "Enable session fingerprinting " "(default: true)"
+                                        "Enable session fingerprinting "
+                                        "(default: true)"
                                     ),
                                 },
                                 "validate_on_login": {
                                     "type": "boolean",
                                     "default": True,
                                     "description": (
-                                        "Validate fingerprint on login " "(default: true)"
+                                        "Validate fingerprint on login "
+                                        "(default: true)"
                                     ),
                                 },
                                 "validate_on_refresh": {
                                     "type": "boolean",
                                     "default": True,
                                     "description": (
-                                        "Validate fingerprint on token refresh " "(default: true)"
+                                        "Validate fingerprint on token refresh "
+                                        "(default: true)"
                                     ),
                                 },
                                 "validate_on_request": {
@@ -826,7 +837,8 @@ MANIFEST_SCHEMA_V2 = {
                                     "minimum": 1,
                                     "default": 900,
                                     "description": (
-                                        "Lockout duration in seconds " "(default: 900 = 15 minutes)"
+                                        "Lockout duration in seconds "
+                                        "(default: 900 = 15 minutes)"
                                     ),
                                 },
                                 "reset_on_success": {
@@ -848,7 +860,8 @@ MANIFEST_SCHEMA_V2 = {
                                     "type": "boolean",
                                     "default": False,
                                     "description": (
-                                        "Enable IP address validation " "(default: false)"
+                                        "Enable IP address validation "
+                                        "(default: false)"
                                     ),
                                 },
                                 "strict": {
@@ -863,7 +876,8 @@ MANIFEST_SCHEMA_V2 = {
                                     "type": "boolean",
                                     "default": True,
                                     "description": (
-                                        "Allow IP address changes during session " "(default: true)"
+                                        "Allow IP address changes during session "
+                                        "(default: true)"
                                     ),
                                 },
                             },
@@ -883,7 +897,9 @@ MANIFEST_SCHEMA_V2 = {
                                 "bind_to_device": {
                                     "type": "boolean",
                                     "default": True,
-                                    "description": ("Bind tokens to device ID " "(default: true)"),
+                                    "description": (
+                                        "Bind tokens to device ID " "(default: true)"
+                                    ),
                                 },
                             },
                             "additionalProperties": False,
@@ -897,7 +913,8 @@ MANIFEST_SCHEMA_V2 = {
                     "type": "boolean",
                     "default": True,
                     "description": (
-                        "Automatically set up token management on app startup " "(default: true)."
+                        "Automatically set up token management on app startup "
+                        "(default: true)."
                     ),
                 },
             },
@@ -929,7 +946,9 @@ MANIFEST_SCHEMA_V2 = {
         },
         "collection_settings": {
             "type": "object",
-            "patternProperties": {"^[a-zA-Z0-9_]+$": {"$ref": "#/definitions/collectionSettings"}},
+            "patternProperties": {
+                "^[a-zA-Z0-9_]+$": {"$ref": "#/definitions/collectionSettings"}
+            },
             "description": "Collection name -> collection settings",
         },
         "websockets": {
@@ -977,7 +996,8 @@ MANIFEST_SCHEMA_V2 = {
                         "description": {
                             "type": "string",
                             "description": (
-                                "Description of what this WebSocket endpoint " "is used for"
+                                "Description of what this WebSocket endpoint "
+                                "is used for"
                             ),
                         },
                         "ping_interval": {
@@ -1190,7 +1210,8 @@ MANIFEST_SCHEMA_V2 = {
                     "type": "boolean",
                     "default": False,
                     "description": (
-                        "Allow credentials (cookies, authorization headers) " "in CORS requests"
+                        "Allow credentials (cookies, authorization headers) "
+                        "in CORS requests"
                     ),
                 },
                 "allow_methods": {
@@ -1274,7 +1295,8 @@ MANIFEST_SCHEMA_V2 = {
                             "type": "boolean",
                             "default": True,
                             "description": (
-                                "Collect operation-level metrics " "(duration, errors, etc.)"
+                                "Collect operation-level metrics "
+                                "(duration, errors, etc.)"
                             ),
                         },
                         "collect_performance_metrics": {
@@ -1434,7 +1456,8 @@ MANIFEST_SCHEMA_V2 = {
                 "definition": {
                     "type": "object",
                     "description": (
-                        "Index definition (required for vectorSearch and " "search indexes)"
+                        "Index definition (required for vectorSearch and "
+                        "search indexes)"
                     ),
                 },
                 "hybrid": {
@@ -1447,7 +1470,8 @@ MANIFEST_SCHEMA_V2 = {
                                     "type": "string",
                                     "pattern": "^[a-zA-Z0-9_]+$",
                                     "description": (
-                                        "Name for the vector index " "(defaults to '{name}_vector')"
+                                        "Name for the vector index "
+                                        "(defaults to '{name}_vector')"
                                     ),
                                 },
                                 "definition": {
@@ -1469,7 +1493,8 @@ MANIFEST_SCHEMA_V2 = {
                                     "type": "string",
                                     "pattern": "^[a-zA-Z0-9_]+$",
                                     "description": (
-                                        "Name for the text index " "(defaults to '{name}_text')"
+                                        "Name for the text index "
+                                        "(defaults to '{name}_text')"
                                     ),
                                 },
                                 "definition": {
@@ -1550,7 +1575,9 @@ MANIFEST_SCHEMA_V2 = {
                     "then": {"required": ["keys", "options"]},
                     "else": {
                         "properties": {
-                            "options": {"not": {"required": ["partialFilterExpression"]}}
+                            "options": {
+                                "not": {"required": ["partialFilterExpression"]}
+                            }
                         }
                     },
                 },
@@ -1776,7 +1803,9 @@ def migrate_manifest(
 
         # No data transformation needed - V2.0 is backward compatible
         # New fields (auth, etc.) are optional
-        logger.debug(f"Migrated manifest from 1.0 to 2.0: {migrated.get('slug', 'unknown')}")
+        logger.debug(
+            f"Migrated manifest from 1.0 to 2.0: {migrated.get('slug', 'unknown')}"
+        )
 
     # Future: Add more migration paths as needed
     # Example: 2.0 -> 3.0, etc.
@@ -1812,7 +1841,8 @@ def get_schema_for_version(version: str) -> Dict[str, Any]:
 
     # Fallback to current
     logger.warning(
-        f"Schema version {version} not found, using current version " f"{CURRENT_SCHEMA_VERSION}"
+        f"Schema version {version} not found, using current version "
+        f"{CURRENT_SCHEMA_VERSION}"
     )
     return SCHEMA_REGISTRY[CURRENT_SCHEMA_VERSION]
 
@@ -1844,7 +1874,9 @@ async def _validate_manifest_async(
     """
     # Check cache first
     if use_cache:
-        cache_key = _get_manifest_hash(manifest_data) + "_" + get_schema_version(manifest_data)
+        cache_key = (
+            _get_manifest_hash(manifest_data) + "_" + get_schema_version(manifest_data)
+        )
     if cache_key in _validation_cache:
         return _validation_cache[cache_key]
 
@@ -1903,7 +1935,11 @@ async def _validate_manifest_async(
         error_message = f"Invalid schema definition: {e.message}"
         result = (False, error_message, ["schema"])
         if use_cache:
-            cache_key = _get_manifest_hash(manifest_data) + "_" + get_schema_version(manifest_data)
+            cache_key = (
+                _get_manifest_hash(manifest_data)
+                + "_"
+                + get_schema_version(manifest_data)
+            )
             _validation_cache[cache_key] = result
 
         return result
@@ -1913,7 +1949,9 @@ async def _validate_manifest_async(
         error_paths = []
         error_messages = []
         if isinstance(e, ValidationError):
-            error_paths = [f".{'.'.join(str(p) for p in error.path)}" for error in e.context or [e]]
+            error_paths = [
+                f".{'.'.join(str(p) for p in error.path)}" for error in e.context or [e]
+            ]
             error_messages = [error.message for error in e.context or [e]]
         else:
             error_messages = [str(e)]
@@ -1921,7 +1959,11 @@ async def _validate_manifest_async(
         error_message = "; ".join(error_messages) if error_messages else str(e)
         result = (False, error_message, error_paths if error_paths else None)
         if use_cache:
-            cache_key = _get_manifest_hash(manifest_data) + "_" + get_schema_version(manifest_data)
+            cache_key = (
+                _get_manifest_hash(manifest_data)
+                + "_"
+                + get_schema_version(manifest_data)
+            )
             _validation_cache[cache_key] = result
 
         return result
@@ -1931,7 +1973,11 @@ async def _validate_manifest_async(
         logger.exception("Unexpected error during manifest validation")
         result = (False, error_message, None)
         if use_cache:
-            cache_key = _get_manifest_hash(manifest_data) + "_" + get_schema_version(manifest_data)
+            cache_key = (
+                _get_manifest_hash(manifest_data)
+                + "_"
+                + get_schema_version(manifest_data)
+            )
             _validation_cache[cache_key] = result
 
         return result
@@ -1963,18 +2009,24 @@ async def validate_manifests_parallel(
         manifest: Dict[str, Any]
     ) -> Tuple[bool, Optional[str], Optional[List[str]], Optional[str]]:
         slug = manifest.get("slug", "unknown")
-        is_valid, error, paths = await _validate_manifest_async(manifest, use_cache=use_cache)
+        is_valid, error, paths = await _validate_manifest_async(
+            manifest, use_cache=use_cache
+        )
         return (is_valid, error, paths, slug)
 
     # Run validations in parallel
-    results = await asyncio.gather(*[validate_one(m) for m in manifests], return_exceptions=True)
+    results = await asyncio.gather(
+        *[validate_one(m) for m in manifests], return_exceptions=True
+    )
 
     # Handle exceptions
     validated_results = []
     for i, result in enumerate(results):
         if isinstance(result, Exception):
             slug = manifests[i].get("slug", "unknown")
-            validated_results.append((False, f"Validation error: {str(result)}", None, slug))
+            validated_results.append(
+                (False, f"Validation error: {str(result)}", None, slug)
+            )
         else:
             validated_results.append(result)
 
@@ -2020,7 +2072,9 @@ async def validate_developer_id(
                     f"developer_id '{developer_id}' does not exist or does not have developer role",
                 )
         except (ValueError, TypeError, AttributeError) as e:
-            logger.exception(f"Validation error validating developer_id '{developer_id}'")
+            logger.exception(
+                f"Validation error validating developer_id '{developer_id}'"
+            )
             return False, f"Error validating developer_id: {e}"
 
     return True, None
@@ -2100,11 +2154,15 @@ def validate_manifest(
 
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 future = executor.submit(
-                    lambda: asyncio.run(_validate_manifest_async(manifest_data, use_cache))
+                    lambda: asyncio.run(
+                        _validate_manifest_async(manifest_data, use_cache)
+                    )
                 )
                 return future.result()
         else:
-            return loop.run_until_complete(_validate_manifest_async(manifest_data, use_cache))
+            return loop.run_until_complete(
+                _validate_manifest_async(manifest_data, use_cache)
+            )
     except RuntimeError:
         # No event loop, create one
         return asyncio.run(_validate_manifest_async(manifest_data, use_cache))
@@ -2128,7 +2186,8 @@ def _validate_regular_index(
     ):
         return (
             False,
-            f"Regular index '{index_name}' in collection " f"'{collection_name}' has empty 'keys'",
+            f"Regular index '{index_name}' in collection "
+            f"'{collection_name}' has empty 'keys'",
         )
 
     # Check for _id index
@@ -2155,7 +2214,8 @@ def _validate_ttl_index(
     if "keys" not in index_def:
         return (
             False,
-            f"TTL index '{index_name}' in collection '{collection_name}' " f"requires 'keys' field",
+            f"TTL index '{index_name}' in collection '{collection_name}' "
+            f"requires 'keys' field",
         )
     options = index_def.get("options", {})
     if "expireAfterSeconds" not in options:
@@ -2245,7 +2305,9 @@ def _validate_geospatial_index(
     if isinstance(keys, dict):
         has_geo = any(v in ["2dsphere", "2d", "geoHaystack"] for v in keys.values())
     elif isinstance(keys, list):
-        has_geo = any(len(k) >= 2 and k[1] in ["2dsphere", "2d", "geoHaystack"] for k in keys)
+        has_geo = any(
+            len(k) >= 2 and k[1] in ["2dsphere", "2d", "geoHaystack"] for k in keys
+        )
     if not has_geo:
         return (
             False,
@@ -2386,7 +2448,8 @@ def validate_index_definition(
     if not index_type:
         return (
             False,
-            f"Index '{index_name}' in collection '{collection_name}' " f"is missing 'type' field",
+            f"Index '{index_name}' in collection '{collection_name}' "
+            f"is missing 'type' field",
         )
 
     # Type-specific validation
@@ -2401,7 +2464,9 @@ def validate_index_definition(
     elif index_type == "geospatial":
         return _validate_geospatial_index(index_def, collection_name, index_name)
     elif index_type in ("vectorSearch", "search"):
-        return _validate_vector_search_index(index_def, collection_name, index_name, index_type)
+        return _validate_vector_search_index(
+            index_def, collection_name, index_name, index_type
+        )
     elif index_type == "hybrid":
         return _validate_hybrid_index(index_def, collection_name, index_name)
     else:
@@ -2451,7 +2516,9 @@ def validate_managed_indexes(
                 )
 
             index_name = index_def.get("name", f"index_{idx}")
-            is_valid, error_msg = validate_index_definition(index_def, collection_name, index_name)
+            is_valid, error_msg = validate_index_definition(
+                index_def, collection_name, index_name
+            )
             if not is_valid:
                 return False, error_msg
 
@@ -2533,7 +2600,9 @@ class ManifestValidator:
         Returns:
             Tuple of (is_valid, error_message, error_paths)
         """
-        return await validate_manifest_with_db(manifest, db_validator, use_cache=use_cache)
+        return await validate_manifest_with_db(
+            manifest, db_validator, use_cache=use_cache
+        )
 
     @staticmethod
     def validate_managed_indexes(
@@ -2651,13 +2720,17 @@ class ManifestParser:
         if validate:
             is_valid, error, paths = ManifestValidator.validate(manifest_data)
             if not is_valid:
-                error_path_str = f" (errors in: {', '.join(paths[:3])})" if paths else ""
+                error_path_str = (
+                    f" (errors in: {', '.join(paths[:3])})" if paths else ""
+                )
                 raise ValueError(f"Manifest validation failed: {error}{error_path_str}")
 
         return manifest_data
 
     @staticmethod
-    async def load_from_dict(data: Dict[str, Any], validate: bool = True) -> Dict[str, Any]:
+    async def load_from_dict(
+        data: Dict[str, Any], validate: bool = True
+    ) -> Dict[str, Any]:
         """
         Load and validate manifest from dictionary.
 
@@ -2675,7 +2748,9 @@ class ManifestParser:
         if validate:
             is_valid, error, paths = ManifestValidator.validate(data)
             if not is_valid:
-                error_path_str = f" (errors in: {', '.join(paths[:3])})" if paths else ""
+                error_path_str = (
+                    f" (errors in: {', '.join(paths[:3])})" if paths else ""
+                )
                 raise ValueError(f"Manifest validation failed: {error}{error_path_str}")
 
         return data.copy()

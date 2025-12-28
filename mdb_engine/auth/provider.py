@@ -6,7 +6,8 @@ Defines the pluggable Authorization (AuthZ) interface for the platform.
 This module is part of MDB_ENGINE - MongoDB Engine.
 """
 
-from __future__ import annotations  # MUST be first import for string type hints
+from __future__ import \
+    annotations  # MUST be first import for string type hints
 
 import asyncio
 import logging
@@ -54,7 +55,9 @@ class CasbinAdapter:
         # Cache for authorization results: {(subject, resource, action): (result, timestamp)}
         self._cache: Dict[Tuple[str, str, str], Tuple[bool, float]] = {}
         self._cache_lock = asyncio.Lock()
-        logger.info("✔️  CasbinAdapter initialized with async thread pool execution and caching.")
+        logger.info(
+            "✔️  CasbinAdapter initialized with async thread pool execution and caching."
+        )
 
     async def check(
         self,
@@ -76,7 +79,9 @@ class CasbinAdapter:
                 cached_result, cached_time = self._cache[cache_key]
                 # Check if cache entry is still valid
                 if current_time - cached_time < AUTHZ_CACHE_TTL:
-                    logger.debug(f"Authorization cache HIT for ({subject}, {resource}, {action})")
+                    logger.debug(
+                        f"Authorization cache HIT for ({subject}, {resource}, {action})"
+                    )
                     return cached_result
                 # Cache expired, remove it
                 del self._cache[cache_key]
@@ -84,7 +89,9 @@ class CasbinAdapter:
         try:
             # The .enforce() method on AsyncEnforcer is synchronous and blocks the event loop.
             # Run it in a thread pool to prevent blocking.
-            result = await asyncio.to_thread(self._enforcer.enforce, subject, resource, action)
+            result = await asyncio.to_thread(
+                self._enforcer.enforce, subject, resource, action
+            )
 
             # Cache the result
             async with self._cache_lock:
@@ -206,7 +213,9 @@ class OsoAdapter:
         # Cache for authorization results: {(subject, resource, action): (result, timestamp)}
         self._cache: Dict[Tuple[str, str, str], Tuple[bool, float]] = {}
         self._cache_lock = asyncio.Lock()
-        logger.info("✔️  OsoAdapter initialized with async thread pool execution and caching.")
+        logger.info(
+            "✔️  OsoAdapter initialized with async thread pool execution and caching."
+        )
 
     async def check(
         self,
@@ -230,7 +239,9 @@ class OsoAdapter:
                 cached_result, cached_time = self._cache[cache_key]
                 # Check if cache entry is still valid
                 if current_time - cached_time < AUTHZ_CACHE_TTL:
-                    logger.debug(f"Authorization cache HIT for ({subject}, {resource}, {action})")
+                    logger.debug(
+                        f"Authorization cache HIT for ({subject}, {resource}, {action})"
+                    )
                     return cached_result
                 # Cache expired, remove it
                 del self._cache[cache_key]
@@ -256,7 +267,9 @@ class OsoAdapter:
                 resource_obj = resource
 
             # Run in thread pool to prevent blocking the event loop
-            result = await asyncio.to_thread(self._oso.authorize, actor, action, resource_obj)
+            result = await asyncio.to_thread(
+                self._oso.authorize, actor, action, resource_obj
+            )
 
             # Cache the result
             async with self._cache_lock:
@@ -320,7 +333,9 @@ class OsoAdapter:
                 )
             elif hasattr(self._oso, "register_constant"):
                 # OSO library - we'd need to use a different approach
-                logger.warning("OSO library mode: add_policy needs to be handled via policy files")
+                logger.warning(
+                    "OSO library mode: add_policy needs to be handled via policy files"
+                )
                 result = True  # Assume success for now
             else:
                 logger.warning("OSO client doesn't support insert() or tell() method")
@@ -391,7 +406,9 @@ class OsoAdapter:
                         self._oso.tell, "has_role", user, role, resource
                     )
                 else:
-                    result = await asyncio.to_thread(self._oso.tell, "has_role", user, role)
+                    result = await asyncio.to_thread(
+                        self._oso.tell, "has_role", user, role
+                    )
             elif hasattr(self._oso, "register_constant"):
                 # OSO library - we'd need to use a different approach
                 logger.warning(
@@ -490,7 +507,9 @@ class OsoAdapter:
                 # OSO library - query facts
                 result = await asyncio.to_thread(
                     lambda: list(
-                        self._oso.query_rule("has_role", user, role, accept_expression=True)
+                        self._oso.query_rule(
+                            "has_role", user, role, accept_expression=True
+                        )
                     )
                 )
                 return len(result) > 0
@@ -529,7 +548,9 @@ class OsoAdapter:
             user, role = params
             # OSO Cloud uses delete() method
             if hasattr(self._oso, "delete"):
-                result = await asyncio.to_thread(self._oso.delete, "has_role", user, role)
+                result = await asyncio.to_thread(
+                    self._oso.delete, "has_role", user, role
+                )
             else:
                 logger.warning("OSO client doesn't support delete() method")
                 result = False

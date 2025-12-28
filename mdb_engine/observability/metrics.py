@@ -55,12 +55,16 @@ class OperationMetrics:
             "count": self.count,
             "avg_duration_ms": round(self.avg_duration_ms, 2),
             "min_duration_ms": (
-                round(self.min_duration_ms, 2) if self.min_duration_ms != float("inf") else 0.0
+                round(self.min_duration_ms, 2)
+                if self.min_duration_ms != float("inf")
+                else 0.0
             ),
             "max_duration_ms": round(self.max_duration_ms, 2),
             "error_count": self.error_count,
             "error_rate_percent": round(self.error_rate, 2),
-            "last_execution": (self.last_execution.isoformat() if self.last_execution else None),
+            "last_execution": (
+                self.last_execution.isoformat() if self.last_execution else None
+            ),
         }
 
 
@@ -134,7 +138,9 @@ class MetricsCollector:
         with self._lock:
             if operation_name:
                 metrics = {
-                    k: v.to_dict() for k, v in self._metrics.items() if k.startswith(operation_name)
+                    k: v.to_dict()
+                    for k, v in self._metrics.items()
+                    if k.startswith(operation_name)
                 }
                 # Move accessed metrics to end (LRU)
                 for key in list(self._metrics.keys()):

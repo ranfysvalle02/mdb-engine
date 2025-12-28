@@ -59,7 +59,8 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         # Check HTTPS requirement
         if self.require_https:
             is_production = (
-                os.getenv("G_NOME_ENV") == "production" or os.getenv("ENVIRONMENT") == "production"
+                os.getenv("G_NOME_ENV") == "production"
+                or os.getenv("ENVIRONMENT") == "production"
             )
             if is_production and request.url.scheme != "https":
                 if request.method == "GET":
@@ -153,7 +154,10 @@ class StaleSessionMiddleware(BaseHTTPMiddleware):
         # Check if we need to clear a stale session cookie
         # Only act if explicitly flagged - this ensures we don't interfere with
         # apps that don't use get_app_user()
-        if hasattr(request.state, "clear_stale_session") and request.state.clear_stale_session:
+        if (
+            hasattr(request.state, "clear_stale_session")
+            and request.state.clear_stale_session
+        ):
             try:
                 # Get cookie name from app config
                 cookie_name = None
@@ -193,7 +197,8 @@ class StaleSessionMiddleware(BaseHTTPMiddleware):
 
                 # Get cookie settings to match how it was set
                 should_use_secure = (
-                    request.url.scheme == "https" or os.getenv("G_NOME_ENV") == "production"
+                    request.url.scheme == "https"
+                    or os.getenv("G_NOME_ENV") == "production"
                 )
 
                 # Delete the stale cookie
@@ -203,7 +208,9 @@ class StaleSessionMiddleware(BaseHTTPMiddleware):
                     secure=should_use_secure,
                     samesite="lax",
                 )
-                logger.debug(f"Cleared stale session cookie '{cookie_name}' for {self.slug_id}")
+                logger.debug(
+                    f"Cleared stale session cookie '{cookie_name}' for {self.slug_id}"
+                )
             except (ValueError, TypeError, AttributeError, RuntimeError) as e:
                 # Don't fail the request if cookie cleanup fails
                 logger.warning(

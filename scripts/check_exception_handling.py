@@ -52,7 +52,9 @@ def _has_logger_exception(node: ast.ExceptHandler) -> bool:
                 if stmt.func.attr == "exception":
                     return True
                 elif stmt.func.attr == "error" and any(
-                    kw.arg == "exc_info" and isinstance(kw.value, ast.Constant) and kw.value.value
+                    kw.arg == "exc_info"
+                    and isinstance(kw.value, ast.Constant)
+                    and kw.value.value
                     for kw in (stmt.keywords or [])
                 ):
                     return True
@@ -215,7 +217,9 @@ class ExceptionHandlerChecker(ast.NodeVisitor):
         if is_exception_catch and self.current_function:
             function_name = (
                 self.current_function.name
-                if isinstance(self.current_function, (ast.FunctionDef, ast.AsyncFunctionDef))
+                if isinstance(
+                    self.current_function, (ast.FunctionDef, ast.AsyncFunctionDef)
+                )
                 else None
             )
             if function_name and function_name in self.top_level_handlers:
@@ -295,7 +299,9 @@ class ExceptionHandlerChecker(ast.NodeVisitor):
             function_name = (
                 self.current_function.name
                 if self.current_function
-                and isinstance(self.current_function, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and isinstance(
+                    self.current_function, (ast.FunctionDef, ast.AsyncFunctionDef)
+                )
                 else None
             )
             # MongoDB operations should catch MongoDB-specific exceptions
@@ -374,7 +380,9 @@ def main():
         sys.exit(1)
     else:
         if files_checked:
-            print(f"✅ Exception handling checks passed for {len(files_checked)} file(s)")
+            print(
+                f"✅ Exception handling checks passed for {len(files_checked)} file(s)"
+            )
         sys.exit(0)
 
 

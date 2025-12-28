@@ -35,23 +35,15 @@ Example EmbeddingService usage:
         return {"embeddings": embeddings}
 """
 
-from .dependencies import (
-    create_embedding_dependency,
-    get_embedding_service_dep,
-    get_embedding_service_dependency,
-    get_embedding_service_for_app,
-    get_global_engine,
-    set_global_engine,
-)
-from .service import (
-    AzureOpenAIEmbeddingProvider,
-    BaseEmbeddingProvider,
-    EmbeddingProvider,
-    EmbeddingService,
-    EmbeddingServiceError,
-    OpenAIEmbeddingProvider,
-    get_embedding_service,
-)
+from .dependencies import (create_embedding_dependency,
+                           get_embedding_service_dep,
+                           get_embedding_service_dependency,
+                           get_embedding_service_for_app, get_global_engine,
+                           set_global_engine)
+from .service import (AzureOpenAIEmbeddingProvider, BaseEmbeddingProvider,
+                      EmbeddingProvider, EmbeddingService,
+                      EmbeddingServiceError, OpenAIEmbeddingProvider,
+                      get_embedding_service)
 
 __all__ = [
     "EmbeddingService",

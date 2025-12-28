@@ -8,7 +8,8 @@ throughout the codebase.
 This module is part of MDB_ENGINE - MongoDB Engine.
 """
 
-from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, TypedDict, Union
+from typing import (TYPE_CHECKING, Any, Dict, List, Literal, Optional,
+                    TypedDict, Union)
 
 if TYPE_CHECKING:
     from ..memory import Mem0MemoryService
@@ -343,7 +344,9 @@ class CORSConfigDict(TypedDict, total=False):
     enabled: bool
     allow_origins: List[str]
     allow_credentials: bool
-    allow_methods: List[Literal["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD", "*"]]
+    allow_methods: List[
+        Literal["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD", "*"]
+    ]
     allow_headers: List[str]
     expose_headers: List[str]
     max_age: int

@@ -12,12 +12,9 @@ from typing import Any, Dict
 
 from fastapi import Request
 
-from .config_defaults import (
-    CORS_DEFAULTS,
-    OBSERVABILITY_DEFAULTS,
-    SECURITY_CONFIG_DEFAULTS,
-    TOKEN_MANAGEMENT_DEFAULTS,
-)
+from .config_defaults import (CORS_DEFAULTS, OBSERVABILITY_DEFAULTS,
+                              SECURITY_CONFIG_DEFAULTS,
+                              TOKEN_MANAGEMENT_DEFAULTS)
 
 logger = logging.getLogger(__name__)
 
@@ -135,7 +132,9 @@ def get_ip_validation_config(request: Request) -> Dict[str, Any]:
         IP validation configuration dictionary
     """
     security_config = get_security_config(request)
-    return security_config.get("ip_validation", SECURITY_CONFIG_DEFAULTS["ip_validation"].copy())
+    return security_config.get(
+        "ip_validation", SECURITY_CONFIG_DEFAULTS["ip_validation"].copy()
+    )
 
 
 def get_token_fingerprinting_config(request: Request) -> Dict[str, Any]:

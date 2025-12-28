@@ -17,7 +17,6 @@ from fastapi import Cookie, Depends, HTTPException, Request, status
 
 from ..exceptions import ConfigurationError
 from .jwt import decode_jwt_token, extract_token_metadata
-
 # Import from local modules
 from .provider import AuthorizationProvider
 from .session_manager import SessionManager
@@ -165,7 +164,9 @@ async def get_current_user(
             if blacklist:
                 is_revoked = await blacklist.is_revoked(jti)
                 if is_revoked:
-                    logger.info(f"get_current_user: Token {jti} is blacklisted (revoked)")
+                    logger.info(
+                        f"get_current_user: Token {jti} is blacklisted (revoked)"
+                    )
                     return None
 
                 # Also check user-level revocation
@@ -173,7 +174,9 @@ async def get_current_user(
                 if user_id:
                     user_revoked = await blacklist.is_user_revoked(user_id)
                     if user_revoked:
-                        logger.info(f"get_current_user: All tokens for user {user_id} are revoked")
+                        logger.info(
+                            f"get_current_user: All tokens for user {user_id} are revoked"
+                        )
                         return None
 
         payload = decode_jwt_token(token, str(SECRET_KEY))
@@ -181,7 +184,9 @@ async def get_current_user(
         # Verify token type (should be access token for backward compatibility, or no type)
         token_type = payload.get("type")
         if token_type and token_type not in ("access", None):
-            logger.warning(f"get_current_user: Invalid token type '{token_type}' for access token")
+            logger.warning(
+                f"get_current_user: Invalid token type '{token_type}' for access token"
+            )
             return None
 
         logger.debug(
@@ -309,7 +314,9 @@ async def get_refresh_token(
             if blacklist:
                 is_revoked = await blacklist.is_revoked(jti)
                 if is_revoked:
-                    logger.info(f"get_refresh_token: Refresh token {jti} is blacklisted")
+                    logger.info(
+                        f"get_refresh_token: Refresh token {jti} is blacklisted"
+                    )
                     return None
 
         payload = decode_jwt_token(refresh_token, str(SECRET_KEY))
@@ -343,9 +350,13 @@ async def get_refresh_token(
                 if stored_fingerprint:
                     from .utils import generate_session_fingerprint
 
-                    device_id = request.cookies.get("device_id") or payload.get("device_id")
+                    device_id = request.cookies.get("device_id") or payload.get(
+                        "device_id"
+                    )
                     if device_id:
-                        current_fingerprint = generate_session_fingerprint(request, device_id)
+                        current_fingerprint = generate_session_fingerprint(
+                            request, device_id
+                        )
                         if current_fingerprint != stored_fingerprint:
                             logger.warning(
                                 f"get_refresh_token: Session fingerprint mismatch "
@@ -608,7 +619,9 @@ async def refresh_access_token(
         from ..config import TOKEN_ROTATION_ENABLED
         from .jwt import generate_token_pair
 
-        user_id = refresh_token_payload.get("user_id") or refresh_token_payload.get("email")
+        user_id = refresh_token_payload.get("user_id") or refresh_token_payload.get(
+            "email"
+        )
         old_refresh_jti = refresh_token_payload.get("jti")
         device_id = refresh_token_payload.get("device_id")
 
@@ -640,7 +653,9 @@ async def refresh_access_token(
 
                     device_id = device_id or request.cookies.get("device_id")
                     if device_id:
-                        current_fingerprint = generate_session_fingerprint(request, device_id)
+                        current_fingerprint = generate_session_fingerprint(
+                            request, device_id
+                        )
                         if current_fingerprint != stored_fingerprint:
                             logger.warning(
                                 f"refresh_access_token: Session fingerprint mismatch "
@@ -656,7 +671,9 @@ async def refresh_access_token(
 
         # Use existing device_id or generate new one
         if not device_id:
-            device_id = str(uuid.uuid4()) if not device_info else device_info.get("device_id")
+            device_id = (
+                str(uuid.uuid4()) if not device_info else device_info.get("device_id")
+            )
 
         if device_info:
             device_info["device_id"] = device_id

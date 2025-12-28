@@ -33,7 +33,9 @@ class TestConnectionManagerErrorHandling:
         # Simulate TypeError when accessing admin.command
         mock_client.admin.command = AsyncMock(side_effect=TypeError("Invalid type"))
 
-        with patch("mdb_engine.core.connection.AsyncIOMotorClient", return_value=mock_client):
+        with patch(
+            "mdb_engine.core.connection.AsyncIOMotorClient", return_value=mock_client
+        ):
             manager = ConnectionManager(**connection_config)
 
             with pytest.raises(InitializationError) as exc_info:
@@ -48,7 +50,9 @@ class TestConnectionManagerErrorHandling:
         mock_client = MagicMock()
         mock_client.admin.command = AsyncMock(side_effect=ValueError("Invalid value"))
 
-        with patch("mdb_engine.core.connection.AsyncIOMotorClient", return_value=mock_client):
+        with patch(
+            "mdb_engine.core.connection.AsyncIOMotorClient", return_value=mock_client
+        ):
             manager = ConnectionManager(**connection_config)
 
             with pytest.raises(InitializationError) as exc_info:
@@ -65,7 +69,9 @@ class TestConnectionManagerErrorHandling:
         mock_client.admin = None
         # This will cause AttributeError when trying to access admin.command
 
-        with patch("mdb_engine.core.connection.AsyncIOMotorClient", return_value=mock_client):
+        with patch(
+            "mdb_engine.core.connection.AsyncIOMotorClient", return_value=mock_client
+        ):
             manager = ConnectionManager(**connection_config)
 
             with pytest.raises(InitializationError) as exc_info:
@@ -85,7 +91,9 @@ class TestConnectionManagerErrorHandling:
 
         mock_client.admin.command = AsyncMock(side_effect=raise_key_error)
 
-        with patch("mdb_engine.core.connection.AsyncIOMotorClient", return_value=mock_client):
+        with patch(
+            "mdb_engine.core.connection.AsyncIOMotorClient", return_value=mock_client
+        ):
             manager = ConnectionManager(**connection_config)
 
             with pytest.raises(InitializationError) as exc_info:
@@ -99,7 +107,9 @@ class TestConnectionManagerMetricsRegistration:
     """Test metrics registration functionality."""
 
     @pytest.mark.asyncio
-    async def test_initialize_registers_metrics(self, connection_config, mock_mongo_client):
+    async def test_initialize_registers_metrics(
+        self, connection_config, mock_mongo_client
+    ):
         """Test that client is registered for metrics on successful initialization."""
         mock_mongo_client.admin.command = AsyncMock(return_value={"ok": 1})
 
@@ -117,7 +127,9 @@ class TestConnectionManagerMetricsRegistration:
                 mock_register.assert_called_once_with(mock_mongo_client)
 
     @pytest.mark.asyncio
-    async def test_initialize_metrics_import_error(self, connection_config, mock_mongo_client):
+    async def test_initialize_metrics_import_error(
+        self, connection_config, mock_mongo_client
+    ):
         """Test handling missing metrics module gracefully."""
         mock_mongo_client.admin.command = AsyncMock(return_value={"ok": 1})
 
@@ -442,7 +454,8 @@ class TestGetSharedClient:
 
     def test_get_shared_client_creation_errors(self, connection_config):
         """Test get_shared_mongo_client error handling during creation (lines 146-149)."""
-        from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError
+        from pymongo.errors import (ConnectionFailure,
+                                    ServerSelectionTimeoutError)
 
         import mdb_engine.database.connection as conn_module
         from mdb_engine.database.connection import get_shared_mongo_client
@@ -554,7 +567,8 @@ class TestVerifySharedClient:
     async def test_verify_shared_client_success(self, connection_config):
         """Test verify_shared_client successful verification (lines 168-171)."""
         import mdb_engine.database.connection as conn_module
-        from mdb_engine.database.connection import get_shared_mongo_client, verify_shared_client
+        from mdb_engine.database.connection import (get_shared_mongo_client,
+                                                    verify_shared_client)
 
         original_client = conn_module._shared_client
         conn_module._shared_client = None
@@ -607,7 +621,9 @@ class TestGetPoolMetrics:
 
         mock_client = MagicMock()
         mock_client.admin.command = AsyncMock(
-            return_value={"connections": {"current": 5, "available": 5, "totalCreated": 10}}
+            return_value={
+                "connections": {"current": 5, "available": 5, "totalCreated": 10}
+            }
         )
         mock_client.options = MagicMock(maxPoolSize=10, minPoolSize=1)
 
@@ -620,7 +636,8 @@ class TestGetPoolMetrics:
     async def test_get_pool_metrics_shared_client_path(self, connection_config):
         """Test get_pool_metrics uses shared client when available (line 233)."""
         import mdb_engine.database.connection as conn_module
-        from mdb_engine.database.connection import get_pool_metrics, get_shared_mongo_client
+        from mdb_engine.database.connection import (get_pool_metrics,
+                                                    get_shared_mongo_client)
 
         original_client = conn_module._shared_client
         conn_module._shared_client = None
@@ -629,7 +646,9 @@ class TestGetPoolMetrics:
             mock_client = MagicMock()
             mock_client._topology = MagicMock()
             mock_client.admin.command = AsyncMock(
-                return_value={"connections": {"current": 3, "available": 7, "totalCreated": 10}}
+                return_value={
+                    "connections": {"current": 3, "available": 7, "totalCreated": 10}
+                }
             )
             mock_client.options = MagicMock(maxPoolSize=10, minPoolSize=1)
 
@@ -675,7 +694,8 @@ class TestGetPoolMetrics:
     async def test_get_pool_metrics_registered_client(self, connection_config):
         """Test get_pool_metrics with registered client (lines 230-241)."""
         import mdb_engine.database.connection as conn_module
-        from mdb_engine.database.connection import get_pool_metrics, register_client_for_metrics
+        from mdb_engine.database.connection import (
+            get_pool_metrics, register_client_for_metrics)
 
         original_client = conn_module._shared_client
         original_registered = conn_module._registered_clients.copy()
@@ -686,7 +706,9 @@ class TestGetPoolMetrics:
             mock_client = MagicMock()
             mock_client._topology = MagicMock()
             mock_client.admin.command = AsyncMock(
-                return_value={"connections": {"current": 3, "available": 7, "totalCreated": 10}}
+                return_value={
+                    "connections": {"current": 3, "available": 7, "totalCreated": 10}
+                }
             )
             mock_client.options = MagicMock(maxPoolSize=10, minPoolSize=1)
 
@@ -700,10 +722,13 @@ class TestGetPoolMetrics:
             conn_module._registered_clients = original_registered
 
     @pytest.mark.asyncio
-    async def test_get_pool_metrics_registered_client_attribute_error(self, connection_config):
+    async def test_get_pool_metrics_registered_client_attribute_error(
+        self, connection_config
+    ):
         """Test get_pool_metrics handles AttributeError in registered client loop."""
         import mdb_engine.database.connection as conn_module
-        from mdb_engine.database.connection import get_pool_metrics, register_client_for_metrics
+        from mdb_engine.database.connection import (
+            get_pool_metrics, register_client_for_metrics)
 
         original_client = conn_module._shared_client
         original_registered = conn_module._registered_clients.copy()
@@ -724,7 +749,9 @@ class TestGetPoolMetrics:
             valid_client = MagicMock()
             valid_client._topology = MagicMock()
             valid_client.admin.command = AsyncMock(
-                return_value={"connections": {"current": 2, "available": 8, "totalCreated": 10}}
+                return_value={
+                    "connections": {"current": 2, "available": 8, "totalCreated": 10}
+                }
             )
             valid_client.options = MagicMock(maxPoolSize=10, minPoolSize=1)
 
@@ -740,10 +767,13 @@ class TestGetPoolMetrics:
             conn_module._registered_clients = original_registered
 
     @pytest.mark.asyncio
-    async def test_get_pool_metrics_registered_client_runtime_error(self, connection_config):
+    async def test_get_pool_metrics_registered_client_runtime_error(
+        self, connection_config
+    ):
         """Test get_pool_metrics handles RuntimeError in registered client loop."""
         import mdb_engine.database.connection as conn_module
-        from mdb_engine.database.connection import get_pool_metrics, register_client_for_metrics
+        from mdb_engine.database.connection import (
+            get_pool_metrics, register_client_for_metrics)
 
         original_client = conn_module._shared_client
         original_registered = conn_module._registered_clients.copy()
@@ -763,7 +793,9 @@ class TestGetPoolMetrics:
             valid_client = MagicMock()
             valid_client._topology = MagicMock()
             valid_client.admin.command = AsyncMock(
-                return_value={"connections": {"current": 2, "available": 8, "totalCreated": 10}}
+                return_value={
+                    "connections": {"current": 2, "available": 8, "totalCreated": 10}
+                }
             )
             valid_client.options = MagicMock(maxPoolSize=10, minPoolSize=1)
 
@@ -779,10 +811,13 @@ class TestGetPoolMetrics:
             conn_module._registered_clients = original_registered
 
     @pytest.mark.asyncio
-    async def test_get_pool_metrics_shared_client_none_registered_exists(self, connection_config):
+    async def test_get_pool_metrics_shared_client_none_registered_exists(
+        self, connection_config
+    ):
         """Test get_pool_metrics when shared client is None but registered exists."""
         import mdb_engine.database.connection as conn_module
-        from mdb_engine.database.connection import get_pool_metrics, register_client_for_metrics
+        from mdb_engine.database.connection import (
+            get_pool_metrics, register_client_for_metrics)
 
         original_client = conn_module._shared_client
         original_registered = conn_module._registered_clients.copy()
@@ -793,7 +828,9 @@ class TestGetPoolMetrics:
             mock_client = MagicMock()
             mock_client._topology = MagicMock()
             mock_client.admin.command = AsyncMock(
-                return_value={"connections": {"current": 1, "available": 9, "totalCreated": 10}}
+                return_value={
+                    "connections": {"current": 1, "available": 9, "totalCreated": 10}
+                }
             )
             mock_client.options = MagicMock(maxPoolSize=10, minPoolSize=1)
 
@@ -828,7 +865,9 @@ class TestGetClientPoolMetrics:
 
         mock_client = MagicMock()
         mock_client.admin.command = AsyncMock(
-            return_value={"connections": {"current": 5, "available": 5, "totalCreated": 10}}
+            return_value={
+                "connections": {"current": 5, "available": 5, "totalCreated": 10}
+            }
         )
         mock_client.options = MagicMock(maxPoolSize=10, minPoolSize=1)
 
@@ -846,7 +885,9 @@ class TestGetClientPoolMetrics:
 
         mock_client = MagicMock()
         mock_client.admin.command = AsyncMock(
-            return_value={"connections": {"current": 9, "available": 1, "totalCreated": 10}}
+            return_value={
+                "connections": {"current": 9, "available": 1, "totalCreated": 10}
+            }
         )
         mock_client.options = MagicMock(maxPoolSize=10, minPoolSize=1)
 
@@ -863,7 +904,9 @@ class TestGetClientPoolMetrics:
         from mdb_engine.database.connection import _get_client_pool_metrics
 
         mock_client = MagicMock()
-        mock_client.admin.command = AsyncMock(side_effect=OperationFailure("Server error"))
+        mock_client.admin.command = AsyncMock(
+            side_effect=OperationFailure("Server error")
+        )
         mock_client.options = MagicMock(maxPoolSize=10, minPoolSize=1)
 
         result = await _get_client_pool_metrics(mock_client)
@@ -902,7 +945,9 @@ class TestGetClientPoolMetrics:
                 ):
                     return None
                 # For other attributes, raise AttributeError so getattr returns None
-                raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+                raise AttributeError(
+                    f"'{type(self).__name__}' object has no attribute '{name}'"
+                )
 
         client = ClientWithoutPoolSize()
 
@@ -946,7 +991,9 @@ class TestGetClientPoolMetrics:
                     "min_pool_size",
                 ):
                     return None
-                raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+                raise AttributeError(
+                    f"'{type(self).__name__}' object has no attribute '{name}'"
+                )
 
         error_client = ClientWithError()
 
@@ -988,7 +1035,9 @@ class TestGetClientPoolMetrics:
                     "min_pool_size",
                 ):
                     return None
-                raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+                raise AttributeError(
+                    f"'{type(self).__name__}' object has no attribute '{name}'"
+                )
 
         error_client = ClientWithTypeError()
 
@@ -1028,7 +1077,9 @@ class TestGetClientPoolMetrics:
                     "min_pool_size",
                 ):
                     return None
-                raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+                raise AttributeError(
+                    f"'{type(self).__name__}' object has no attribute '{name}'"
+                )
 
         error_client = ClientWithKeyError()
 
@@ -1061,7 +1112,8 @@ class TestCloseSharedClient:
     def test_close_shared_client_success(self, connection_config):
         """Test close_shared_client successful close (lines 375-378)."""
         import mdb_engine.database.connection as conn_module
-        from mdb_engine.database.connection import close_shared_client, get_shared_mongo_client
+        from mdb_engine.database.connection import (close_shared_client,
+                                                    get_shared_mongo_client)
 
         original_client = conn_module._shared_client
         conn_module._shared_client = None
@@ -1091,7 +1143,8 @@ class TestCloseSharedClient:
     def test_close_shared_client_error(self, connection_config):
         """Test close_shared_client handles errors (lines 379-382)."""
         import mdb_engine.database.connection as conn_module
-        from mdb_engine.database.connection import close_shared_client, get_shared_mongo_client
+        from mdb_engine.database.connection import (close_shared_client,
+                                                    get_shared_mongo_client)
 
         original_client = conn_module._shared_client
         conn_module._shared_client = None
@@ -1159,7 +1212,8 @@ class TestRegisterClientForMetrics:
         from pymongo.errors import ConnectionFailure
 
         import mdb_engine.database.connection as conn_module
-        from mdb_engine.database.connection import get_shared_mongo_client, verify_shared_client
+        from mdb_engine.database.connection import (get_shared_mongo_client,
+                                                    verify_shared_client)
 
         original_client = conn_module._shared_client
         conn_module._shared_client = None
@@ -1196,7 +1250,8 @@ class TestRegisterClientForMetrics:
         from pymongo.errors import ServerSelectionTimeoutError
 
         import mdb_engine.database.connection as conn_module
-        from mdb_engine.database.connection import get_shared_mongo_client, verify_shared_client
+        from mdb_engine.database.connection import (get_shared_mongo_client,
+                                                    verify_shared_client)
 
         original_client = conn_module._shared_client
         conn_module._shared_client = None

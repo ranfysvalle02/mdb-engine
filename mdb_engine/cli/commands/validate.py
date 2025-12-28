@@ -42,10 +42,14 @@ def validate(manifest_file: Path, verbose: bool) -> None:
         is_valid, error_message, error_paths = validator.validate(manifest)
 
         if is_valid:
-            click.echo(click.style(f"✅ Manifest '{manifest_file}' is valid!", fg="green"))
+            click.echo(
+                click.style(f"✅ Manifest '{manifest_file}' is valid!", fg="green")
+            )
             sys.exit(0)
         else:
-            click.echo(click.style(f"❌ Manifest '{manifest_file}' is invalid!", fg="red"))
+            click.echo(
+                click.style(f"❌ Manifest '{manifest_file}' is invalid!", fg="red")
+            )
             if error_message:
                 click.echo(click.style(f"Error: {error_message}", fg="red"))
             if error_paths and verbose:

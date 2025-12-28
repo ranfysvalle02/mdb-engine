@@ -66,12 +66,18 @@ class EngineConfig:
         """
         self.mongo_uri = mongo_uri or os.getenv("MONGO_URI", "")
         self.db_name = db_name or os.getenv("DB_NAME", "")
-        self.max_pool_size = max_pool_size or int(os.getenv("MONGO_MAX_POOL_SIZE", "50"))
-        self.min_pool_size = min_pool_size or int(os.getenv("MONGO_MIN_POOL_SIZE", "10"))
+        self.max_pool_size = max_pool_size or int(
+            os.getenv("MONGO_MAX_POOL_SIZE", "50")
+        )
+        self.min_pool_size = min_pool_size or int(
+            os.getenv("MONGO_MIN_POOL_SIZE", "10")
+        )
         self.server_selection_timeout_ms = server_selection_timeout_ms or int(
             os.getenv("MONGO_SERVER_SELECTION_TIMEOUT_MS", "5000")
         )
-        self.authz_cache_ttl = authz_cache_ttl or int(os.getenv("AUTHZ_CACHE_TTL", "300"))
+        self.authz_cache_ttl = authz_cache_ttl or int(
+            os.getenv("AUTHZ_CACHE_TTL", "300")
+        )
 
     def validate(self) -> None:
         """
@@ -109,7 +115,9 @@ class EngineConfig:
             )
 
         if self.authz_cache_ttl < 0:
-            raise ValueError(f"authz_cache_ttl must be >= 0, got {self.authz_cache_ttl}")
+            raise ValueError(
+                f"authz_cache_ttl must be >= 0, got {self.authz_cache_ttl}"
+            )
 
 
 # Pydantic-based configuration (optional, only if Pydantic is available)
@@ -130,7 +138,9 @@ if PYDANTIC_AVAILABLE:
             )
         """
 
-        mongo_uri: str = Field(..., env="MONGO_URI", description="MongoDB connection URI")
+        mongo_uri: str = Field(
+            ..., env="MONGO_URI", description="MongoDB connection URI"
+        )
         db_name: str = Field(..., env="DB_NAME", description="Database name")
         max_pool_size: int = Field(
             50,
@@ -193,11 +203,15 @@ ACCESS_TOKEN_TTL: int = int(os.getenv("ACCESS_TOKEN_TTL", "900"))  # 15 minutes
 REFRESH_TOKEN_TTL: int = int(os.getenv("REFRESH_TOKEN_TTL", "604800"))  # 7 days
 """Refresh token TTL in seconds (default: 604800 / 7 days)."""
 
-TOKEN_ROTATION_ENABLED: bool = os.getenv("TOKEN_ROTATION_ENABLED", "true").lower() == "true"
+TOKEN_ROTATION_ENABLED: bool = (
+    os.getenv("TOKEN_ROTATION_ENABLED", "true").lower() == "true"
+)
 """Whether to rotate refresh tokens on each use (default: true)."""
 
 MAX_SESSIONS_PER_USER: int = int(os.getenv("MAX_SESSIONS_PER_USER", "10"))
 """Maximum number of concurrent sessions per user (default: 10)."""
 
-SESSION_INACTIVITY_TIMEOUT: int = int(os.getenv("SESSION_INACTIVITY_TIMEOUT", "1800"))  # 30 minutes
+SESSION_INACTIVITY_TIMEOUT: int = int(
+    os.getenv("SESSION_INACTIVITY_TIMEOUT", "1800")
+)  # 30 minutes
 """Session inactivity timeout in seconds (default: 1800 / 30 minutes)."""

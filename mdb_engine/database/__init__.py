@@ -6,19 +6,11 @@ and MongoDB-style API for familiarity.
 """
 
 from .abstraction import AppDB, Collection, get_app_db
-from .connection import (
-    close_shared_client,
-    get_pool_metrics,
-    get_shared_mongo_client,
-    register_client_for_metrics,
-    verify_shared_client,
-)
-from .scoped_wrapper import (
-    AsyncAtlasIndexManager,
-    AutoIndexManager,
-    ScopedCollectionWrapper,
-    ScopedMongoWrapper,
-)
+from .connection import (close_shared_client, get_pool_metrics,
+                         get_shared_mongo_client, register_client_for_metrics,
+                         verify_shared_client)
+from .scoped_wrapper import (AsyncAtlasIndexManager, AutoIndexManager,
+                             ScopedCollectionWrapper, ScopedMongoWrapper)
 
 __all__ = [
     # Scoped wrappers

@@ -59,7 +59,9 @@ class TestSeedingIntegration:
             "name": "Idempotent Test",
             "status": "active",
             "developer_id": "dev@example.com",
-            "initial_data": {"documents": [{"title": "Unique Doc", "content": "Content"}]},
+            "initial_data": {
+                "documents": [{"title": "Unique Doc", "content": "Content"}]
+            },
         }
 
         # First registration
@@ -115,7 +117,9 @@ class TestSeedingIntegration:
             "name": "Datetime Test",
             "status": "active",
             "developer_id": "dev@example.com",
-            "initial_data": {"events": [{"name": "Event 1", "created_at": "2024-01-01T12:00:00Z"}]},
+            "initial_data": {
+                "events": [{"name": "Event 1", "created_at": "2024-01-01T12:00:00Z"}]
+            },
         }
 
         await engine.register_app(manifest, create_indexes=False)
@@ -149,7 +153,9 @@ class TestSeedingIntegration:
             "name": "Prepopulated Test",
             "status": "active",
             "developer_id": "dev@example.com",
-            "initial_data": {"prepopulated_collection": [{"should": "not_be_inserted"}]},
+            "initial_data": {
+                "prepopulated_collection": [{"should": "not_be_inserted"}]
+            },
         }
 
         await engine.register_app(manifest, create_indexes=False)
