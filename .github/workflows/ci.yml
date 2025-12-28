@@ -21,10 +21,6 @@ jobs:
         run: |
           python -m pip install --upgrade pip setuptools wheel
           pip install -e ".[dev,test]"
-          # Verify tools are installed and accessible
-          flake8 --version
-          isort --version
-          echo "✅ All dev tools installed successfully"
 
       - name: Run linting and formatting checks
         run: make lint

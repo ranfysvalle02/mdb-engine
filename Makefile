@@ -75,10 +75,8 @@ test-coverage-html:
 
 # Code quality helpers
 _check-tools:
-	@if ! command -v flake8 &> /dev/null || ! command -v isort &> /dev/null; then \
-		echo "⚠️  Dev tools not installed. Install with: pip install -e '.[dev]'"; \
-		exit 1; \
-	fi
+	@python -m flake8 --version > /dev/null 2>&1 || (echo "⚠️  flake8 not installed. Install with: pip install -e '.[dev]'" && exit 1)
+	@python -m isort --version > /dev/null 2>&1 || (echo "⚠️  isort not installed. Install with: pip install -e '.[dev]'" && exit 1)
 
 _lint-flake8:
 	@echo "Checking flake8..."
