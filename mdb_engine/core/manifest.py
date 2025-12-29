@@ -1256,6 +1256,41 @@ MANIFEST_SCHEMA_V2 = {
             "additionalProperties": False,
             "description": "CORS (Cross-Origin Resource Sharing) configuration for web apps",
         },
+        "data_access": {
+            "type": "object",
+            "properties": {
+                "read_scopes": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "List of app slugs this app can read from. "
+                        "Defaults to [app_slug] if not specified."
+                    ),
+                },
+                "write_scope": {
+                    "type": "string",
+                    "description": (
+                        "App slug this app writes to. "
+                        "Defaults to app_slug if not specified."
+                    ),
+                },
+                "cross_app_policy": {
+                    "type": "string",
+                    "enum": ["explicit", "deny_all"],
+                    "default": "explicit",
+                    "description": (
+                        "Policy for cross-app access. 'explicit' allows access "
+                        "to apps listed in read_scopes. 'deny_all' blocks all "
+                        "cross-app access regardless of read_scopes."
+                    ),
+                },
+            },
+            "additionalProperties": False,
+            "description": (
+                "Data access configuration defining which apps this app can "
+                "read from and write to. Used for cross-app data access control."
+            ),
+        },
         "observability": {
             "type": "object",
             "properties": {
@@ -1873,12 +1908,13 @@ async def _validate_manifest_async(
           Use validate_manifest_with_db() for database validation.
     """
     # Check cache first
+    cache_key = None
     if use_cache:
         cache_key = (
             _get_manifest_hash(manifest_data) + "_" + get_schema_version(manifest_data)
         )
-    if cache_key in _validation_cache:
-        return _validation_cache[cache_key]
+        if cache_key in _validation_cache:
+            return _validation_cache[cache_key]
 
     try:
         # Get schema version

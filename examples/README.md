@@ -63,6 +63,25 @@ A demonstration of:
 
 **Perfect for:** Understanding vector embeddings and LLM abstractions
 
+### [Multi-App](./multi_app/)
+
+An advanced example demonstrating:
+- Secure cross-app data access with app-level authentication
+- Envelope encryption for app secrets
+- Manifest-level authorization via `read_scopes`
+- OSO authorization for fine-grained access control
+- Docker Compose orchestration of multiple apps
+- Two-phase startup for secret management
+
+**Perfect for:** Understanding multi-tenant security and cross-app access patterns
+
+**Run it:**
+```bash
+cd multi_app
+./scripts/setup.sh
+docker-compose up
+```
+
 ## Docker Compose Setup
 
 Each example includes a `docker-compose.yml` file that provides:

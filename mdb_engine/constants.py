@@ -72,6 +72,7 @@ RESERVED_COLLECTION_PREFIXES: Final[tuple[str, ...]] = (
 # Reserved collection names (engine-internal)
 RESERVED_COLLECTION_NAMES: Final[tuple[str, ...]] = (
     "apps_config",  # Engine internal - app registration
+    "_mdb_engine_app_secrets",  # Engine internal - encrypted app secrets
 )
 """Reserved collection names that cannot be accessed through scoped wrappers."""
 

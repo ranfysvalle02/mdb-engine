@@ -181,6 +181,9 @@ class TestScopedDataIsolation:
             "name": "Multi Scope App 1",
             "status": "active",
             "developer_id": "dev@example.com",
+            "data_access": {
+                "read_scopes": ["multi_scope_app1", "multi_scope_app2"],
+            },
         }
 
         app2_manifest = {

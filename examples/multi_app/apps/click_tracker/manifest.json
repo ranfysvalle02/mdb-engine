@@ -1,0 +1,38 @@
+{
+  "schema_version": "2.0",
+  "slug": "click_tracker",
+  "name": "Click Tracker",
+  "description": "Tracks user clicks and events",
+  "status": "active",
+  "data_access": {
+    "read_scopes": ["click_tracker"],
+    "write_scope": "click_tracker",
+    "cross_app_policy": "explicit"
+  },
+  "managed_indexes": {
+    "clicks": [
+      {
+        "type": "regular",
+        "name": "timestamp_idx",
+        "keys": {
+          "timestamp": -1
+        }
+      },
+      {
+        "type": "regular",
+        "name": "user_id_idx",
+        "keys": {
+          "user_id": 1
+        }
+      },
+      {
+        "type": "regular",
+        "name": "session_id_idx",
+        "keys": {
+          "session_id": 1
+        }
+      }
+    ]
+  }
+}
+

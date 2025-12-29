@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Click Tracker Dashboard</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            min-height: 100vh;
+            padding: 40px 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .header {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+        }
+        .header h1 { color: #333; margin-bottom: 10px; }
+        .header p { color: #666; }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .stat-box {
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            text-align: center;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+        }
+        .stat-box .number {
+            font-size: 48px;
+            font-weight: bold;
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 10px;
+        }
+        .stat-box .label {
+            color: #666;
+            font-size: 14px;
+        }
+        .clicks-section {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+        }
+        .clicks-section h2 {
+            color: #333;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #f5576c;
+            padding-bottom: 10px;
+        }
+        .click-item {
+            background: #f9fafb;
+            padding: 15px;
+            margin-bottom: 10px;
+            border-radius: 8px;
+            border-left: 4px solid #f5576c;
+        }
+        .click-item strong { color: #f5576c; }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        .empty {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+        .refresh-btn {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            margin-bottom: 20px;
+            font-weight: 600;
+        }
+        .refresh-btn:hover {
+            opacity: 0.9;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📊 Click Tracker Dashboard</h1>
+            <p>Admin dashboard reading clicks from ClickTracker app (cross-app access)</p>
+        </div>
+        
+        <div class="stats">
+            <div class="stat-box">
+                <div class="number" id="totalClicks">0</div>
+                <div class="label">Total Clicks</div>
+            </div>
+            <div class="stat-box">
+                <div class="number" id="uniqueUsers">0</div>
+                <div class="label">Unique Users</div>
+            </div>
+            <div class="stat-box">
+                <div class="number" id="uniqueSessions">0</div>
+                <div class="label">Unique Sessions</div>
+            </div>
+        </div>
+        
+        <div class="clicks-section">
+            <h2>Recent Clicks</h2>
+            <button class="refresh-btn" onclick="loadAnalytics()">Refresh</button>
+            <div id="clicksList">
+                <div class="loading">Loading clicks...</div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        async function loadAnalytics() {
+            try {
+                const response = await fetch('/analytics?hours=24');
+                const data = await response.json();
+                
+                // Update stats
+                document.getElementById('totalClicks').textContent = data.total_clicks || 0;
+                document.getElementById('uniqueUsers').textContent = data.unique_users || 0;
+                document.getElementById('uniqueSessions').textContent = data.unique_sessions || 0;
+                
+                // Update clicks list
+                const clicksList = document.getElementById('clicksList');
+                if (data.clicks && data.clicks.length > 0) {
+                    clicksList.innerHTML = data.clicks.map(click => `
+                        <div class="click-item">
+                            <div><strong>User:</strong> ${click.user_id || 'anonymous'}</div>
+                            <div><strong>URL:</strong> ${click.url || 'N/A'}</div>
+                            <div><strong>Time:</strong> ${new Date(click.timestamp).toLocaleString()}</div>
+                        </div>
+                    `).join('');
+                } else {
+                    clicksList.innerHTML = '<div class="empty">No clicks yet. Go to <a href="http://localhost:8000" target="_blank">Click Tracker</a> and click the button!</div>';
+                }
+            } catch (error) {
+                document.getElementById('clicksList').innerHTML = `<div class="error">Error: ${error.message}</div>`;
+            }
+        }
+        
+        // Load on page load
+        loadAnalytics();
+        
+        // Auto-refresh every 3 seconds
+        setInterval(loadAnalytics, 3000);
+    </script>
+</body>
+</html>

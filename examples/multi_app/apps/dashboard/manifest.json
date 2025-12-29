@@ -1,0 +1,13 @@
+{
+  "schema_version": "2.0",
+  "slug": "click_tracker_dashboard",
+  "name": "Click Tracker Dashboard",
+  "description": "Admin dashboard for viewing click analytics",
+  "status": "active",
+  "data_access": {
+    "read_scopes": ["click_tracker_dashboard", "click_tracker"],
+    "write_scope": "click_tracker_dashboard",
+    "cross_app_policy": "explicit"
+  }
+}
+

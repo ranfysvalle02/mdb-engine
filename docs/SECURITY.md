@@ -43,6 +43,7 @@ The MongoDB Engine (`mdb-engine`) provides enterprise-grade security features de
 ┌────────────────────▼──────────────────────────────────────┐
 │              Scoped Database Layer                        │
 │  • Collection name validation                            │
+│  • App-level authentication (token verification)          │
 │  • Cross-app access control                               │
 │  • Scope validation                                       │
 └────────────────────┬──────────────────────────────────────┘
@@ -90,6 +91,10 @@ The security system consists of several key components:
 
 ```
 User Query
+    │
+    ├─► App Token Verification (if app has stored secret)
+    │   └─► Valid? ──► Continue
+    │       Invalid? ──► Raise ValueError
     │
     ├─► Collection Name Validation
     │   └─► Valid? ──► Continue
@@ -412,6 +417,7 @@ Collection names are strictly validated to prevent security vulnerabilities:
 The following collection names are blocked:
 
 - `apps_config` - Engine internal (app registration)
+- `_mdb_engine_app_secrets` - Engine internal (encrypted app secrets)
 - Any name starting with `system` - MongoDB system collections
 - Any name starting with `admin` - MongoDB admin collections
 - Any name starting with `config` - MongoDB config collections
@@ -450,26 +456,126 @@ for prefix in RESERVED_COLLECTION_PREFIXES:
         raise ValueError(f"Collection name cannot start with '{prefix}'")
 ```
 
+## App-Level Authentication
+
+### Overview
+
+MDB_ENGINE implements secure app-level authentication using **envelope encryption** to protect app secrets. Each app has a unique secret token that must be provided when accessing the database.
+
+**Key Features:**
+- Envelope encryption for secret storage
+- Runtime token verification
+- Manifest-level authorization
+- Constant-time comparison (timing attack prevention)
+- Comprehensive audit logging
+
+### Architecture
+
+App secrets are encrypted using a two-layer encryption model:
+
+1. **Master Key (MK)**: Encrypts Data Encryption Keys (DEKs)
+2. **Data Encryption Key (DEK)**: Encrypts app secrets (one per app)
+3. **App Secret**: Plaintext secret, encrypted with DEK
+
+This provides defense-in-depth: even if DEKs are compromised, they cannot be decrypted without the master key.
+
+### Internal Secure Collection
+
+Secrets are stored in the `_mdb_engine_app_secrets` collection:
+
+- **Access**: Only accessible via raw MongoDB client (bypasses scoped wrapper)
+- **Schema**: Stores encrypted secret, encrypted DEK, algorithm, timestamps
+- **Security**: Collection is reserved and cannot be accessed by apps
+
+### How It Works
+
+**Registration:**
+1. App is registered via `register_app(manifest)`
+2. Engine generates random 256-bit secret
+3. Secret is encrypted using envelope encryption
+4. Encrypted secret is stored in `_mdb_engine_app_secrets`
+
+**Runtime Access:**
+1. App provides `app_token` to `get_scoped_db()` (or auto-retrieved if not in environment)
+2. Engine retrieves encrypted secret from database
+3. Engine decrypts secret using master key
+4. Engine compares provided token with decrypted secret (constant-time)
+5. If match, returns scoped database; if mismatch, raises `ValueError`
+
+**Automatic Secret Management:**
+- **First Run**: Secret generated → Encrypted → Stored → Auto-retrieved from database
+- **Subsequent Runs**: Secret auto-retrieved from encrypted storage if not in environment
+- **Optional Optimization**: Store secrets in environment variables to avoid DB lookup on every request
+- **Zero Configuration**: Works automatically - no manual secret copying required
+
+### Master Key Management
+
+**Development:**
+```bash
+# Generate master key
+python -c 'from mdb_engine.core.encryption import EnvelopeEncryptionService; print(EnvelopeEncryptionService.generate_master_key())'
+
+# Store in .env (gitignored)
+MDB_ENGINE_MASTER_KEY="<generated-key>"
+```
+
+**Production:**
+- Use key management service (AWS KMS, HashiCorp Vault)
+- Store master key securely
+- Rotate master keys regularly
+
+### Security Benefits
+
+- **App Identity Verification**: Secrets prove which app is making the request
+- **Encrypted Storage**: Secrets never stored in plaintext
+- **Constant-Time Comparison**: Prevents timing attacks
+- **Audit Trail**: All verification attempts logged
+- **Fail Secure**: Invalid tokens → access denied
+
+For detailed documentation, see [App Authentication Guide](APP_AUTHENTICATION.md).
+
 ## Cross-App Access Control
 
 ### Authorization Model
 
-Cross-app collection access is strictly controlled through the `read_scopes` mechanism:
+Cross-app collection access is strictly controlled through the `read_scopes` mechanism with app-level authentication:
 
 #### How It Works
 
-1. **App Registration**: Each app is registered with a unique `slug`
-2. **Read Scopes**: Apps specify which other apps they can read from
-3. **Write Scope**: Apps can only write to their own collections
-4. **Access Validation**: All cross-app access attempts are validated
+1. **App Registration**: Each app is registered with a unique `slug` and encrypted secret
+   - Secret is automatically generated (256-bit random)
+   - Secret is encrypted using envelope encryption
+   - Encrypted secret is stored in `_mdb_engine_app_secrets` collection
+2. **Manifest Configuration**: Apps declare `data_access.read_scopes` in manifest
+   - `read_scopes`: List of apps this app can read from
+   - `write_scope`: App this app can write to (defaults to own slug)
+   - Validated at registration time
+3. **Token Verification**: Apps must provide valid `app_token` to access database
+   - Token is automatically retrieved from encrypted storage if not in environment
+   - Token is verified using constant-time comparison (prevents timing attacks)
+   - Verification happens before any database access
+4. **Read Scopes**: Apps specify which other apps they can read from
+   - Must be declared in manifest `read_scopes`
+   - Validated on every `get_scoped_db()` call
+   - Unauthorized access attempts are blocked and logged
+5. **Write Scope**: Apps can only write to their own collections
+   - All writes are tagged with `app_id` matching the app's `write_scope`
+   - Prevents apps from writing to other apps' collections
+6. **Access Validation**: All cross-app access attempts are validated
+   - Token verification (app identity)
+   - Scope validation (authorized apps)
+   - Collection name validation (security)
+   - All access is logged for audit
 
 #### Example Configuration
 
 ```python
 # App "my_app" can read from itself and "shared_app"
+# Must provide app_token for authentication
 db = engine.get_scoped_db(
     "my_app",
-    read_scopes=["my_app", "shared_app"],
+    app_token=os.getenv("MY_APP_SECRET"),  # Required for apps with secrets
+    read_scopes=["my_app", "shared_app"],  # Optional - uses manifest if not provided
     write_scope="my_app"
 )
 
@@ -481,15 +587,34 @@ collection = db.get_collection("other_app_data")
 # Raises ValueError: Access to collection 'other_app_data' not authorized
 ```
 
+#### Manifest-Level Configuration
+
+Declare cross-app access in manifest:
+
+```json
+{
+  "slug": "my_app",
+  "data_access": {
+    "read_scopes": ["my_app", "shared_app"],
+    "write_scope": "my_app",
+    "cross_app_policy": "explicit"
+  }
+}
+```
+
 #### Access Validation Flow
 
 ```
 Collection Access Request
     │
+    ├─► Verify app_token (if app has stored secret)
+    │   ├─► Valid → Continue
+    │   └─► Invalid → Raise ValueError
+    │
     ├─► Extract app slug from collection name
     │   (e.g., "shared_app_data" → "shared_app")
     │
-    ├─► Check if app is in read_scopes
+    ├─► Check if app is in read_scopes (from manifest)
     │   ├─► Yes → Allow access
     │   └─► No → Block access and log warning
     │
@@ -498,10 +623,12 @@ Collection Access Request
 
 #### Security Benefits
 
-- **Explicit Authorization**: Apps must explicitly grant access
-- **Audit Trail**: All cross-app access is logged
+- **App Identity Verification**: Tokens verify which app is making the request
+- **Explicit Authorization**: Apps must explicitly grant access in manifest
+- **Audit Trail**: All cross-app access is logged with app identity
 - **Default Deny**: Unauthorized access is blocked by default
 - **Scope Isolation**: Apps cannot accidentally access other apps' data
+- **Defense in Depth**: Multiple layers (encryption, manifest config, runtime validation)
 
 ## Data Isolation
 
@@ -1025,22 +1152,81 @@ db.users
 db.app_users
 ```
 
+### App Authentication Errors
+
+#### Error: `ValueError: Invalid app token for 'my_app'`
+
+**Cause**: Provided app token doesn't match stored encrypted secret.
+
+**Solution**: Verify secret matches stored value. See [App Authentication Guide](APP_AUTHENTICATION.md) for details.
+
+```bash
+# Retrieve current secret (if you have access)
+# Update environment variable
+export MY_APP_SECRET="<correct-secret>"
+```
+
+#### Error: `ValueError: App token required for 'my_app'`
+
+**Cause**: App has stored secret but `app_token` not provided.
+
+**Solution**: Provide `app_token` parameter:
+
+```python
+# Instead of:
+db = engine.get_scoped_db("my_app")
+
+# Use:
+db = engine.get_scoped_db("my_app", app_token=os.getenv("MY_APP_SECRET"))
+```
+
+#### Error: `ValueError: Master key not found`
+
+**Cause**: `MDB_ENGINE_MASTER_KEY` environment variable not set.
+
+**Solution**: Generate and set master key:
+
+```bash
+# Generate master key
+python -c 'from mdb_engine.core.encryption import EnvelopeEncryptionService; print(EnvelopeEncryptionService.generate_master_key())'
+
+# Set environment variable
+export MDB_ENGINE_MASTER_KEY="<generated-key>"
+```
+
 ### Cross-App Access Errors
 
 #### Error: `ValueError: Access to collection 'other_app_data' not authorized`
 
-**Cause**: App is not authorized to access the collection.
+**Cause**: App is not authorized to access the collection (not in `read_scopes`).
 
-**Solution**: Add the app to `read_scopes`:
+**Solution**: Add the app to manifest `read_scopes`:
+
+```json
+// Update manifest.json
+{
+  "data_access": {
+    "read_scopes": ["my_app", "other_app"]  // Add other_app
+  }
+}
+
+// Re-register app
+await engine.register_app(manifest)
+```
+
+#### Error: `ValueError: App 'my_app' not authorized to read from 'other_app'`
+
+**Cause**: Requested `read_scopes` include app not in manifest authorization.
+
+**Solution**: Update manifest or remove unauthorized scope from request:
 
 ```python
-# Instead of:
-db = engine.get_scoped_db("my_app", read_scopes=["my_app"])
-
-# Use:
+# Option 1: Update manifest read_scopes
+# Option 2: Remove unauthorized scope from request
 db = engine.get_scoped_db(
     "my_app",
-    read_scopes=["my_app", "other_app"]  # Add authorized app
+    app_token="secret",
+    read_scopes=["my_app"],  # Remove other_app if not authorized
 )
 ```
 

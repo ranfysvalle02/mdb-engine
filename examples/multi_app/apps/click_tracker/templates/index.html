@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Click Tracker</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .container {
+            background: white;
+            border-radius: 20px;
+            padding: 60px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            text-align: center;
+            max-width: 500px;
+            width: 100%;
+        }
+        h1 { color: #333; margin-bottom: 30px; font-size: 32px; }
+        .click-button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 20px 60px;
+            font-size: 24px;
+            font-weight: bold;
+            border-radius: 50px;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.4);
+        }
+        .click-button:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 15px 40px rgba(102, 126, 234, 0.5);
+        }
+        .click-button:active {
+            transform: translateY(-1px);
+        }
+        .success {
+            margin-top: 20px;
+            color: #10b981;
+            font-weight: 600;
+            display: none;
+        }
+        .error {
+            margin-top: 20px;
+            color: #ef4444;
+            font-weight: 600;
+            display: none;
+        }
+        .info {
+            margin-top: 30px;
+            color: #666;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎯 Click Tracker</h1>
+        <p style="color: #666; margin-bottom: 40px;">Click the button to track a click event</p>
+        <button class="click-button" onclick="trackClick()">Click Me!</button>
+        <div id="success" class="success">✅ Click tracked!</div>
+        <div id="error" class="error"></div>
+        <div class="info">
+            <p>Demo User: <strong>demo_user</strong></p>
+            <p style="margin-top: 10px;">View analytics at <a href="http://localhost:8001" target="_blank" style="color: #667eea;">Dashboard</a></p>
+        </div>
+    </div>
+    
+    <script>
+        async function trackClick() {
+            const button = document.querySelector('.click-button');
+            const success = document.getElementById('success');
+            const error = document.getElementById('error');
+            
+            // Disable button
+            button.disabled = true;
+            button.textContent = 'Tracking...';
+            success.style.display = 'none';
+            error.style.display = 'none';
+            
+            try {
+                const response = await fetch('/track', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        user_id: 'demo_user',
+                        url: window.location.pathname,
+                        element: 'click-button',
+                        session_id: 'demo_session'
+                    })
+                });
+                
+                // Check content type
+                const contentType = response.headers.get('content-type');
+                let data;
+                
+                if (contentType && contentType.includes('application/json')) {
+                    data = await response.json();
+                } else {
+                    // Not JSON, try to get text
+                    const text = await response.text();
+                    throw new Error(`Server returned non-JSON: ${text.substring(0, 100)}`);
+                }
+                
+                if (response.ok) {
+                    success.style.display = 'block';
+                    button.textContent = 'Click Me!';
+                } else {
+                    error.textContent = `Error: ${data.detail || data.message || 'Failed to track click'}`;
+                    error.style.display = 'block';
+                    button.textContent = 'Click Me!';
+                }
+            } catch (err) {
+                error.textContent = `Error: ${err.message}`;
+                error.style.display = 'block';
+                button.textContent = 'Click Me!';
+            } finally {
+                button.disabled = false;
+            }
+        }
+    </script>
+</body>
+</html>

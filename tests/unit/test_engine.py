@@ -138,8 +138,37 @@ class TestMongoDBEngineScopedDatabase:
         assert scoped_db._write_scope == "test_app"
 
     @pytest.mark.asyncio
-    async def test_get_scoped_db_custom_scopes(self, mongodb_engine):
+    async def test_get_scoped_db_custom_scopes(self, mongodb_engine, sample_manifest):
         """Test scoped database with custom read/write scopes."""
+        # Register app with read_scopes including app1 and app2
+        manifest_with_scopes = sample_manifest.copy()
+        manifest_with_scopes["slug"] = (
+            "test_app"  # Update slug to match test expectations
+        )
+        manifest_with_scopes["schema_version"] = "2.0"  # Use V2 schema
+        manifest_with_scopes["data_access"] = {
+            "read_scopes": ["test_app", "app1", "app2"],
+        }
+        await mongodb_engine.register_app(manifest_with_scopes, create_indexes=False)
+
+        # Verify read_scopes were set correctly
+        assert mongodb_engine._app_read_scopes.get("test_app") == [
+            "test_app",
+            "app1",
+            "app2",
+        ]
+
+        # Also register app1 and app2 so they exist
+        app1_manifest = sample_manifest.copy()
+        app1_manifest["slug"] = "app1"
+        app1_manifest["name"] = "App 1"
+        await mongodb_engine.register_app(app1_manifest, create_indexes=False)
+
+        app2_manifest = sample_manifest.copy()
+        app2_manifest["slug"] = "app2"
+        app2_manifest["name"] = "App 2"
+        await mongodb_engine.register_app(app2_manifest, create_indexes=False)
+
         scoped_db = mongodb_engine.get_scoped_db(
             app_slug="test_app", read_scopes=["app1", "app2"], write_scope="app1"
         )
@@ -324,15 +353,38 @@ class TestMongoDBEngineGetScopedDbSecurity:
         assert db is not None
 
     @pytest.mark.asyncio
-    async def test_get_scoped_db_valid_scopes(self, mongodb_engine):
+    async def test_get_scoped_db_valid_scopes(self, mongodb_engine, sample_manifest):
         """Test that get_scoped_db works with valid scopes."""
         await mongodb_engine.initialize()
+
+        # Register app with read_scopes including other_app
+        manifest_with_scopes = sample_manifest.copy()
+        manifest_with_scopes["slug"] = (
+            "test_app"  # Update slug to match test expectations
+        )
+        manifest_with_scopes["schema_version"] = "2.0"  # Use V2 schema
+        manifest_with_scopes["data_access"] = {
+            "read_scopes": ["test_app", "other_app"],
+        }
+        await mongodb_engine.register_app(manifest_with_scopes, create_indexes=False)
+
+        # Verify read_scopes were set correctly
+        assert mongodb_engine._app_read_scopes.get("test_app") == [
+            "test_app",
+            "other_app",
+        ]
+
+        # Also register other_app so it exists
+        other_app_manifest = sample_manifest.copy()
+        other_app_manifest["slug"] = "other_app"
+        other_app_manifest["name"] = "Other App"
+        await mongodb_engine.register_app(other_app_manifest, create_indexes=False)
 
         # Valid single scope
         db = mongodb_engine.get_scoped_db("test_app")
         assert db is not None
 
-        # Valid multiple scopes
+        # Valid multiple scopes (now authorized in manifest)
         db = mongodb_engine.get_scoped_db(
             "test_app", read_scopes=["test_app", "other_app"]
         )

@@ -21,6 +21,7 @@ from motor.motor_asyncio import (AsyncIOMotorClient, AsyncIOMotorCollection,
 if "FLASK_SECRET_KEY" not in os.environ:
     os.environ["FLASK_SECRET_KEY"] = "test_secret_key_for_testing_only_" + "x" * 32
 
+from mdb_engine.core.encryption import EnvelopeEncryptionService
 # Import engine components for testing
 from mdb_engine.core.engine import MongoDBEngine
 from mdb_engine.database.scoped_wrapper import (ScopedCollectionWrapper,
@@ -644,3 +645,63 @@ async def clean_test_db(real_mongo_db):
             await real_mongo_db.drop_collection(collection_name)
         except (ConnectionError, RuntimeError, OSError):
             pass  # Ignore cleanup errors
+
+
+# ============================================================================
+# ENCRYPTION AND APP SECRETS FIXTURES
+# ============================================================================
+
+
+@pytest.fixture
+def master_key():
+    """Generate a test master key for encryption tests."""
+    return EnvelopeEncryptionService.generate_master_key()
+
+
+@pytest.fixture
+def encryption_service(master_key):
+    """Create encryption service with test master key."""
+    import base64
+
+    key_bytes = base64.b64decode(master_key.encode())
+    return EnvelopeEncryptionService(key_bytes)
+
+
+@pytest.fixture
+def app_secrets_manager(mock_mongo_database, encryption_service):
+    """Create AppSecretsManager instance for testing."""
+    from mdb_engine.core.app_secrets import AppSecretsManager
+
+    return AppSecretsManager(mock_mongo_database, encryption_service)
+
+
+@pytest.fixture
+def click_tracker_manifest():
+    """ClickTracker manifest fixture."""
+    return {
+        "schema_version": "2.0",
+        "slug": "click_tracker",
+        "name": "Click Tracker",
+        "description": "Tracks user clicks",
+        "status": "active",
+        "data_access": {
+            "read_scopes": ["click_tracker"],
+            "write_scope": "click_tracker",
+        },
+    }
+
+
+@pytest.fixture
+def dashboard_manifest():
+    """ClickTrackerDashboard manifest fixture."""
+    return {
+        "schema_version": "2.0",
+        "slug": "click_tracker_dashboard",
+        "name": "Click Tracker Dashboard",
+        "description": "Admin dashboard",
+        "status": "active",
+        "data_access": {
+            "read_scopes": ["click_tracker_dashboard", "click_tracker"],
+            "write_scope": "click_tracker_dashboard",
+        },
+    }

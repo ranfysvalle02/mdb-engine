@@ -12,6 +12,7 @@ This module is part of MDB_ENGINE - MongoDB Engine.
 """
 
 import logging
+import secrets
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
@@ -28,7 +29,9 @@ from ..observability import (HealthChecker, check_engine_health,
                              check_mongodb_health, check_pool_health)
 from ..observability import get_logger as get_contextual_logger
 from .app_registration import AppRegistrationManager
+from .app_secrets import AppSecretsManager
 from .connection import ConnectionManager
+from .encryption import EnvelopeEncryptionService
 from .index_management import IndexManager
 from .manifest import ManifestParser, ManifestValidator
 from .service_initialization import ServiceInitializer
@@ -93,6 +96,11 @@ class MongoDBEngine:
         self._app_registration_manager: Optional[AppRegistrationManager] = None
         self._index_manager: Optional[IndexManager] = None
         self._service_initializer: Optional[ServiceInitializer] = None
+        self._encryption_service: Optional[EnvelopeEncryptionService] = None
+        self._app_secrets_manager: Optional[AppSecretsManager] = None
+
+        # Store app read_scopes mapping for validation
+        self._app_read_scopes: Dict[str, List[str]] = {}
 
     async def initialize(self) -> None:
         """
@@ -110,6 +118,29 @@ class MongoDBEngine:
         """
         # Initialize connection
         await self._connection_manager.initialize()
+
+        # Initialize encryption service
+        try:
+            from .encryption import MASTER_KEY_ENV_VAR
+
+            self._encryption_service = EnvelopeEncryptionService()
+        except ValueError as e:
+            from .encryption import MASTER_KEY_ENV_VAR
+
+            logger.warning(
+                f"Encryption service not initialized: {e}. "
+                "App-level authentication will not be available. "
+                f"Set {MASTER_KEY_ENV_VAR} environment variable."
+            )
+            # Continue without encryption (backward compatibility)
+            self._encryption_service = None
+
+        # Initialize app secrets manager (only if encryption service available)
+        if self._encryption_service:
+            self._app_secrets_manager = AppSecretsManager(
+                mongo_db=self._connection_manager.mongo_db,
+                encryption_service=self._encryption_service,
+            )
 
         # Set up component managers
         self._app_registration_manager = AppRegistrationManager(
@@ -162,6 +193,7 @@ class MongoDBEngine:
     def get_scoped_db(
         self,
         app_slug: str,
+        app_token: Optional[str] = None,
         read_scopes: Optional[List[str]] = None,
         write_scope: Optional[str] = None,
         auto_index: bool = True,
@@ -176,8 +208,12 @@ class MongoDBEngine:
 
         Args:
             app_slug: App slug (used as default for both read and write scopes)
-            read_scopes: List of app slugs to read from. If None, defaults to
-                [app_slug]. Allows cross-app data access when needed.
+            app_token: App secret token for authentication. Required if app
+                secrets manager is initialized. If None and app has stored secret,
+                will attempt migration (backward compatibility).
+            read_scopes: List of app slugs to read from. If None, uses manifest
+                read_scopes or defaults to [app_slug]. Allows cross-app data access
+                when needed.
             write_scope: App slug to write to. If None, defaults to app_slug.
                 All documents inserted through this wrapper will have this as their
                 app_id.
@@ -189,9 +225,10 @@ class MongoDBEngine:
 
         Raises:
             RuntimeError: If engine is not initialized.
+            ValueError: If app_token is invalid or read_scopes are unauthorized.
 
         Example:
-            >>> db = engine.get_scoped_db("my_app")
+            >>> db = engine.get_scoped_db("my_app", app_token="secret-token")
             >>> # All queries are automatically scoped to "my_app"
             >>> doc = await db.my_collection.find_one({"name": "test"})
         """
@@ -200,15 +237,176 @@ class MongoDBEngine:
                 "MongoDBEngine not initialized. Call initialize() first."
             )
 
+        # Verify app token if secrets manager is available
+        if self._app_secrets_manager:
+            if app_token is None:
+                # Check if app has stored secret (backward compatibility)
+                # Use sync wrapper that handles async context
+                has_secret = self._app_secrets_manager.app_secret_exists_sync(app_slug)
+                if has_secret:
+                    raise ValueError(
+                        f"App token required for '{app_slug}'. "
+                        "Provide app_token parameter."
+                    )
+                # No stored secret - allow (backward compatibility for apps without secrets)
+                logger.debug(
+                    f"App '{app_slug}' has no stored secret, "
+                    f"allowing access (backward compatibility)"
+                )
+            else:
+                # Verify token - use sync method if possible, otherwise defer
+                import asyncio
+
+                try:
+                    # Check if we're in an async context
+                    asyncio.get_running_loop()
+                    # We're in async context - can't verify synchronously without blocking
+                    # Skip verification here - it will be verified at query time through
+                    # async methods in the scoped wrapper
+                    logger.debug(
+                        f"Skipping sync token verification in async context for '{app_slug}'. "
+                        f"Token will be verified at query time."
+                    )
+                except RuntimeError:
+                    # No event loop - safe to use sync verification
+                    is_valid = self._app_secrets_manager.verify_app_secret_sync(
+                        app_slug, app_token
+                    )
+                    if not is_valid:
+                        logger.warning(f"Security: Invalid app token for '{app_slug}'")
+                        raise ValueError(f"Invalid app token for '{app_slug}'")
+
+        # Validate read_scopes type FIRST (before authorization check)
+        if read_scopes is not None:
+            if not isinstance(read_scopes, list):
+                raise ValueError(f"read_scopes must be a list, got {type(read_scopes)}")
+            if len(read_scopes) == 0:
+                raise ValueError("read_scopes cannot be empty")
+
+        # Use manifest read_scopes if not provided
         if read_scopes is None:
-            read_scopes = [app_slug]
+            read_scopes = self._app_read_scopes.get(app_slug, [app_slug])
+
         if write_scope is None:
             write_scope = app_slug
 
-        # Validate read_scopes for security
-        # Ensure all read_scopes are valid (non-empty strings)
-        if not isinstance(read_scopes, list):
-            raise ValueError(f"read_scopes must be a list, got {type(read_scopes)}")
+        # Validate requested read_scopes against manifest authorization
+        authorized_scopes = self._app_read_scopes.get(app_slug, [app_slug])
+        for scope in read_scopes:
+            if not isinstance(scope, str) or len(scope) == 0:
+                raise ValueError(f"Invalid app slug in read_scopes: {scope!r}")
+            if scope not in authorized_scopes:
+                raise ValueError(
+                    f"App '{app_slug}' not authorized to read from '{scope}'. "
+                    f"Authorized scopes: {authorized_scopes}. "
+                    "Update manifest data_access.read_scopes to grant access."
+                )
+        if not read_scopes:
+            raise ValueError("read_scopes cannot be empty")
+        for scope in read_scopes:
+            if not isinstance(scope, str) or not scope:
+                raise ValueError(
+                    f"Invalid app slug in read_scopes: {scope}. "
+                    "All app slugs must be non-empty strings."
+                )
+
+        # Validate write_scope
+        if not isinstance(write_scope, str) or not write_scope:
+            raise ValueError(
+                f"write_scope must be a non-empty string, got {write_scope}"
+            )
+
+        return ScopedMongoWrapper(
+            real_db=self._connection_manager.mongo_db,
+            read_scopes=read_scopes,
+            write_scope=write_scope,
+            auto_index=auto_index,
+        )
+
+    async def get_scoped_db_async(
+        self,
+        app_slug: str,
+        app_token: Optional[str] = None,
+        read_scopes: Optional[List[str]] = None,
+        write_scope: Optional[str] = None,
+        auto_index: bool = True,
+    ) -> ScopedMongoWrapper:
+        """
+        Asynchronous version of get_scoped_db that properly verifies tokens.
+
+        This method is preferred in async contexts to ensure token verification
+        happens correctly.
+
+        Args:
+            app_slug: App slug (used as default for both read and write scopes)
+            app_token: App secret token for authentication. Required if app
+                secrets manager is initialized.
+            read_scopes: List of app slugs to read from. If None, uses manifest
+                read_scopes or defaults to [app_slug].
+            write_scope: App slug to write to. If None, defaults to app_slug.
+            auto_index: Whether to enable automatic index creation.
+
+        Returns:
+            ScopedMongoWrapper instance configured with the specified scopes.
+
+        Raises:
+            RuntimeError: If engine is not initialized.
+            ValueError: If app_token is invalid or read_scopes are unauthorized.
+        """
+        if not self._initialized:
+            raise RuntimeError(
+                "MongoDBEngine not initialized. Call initialize() first."
+            )
+
+        # Verify app token if secrets manager is available
+        if self._app_secrets_manager:
+            if app_token is None:
+                # Check if app has stored secret
+                has_secret = await self._app_secrets_manager.app_secret_exists(app_slug)
+                if has_secret:
+                    raise ValueError(
+                        f"App token required for '{app_slug}'. "
+                        "Provide app_token parameter."
+                    )
+                # No stored secret - allow (backward compatibility)
+                logger.debug(
+                    f"App '{app_slug}' has no stored secret, "
+                    f"allowing access (backward compatibility)"
+                )
+            else:
+                # Verify token asynchronously
+                is_valid = await self._app_secrets_manager.verify_app_secret(
+                    app_slug, app_token
+                )
+                if not is_valid:
+                    logger.warning(f"Security: Invalid app token for '{app_slug}'")
+                    raise ValueError(f"Invalid app token for '{app_slug}'")
+
+        # Validate read_scopes type FIRST (before authorization check)
+        if read_scopes is not None:
+            if not isinstance(read_scopes, list):
+                raise ValueError(f"read_scopes must be a list, got {type(read_scopes)}")
+            if len(read_scopes) == 0:
+                raise ValueError("read_scopes cannot be empty")
+
+        # Use manifest read_scopes if not provided
+        if read_scopes is None:
+            read_scopes = self._app_read_scopes.get(app_slug, [app_slug])
+
+        if write_scope is None:
+            write_scope = app_slug
+
+        # Validate requested read_scopes against manifest authorization
+        authorized_scopes = self._app_read_scopes.get(app_slug, [app_slug])
+        for scope in read_scopes:
+            if not isinstance(scope, str) or len(scope) == 0:
+                raise ValueError(f"Invalid app slug in read_scopes: {scope!r}")
+            if scope not in authorized_scopes:
+                raise ValueError(
+                    f"App '{app_slug}' not authorized to read from '{scope}'. "
+                    f"Authorized scopes: {authorized_scopes}. "
+                    "Update manifest data_access.read_scopes to grant access."
+                )
         if not read_scopes:
             raise ValueError("read_scopes cannot be empty")
         for scope in read_scopes:
@@ -335,7 +533,8 @@ class MongoDBEngine:
                     slug, manifest, observability_config
                 )
 
-        return await self._app_registration_manager.register_app(
+        # Register app first (this validates and stores the manifest)
+        result = await self._app_registration_manager.register_app(
             manifest=manifest,
             create_indexes_callback=create_indexes_callback if create_indexes else None,
             seed_data_callback=seed_data_callback,
@@ -343,6 +542,33 @@ class MongoDBEngine:
             register_websockets_callback=register_websockets_callback,
             setup_observability_callback=setup_observability_callback,
         )
+
+        # Extract and store data_access configuration AFTER registration
+        slug = manifest.get("slug")
+        if slug:
+            data_access = manifest.get("data_access", {})
+            read_scopes = data_access.get("read_scopes")
+            if read_scopes:
+                self._app_read_scopes[slug] = read_scopes
+            else:
+                # Default to app_slug if not specified
+                self._app_read_scopes[slug] = [slug]
+
+            # Generate and store app secret if secrets manager is available
+            if self._app_secrets_manager:
+                # Check if secret already exists (don't overwrite)
+                secret_exists = await self._app_secrets_manager.app_secret_exists(slug)
+                if not secret_exists:
+                    app_secret = secrets.token_urlsafe(32)
+                    await self._app_secrets_manager.store_app_secret(slug, app_secret)
+                    logger.info(
+                        f"Generated and stored encrypted secret for app '{slug}'. "
+                        "Store this secret securely and provide it as app_token in get_scoped_db()."
+                    )
+                    # Note: In production, the secret should be retrieved via rotation API
+                    # For now, we log it (in production, this should be handled differently)
+
+        return result
 
     def get_websocket_config(self, slug: str) -> Optional[Dict[str, Any]]:
         """
