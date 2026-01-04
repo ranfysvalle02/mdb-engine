@@ -20,8 +20,7 @@ Dependencies:
 """
 
 # Import service components (mem0 import is lazy within service.py)
-from .service import (Mem0MemoryService, Mem0MemoryServiceError,
-                      get_memory_service)
+from .service import Mem0MemoryService, Mem0MemoryServiceError, get_memory_service
 
 __all__ = [
     "Mem0MemoryService",

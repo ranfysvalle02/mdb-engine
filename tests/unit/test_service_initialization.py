@@ -62,16 +62,10 @@ class TestMemoryServiceInitialization:
 
         original_mem0 = getattr(mdb_engine.memory, "Mem0MemoryService", None)
         try:
-            mdb_engine.memory.Mem0MemoryService = MagicMock(
-                return_value=mock_memory_service
-            )
-            await service_initializer.initialize_memory_service(
-                "test_app", memory_config
-            )
+            mdb_engine.memory.Mem0MemoryService = MagicMock(return_value=mock_memory_service)
+            await service_initializer.initialize_memory_service("test_app", memory_config)
             assert "test_app" in service_initializer._memory_services
-            assert (
-                service_initializer._memory_services["test_app"] == mock_memory_service
-            )
+            assert service_initializer._memory_services["test_app"] == mock_memory_service
         finally:
             if original_mem0:
                 mdb_engine.memory.Mem0MemoryService = original_mem0
@@ -97,9 +91,7 @@ class TestMemoryServiceInitialization:
                 raise ImportError("No module named 'mem0'")
 
             with patch("builtins.__import__", side_effect=raise_import_error):
-                await service_initializer.initialize_memory_service(
-                    "test_app", memory_config
-                )
+                await service_initializer.initialize_memory_service("test_app", memory_config)
         finally:
             if original_mem0:
                 mdb_engine.memory.Mem0MemoryService = original_mem0
@@ -108,9 +100,7 @@ class TestMemoryServiceInitialization:
         assert "test_app" not in service_initializer._memory_services
 
     @pytest.mark.asyncio
-    async def test_initialize_memory_service_config_extraction(
-        self, service_initializer
-    ):
+    async def test_initialize_memory_service_config_extraction(self, service_initializer):
         """Test that config is filtered correctly."""
         mock_memory_service = MagicMock()
         mock_memory_service.memory = MagicMock()
@@ -137,9 +127,7 @@ class TestMemoryServiceInitialization:
         mock_service_class = MagicMock(return_value=mock_service_instance)
         try:
             mdb_engine.memory.Mem0MemoryService = mock_service_class
-            await service_initializer.initialize_memory_service(
-                "test_app", memory_config
-            )
+            await service_initializer.initialize_memory_service("test_app", memory_config)
 
             # Check that Mem0MemoryService was called with filtered config
             call_kwargs = mock_service_class.call_args[1]
@@ -153,9 +141,7 @@ class TestMemoryServiceInitialization:
                 delattr(mdb_engine.memory, "Mem0MemoryService")
 
     @pytest.mark.asyncio
-    async def test_initialize_memory_service_collection_prefixing(
-        self, service_initializer
-    ):
+    async def test_initialize_memory_service_collection_prefixing(self, service_initializer):
         """Test that collection names are prefixed with app slug."""
         mock_memory_service = MagicMock()
         mock_memory_service.memory = MagicMock()
@@ -174,9 +160,7 @@ class TestMemoryServiceInitialization:
         mock_service_class = MagicMock(return_value=mock_service_instance)
         try:
             mdb_engine.memory.Mem0MemoryService = mock_service_class
-            await service_initializer.initialize_memory_service(
-                "test_app", memory_config
-            )
+            await service_initializer.initialize_memory_service("test_app", memory_config)
 
             # Check that collection name was prefixed
             call_kwargs = mock_service_class.call_args[1]
@@ -188,9 +172,7 @@ class TestMemoryServiceInitialization:
                 delattr(mdb_engine.memory, "Mem0MemoryService")
 
     @pytest.mark.asyncio
-    async def test_initialize_memory_service_default_collection(
-        self, service_initializer
-    ):
+    async def test_initialize_memory_service_default_collection(self, service_initializer):
         """Test that default collection name is used when not provided."""
         mock_memory_service = MagicMock()
         mock_memory_service.memory = MagicMock()
@@ -209,9 +191,7 @@ class TestMemoryServiceInitialization:
         mock_service_class = MagicMock(return_value=mock_service_instance)
         try:
             mdb_engine.memory.Mem0MemoryService = mock_service_class
-            await service_initializer.initialize_memory_service(
-                "test_app", memory_config
-            )
+            await service_initializer.initialize_memory_service("test_app", memory_config)
 
             # Check that default collection name was used
             call_kwargs = mock_service_class.call_args[1]
@@ -233,9 +213,7 @@ class TestMemoryServiceInitialization:
             side_effect=Exception("Service error"),
         ):
             # Should not raise, just log error
-            await service_initializer.initialize_memory_service(
-                "test_app", memory_config
-            )
+            await service_initializer.initialize_memory_service("test_app", memory_config)
 
         assert "test_app" not in service_initializer._memory_services
 
@@ -253,33 +231,23 @@ class TestMemoryServiceInitialization:
             mdb_engine.memory.Mem0MemoryService = MagicMock(
                 side_effect=AttributeError("Missing attribute")
             )
-            await service_initializer.initialize_memory_service(
-                "test_app", memory_config
-            )
+            await service_initializer.initialize_memory_service("test_app", memory_config)
         finally:
             if original_mem0:
                 mdb_engine.memory.Mem0MemoryService = original_mem0
 
         # Test TypeError
         try:
-            mdb_engine.memory.Mem0MemoryService = MagicMock(
-                side_effect=TypeError("Invalid type")
-            )
-            await service_initializer.initialize_memory_service(
-                "test_app", memory_config
-            )
+            mdb_engine.memory.Mem0MemoryService = MagicMock(side_effect=TypeError("Invalid type"))
+            await service_initializer.initialize_memory_service("test_app", memory_config)
         finally:
             if original_mem0:
                 mdb_engine.memory.Mem0MemoryService = original_mem0
 
         # Test ValueError
         try:
-            mdb_engine.memory.Mem0MemoryService = MagicMock(
-                side_effect=ValueError("Invalid value")
-            )
-            await service_initializer.initialize_memory_service(
-                "test_app", memory_config
-            )
+            mdb_engine.memory.Mem0MemoryService = MagicMock(side_effect=ValueError("Invalid value"))
+            await service_initializer.initialize_memory_service("test_app", memory_config)
         finally:
             if original_mem0:
                 mdb_engine.memory.Mem0MemoryService = original_mem0
@@ -370,9 +338,7 @@ class TestDataSeeding:
     """Test data seeding functionality."""
 
     @pytest.mark.asyncio
-    async def test_seed_initial_data_success(
-        self, service_initializer, mock_get_scoped_db_fn
-    ):
+    async def test_seed_initial_data_success(self, service_initializer, mock_get_scoped_db_fn):
         """Test successful data seeding."""
         initial_data = {
             "collection1": [{"field1": "value1"}, {"field2": "value2"}],
@@ -382,9 +348,7 @@ class TestDataSeeding:
         mock_db = MagicMock()
         mock_collection = MagicMock()
         mock_collection.count_documents = AsyncMock(return_value=0)
-        mock_collection.insert_many = AsyncMock(
-            return_value=MagicMock(inserted_ids=["id1", "id2"])
-        )
+        mock_collection.insert_many = AsyncMock(return_value=MagicMock(inserted_ids=["id1", "id2"]))
         mock_db.__getitem__ = lambda name: mock_collection
 
         service_initializer.get_scoped_db_fn = lambda slug: mock_db
@@ -405,9 +369,7 @@ class TestDataSeeding:
         # Mock the scoped db properly with app_seeding_metadata collection
         mock_db = MagicMock()
         mock_metadata_collection = MagicMock()
-        mock_metadata_collection.find_one = AsyncMock(
-            return_value={"seeded_collections": []}
-        )
+        mock_metadata_collection.find_one = AsyncMock(return_value={"seeded_collections": []})
         # Set the attribute directly (getattr is used in seeding.py line 45)
         mock_db.app_seeding_metadata = mock_metadata_collection
 
@@ -477,16 +439,12 @@ class TestDataSeeding:
 
         mock_db = MagicMock()
         mock_metadata_collection = MagicMock()
-        mock_metadata_collection.find_one = AsyncMock(
-            return_value={"seeded_collections": []}
-        )
+        mock_metadata_collection.find_one = AsyncMock(return_value={"seeded_collections": []})
         mock_db.app_seeding_metadata = mock_metadata_collection
 
         mock_collection = MagicMock()
         mock_collection.count_documents = AsyncMock(return_value=0)
-        mock_collection.insert_many = AsyncMock(
-            return_value=MagicMock(inserted_ids=["id1"])
-        )
+        mock_collection.insert_many = AsyncMock(return_value=MagicMock(inserted_ids=["id1"]))
         mock_db.__getitem__ = lambda name: mock_collection
 
         service_initializer.get_scoped_db_fn = lambda slug: mock_db
@@ -512,9 +470,7 @@ class TestObservabilitySetup:
             "logging": {"level": "INFO", "format": "json"},
         }
 
-        await service_initializer.setup_observability(
-            "test_app", manifest, observability_config
-        )
+        await service_initializer.setup_observability("test_app", manifest, observability_config)
 
         # Should complete without error
 
@@ -527,9 +483,7 @@ class TestObservabilitySetup:
             "metrics": {"enabled": True},
         }
 
-        await service_initializer.setup_observability(
-            "test_app", manifest, observability_config
-        )
+        await service_initializer.setup_observability("test_app", manifest, observability_config)
 
         # Should complete without error
 
@@ -542,9 +496,7 @@ class TestObservabilitySetup:
             "metrics": {"enabled": False},
         }
 
-        await service_initializer.setup_observability(
-            "test_app", manifest, observability_config
-        )
+        await service_initializer.setup_observability("test_app", manifest, observability_config)
 
         # Should complete without error
 
@@ -560,9 +512,7 @@ class TestObservabilitySetup:
             }
         }
 
-        await service_initializer.setup_observability(
-            "test_app", manifest, observability_config
-        )
+        await service_initializer.setup_observability("test_app", manifest, observability_config)
 
         # Should complete without error
 
@@ -576,9 +526,7 @@ class TestObservabilitySetup:
         }
 
         # Test various error types
-        with patch(
-            "mdb_engine.core.service_initialization.contextual_logger"
-        ) as mock_logger:
+        with patch("mdb_engine.core.service_initialization.contextual_logger") as mock_logger:
             # Simulate an error in the setup process
             mock_logger.info.side_effect = KeyError("Missing key")
             await service_initializer.setup_observability(
@@ -688,9 +636,7 @@ class TestServiceAccessors:
             def __getattr__(self, name):
                 if name == "memory":
                     raise TypeError("'NoneType' object is not callable")
-                raise AttributeError(
-                    f"'{type(self).__name__}' object has no attribute '{name}'"
-                )
+                raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
         service_initializer._memory_services["test_app"] = InvalidService()
         service = service_initializer.get_memory_service("test_app")
@@ -705,9 +651,7 @@ class TestServiceAccessors:
             def __getattr__(self, name):
                 if name == "memory":
                     raise AttributeError("'NoneType' object has no attribute 'memory'")
-                raise AttributeError(
-                    f"'{type(self).__name__}' object has no attribute '{name}'"
-                )
+                raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
         service_initializer._memory_services["test_app"] = ServiceWithAttributeError()
         service = service_initializer.get_memory_service("test_app")

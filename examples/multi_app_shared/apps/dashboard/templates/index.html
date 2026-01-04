@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analytics Dashboard - Shared Auth</title>
+    <style>
+        :root {
+            --bg-dark: #0a0a0c;
+            --bg-card: #141418;
+            --accent: #a855f7;
+            --accent-dim: #7c3aed;
+            --text: #e4e4e7;
+            --text-dim: #a1a1aa;
+            --success: #22c55e;
+            --warning: #f59e0b;
+        }
+        
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: 'SF Mono', 'JetBrains Mono', monospace;
+            background: var(--bg-dark);
+            color: var(--text);
+            min-height: 100vh;
+            padding: 2rem;
+        }
+        
+        .container { max-width: 1000px; margin: 0 auto; }
+        
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid var(--bg-card);
+        }
+        
+        h1 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--accent);
+        }
+        
+        .badge {
+            background: var(--accent-dim);
+            color: white;
+            padding: 0.25rem 0.75rem;
+            border-radius: 999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+        
+        .badge.editor { background: var(--warning); color: #000; }
+        .badge.admin { background: var(--accent); }
+        
+        .card {
+            background: var(--bg-card);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+        }
+        
+        .card h2 {
+            font-size: 1rem;
+            color: var(--text-dim);
+            margin-bottom: 1rem;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+        }
+        
+        .stat {
+            background: var(--bg-dark);
+            padding: 1.5rem;
+            border-radius: 8px;
+            text-align: center;
+        }
+        
+        .stat-value {
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: var(--accent);
+        }
+        
+        .stat-label {
+            font-size: 0.75rem;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            margin-top: 0.5rem;
+        }
+        
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+        
+        .user-info span {
+            color: var(--accent);
+        }
+        
+        .roles {
+            display: flex;
+            gap: 0.5rem;
+        }
+        
+        .role-badge {
+            background: var(--bg-dark);
+            border: 1px solid var(--accent-dim);
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+        }
+        
+        button {
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 8px;
+            font-family: inherit;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        
+        button:hover { background: var(--accent-dim); }
+        
+        .btn-secondary {
+            background: transparent;
+            border: 1px solid var(--accent);
+            color: var(--accent);
+        }
+        
+        .actions {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 1rem;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+        
+        th, td {
+            padding: 0.75rem;
+            text-align: left;
+            border-bottom: 1px solid var(--bg-dark);
+        }
+        
+        th {
+            color: var(--text-dim);
+            font-weight: 600;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
+        
+        .sso-note {
+            background: rgba(168, 85, 247, 0.1);
+            border: 1px solid var(--accent-dim);
+            padding: 1rem;
+            border-radius: 8px;
+            font-size: 0.875rem;
+            margin-top: 1rem;
+        }
+        
+        .admin-panel {
+            border: 2px dashed var(--accent-dim);
+            padding: 1.5rem;
+            border-radius: 12px;
+            margin-top: 1rem;
+        }
+        
+        .admin-panel h3 {
+            color: var(--accent);
+            margin-bottom: 1rem;
+        }
+        
+        input, select {
+            background: var(--bg-dark);
+            border: 1px solid var(--text-dim);
+            padding: 0.75rem;
+            border-radius: 8px;
+            color: var(--text);
+            font-family: inherit;
+            width: 100%;
+            margin-bottom: 0.5rem;
+        }
+        
+        input:focus, select:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+        
+        .message {
+            padding: 0.75rem;
+            border-radius: 8px;
+            margin-top: 1rem;
+            font-size: 0.875rem;
+        }
+        
+        .message.success { background: rgba(34, 197, 94, 0.2); border: 1px solid var(--success); }
+        .message.error { background: rgba(239, 68, 68, 0.2); border: 1px solid #ef4444; }
+        .nav-links {
+            display: flex;
+            gap: 1rem;
+        }
+        
+        .nav-links a {
+            color: var(--text-dim);
+            text-decoration: none;
+            font-size: 0.875rem;
+            transition: color 0.2s;
+        }
+        
+        .nav-links a:hover { color: var(--accent); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div>
+                <h1>📊 Analytics Dashboard</h1>
+                <div style="display: flex; gap: 0.5rem; align-items: center; margin-top: 0.5rem;">
+                    <span class="badge">Shared Auth</span>
+                    <span class="badge editor">Viewer Access</span>
+                </div>
+            </div>
+            <div class="nav-links">
+                <a href="http://localhost:8000">🖱️ Click Tracker</a>
+                <a href="http://localhost:8001" style="color: var(--accent);">📊 Dashboard</a>
+            </div>
+        </header>
+        
+        {% if user %}
+        <!-- Authenticated View -->
+        <div class="card">
+            <h2>Current User</h2>
+            <div class="user-info">
+                <div>
+                    <span>{{ user.email }}</span>
+                    <div class="roles" style="margin-top: 0.5rem;">
+                        {% for role in roles %}
+                        <span class="role-badge">{{ role }}</span>
+                        {% endfor %}
+                    </div>
+                </div>
+                <div style="margin-left: auto;">
+                    <button class="btn-secondary" onclick="logout()">Logout</button>
+                </div>
+            </div>
+        </div>
+        
+        <div class="card">
+            <h2>Click Analytics (Last 24h)</h2>
+            <div class="stats-grid" id="stats">
+                <div class="stat">
+                    <div class="stat-value" id="totalClicks">-</div>
+                    <div class="stat-label">Total Clicks</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value" id="uniqueUsers">-</div>
+                    <div class="stat-label">Unique Users</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value" id="topUrl">-</div>
+                    <div class="stat-label">Top URL</div>
+                </div>
+            </div>
+            <div class="actions">
+                <button onclick="loadAnalytics()">Refresh Analytics</button>
+                <button class="btn-secondary" onclick="loadAnalytics(168)">Last 7 Days</button>
+            </div>
+        </div>
+        
+        <div class="card">
+            <h2>Recent Clicks</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>User</th>
+                        <th>URL</th>
+                        <th>Time</th>
+                    </tr>
+                </thead>
+                <tbody id="clicksTable">
+                    <tr><td colspan="3" style="color: var(--text-dim);">Loading...</td></tr>
+                </tbody>
+            </table>
+        </div>
+        
+        {% if 'admin' in roles %}
+        <div class="admin-panel">
+            <h3>🔑 Admin Panel</h3>
+            <p style="color: var(--text-dim); margin-bottom: 1rem;">Grant roles to users (you're an admin!)</p>
+            <input type="email" id="targetEmail" placeholder="User email">
+            <select id="targetRole">
+                <option value="viewer">viewer</option>
+                <option value="editor">editor</option>
+                <option value="admin">admin</option>
+            </select>
+            <div class="actions">
+                <button onclick="grantDashboardRole()">Grant Dashboard Role</button>
+                <button class="btn-secondary" onclick="grantClickTrackerRole()">Grant ClickTracker Role</button>
+            </div>
+            <div id="adminMessage"></div>
+        </div>
+        {% endif %}
+        
+        <div class="sso-note">
+            <strong>SSO Active:</strong> You're viewing data from the ClickTracker app.
+            Both apps share the same user pool. Go to 
+            <a href="http://localhost:8000" style="color: var(--accent);">Click Tracker</a>
+            to generate more clicks!
+        </div>
+        {% else %}
+        <!-- Not Authenticated View -->
+        <div class="card">
+            <h2>Login</h2>
+            <form class="auth-form" onsubmit="login(event)">
+                <input type="email" id="loginEmail" placeholder="Email" required>
+                <input type="password" id="loginPassword" placeholder="Password" required>
+                <button type="submit">Login</button>
+            </form>
+            <div id="loginMessage"></div>
+        </div>
+        
+        <div class="sso-note">
+            <strong>Shared Auth Mode:</strong> Use your Click Tracker credentials.
+            Login once, access multiple apps.
+        </div>
+        {% endif %}
+    </div>
+    
+    <script>
+        {% if user %}
+        async function loadAnalytics(hours = 24) {
+            try {
+                const res = await fetch(`/analytics?hours=${hours}`);
+                
+                if (res.status === 403) {
+                    const tbody = document.getElementById('clicksTable');
+                    tbody.innerHTML = '<tr><td colspan="3" style="color: var(--error);">Access Denied: You need "viewer" role to view analytics.</td></tr>';
+                    
+                    document.getElementById('totalClicks').textContent = '🔒';
+                    document.getElementById('uniqueUsers').textContent = '🔒';
+                    document.getElementById('topUrl').textContent = '🔒';
+                    return;
+                }
+                
+                const data = await res.json();
+                
+                document.getElementById('totalClicks').textContent = data.total_clicks;
+                document.getElementById('uniqueUsers').textContent = data.unique_users;
+                document.getElementById('topUrl').textContent = 
+                    data.top_urls.length > 0 ? data.top_urls[0].url : 'N/A';
+                
+                // Update clicks table
+                const tbody = document.getElementById('clicksTable');
+                if (data.recent_clicks.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="3" style="color: var(--text-dim);">No clicks yet</td></tr>';
+                } else {
+                    tbody.innerHTML = data.recent_clicks.map(click => `
+                        <tr>
+                            <td>${click.user_id || 'anonymous'}</td>
+                            <td>${click.url || '/'}</td>
+                            <td>${new Date(click.timestamp).toLocaleString()}</td>
+                        </tr>
+                    `).join('');
+                }
+            } catch (err) {
+                console.error('Failed to load analytics:', err);
+                const tbody = document.getElementById('clicksTable');
+                tbody.innerHTML = '<tr><td colspan="3" style="color: var(--error);">Error loading data</td></tr>';
+            }
+        }
+        
+        async function logout() {
+            await fetch('/logout', {method: 'POST'}).catch(() => {});
+            // Clear cookie and redirect
+            document.cookie = 'mdb_auth_token=; Max-Age=0; path=/';
+            location.reload();  // Reload current page to show login form
+        }
+        
+        async function grantDashboardRole() {
+            const email = document.getElementById('targetEmail').value;
+            const role = document.getElementById('targetRole').value;
+            
+            try {
+                const res = await fetch('/admin/grant-role', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({email, roles: [role]})
+                });
+                const data = await res.json();
+                
+                if (res.ok) {
+                    showMessage('adminMessage', `Dashboard role '${role}' granted to ${email}`, 'success');
+                } else {
+                    showMessage('adminMessage', data.detail || 'Failed', 'error');
+                }
+            } catch (err) {
+                showMessage('adminMessage', 'Network error', 'error');
+            }
+        }
+        
+        async function grantClickTrackerRole() {
+            const email = document.getElementById('targetEmail').value;
+            const role = document.getElementById('targetRole').value;
+            
+            try {
+                const res = await fetch('/admin/grant-click-tracker-role', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({email, roles: [role]})
+                });
+                const data = await res.json();
+                
+                if (res.ok) {
+                    showMessage('adminMessage', `ClickTracker role '${role}' granted to ${email}`, 'success');
+                } else {
+                    showMessage('adminMessage', data.detail || 'Failed', 'error');
+                }
+            } catch (err) {
+                showMessage('adminMessage', 'Network error', 'error');
+            }
+        }
+        
+        function showMessage(id, text, type) {
+            const el = document.getElementById(id);
+            el.className = `message ${type}`;
+            el.textContent = text;
+        }
+        
+        // Load analytics on page load
+        loadAnalytics();
+        {% else %}
+        async function login(e) {
+            e.preventDefault();
+            const email = document.getElementById('loginEmail').value;
+            const password = document.getElementById('loginPassword').value;
+            
+            try {
+                const res = await fetch('/login', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({email, password})
+                });
+                const data = await res.json();
+                
+                if (res.ok) {
+                    showMessage('loginMessage', 'Login successful! Reloading...', 'success');
+                    setTimeout(() => location.reload(), 1000);
+                } else {
+                    showMessage('loginMessage', data.detail || 'Login failed', 'error');
+                }
+            } catch (err) {
+                showMessage('loginMessage', 'Network error', 'error');
+            }
+        }
+        {% endif %}
+        
+        function showMessage(id, text, type) {
+            const el = document.getElementById(id);
+            if (el) {
+                el.className = `message ${type}`;
+                el.textContent = text;
+            }
+        }
+    </script>
+</body>
+</html>
+

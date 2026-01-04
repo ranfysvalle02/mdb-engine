@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 def normalize_keys(
-    keys: Union[Dict[str, Any], List[Tuple[str, Any]]]
+    keys: Union[Dict[str, Any], List[Tuple[str, Any]]],
 ) -> List[Tuple[str, Any]]:
     """
     Normalize index keys to a consistent format.

@@ -10,10 +10,14 @@ Tests the manifest validation system including:
 
 import pytest
 
-from mdb_engine.core.manifest import (ManifestParser, ManifestValidator,
-                                      get_schema_version, migrate_manifest,
-                                      validate_index_definition,
-                                      validate_managed_indexes)
+from mdb_engine.core.manifest import (
+    ManifestParser,
+    ManifestValidator,
+    get_schema_version,
+    migrate_manifest,
+    validate_index_definition,
+    validate_managed_indexes,
+)
 
 
 class TestManifestSchemaVersion:
@@ -180,9 +184,7 @@ class TestIndexDefinitionValidation:
             "keys": [("field1", 1), ("field2", -1)],
         }
 
-        is_valid, error = validate_index_definition(
-            index_def, "test_collection", "test_index"
-        )
+        is_valid, error = validate_index_definition(index_def, "test_collection", "test_index")
         assert is_valid is True
         assert error is None
 
@@ -190,9 +192,7 @@ class TestIndexDefinitionValidation:
         """Test validation of regular index without keys."""
         index_def = {"name": "test_index", "type": "regular"}
 
-        is_valid, error = validate_index_definition(
-            index_def, "test_collection", "test_index"
-        )
+        is_valid, error = validate_index_definition(index_def, "test_collection", "test_index")
         assert is_valid is False
         assert "keys" in error.lower()
 
@@ -200,9 +200,7 @@ class TestIndexDefinitionValidation:
         """Test validation rejects _id index."""
         index_def = {"name": "test_index", "type": "regular", "keys": [("_id", 1)]}
 
-        is_valid, error = validate_index_definition(
-            index_def, "test_collection", "test_index"
-        )
+        is_valid, error = validate_index_definition(index_def, "test_collection", "test_index")
         assert is_valid is False
         assert "_id" in error.lower()
 
@@ -215,18 +213,14 @@ class TestIndexDefinitionValidation:
             "options": {"expireAfterSeconds": 3600},
         }
 
-        is_valid, error = validate_index_definition(
-            index_def, "test_collection", "ttl_index"
-        )
+        is_valid, error = validate_index_definition(index_def, "test_collection", "ttl_index")
         assert is_valid is True
 
     def test_validate_ttl_index_missing_expire(self):
         """Test validation of TTL index without expireAfterSeconds."""
         index_def = {"name": "ttl_index", "type": "ttl", "keys": [("created_at", 1)]}
 
-        is_valid, error = validate_index_definition(
-            index_def, "test_collection", "ttl_index"
-        )
+        is_valid, error = validate_index_definition(index_def, "test_collection", "ttl_index")
         assert is_valid is False
         assert "expireafterseconds" in error.lower()
 
@@ -236,33 +230,25 @@ class TestIndexDefinitionValidation:
             "name": "vector_index",
             "type": "vectorSearch",
             "definition": {
-                "fields": [
-                    {"type": "vector", "path": "embedding", "numDimensions": 128}
-                ]
+                "fields": [{"type": "vector", "path": "embedding", "numDimensions": 128}]
             },
         }
 
-        is_valid, error = validate_index_definition(
-            index_def, "test_collection", "vector_index"
-        )
+        is_valid, error = validate_index_definition(index_def, "test_collection", "vector_index")
         assert is_valid is True
 
     def test_validate_vector_search_index_missing_definition(self):
         """Test validation of vector search index without definition."""
         index_def = {"name": "vector_index", "type": "vectorSearch"}
 
-        is_valid, error = validate_index_definition(
-            index_def, "test_collection", "vector_index"
-        )
+        is_valid, error = validate_index_definition(index_def, "test_collection", "vector_index")
         assert is_valid is False
         assert "definition" in error.lower()
 
     def test_validate_managed_indexes_valid(self):
         """Test validation of valid managed indexes."""
         managed_indexes = {
-            "test_collection": [
-                {"name": "test_index", "type": "regular", "keys": [("field1", 1)]}
-            ]
+            "test_collection": [{"name": "test_index", "type": "regular", "keys": [("field1", 1)]}]
         }
 
         is_valid, error = validate_managed_indexes(managed_indexes)

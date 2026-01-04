@@ -1,0 +1,70 @@
+{
+  "schema_version": "2.0",
+  "slug": "click_tracker",
+  "name": "Click Tracker",
+  "description": "Tracks user clicks and events with shared authentication",
+  "status": "active",
+  "auth": {
+    "mode": "shared",
+    "roles": ["viewer", "editor", "admin"],
+    "default_role": "viewer",
+    "require_role": "viewer",
+    "public_routes": ["/", "/health", "/api", "/login", "/register", "/logout"],
+    "rate_limits": {
+      "/login": {"max_attempts": 5, "window_seconds": 300},
+      "/register": {"max_attempts": 3, "window_seconds": 3600}
+    },
+    "audit": {
+      "enabled": true,
+      "retention_days": 90
+    },
+    "csrf_protection": true,
+    "security": {
+      "hsts": {
+        "enabled": true,
+        "max_age": 31536000,
+        "include_subdomains": true
+      }
+    },
+    "jwt": {
+      "algorithm": "HS256",
+      "token_expiry_hours": 24
+    },
+    "password_policy": {
+      "min_length": 8,
+      "min_entropy_bits": 40,
+      "require_uppercase": true,
+      "require_lowercase": true,
+      "require_numbers": true,
+      "check_common_passwords": true
+    },
+    "session_binding": {
+      "bind_ip": false,
+      "bind_fingerprint": true
+    }
+  },
+  "data_access": {
+    "read_scopes": ["click_tracker"],
+    "write_scope": "click_tracker",
+    "cross_app_policy": "explicit"
+  },
+  "managed_indexes": {
+    "clicks": [
+      {
+        "type": "regular",
+        "name": "timestamp_idx",
+        "keys": {
+          "timestamp": -1
+        }
+      },
+      {
+        "type": "regular",
+        "name": "user_id_idx",
+        "keys": {
+          "user_id": 1
+        }
+      }
+    ]
+  }
+}
+

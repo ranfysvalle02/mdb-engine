@@ -95,6 +95,145 @@ def get_device_info(request: Request) -> Dict[str, Any]:
     }
 
 
+def calculate_password_entropy(password: str) -> float:
+    """
+    Calculate the entropy of a password in bits.
+
+    Entropy measures password randomness/unpredictability.
+    Higher entropy = more secure password.
+
+    Character set sizes:
+    - Lowercase: 26
+    - Uppercase: 26
+    - Digits: 10
+    - Special: ~32
+
+    Formula: entropy = length * log2(character_set_size)
+
+    Args:
+        password: Password to calculate entropy for
+
+    Returns:
+        Entropy in bits (float)
+    """
+    import math
+
+    if not password:
+        return 0.0
+
+    # Determine character set size based on what's used
+    char_set_size = 0
+
+    if re.search(r"[a-z]", password):
+        char_set_size += 26
+    if re.search(r"[A-Z]", password):
+        char_set_size += 26
+    if re.search(r"\d", password):
+        char_set_size += 10
+    if re.search(r'[!@#$%^&*(),.?":{}|<>\[\]\\;\'`~_+=\-/]', password):
+        char_set_size += 32
+    if re.search(r"\s", password):
+        char_set_size += 1
+
+    if char_set_size == 0:
+        # Fallback for Unicode or other characters
+        char_set_size = 94  # Printable ASCII assumption
+
+    # Entropy = length * log2(char_set_size)
+    entropy = len(password) * math.log2(char_set_size)
+
+    return round(entropy, 2)
+
+
+def is_common_password(password: str) -> bool:
+    """
+    Check if password is in the common passwords list.
+
+    Uses a bundled list of the top 10,000 most common passwords.
+    Falls back gracefully if the file is not available.
+
+    Args:
+        password: Password to check
+
+    Returns:
+        True if password is common, False otherwise
+    """
+    try:
+        import os
+
+        # Get the path to the common passwords file
+        resources_dir = os.path.join(os.path.dirname(__file__), "resources")
+        common_passwords_path = os.path.join(resources_dir, "common_passwords.txt")
+
+        if not os.path.exists(common_passwords_path):
+            logger.debug("Common passwords file not found, skipping check")
+            return False
+
+        # Read and check (case-insensitive)
+        password_lower = password.lower()
+        with open(common_passwords_path, encoding="utf-8") as f:
+            for line in f:
+                if line.strip().lower() == password_lower:
+                    return True
+
+        return False
+    except OSError as e:
+        logger.warning(f"Error checking common passwords: {e}")
+        return False
+
+
+async def check_password_breach(password: str) -> bool:
+    """
+    Check if password has been exposed in known data breaches.
+
+    Uses the HaveIBeenPwned API with k-anonymity (only sends first 5 chars of hash).
+    This is privacy-preserving - the full password hash is never sent.
+
+    Requires network access. Returns False (not breached) if check fails.
+
+    Args:
+        password: Password to check
+
+    Returns:
+        True if password was found in breaches, False otherwise
+    """
+    try:
+        import hashlib
+
+        import httpx
+
+        # Hash the password
+        sha1_hash = hashlib.sha1(password.encode()).hexdigest().upper()
+        prefix = sha1_hash[:5]
+        suffix = sha1_hash[5:]
+
+        # Query HIBP API (k-anonymity: only send first 5 chars)
+        url = f"https://api.pwnedpasswords.com/range/{prefix}"
+
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+
+        # Check if our suffix is in the response
+        for line in response.text.splitlines():
+            hash_suffix, count = line.split(":")
+            if hash_suffix == suffix:
+                logger.debug(f"Password found in {count} breaches")
+                return True
+
+        return False
+
+    except ImportError:
+        logger.debug("httpx not available, skipping breach check")
+        return False
+    except httpx.HTTPError as e:
+        logger.warning(f"Error checking password breaches: {e}")
+        return False
+    except (TimeoutError, ConnectionError, OSError) as e:
+        logger.warning(f"Error checking password breaches: {e}")
+        return False
+
+
 def validate_password_strength(
     password: str,
     min_length: Optional[int] = None,
@@ -102,6 +241,8 @@ def validate_password_strength(
     require_lowercase: Optional[bool] = None,
     require_numbers: Optional[bool] = None,
     require_special: Optional[bool] = None,
+    min_entropy_bits: Optional[int] = None,
+    check_common_passwords: Optional[bool] = None,
     config: Optional[Dict[str, Any]] = None,
 ) -> Tuple[bool, List[str]]:
     """
@@ -114,6 +255,8 @@ def validate_password_strength(
         require_lowercase: Require lowercase letters (default: from config or True)
         require_numbers: Require numbers (default: from config or True)
         require_special: Require special characters (default: from config or False)
+        min_entropy_bits: Minimum entropy in bits (default: from config or 0)
+        check_common_passwords: Check against common passwords (default: from config or False)
         config: Optional password_policy config dict from manifest
 
     Returns:
@@ -125,9 +268,7 @@ def validate_password_strength(
         return False, ["Password is required"]
 
     if config:
-        min_length = (
-            min_length if min_length is not None else config.get("min_length", 8)
-        )
+        min_length = min_length if min_length is not None else config.get("min_length", 8)
         require_uppercase = (
             require_uppercase
             if require_uppercase is not None
@@ -139,14 +280,18 @@ def validate_password_strength(
             else config.get("require_lowercase", True)
         )
         require_numbers = (
-            require_numbers
-            if require_numbers is not None
-            else config.get("require_numbers", True)
+            require_numbers if require_numbers is not None else config.get("require_numbers", True)
         )
         require_special = (
-            require_special
-            if require_special is not None
-            else config.get("require_special", False)
+            require_special if require_special is not None else config.get("require_special", False)
+        )
+        min_entropy_bits = (
+            min_entropy_bits if min_entropy_bits is not None else config.get("min_entropy_bits", 0)
+        )
+        check_common_passwords = (
+            check_common_passwords
+            if check_common_passwords is not None
+            else config.get("check_common_passwords", False)
         )
     else:
         min_length = min_length if min_length is not None else 8
@@ -154,6 +299,10 @@ def validate_password_strength(
         require_lowercase = require_lowercase if require_lowercase is not None else True
         require_numbers = require_numbers if require_numbers is not None else True
         require_special = require_special if require_special is not None else False
+        min_entropy_bits = min_entropy_bits if min_entropy_bits is not None else 0
+        check_common_passwords = (
+            check_common_passwords if check_common_passwords is not None else False
+        )
 
     if len(password) < min_length:
         errors.append(f"Password must be at least {min_length} characters long")
@@ -170,7 +319,60 @@ def validate_password_strength(
     if require_special and not re.search(r'[!@#$%^&*(),.?":{}|<>]', password):
         errors.append("Password must contain at least one special character")
 
+    # Entropy check
+    if min_entropy_bits and min_entropy_bits > 0:
+        entropy = calculate_password_entropy(password)
+        if entropy < min_entropy_bits:
+            errors.append(
+                f"Password is too weak (entropy: {entropy:.0f} bits, "
+                f"required: {min_entropy_bits} bits)"
+            )
+
+    # Common password check
+    if check_common_passwords:
+        if is_common_password(password):
+            errors.append("Password is too common - please choose a unique password")
+
     return len(errors) == 0, errors
+
+
+async def validate_password_strength_async(
+    password: str,
+    config: Optional[Dict[str, Any]] = None,
+    check_breaches: Optional[bool] = None,
+) -> Tuple[bool, List[str]]:
+    """
+    Async version of validate_password_strength with breach checking.
+
+    This performs all synchronous checks, plus an optional async breach
+    check against HaveIBeenPwned.
+
+    Args:
+        password: Password to validate
+        config: Optional password_policy config dict from manifest
+        check_breaches: Check against HIBP breach database (default: from config or False)
+
+    Returns:
+        Tuple of (is_valid, list_of_errors)
+    """
+    # First, run sync validation
+    is_valid, errors = validate_password_strength(password, config=config)
+
+    # Determine if we should check breaches
+    if check_breaches is None and config:
+        check_breaches = config.get("check_breaches", False)
+    elif check_breaches is None:
+        check_breaches = False
+
+    # Async breach check
+    if check_breaches:
+        if await check_password_breach(password):
+            errors.append(
+                "Password has been exposed in a data breach - " "please choose a different password"
+            )
+            is_valid = False
+
+    return is_valid, errors
 
 
 def generate_session_fingerprint(request: Request, device_id: str) -> str:
@@ -478,9 +680,7 @@ async def register_user(
             )
 
         response = _create_registration_response(user_doc, redirect_url)
-        set_auth_cookies(
-            response, access_token, refresh_token, request=request, config=config
-        )
+        set_auth_cookies(response, access_token, refresh_token, request=request, config=config)
 
         response.set_cookie(
             key="device_id",
@@ -510,9 +710,7 @@ async def register_user(
         return {"success": False, "error": "Registration failed. Please try again."}
 
 
-async def _get_user_id_from_request(
-    request: Request, user_id: Optional[str]
-) -> Optional[str]:
+async def _get_user_id_from_request(request: Request, user_id: Optional[str]) -> Optional[str]:
     """Extract user_id from request if not provided."""
     if user_id:
         return user_id

@@ -16,7 +16,7 @@ from datetime import datetime
 from typing import Optional
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
-from pymongo.errors import OperationFailure
+from pymongo.errors import OperationFailure, PyMongoError
 
 from .encryption import EnvelopeEncryptionService
 
@@ -66,9 +66,7 @@ class AppSecretsManager:
         """
         try:
             # Encrypt secret
-            encrypted_secret, encrypted_dek = self._encryption_service.encrypt_secret(
-                secret
-            )
+            encrypted_secret, encrypted_dek = self._encryption_service.encrypt_secret(secret)
 
             # Encode as base64 for storage
             encrypted_secret_b64 = base64.b64encode(encrypted_secret).decode()
@@ -102,11 +100,14 @@ class AppSecretsManager:
                 await self._secrets_collection.insert_one(document)
                 logger.info(f"Stored encrypted secret for app '{app_slug}'")
 
-        except Exception as e:
-            logger.error(
-                f"Failed to store secret for app '{app_slug}': {e}", exc_info=True
-            )
+        except PyMongoError as e:
+            logger.error(f"Database error storing secret for app '{app_slug}': {e}", exc_info=True)
             raise OperationFailure(f"Failed to store app secret: {e}") from e
+        except (ValueError, TypeError) as e:
+            logger.error(
+                f"Encryption error storing secret for app '{app_slug}': {e}", exc_info=True
+            )
+            raise
 
     def verify_app_secret_sync(self, app_slug: str, provided_secret: str) -> bool:
         """
@@ -154,7 +155,9 @@ class AppSecretsManager:
         # Get encrypted secret from database
         doc = await self._secrets_collection.find_one({"_id": app_slug})
         if not doc:
+            # Log detailed info for debugging
             logger.warning(f"Secret verification failed: app '{app_slug}' not found")
+            # Return False without revealing app existence
             return False
 
         # Decode base64
@@ -162,35 +165,27 @@ class AppSecretsManager:
             encrypted_secret = base64.b64decode(doc["encrypted_secret"])
             encrypted_dek = base64.b64decode(doc["encrypted_dek"])
         except (ValueError, KeyError, TypeError) as e:
-            logger.warning(f"Secret verification error for app '{app_slug}': {e}")
+            # Log detailed error for debugging
+            logger.warning(f"Secret verification error for app '{app_slug}': {e}", exc_info=True)
+            # Return False without revealing specific error
             return False
 
         # Decrypt stored secret
         try:
-            stored_secret = self._encryption_service.decrypt_secret(
-                encrypted_secret, encrypted_dek
-            )
+            stored_secret = self._encryption_service.decrypt_secret(encrypted_secret, encrypted_dek)
         except ValueError:
-            logger.warning(f"Secret decryption failed for app '{app_slug}'")
-            return False
-
-        # Constant-time comparison to prevent timing attacks
-        if len(provided_secret) != len(stored_secret):
-            logger.info(
-                f"Secret verification failed for app '{app_slug}': length mismatch"
-            )
+            # Log detailed error for debugging
+            logger.warning(f"Secret decryption failed for app '{app_slug}'", exc_info=True)
+            # Return False without revealing decryption failure
             return False
 
         # Use secrets.compare_digest for constant-time comparison
-        result = secrets.compare_digest(
-            provided_secret.encode(), stored_secret.encode()
-        )
+        # Note: compare_digest handles length differences internally, preventing timing attacks
+        result = secrets.compare_digest(provided_secret.encode(), stored_secret.encode())
         if result:
             logger.debug(f"Secret verification succeeded for app '{app_slug}'")
         else:
-            logger.warning(
-                f"Secret verification failed for app '{app_slug}': secret mismatch"
-            )
+            logger.warning(f"Secret verification failed for app '{app_slug}'")
         return result
 
     async def get_app_secret(self, app_slug: str) -> Optional[str]:
@@ -221,9 +216,7 @@ class AppSecretsManager:
 
         # Decrypt secret
         try:
-            secret = self._encryption_service.decrypt_secret(
-                encrypted_secret, encrypted_dek
-            )
+            secret = self._encryption_service.decrypt_secret(encrypted_secret, encrypted_dek)
             return secret
         except ValueError as e:
             logger.warning(f"Failed to decrypt secret for app '{app_slug}': {e}")
@@ -293,7 +286,5 @@ class AppSecretsManager:
         Returns:
             True if secret exists, False otherwise
         """
-        doc = await self._secrets_collection.find_one(
-            {"_id": app_slug}, projection={"_id": 1}
-        )
+        doc = await self._secrets_collection.find_one({"_id": app_slug}, projection={"_id": 1})
         return doc is not None

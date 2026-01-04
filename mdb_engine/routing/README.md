@@ -286,7 +286,7 @@ async def safe_message_handler(websocket, message):
                 "type": "action_result",
                 "result": result
             })
-    except Exception as e:
+    except (ValueError, TypeError, KeyError) as e:
         logger.error(f"Error handling message: {e}")
         # Send error to client
         manager = await get_websocket_manager("my_app")

@@ -30,10 +30,10 @@ def load_manifest_file(file_path: Path) -> Dict[str, Any]:
         raise click.ClickException(f"Manifest file not found: {file_path}")
 
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
+        with open(file_path, encoding="utf-8") as f:
             return json.load(f)
     except json.JSONDecodeError as e:
-        raise click.ClickException(f"Invalid JSON in manifest file: {e}")
+        raise click.ClickException(f"Invalid JSON in manifest file: {e}") from e
 
 
 def save_manifest_file(file_path: Path, manifest: Dict[str, Any]) -> None:
@@ -51,7 +51,7 @@ def save_manifest_file(file_path: Path, manifest: Dict[str, Any]) -> None:
         with open(file_path, "w", encoding="utf-8") as f:
             json.dump(manifest, f, indent=2, ensure_ascii=False)
     except OSError as e:
-        raise click.ClickException(f"Failed to write manifest file: {e}")
+        raise click.ClickException(f"Failed to write manifest file: {e}") from e
 
 
 def format_manifest_output(manifest: Dict[str, Any], format_type: str) -> str:

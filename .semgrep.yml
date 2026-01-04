@@ -1,0 +1,208 @@
+# Semgrep Rules for Exception Handling
+# Based on Miguel Grinberg's Exception Handling Framework
+#
+# Type 1: New Recoverable - Handle internally, don't raise
+# Type 2: Bubbled-Up Recoverable - Catch SPECIFIC exceptions, recover, continue
+# Type 3: New Non-Recoverable - Raise exception, let it bubble up
+# Type 4: Bubbled-Up Non-Recoverable - Do nothing, let framework handle it
+#
+# Reference: https://blog.miguelgrinberg.com/post/the-ultimate-guide-to-python-exception-handling
+#
+# Note: Some rules are handled by ruff (B904, TRY200, TRY400, BLE001) - see pyproject.toml
+
+rules:
+  # =============================================================================
+  # CRITICAL: Bare except clauses (always wrong)
+  # =============================================================================
+  - id: no-bare-except
+    pattern: |
+      try:
+          ...
+      except:
+          ...
+    message: |
+      Bare except clause catches everything including KeyboardInterrupt and SystemExit.
+      Always catch specific exceptions: `except SomeException as e:`
+    severity: ERROR
+    languages: [python]
+    metadata:
+      category: security
+      grinberg_type: all
+
+  # =============================================================================
+  # TYPE 4 VIOLATIONS: Catching Exception without proper handling
+  # =============================================================================
+
+  # Catching Exception and returning None (likely swallowing)
+  - id: grinberg-type4-swallow-return-none
+    pattern: |
+      try:
+          ...
+      except Exception:
+          return None
+    message: |
+      [Grinberg Type 4] Catching Exception and returning None silently swallows errors.
+      If this is intentional fail-open behavior, catch specific exceptions instead of Exception.
+    severity: WARNING
+    languages: [python]
+    metadata:
+      category: correctness
+      grinberg_type: 4
+
+  - id: grinberg-type4-swallow-return-false
+    pattern: |
+      try:
+          ...
+      except Exception:
+          return False
+    message: |
+      [Grinberg Type 4] Catching Exception and returning False silently swallows errors.
+      If this is intentional fail-open behavior, catch specific exceptions instead of Exception.
+    severity: WARNING
+    languages: [python]
+    metadata:
+      category: correctness
+      grinberg_type: 4
+
+  # Catching Exception with pass (complete swallow)
+  - id: grinberg-type4-swallow-pass
+    pattern: |
+      try:
+          ...
+      except Exception:
+          pass
+    message: |
+      [Grinberg Type 4] Catching Exception with pass completely swallows all errors.
+      This hides bugs. Remove this try/except or catch specific exceptions.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      category: correctness
+      grinberg_type: 4
+
+  # =============================================================================
+  # MONGODB-SPECIFIC: Use PyMongoError hierarchy
+  # =============================================================================
+  
+  - id: mongodb-catch-exception-on-find
+    pattern: |
+      try:
+          await $COLL.find_one(...)
+      except Exception as $E:
+          ...
+    message: |
+      MongoDB operations should catch PyMongoError or specific subclasses, not Exception.
+      Use: `from pymongo.errors import PyMongoError, OperationFailure`
+    severity: WARNING
+    languages: [python]
+    metadata:
+      category: correctness
+      framework: mongodb
+
+  - id: mongodb-catch-exception-on-insert
+    pattern: |
+      try:
+          await $COLL.insert_one(...)
+      except Exception as $E:
+          ...
+    message: |
+      MongoDB operations should catch PyMongoError or specific subclasses, not Exception.
+      Use: `from pymongo.errors import PyMongoError, OperationFailure`
+    severity: WARNING
+    languages: [python]
+    metadata:
+      category: correctness
+      framework: mongodb
+
+  - id: mongodb-catch-exception-on-update
+    pattern: |
+      try:
+          await $COLL.update_one(...)
+      except Exception as $E:
+          ...
+    message: |
+      MongoDB operations should catch PyMongoError or specific subclasses, not Exception.
+      Use: `from pymongo.errors import PyMongoError, OperationFailure`
+    severity: WARNING
+    languages: [python]
+    metadata:
+      category: correctness
+      framework: mongodb
+
+  - id: mongodb-catch-exception-on-delete
+    pattern: |
+      try:
+          await $COLL.delete_one(...)
+      except Exception as $E:
+          ...
+    message: |
+      MongoDB operations should catch PyMongoError or specific subclasses, not Exception.
+      Use: `from pymongo.errors import PyMongoError, OperationFailure`
+    severity: WARNING
+    languages: [python]
+    metadata:
+      category: correctness
+      framework: mongodb
+
+  - id: mongodb-catch-exception-on-aggregate
+    pattern: |
+      try:
+          await $COLL.aggregate(...)
+      except Exception as $E:
+          ...
+    message: |
+      MongoDB operations should catch PyMongoError or specific subclasses, not Exception.
+      Use: `from pymongo.errors import PyMongoError, OperationFailure`
+    severity: WARNING
+    languages: [python]
+    metadata:
+      category: correctness
+      framework: mongodb
+
+  - id: mongodb-catch-exception-on-create-index
+    pattern: |
+      try:
+          await $COLL.create_index(...)
+      except Exception as $E:
+          ...
+    message: |
+      MongoDB operations should catch PyMongoError or specific subclasses, not Exception.
+      Use: `from pymongo.errors import PyMongoError, OperationFailure`
+    severity: WARNING
+    languages: [python]
+    metadata:
+      category: correctness
+      framework: mongodb
+
+  # =============================================================================
+  # CRITICAL: NO BROAD EXCEPTION CATCHING - Be intentional!
+  # =============================================================================
+  - id: no-broad-except-exception
+    pattern-either:
+      - pattern: |
+          try:
+              ...
+          except Exception as $E:
+              ...
+      - pattern: |
+          try:
+              ...
+          except Exception:
+              ...
+    message: |
+      DO NOT catch broad `Exception`. Be intentional about exception handling!
+      Catch SPECIFIC exceptions (e.g., ValueError, KeyError, PyMongoError, jwt.InvalidTokenError).
+      This forces you to understand what can fail and handle it appropriately.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      category: correctness
+      grinberg_type: all
+
+# =============================================================================
+# RULES COVERED BY RUFF (not duplicated here):
+# =============================================================================
+# - BLE001: Catches `except BaseException:` (NOT Exception!)
+# - B904/TRY200: Missing 'raise from' (exception chaining)
+# - TRY400: Use logging.exception instead of logging.error
+# =============================================================================

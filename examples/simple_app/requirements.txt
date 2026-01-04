@@ -1,0 +1,8 @@
+# Web dependencies (mdb-engine is installed from source in Docker)
+fastapi>=0.100.0
+uvicorn[standard]>=0.22.0
+jinja2>=3.1.0
+pydantic>=2.0.0
+
+# For local development without Docker, install mdb-engine from project root:
+# pip install -e ../..

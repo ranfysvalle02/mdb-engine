@@ -4,9 +4,9 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mdb-engine"
-version = "0.1.6"
+version = "0.1.7"
 description = "MongoDB Engine"
-readme = "mdb_engine/README.md"
+readme = "README.md"
 requires-python = ">=3.8"
 license = {text = "AGPL-3.0"}
 authors = [
@@ -58,13 +58,8 @@ test = [
     "testcontainers>=3.7.0",
 ]
 dev = [
-    "black>=24.1.0",
-    "isort>=5.13.0",
-    "flake8>=7.0.0",
-    "flake8-docstrings>=1.7.0",
-    "flake8-bugbear>=24.2.0",
-    "flake8-comprehensions>=3.14.0",
-    "flake8-import-order>=0.18.2",
+    "ruff>=0.4.0",
+    "semgrep>=1.50.0",
 ]
 all = [
     "casbin>=1.0.0",
@@ -101,3 +96,46 @@ exclude_lines = [
     "@(abc\\.)?abstractmethod",
 ]
 fail_under = 70
+
+[tool.ruff]
+line-length = 100
+target-version = "py38"
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "F",      # pyflakes
+    "W",      # pycodestyle warnings
+    "I",      # isort
+    "B",      # flake8-bugbear
+    "C90",    # mccabe complexity
+    "UP",     # pyupgrade
+    "BLE",    # flake8-blind-except (no bare except)
+    "TRY",    # tryceratops (exception handling best practices)
+]
+ignore = [
+    "E203",   # Whitespace before ':' (conflicts with black)
+    "UP007",  # Use X | Y for type annotations (requires Python 3.10+, we target 3.8)
+    "B008",   # Do not perform function call in argument defaults (FastAPI Depends pattern)
+    "B025",   # Duplicate exceptions in try-except (often intentional for clarity)
+    # TRY - Exception handling (keep critical, ignore pedantic)
+    "TRY002", # Create your own exception (too strict - built-ins are fine)
+    "TRY003", # Avoid inline exception messages (too strict)
+    "TRY004", # Prefer TypeError (too strict - ValueError is often appropriate)
+    "TRY201", # Use raise without exception name (bare raise not always clearer)
+    "TRY300", # Move statement to else block (pedantic, minimal benefit)
+    "TRY301", # Abstract raise to inner function (over-engineering)
+    "TRY302", # Remove handler with immediate re-raise (useful for logging)
+    "TRY401", # Redundant exception in logging.exception (minor style issue)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
+"tests/**/*.py" = [
+    "F841",   # Unused variables (common in test assertions)
+    "B018",   # Useless expressions (common in test assertions)
+    "BLE001", # Blind exception catching (acceptable in test mocks)
+]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 40

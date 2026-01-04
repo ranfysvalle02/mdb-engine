@@ -69,9 +69,7 @@ class TestQueryValidator:
         validator.validate_filter({"age": {"$gt": 18}})
         validator.validate_filter({"tags": {"$in": ["red", "blue"]}})
         validator.validate_filter({"$or": [{"status": "active"}, {"deleted": False}]})
-        validator.validate_filter(
-            {"$and": [{"status": "active"}, {"age": {"$gt": 18}}]}
-        )
+        validator.validate_filter({"$and": [{"status": "active"}, {"age": {"$gt": 18}}]})
 
     def test_validate_filter_max_depth(self):
         """Test that query depth is limited."""

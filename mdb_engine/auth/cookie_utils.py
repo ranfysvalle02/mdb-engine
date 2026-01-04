@@ -51,8 +51,7 @@ def get_secure_cookie_settings(
             # Auto-detect: secure if HTTPS or production environment
             is_https = request.url.scheme == "https"
             is_production = (
-                os.getenv("G_NOME_ENV") == "production"
-                or os.getenv("ENVIRONMENT") == "production"
+                os.getenv("G_NOME_ENV") == "production" or os.getenv("ENVIRONMENT") == "production"
             )
             secure = is_https or is_production
         elif cookie_secure == "true":
@@ -63,8 +62,7 @@ def get_secure_cookie_settings(
         # No config - use environment-based defaults
         is_https = request.url.scheme == "https"
         is_production = (
-            os.getenv("G_NOME_ENV") == "production"
-            or os.getenv("ENVIRONMENT") == "production"
+            os.getenv("G_NOME_ENV") == "production" or os.getenv("ENVIRONMENT") == "production"
         )
         secure = is_https or is_production
 
@@ -153,6 +151,4 @@ def clear_auth_cookies(response, request: Optional[Request] = None):
     response.delete_cookie(key="token", httponly=True, secure=secure, samesite=samesite)
 
     # Delete refresh token cookie
-    response.delete_cookie(
-        key="refresh_token", httponly=True, secure=secure, samesite=samesite
-    )
+    response.delete_cookie(key="refresh_token", httponly=True, secure=secure, samesite=samesite)

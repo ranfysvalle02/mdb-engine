@@ -9,8 +9,7 @@ from datetime import datetime
 
 import pytest
 
-from mdb_engine.core.encryption import (MASTER_KEY_ENV_VAR,
-                                        EnvelopeEncryptionService)
+from mdb_engine.core.encryption import MASTER_KEY_ENV_VAR, EnvelopeEncryptionService
 
 
 @pytest.fixture
@@ -125,9 +124,7 @@ class TestExampleApps:
         await engine.register_app(dashboard_manifest)
 
         # Get secrets
-        tracker_secret = await engine._app_secrets_manager.get_app_secret(
-            "click_tracker"
-        )
+        tracker_secret = await engine._app_secrets_manager.get_app_secret("click_tracker")
         dashboard_secret = await engine._app_secrets_manager.get_app_secret(
             "click_tracker_dashboard"
         )
@@ -145,15 +142,11 @@ class TestExampleApps:
             )
 
         # Read analytics via Dashboard (cross-app access)
-        dashboard_db = engine.get_scoped_db(
-            "click_tracker_dashboard", app_token=dashboard_secret
-        )
+        dashboard_db = engine.get_scoped_db("click_tracker_dashboard", app_token=dashboard_secret)
 
         # Access ClickTracker's collection
         clicks = (
-            await dashboard_db.get_collection("click_tracker_clicks")
-            .find({})
-            .to_list(length=100)
+            await dashboard_db.get_collection("click_tracker_clicks").find({}).to_list(length=100)
         )
 
         assert len(clicks) == 5
@@ -175,9 +168,7 @@ class TestExampleApps:
         await engine.register_app(dashboard_manifest)
 
         # Get secrets
-        tracker_secret = await engine._app_secrets_manager.get_app_secret(
-            "click_tracker"
-        )
+        tracker_secret = await engine._app_secrets_manager.get_app_secret("click_tracker")
         dashboard_secret = await engine._app_secrets_manager.get_app_secret(
             "click_tracker_dashboard"
         )
@@ -197,15 +188,11 @@ class TestExampleApps:
             click_ids.append(result.inserted_id)
 
         # Step 2: View analytics via dashboard
-        dashboard_db = engine.get_scoped_db(
-            "click_tracker_dashboard", app_token=dashboard_secret
-        )
+        dashboard_db = engine.get_scoped_db("click_tracker_dashboard", app_token=dashboard_secret)
 
         # Get all clicks
         all_clicks = (
-            await dashboard_db.get_collection("click_tracker_clicks")
-            .find({})
-            .to_list(length=100)
+            await dashboard_db.get_collection("click_tracker_clicks").find({}).to_list(length=100)
         )
 
         assert len(all_clicks) == 10

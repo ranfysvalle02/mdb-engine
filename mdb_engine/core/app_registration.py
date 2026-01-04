@@ -13,13 +13,18 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
+from jsonschema import SchemaError
+from jsonschema import ValidationError as JsonSchemaValidationError
 from motor.motor_asyncio import AsyncIOMotorDatabase
-from pymongo.errors import (ConnectionFailure, InvalidOperation,
-                            OperationFailure, ServerSelectionTimeoutError)
+from pymongo.errors import (
+    ConnectionFailure,
+    InvalidOperation,
+    OperationFailure,
+    ServerSelectionTimeoutError,
+)
 
-from ..observability import clear_app_context
+from ..observability import clear_app_context, record_operation, set_app_context
 from ..observability import get_logger as get_contextual_logger
-from ..observability import record_operation, set_app_context
 from .manifest import ManifestParser, ManifestValidator
 
 if TYPE_CHECKING:
@@ -81,7 +86,7 @@ class AppRegistrationManager:
                 experiment_slug=slug,
             )
             return result
-        except Exception:
+        except (JsonSchemaValidationError, SchemaError, ValueError, TypeError, KeyError):
             duration_ms = (time.time() - start_time) * 1000
             record_operation(
                 "app_registration.validate_manifest",
@@ -111,15 +116,9 @@ class AppRegistrationManager:
         self,
         manifest: "ManifestDict",
         create_indexes_callback: Optional[Callable[[str, "ManifestDict"], Any]] = None,
-        seed_data_callback: Optional[
-            Callable[[str, Dict[str, List[Dict[str, Any]]]], Any]
-        ] = None,
-        initialize_memory_callback: Optional[
-            Callable[[str, Dict[str, Any]], Any]
-        ] = None,
-        register_websockets_callback: Optional[
-            Callable[[str, Dict[str, Any]], Any]
-        ] = None,
+        seed_data_callback: Optional[Callable[[str, Dict[str, List[Dict[str, Any]]]], Any]] = None,
+        initialize_memory_callback: Optional[Callable[[str, Dict[str, Any]], Any]] = None,
+        register_websockets_callback: Optional[Callable[[str, Dict[str, Any]], Any]] = None,
         setup_observability_callback: Optional[
             Callable[[str, "ManifestDict", Dict[str, Any]], Any]
         ] = None,
@@ -210,9 +209,7 @@ class AppRegistrationManager:
                 )
                 # Continue even if persistence fails - app is still registered in memory
             except InvalidOperation as e:
-                logger.debug(
-                    f"Cannot persist app '{slug}': MongoDB client is closed: {e}"
-                )
+                logger.debug(f"Cannot persist app '{slug}': MongoDB client is closed: {e}")
                 # Continue - app is still registered in memory
 
             # Invalidate auth config cache for this app
@@ -228,32 +225,22 @@ class AppRegistrationManager:
 
             # Create indexes if requested
             if create_indexes_callback and "managed_indexes" in manifest:
-                logger.info(
-                    f"[{slug}] Creating managed indexes " f"(has_managed_indexes=True)"
-                )
+                logger.info(f"[{slug}] Creating managed indexes " f"(has_managed_indexes=True)")
                 callback_tasks.append(create_indexes_callback(slug, manifest))
 
             # Seed initial data if configured
             if seed_data_callback and "initial_data" in manifest:
-                callback_tasks.append(
-                    seed_data_callback(slug, manifest["initial_data"])
-                )
+                callback_tasks.append(seed_data_callback(slug, manifest["initial_data"]))
 
             # Initialize Memory service if configured
             memory_config = manifest.get("memory_config")
-            if (
-                initialize_memory_callback
-                and memory_config
-                and memory_config.get("enabled", False)
-            ):
+            if initialize_memory_callback and memory_config and memory_config.get("enabled", False):
                 callback_tasks.append(initialize_memory_callback(slug, memory_config))
 
             # Register WebSocket endpoints if configured
             websockets_config = manifest.get("websockets")
             if register_websockets_callback and websockets_config:
-                callback_tasks.append(
-                    register_websockets_callback(slug, websockets_config)
-                )
+                callback_tasks.append(register_websockets_callback(slug, websockets_config))
 
             # Set up observability (health checks, metrics, logging)
             observability_config = manifest.get("observability", {})
@@ -275,9 +262,7 @@ class AppRegistrationManager:
                             "register_websockets",
                             "setup_observability",
                         ]
-                        callback_name = (
-                            callback_names[i] if i < len(callback_names) else "unknown"
-                        )
+                        callback_name = callback_names[i] if i < len(callback_names) else "unknown"
                         logger.warning(
                             f"[{slug}] Callback '{callback_name}' failed during "
                             f"app registration: {result}",
@@ -295,9 +280,7 @@ class AppRegistrationManager:
                 "App registered successfully",
                 extra={
                     "app_slug": slug,
-                    "memory_enabled": bool(
-                        memory_config and memory_config.get("enabled", False)
-                    ),
+                    "memory_enabled": bool(memory_config and memory_config.get("enabled", False)),
                     "websockets_configured": bool(websockets_config),
                     "duration_ms": round(duration_ms, 2),
                 },
@@ -324,9 +307,7 @@ class AppRegistrationManager:
         try:
             # Fetch active apps
             active_cfgs = (
-                await self._mongo_db.apps_config.find({"status": "active"})
-                .limit(500)
-                .to_list(None)
+                await self._mongo_db.apps_config.find({"status": "active"}).limit(500).to_list(None)
             )
 
             logger.info(f"Found {len(active_cfgs)} active app(s).")

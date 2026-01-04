@@ -6,6 +6,53 @@ This guide is designed to help Large Language Models understand and generate cod
 
 ---
 
+## When to Use What (Quick Reference)
+
+### Pattern Selection
+
+| Building... | Use This | Why |
+|-------------|----------|-----|
+| **New FastAPI app** | `engine.create_app()` | Zero boilerplate, automatic lifecycle |
+| **Existing app** | `engine.lifespan()` or manual | Keep your existing setup |
+| **CLI/Script** | `async with engine` | Simple, clean cleanup |
+| **Multi-tenant SaaS** | Multi-app + `read_scopes` | Secure data isolation |
+| **Microservices** | One engine per service | Independent scaling |
+
+### Feature Activation Guide
+
+| Feature | Activate When... | How to Enable |
+|---------|-----------------|---------------|
+| **Ray** | CPU-heavy tasks, distributed workers, isolated processing | `MongoDBEngine(..., enable_ray=True)` |
+| **Multi-site** | Apps need cross-app data access | `"read_scopes": ["app1", "app2"]` in manifest |
+| **App Secrets** | Production, need encrypted tokens | Set `MDB_ENGINE_MASTER_KEY` env var |
+| **Casbin** | Simple RBAC (admin/user roles) | `"provider": "casbin"` in auth config |
+| **OSO** | Complex policies (ownership, attributes) | `"provider": "oso"` in auth config |
+| **Memory** | AI chatbots with conversation history | `"memory_config": {...}` in manifest |
+| **Embeddings** | Semantic search, RAG, similarity | Use `EmbeddingService` |
+| **WebSockets** | Real-time updates, live data | `"websockets": {...}` in manifest |
+| **Auto-indexing** | Let engine create indexes from queries | Default ON, disable with `auto_index=False` |
+
+### Authorization: Casbin vs OSO
+
+| Use Casbin When... | Use OSO When... |
+|-------------------|-----------------|
+| Simple role-based access (admin, user, guest) | Complex attribute-based rules |
+| Static permissions per role | Dynamic conditions (ownership, time-based) |
+| Quick setup needed | Need Polar policy language |
+| MongoDB-backed policies | Cloud-managed policies |
+
+### Single-App vs Multi-App
+
+| Single-App | Multi-App |
+|------------|-----------|
+| One manifest, one `create_app()` | Multiple manifests, multiple engines or apps |
+| All data in one scope | Data isolated per app with `app_id` |
+| Simple auth | Cross-app access via `read_scopes` |
+| No app tokens needed | App tokens for secure cross-app access |
+| **Use for:** Most applications | **Use for:** SaaS platforms, multi-tenant systems |
+
+---
+
 ## Table of Contents
 
 1. [Installation](#installation)
@@ -124,6 +171,45 @@ await db.tasks.find({}).to_list(length=10)
 ```
 
 ### Step 2: Initialize Engine in FastAPI
+
+**Option A: Simplified Pattern (Recommended)**
+
+The easiest way - use `create_app()` for automatic lifecycle management:
+
+```python
+from pathlib import Path
+from mdb_engine import MongoDBEngine
+
+# Initialize engine
+engine = MongoDBEngine(
+    mongo_uri="mongodb://localhost:27017",
+    db_name="my_database"
+)
+
+# Create FastAPI app with automatic lifecycle management
+app = engine.create_app(
+    slug="my_app",
+    manifest=Path("manifest.json")
+)
+
+# Use the scoped database
+@app.post("/tasks")
+async def create_task(task: dict):
+    db = engine.get_scoped_db("my_app")
+    result = await db.tasks.insert_one(task)
+    return {"id": str(result.inserted_id)}
+```
+
+This automatically handles:
+- Engine initialization on startup
+- Manifest loading and app registration
+- Multi-site mode auto-detection
+- App token auto-retrieval
+- Clean shutdown on app exit
+
+**Option B: Manual Pattern (More Control)**
+
+For more control over the lifecycle:
 
 ```python
 from pathlib import Path
@@ -1054,6 +1140,94 @@ async with MongoDBEngine(mongo_uri, db_name) as engine:
     # ... use engine
     # Automatic cleanup on exit
 ```
+
+### Pattern 6: FastAPI with create_app()
+
+The simplest pattern using automatic lifecycle management:
+
+```python
+from pathlib import Path
+from mdb_engine import MongoDBEngine
+
+engine = MongoDBEngine(
+    mongo_uri="mongodb://localhost:27017",
+    db_name="my_database"
+)
+
+# Automatic initialization, manifest loading, and cleanup
+app = engine.create_app(
+    slug="my_app",
+    manifest=Path("manifest.json"),
+    title="My Application"
+)
+
+@app.get("/items")
+async def get_items():
+    db = engine.get_scoped_db("my_app")
+    return await db.items.find({}).to_list(10)
+```
+
+---
+
+## Optional Ray Support
+
+Ray integration enables distributed processing with isolated app environments. Ray is **optional** - the engine works perfectly without it.
+
+### Enable Ray
+
+```python
+from mdb_engine import MongoDBEngine
+
+# Enable Ray (only activates if Ray is installed)
+engine = MongoDBEngine(
+    mongo_uri="mongodb://localhost:27017",
+    db_name="my_database",
+    enable_ray=True,
+    ray_namespace="my_namespace"
+)
+
+await engine.initialize()
+
+# Check if Ray is available
+if engine.has_ray:
+    print(f"Ray initialized in namespace: {engine.ray_namespace}")
+else:
+    print("Ray not available - running in standard mode")
+```
+
+### Ray with FastAPI
+
+```python
+from mdb_engine import MongoDBEngine
+from pathlib import Path
+
+engine = MongoDBEngine(
+    mongo_uri="mongodb://localhost:27017",
+    db_name="my_database",
+    enable_ray=True
+)
+
+app = engine.create_app(slug="my_app", manifest=Path("manifest.json"))
+
+@app.get("/status")
+async def status():
+    return {
+        "app": "my_app",
+        "ray_enabled": engine.has_ray,
+        "ray_namespace": engine.ray_namespace if engine.has_ray else None
+    }
+```
+
+### Install Ray (Optional)
+
+```bash
+pip install ray
+```
+
+Ray features:
+- **Isolated environments**: Each app can run in its own Ray actor
+- **Distributed processing**: Offload heavy computations
+- **Graceful degradation**: Works without Ray installed
 
 ---
 

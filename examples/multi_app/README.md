@@ -1,6 +1,6 @@
 # Multi-App Example: Cross-App Data Access
 
-This example demonstrates secure cross-app data access using MDB_ENGINE's app-level authentication and envelope encryption.
+This example demonstrates secure cross-app data access using MDB_ENGINE's unified `MongoDBEngine` pattern with `create_app()` for automatic lifecycle management.
 
 ## Overview
 
@@ -9,15 +9,44 @@ The example consists of two applications:
 1. **ClickTracker** (`apps/click_tracker/`) - Tracks user clicks and events
 2. **Dashboard** (`apps/dashboard/`) - Admin dashboard that reads ClickTracker data for analytics
 
+Both apps use the **unified MongoDBEngine pattern**:
+
+```python
+from mdb_engine import MongoDBEngine
+from pathlib import Path
+
+engine = MongoDBEngine(
+    mongo_uri=os.getenv("MONGODB_URI"),
+    db_name=os.getenv("MONGODB_DB"),
+)
+
+# Automatic lifecycle management
+app = engine.create_app(
+    slug="click_tracker",
+    manifest=Path(__file__).parent / "manifest.json",
+)
+```
+
+### When to Use Multi-App Pattern
+
+| Use Multi-App When... | Use Single-App When... |
+|----------------------|----------------------|
+| Building a SaaS platform | Building a standalone app |
+| Multiple services share data | All data in one scope |
+| Need cross-app analytics | No cross-service data needs |
+| Microservices architecture | Monolithic application |
+| Different teams own different apps | Single team owns everything |
+
 ### Key Features Demonstrated
 
+- ✅ **Unified MongoDBEngine pattern** with `create_app()`
 - ✅ **App-level authentication** with envelope encryption
 - ✅ **Automatic secret management** - secrets auto-retrieved from encrypted storage
 - ✅ **Cross-app data access** via manifest `read_scopes`
 - ✅ **Secure token verification** on every database access
 - ✅ **Data isolation** - automatic `app_id` filtering
+- ✅ **Multi-site auto-detection** - engine detects from manifest
 - ✅ **Docker Compose orchestration** for easy setup
-- ✅ **Zero-configuration** - works out of the box after `docker-compose up`
 
 ## Architecture
 
@@ -321,7 +350,43 @@ See `.env.example` for all available variables. Key variables:
 2. Verify connection string in `.env` matches docker-compose service name
 3. Check MongoDB logs: `docker-compose logs mongodb`
 
-## How It Works Securely
+## How It Works
+
+### Unified MongoDBEngine Pattern
+
+Both apps in this example use the unified `MongoDBEngine` pattern with `create_app()`:
+
+```python
+from mdb_engine import MongoDBEngine
+from pathlib import Path
+import os
+
+# Initialize engine
+engine = MongoDBEngine(
+    mongo_uri=os.getenv("MONGODB_URI", "mongodb://localhost:27017"),
+    db_name=os.getenv("MONGODB_DB", "mdb_runtime"),
+)
+
+# Create FastAPI app with automatic lifecycle management
+app = engine.create_app(
+    slug="click_tracker",
+    manifest=Path(__file__).parent / "manifest.json",
+)
+
+@app.get("/clicks")
+async def get_clicks():
+    # Token auto-retrieved by engine
+    db = engine.get_scoped_db("click_tracker")
+    return await db.clicks.find({}).to_list(100)
+```
+
+The `create_app()` method automatically:
+- Initializes the engine on startup
+- Loads and validates the manifest
+- Registers the app (generates secrets if needed)
+- Auto-retrieves app tokens from environment or database
+- Detects multi-site mode from manifest `read_scopes`
+- Shuts down cleanly on app exit
 
 ### App-Level Authentication
 
@@ -390,9 +455,11 @@ MongoDB Query (with app_id filtering)
 
 ## Related Documentation
 
+- [Simple App Example](../simple_app/README.md) - Simpler example with create_app() pattern
 - [App Authentication Guide](../../docs/APP_AUTHENTICATION.md) - Detailed authentication guide
 - [Security Guide](../../docs/SECURITY.md) - Overall security architecture
 - [Cross-App Access](../../docs/SECURITY.md#cross-app-access-control) - Cross-app access documentation
+- [Quick Start Guide](../../docs/QUICK_START.md) - Getting started with MDB Engine
 
 ## File Structure
 

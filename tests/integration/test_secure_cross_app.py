@@ -9,8 +9,7 @@ from datetime import datetime
 
 import pytest
 
-from mdb_engine.core.encryption import (MASTER_KEY_ENV_VAR,
-                                        EnvelopeEncryptionService)
+from mdb_engine.core.encryption import MASTER_KEY_ENV_VAR, EnvelopeEncryptionService
 
 
 @pytest.fixture
@@ -77,9 +76,7 @@ class TestSecureCrossAppAccess:
         assert result is True
 
         # Verify secret was stored
-        secret_exists = await engine._app_secrets_manager.app_secret_exists(
-            "click_tracker"
-        )
+        secret_exists = await engine._app_secrets_manager.app_secret_exists("click_tracker")
         assert secret_exists is True
 
     async def test_dashboard_registration(
@@ -145,9 +142,7 @@ class TestSecureCrossAppAccess:
         await engine.register_app(dashboard_manifest)
 
         # Get secrets
-        tracker_secret = await engine._app_secrets_manager.get_app_secret(
-            "click_tracker"
-        )
+        tracker_secret = await engine._app_secrets_manager.get_app_secret("click_tracker")
         dashboard_secret = await engine._app_secrets_manager.get_app_secret(
             "click_tracker_dashboard"
         )
@@ -163,15 +158,11 @@ class TestSecureCrossAppAccess:
         await tracker_db.clicks.insert_one(click_doc)
 
         # Read click via Dashboard (cross-app access)
-        dashboard_db = engine.get_scoped_db(
-            "click_tracker_dashboard", app_token=dashboard_secret
-        )
+        dashboard_db = engine.get_scoped_db("click_tracker_dashboard", app_token=dashboard_secret)
 
         # Access ClickTracker's collection
         clicks = (
-            await dashboard_db.get_collection("click_tracker_clicks")
-            .find({})
-            .to_list(length=100)
+            await dashboard_db.get_collection("click_tracker_clicks").find({}).to_list(length=100)
         )
 
         assert len(clicks) > 0
@@ -195,9 +186,7 @@ class TestSecureCrossAppAccess:
             "click_tracker_dashboard"
         )
 
-        dashboard_db = engine.get_scoped_db(
-            "click_tracker_dashboard", app_token=dashboard_secret
-        )
+        dashboard_db = engine.get_scoped_db("click_tracker_dashboard", app_token=dashboard_secret)
 
         # Try to write to ClickTracker's collection (should fail validation)
         # Note: The scoped wrapper will add app_id="click_tracker_dashboard"
@@ -245,9 +234,7 @@ class TestSecureCrossAppAccess:
         # Register ClickTracker only (no Dashboard)
         await engine.register_app(click_tracker_manifest)
 
-        tracker_secret = await engine._app_secrets_manager.get_app_secret(
-            "click_tracker"
-        )
+        tracker_secret = await engine._app_secrets_manager.get_app_secret("click_tracker")
 
         # Try to access unauthorized scope
         with pytest.raises(ValueError, match="not authorized to read from"):
@@ -270,9 +257,7 @@ class TestSecureCrossAppAccess:
         secret = await engine._app_secrets_manager.get_app_secret("click_tracker")
 
         # Verify secret can be used
-        is_valid = await engine._app_secrets_manager.verify_app_secret(
-            "click_tracker", secret
-        )
+        is_valid = await engine._app_secrets_manager.verify_app_secret("click_tracker", secret)
         assert is_valid is True
 
         # Verify wrong secret is rejected
@@ -291,14 +276,10 @@ class TestSecureCrossAppAccess:
         await engine.register_app(click_tracker_manifest)
 
         # Get original secret
-        original_secret = await engine._app_secrets_manager.get_app_secret(
-            "click_tracker"
-        )
+        original_secret = await engine._app_secrets_manager.get_app_secret("click_tracker")
 
         # Rotate secret
-        new_secret = await engine._app_secrets_manager.rotate_app_secret(
-            "click_tracker"
-        )
+        new_secret = await engine._app_secrets_manager.rotate_app_secret("click_tracker")
 
         assert new_secret != original_secret
 
@@ -338,9 +319,7 @@ class TestSecureCrossAppAccess:
         }
         await engine.register_app(other_app_manifest)
 
-        tracker_secret = await engine._app_secrets_manager.get_app_secret(
-            "click_tracker"
-        )
+        tracker_secret = await engine._app_secrets_manager.get_app_secret("click_tracker")
         other_secret = await engine._app_secrets_manager.get_app_secret("other_app")
 
         # Insert data in ClickTracker
@@ -351,10 +330,6 @@ class TestSecureCrossAppAccess:
         other_db = engine.get_scoped_db("other_app", app_token=other_secret)
 
         # Query should only return other_app's data (empty)
-        clicks = (
-            await other_db.get_collection("click_tracker_clicks")
-            .find({})
-            .to_list(length=100)
-        )
+        clicks = await other_db.get_collection("click_tracker_clicks").find({}).to_list(length=100)
         # Should be empty because other_app is not authorized to read click_tracker
         assert len(clicks) == 0

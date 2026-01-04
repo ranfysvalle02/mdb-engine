@@ -36,9 +36,14 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from jsonschema import SchemaError, ValidationError, validate
 
-from ..constants import (CURRENT_SCHEMA_VERSION, DEFAULT_SCHEMA_VERSION,
-                         MAX_TTL_SECONDS, MAX_VECTOR_DIMENSIONS,
-                         MIN_TTL_SECONDS, MIN_VECTOR_DIMENSIONS)
+from ..constants import (
+    CURRENT_SCHEMA_VERSION,
+    DEFAULT_SCHEMA_VERSION,
+    MAX_TTL_SECONDS,
+    MAX_VECTOR_DIMENSIONS,
+    MIN_TTL_SECONDS,
+    MIN_VECTOR_DIMENSIONS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -87,9 +92,7 @@ def _get_manifest_hash(manifest_data: Dict[str, Any]) -> str:
 
     # Normalize manifest by removing metadata fields that don't affect validation
     normalized = {
-        k: v
-        for k, v in manifest_data.items()
-        if k not in ["_id", "_updated", "_created", "url"]
+        k: v for k, v in manifest_data.items() if k not in ["_id", "_updated", "_created", "url"]
     }
     normalized_str = json.dumps(normalized, sort_keys=True)
     return hashlib.sha256(normalized_str.encode()).hexdigest()[:16]
@@ -137,6 +140,49 @@ MANIFEST_SCHEMA_V2 = {
         "auth": {
             "type": "object",
             "properties": {
+                "mode": {
+                    "type": "string",
+                    "enum": ["app", "shared"],
+                    "default": "app",
+                    "description": (
+                        "Authentication mode: 'app' for per-app tokens "
+                        "(isolated auth per app, default), 'shared' for "
+                        "shared user pool with SSO across all apps. "
+                        "Modes are mutually exclusive."
+                    ),
+                },
+                "roles": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Available roles for this app (shared mode only). "
+                        "Example: ['viewer', 'editor', 'admin']"
+                    ),
+                },
+                "default_role": {
+                    "type": "string",
+                    "description": (
+                        "Default role assigned to new users for this app "
+                        "(shared mode only). Must be one of the defined roles."
+                    ),
+                },
+                "require_role": {
+                    "type": "string",
+                    "description": (
+                        "Minimum role required to access this app "
+                        "(shared mode only). Users without this role "
+                        "will be denied access."
+                    ),
+                },
+                "public_routes": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Routes that don't require authentication. "
+                        "Supports wildcards, e.g., ['/health', '/api/public/*']. "
+                        "Works in both auth modes."
+                    ),
+                },
                 "policy": {
                     "type": "object",
                     "properties": {
@@ -484,8 +530,7 @@ MANIFEST_SCHEMA_V2 = {
                                         "type": "string",
                                         "default": "user",
                                         "description": (
-                                            "Role for demo user in app "
-                                            "(default: 'user')"
+                                            "Role for demo user in app " "(default: 'user')"
                                         ),
                                     },
                                     "auto_create": {
@@ -567,6 +612,292 @@ MANIFEST_SCHEMA_V2 = {
                         "independent of platform authentication."
                     ),
                 },
+                "rate_limits": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "object",
+                        "properties": {
+                            "max_attempts": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "default": 5,
+                                "description": (
+                                    "Maximum attempts allowed in the time window " "(default: 5)."
+                                ),
+                            },
+                            "window_seconds": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "default": 300,
+                                "description": (
+                                    "Time window in seconds for rate limiting "
+                                    "(default: 300 = 5 minutes)."
+                                ),
+                            },
+                        },
+                        "additionalProperties": False,
+                    },
+                    "description": (
+                        "Rate limiting configuration for auth endpoints. "
+                        "Keys are endpoint paths (e.g., '/login', '/register'). "
+                        "Example: {'/login': {'max_attempts': 5, 'window_seconds': 300}}"
+                    ),
+                },
+                "audit": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": (
+                                "Enable audit logging for authentication events "
+                                "(default: true for shared auth mode)."
+                            ),
+                        },
+                        "retention_days": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "default": 90,
+                            "description": (
+                                "Number of days to retain audit logs " "(default: 90 days)."
+                            ),
+                        },
+                    },
+                    "additionalProperties": False,
+                    "description": (
+                        "Audit logging configuration for authentication events. "
+                        "Logs are stored in MongoDB with automatic TTL cleanup."
+                    ),
+                },
+                "csrf_protection": {
+                    "oneOf": [
+                        {"type": "boolean"},
+                        {
+                            "type": "object",
+                            "properties": {
+                                "enabled": {
+                                    "type": "boolean",
+                                    "default": True,
+                                    "description": (
+                                        "Enable CSRF protection "
+                                        "(default: true for shared auth mode)."
+                                    ),
+                                },
+                                "exempt_routes": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                    "description": (
+                                        "Routes exempt from CSRF validation. "
+                                        "Supports wildcards (e.g., '/api/*'). "
+                                        "Defaults to public_routes if not specified."
+                                    ),
+                                },
+                                "rotate_tokens": {
+                                    "type": "boolean",
+                                    "default": False,
+                                    "description": (
+                                        "Rotate CSRF token on each request "
+                                        "(more secure, less convenient). Default: false."
+                                    ),
+                                },
+                                "token_ttl": {
+                                    "type": "integer",
+                                    "minimum": 60,
+                                    "default": 3600,
+                                    "description": (
+                                        "CSRF token TTL in seconds " "(default: 3600 = 1 hour)."
+                                    ),
+                                },
+                            },
+                            "additionalProperties": False,
+                        },
+                    ],
+                    "default": True,
+                    "description": (
+                        "CSRF protection configuration. Auto-enabled for shared "
+                        "auth mode. Set to false to disable, or provide object "
+                        "for detailed configuration. Uses double-submit cookie "
+                        "pattern with SameSite=Lax cookies."
+                    ),
+                },
+                "security": {
+                    "type": "object",
+                    "properties": {
+                        "hsts": {
+                            "type": "object",
+                            "properties": {
+                                "enabled": {
+                                    "type": "boolean",
+                                    "default": True,
+                                    "description": (
+                                        "Enable HSTS header in production " "(default: true)."
+                                    ),
+                                },
+                                "max_age": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "default": 31536000,
+                                    "description": (
+                                        "HSTS max-age in seconds " "(default: 31536000 = 1 year)."
+                                    ),
+                                },
+                                "include_subdomains": {
+                                    "type": "boolean",
+                                    "default": True,
+                                    "description": (
+                                        "Include subdomains in HSTS policy " "(default: true)."
+                                    ),
+                                },
+                                "preload": {
+                                    "type": "boolean",
+                                    "default": False,
+                                    "description": (
+                                        "Add preload directive for HSTS preload "
+                                        "list submission (default: false). Only "
+                                        "enable if you're ready for permanent HTTPS."
+                                    ),
+                                },
+                            },
+                            "additionalProperties": False,
+                            "description": (
+                                "HTTP Strict Transport Security configuration. "
+                                "Forces HTTPS connections in production."
+                            ),
+                        },
+                    },
+                    "additionalProperties": False,
+                    "description": (
+                        "Security settings including HSTS, headers, and other " "security controls."
+                    ),
+                },
+                "jwt": {
+                    "type": "object",
+                    "properties": {
+                        "algorithm": {
+                            "type": "string",
+                            "enum": ["HS256", "RS256", "ES256"],
+                            "default": "HS256",
+                            "description": (
+                                "JWT signing algorithm. HS256 (HMAC, default) "
+                                "uses symmetric secret. RS256 (RSA) and ES256 "
+                                "(ECDSA) use asymmetric key pairs for better "
+                                "security in distributed systems."
+                            ),
+                        },
+                        "token_expiry_hours": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "default": 24,
+                            "description": ("JWT token expiry in hours (default: 24)."),
+                        },
+                    },
+                    "additionalProperties": False,
+                    "description": (
+                        "JWT configuration for shared auth mode. "
+                        "Controls algorithm and token lifetime."
+                    ),
+                },
+                "password_policy": {
+                    "type": "object",
+                    "properties": {
+                        "min_length": {
+                            "type": "integer",
+                            "minimum": 6,
+                            "default": 12,
+                            "description": ("Minimum password length (default: 12)."),
+                        },
+                        "min_entropy_bits": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "default": 50,
+                            "description": (
+                                "Minimum password entropy in bits "
+                                "(default: 50). Set to 0 to disable."
+                            ),
+                        },
+                        "require_uppercase": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": (
+                                "Require at least one uppercase letter " "(default: true)."
+                            ),
+                        },
+                        "require_lowercase": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": (
+                                "Require at least one lowercase letter " "(default: true)."
+                            ),
+                        },
+                        "require_numbers": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": ("Require at least one number " "(default: true)."),
+                        },
+                        "require_special": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": (
+                                "Require at least one special character " "(default: false)."
+                            ),
+                        },
+                        "check_common_passwords": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": (
+                                "Check against common password list " "(default: true)."
+                            ),
+                        },
+                        "check_breaches": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": (
+                                "Check against HaveIBeenPwned breach database "
+                                "(default: false). Requires network access."
+                            ),
+                        },
+                    },
+                    "additionalProperties": False,
+                    "description": (
+                        "Password policy configuration for shared auth mode. "
+                        "Enforces password strength requirements."
+                    ),
+                },
+                "session_binding": {
+                    "type": "object",
+                    "properties": {
+                        "bind_ip": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": (
+                                "Bind sessions to IP address. Strict mode: "
+                                "reject if IP changes (default: false)."
+                            ),
+                        },
+                        "bind_fingerprint": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": (
+                                "Bind sessions to device fingerprint. Soft mode: "
+                                "log warning if fingerprint changes (default: true)."
+                            ),
+                        },
+                        "allow_ip_change_with_reauth": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": (
+                                "Allow IP change if user re-authenticates "
+                                "(default: true). Only applies when bind_ip=true."
+                            ),
+                        },
+                    },
+                    "additionalProperties": False,
+                    "description": (
+                        "Session binding configuration. Ties sessions to client "
+                        "characteristics for additional security against session "
+                        "hijacking."
+                    ),
+                },
             },
             "additionalProperties": False,
             "description": (
@@ -590,17 +921,13 @@ MANIFEST_SCHEMA_V2 = {
                     "type": "integer",
                     "minimum": 60,
                     "default": 900,
-                    "description": (
-                        "Access token TTL in seconds " "(default: 900 = 15 minutes)."
-                    ),
+                    "description": ("Access token TTL in seconds " "(default: 900 = 15 minutes)."),
                 },
                 "refresh_token_ttl": {
                     "type": "integer",
                     "minimum": 3600,
                     "default": 604800,
-                    "description": (
-                        "Refresh token TTL in seconds " "(default: 604800 = 7 days)."
-                    ),
+                    "description": ("Refresh token TTL in seconds " "(default: 604800 = 7 days)."),
                 },
                 "token_rotation": {
                     "type": "boolean",
@@ -615,8 +942,7 @@ MANIFEST_SCHEMA_V2 = {
                     "minimum": 1,
                     "default": 10,
                     "description": (
-                        "Maximum number of concurrent sessions per user "
-                        "(default: 10)."
+                        "Maximum number of concurrent sessions per user " "(default: 10)."
                     ),
                 },
                 "session_inactivity_timeout": {
@@ -635,8 +961,7 @@ MANIFEST_SCHEMA_V2 = {
                             "type": "boolean",
                             "default": False,
                             "description": (
-                                "Require HTTPS in production "
-                                "(default: false, auto-detected)."
+                                "Require HTTPS in production " "(default: false, auto-detected)."
                             ),
                         },
                         "cookie_secure": {
@@ -718,9 +1043,7 @@ MANIFEST_SCHEMA_V2 = {
                                 },
                             },
                             "additionalProperties": False,
-                            "description": (
-                                "Rate limiting configuration per endpoint type."
-                            ),
+                            "description": ("Rate limiting configuration per endpoint type."),
                         },
                         "password_policy": {
                             "type": "object",
@@ -747,9 +1070,7 @@ MANIFEST_SCHEMA_V2 = {
                                 "require_lowercase": {
                                     "type": "boolean",
                                     "default": True,
-                                    "description": (
-                                        "Require lowercase letters " "(default: true)"
-                                    ),
+                                    "description": ("Require lowercase letters " "(default: true)"),
                                 },
                                 "require_numbers": {
                                     "type": "boolean",
@@ -774,24 +1095,21 @@ MANIFEST_SCHEMA_V2 = {
                                     "type": "boolean",
                                     "default": True,
                                     "description": (
-                                        "Enable session fingerprinting "
-                                        "(default: true)"
+                                        "Enable session fingerprinting " "(default: true)"
                                     ),
                                 },
                                 "validate_on_login": {
                                     "type": "boolean",
                                     "default": True,
                                     "description": (
-                                        "Validate fingerprint on login "
-                                        "(default: true)"
+                                        "Validate fingerprint on login " "(default: true)"
                                     ),
                                 },
                                 "validate_on_refresh": {
                                     "type": "boolean",
                                     "default": True,
                                     "description": (
-                                        "Validate fingerprint on token refresh "
-                                        "(default: true)"
+                                        "Validate fingerprint on token refresh " "(default: true)"
                                     ),
                                 },
                                 "validate_on_request": {
@@ -837,8 +1155,7 @@ MANIFEST_SCHEMA_V2 = {
                                     "minimum": 1,
                                     "default": 900,
                                     "description": (
-                                        "Lockout duration in seconds "
-                                        "(default: 900 = 15 minutes)"
+                                        "Lockout duration in seconds " "(default: 900 = 15 minutes)"
                                     ),
                                 },
                                 "reset_on_success": {
@@ -860,8 +1177,7 @@ MANIFEST_SCHEMA_V2 = {
                                     "type": "boolean",
                                     "default": False,
                                     "description": (
-                                        "Enable IP address validation "
-                                        "(default: false)"
+                                        "Enable IP address validation " "(default: false)"
                                     ),
                                 },
                                 "strict": {
@@ -876,8 +1192,7 @@ MANIFEST_SCHEMA_V2 = {
                                     "type": "boolean",
                                     "default": True,
                                     "description": (
-                                        "Allow IP address changes during session "
-                                        "(default: true)"
+                                        "Allow IP address changes during session " "(default: true)"
                                     ),
                                 },
                             },
@@ -897,9 +1212,7 @@ MANIFEST_SCHEMA_V2 = {
                                 "bind_to_device": {
                                     "type": "boolean",
                                     "default": True,
-                                    "description": (
-                                        "Bind tokens to device ID " "(default: true)"
-                                    ),
+                                    "description": ("Bind tokens to device ID " "(default: true)"),
                                 },
                             },
                             "additionalProperties": False,
@@ -913,8 +1226,7 @@ MANIFEST_SCHEMA_V2 = {
                     "type": "boolean",
                     "default": True,
                     "description": (
-                        "Automatically set up token management on app startup "
-                        "(default: true)."
+                        "Automatically set up token management on app startup " "(default: true)."
                     ),
                 },
             },
@@ -946,9 +1258,7 @@ MANIFEST_SCHEMA_V2 = {
         },
         "collection_settings": {
             "type": "object",
-            "patternProperties": {
-                "^[a-zA-Z0-9_]+$": {"$ref": "#/definitions/collectionSettings"}
-            },
+            "patternProperties": {"^[a-zA-Z0-9_]+$": {"$ref": "#/definitions/collectionSettings"}},
             "description": "Collection name -> collection settings",
         },
         "websockets": {
@@ -996,8 +1306,7 @@ MANIFEST_SCHEMA_V2 = {
                         "description": {
                             "type": "string",
                             "description": (
-                                "Description of what this WebSocket endpoint "
-                                "is used for"
+                                "Description of what this WebSocket endpoint " "is used for"
                             ),
                         },
                         "ping_interval": {
@@ -1210,8 +1519,7 @@ MANIFEST_SCHEMA_V2 = {
                     "type": "boolean",
                     "default": False,
                     "description": (
-                        "Allow credentials (cookies, authorization headers) "
-                        "in CORS requests"
+                        "Allow credentials (cookies, authorization headers) " "in CORS requests"
                     ),
                 },
                 "allow_methods": {
@@ -1270,8 +1578,7 @@ MANIFEST_SCHEMA_V2 = {
                 "write_scope": {
                     "type": "string",
                     "description": (
-                        "App slug this app writes to. "
-                        "Defaults to app_slug if not specified."
+                        "App slug this app writes to. " "Defaults to app_slug if not specified."
                     ),
                 },
                 "cross_app_policy": {
@@ -1330,8 +1637,7 @@ MANIFEST_SCHEMA_V2 = {
                             "type": "boolean",
                             "default": True,
                             "description": (
-                                "Collect operation-level metrics "
-                                "(duration, errors, etc.)"
+                                "Collect operation-level metrics " "(duration, errors, etc.)"
                             ),
                         },
                         "collect_performance_metrics": {
@@ -1491,8 +1797,7 @@ MANIFEST_SCHEMA_V2 = {
                 "definition": {
                     "type": "object",
                     "description": (
-                        "Index definition (required for vectorSearch and "
-                        "search indexes)"
+                        "Index definition (required for vectorSearch and " "search indexes)"
                     ),
                 },
                 "hybrid": {
@@ -1505,8 +1810,7 @@ MANIFEST_SCHEMA_V2 = {
                                     "type": "string",
                                     "pattern": "^[a-zA-Z0-9_]+$",
                                     "description": (
-                                        "Name for the vector index "
-                                        "(defaults to '{name}_vector')"
+                                        "Name for the vector index " "(defaults to '{name}_vector')"
                                     ),
                                 },
                                 "definition": {
@@ -1528,8 +1832,7 @@ MANIFEST_SCHEMA_V2 = {
                                     "type": "string",
                                     "pattern": "^[a-zA-Z0-9_]+$",
                                     "description": (
-                                        "Name for the text index "
-                                        "(defaults to '{name}_text')"
+                                        "Name for the text index " "(defaults to '{name}_text')"
                                     ),
                                 },
                                 "definition": {
@@ -1610,9 +1913,7 @@ MANIFEST_SCHEMA_V2 = {
                     "then": {"required": ["keys", "options"]},
                     "else": {
                         "properties": {
-                            "options": {
-                                "not": {"required": ["partialFilterExpression"]}
-                            }
+                            "options": {"not": {"required": ["partialFilterExpression"]}}
                         }
                     },
                 },
@@ -1838,9 +2139,7 @@ def migrate_manifest(
 
         # No data transformation needed - V2.0 is backward compatible
         # New fields (auth, etc.) are optional
-        logger.debug(
-            f"Migrated manifest from 1.0 to 2.0: {migrated.get('slug', 'unknown')}"
-        )
+        logger.debug(f"Migrated manifest from 1.0 to 2.0: {migrated.get('slug', 'unknown')}")
 
     # Future: Add more migration paths as needed
     # Example: 2.0 -> 3.0, etc.
@@ -1876,8 +2175,7 @@ def get_schema_for_version(version: str) -> Dict[str, Any]:
 
     # Fallback to current
     logger.warning(
-        f"Schema version {version} not found, using current version "
-        f"{CURRENT_SCHEMA_VERSION}"
+        f"Schema version {version} not found, using current version " f"{CURRENT_SCHEMA_VERSION}"
     )
     return SCHEMA_REGISTRY[CURRENT_SCHEMA_VERSION]
 
@@ -1910,9 +2208,7 @@ async def _validate_manifest_async(
     # Check cache first
     cache_key = None
     if use_cache:
-        cache_key = (
-            _get_manifest_hash(manifest_data) + "_" + get_schema_version(manifest_data)
-        )
+        cache_key = _get_manifest_hash(manifest_data) + "_" + get_schema_version(manifest_data)
         if cache_key in _validation_cache:
             return _validation_cache[cache_key]
 
@@ -1971,11 +2267,7 @@ async def _validate_manifest_async(
         error_message = f"Invalid schema definition: {e.message}"
         result = (False, error_message, ["schema"])
         if use_cache:
-            cache_key = (
-                _get_manifest_hash(manifest_data)
-                + "_"
-                + get_schema_version(manifest_data)
-            )
+            cache_key = _get_manifest_hash(manifest_data) + "_" + get_schema_version(manifest_data)
             _validation_cache[cache_key] = result
 
         return result
@@ -1985,9 +2277,7 @@ async def _validate_manifest_async(
         error_paths = []
         error_messages = []
         if isinstance(e, ValidationError):
-            error_paths = [
-                f".{'.'.join(str(p) for p in error.path)}" for error in e.context or [e]
-            ]
+            error_paths = [f".{'.'.join(str(p) for p in error.path)}" for error in e.context or [e]]
             error_messages = [error.message for error in e.context or [e]]
         else:
             error_messages = [str(e)]
@@ -1995,11 +2285,7 @@ async def _validate_manifest_async(
         error_message = "; ".join(error_messages) if error_messages else str(e)
         result = (False, error_message, error_paths if error_paths else None)
         if use_cache:
-            cache_key = (
-                _get_manifest_hash(manifest_data)
-                + "_"
-                + get_schema_version(manifest_data)
-            )
+            cache_key = _get_manifest_hash(manifest_data) + "_" + get_schema_version(manifest_data)
             _validation_cache[cache_key] = result
 
         return result
@@ -2009,11 +2295,7 @@ async def _validate_manifest_async(
         logger.exception("Unexpected error during manifest validation")
         result = (False, error_message, None)
         if use_cache:
-            cache_key = (
-                _get_manifest_hash(manifest_data)
-                + "_"
-                + get_schema_version(manifest_data)
-            )
+            cache_key = _get_manifest_hash(manifest_data) + "_" + get_schema_version(manifest_data)
             _validation_cache[cache_key] = result
 
         return result
@@ -2042,27 +2324,21 @@ async def validate_manifests_parallel(
     """
 
     async def validate_one(
-        manifest: Dict[str, Any]
+        manifest: Dict[str, Any],
     ) -> Tuple[bool, Optional[str], Optional[List[str]], Optional[str]]:
         slug = manifest.get("slug", "unknown")
-        is_valid, error, paths = await _validate_manifest_async(
-            manifest, use_cache=use_cache
-        )
+        is_valid, error, paths = await _validate_manifest_async(manifest, use_cache=use_cache)
         return (is_valid, error, paths, slug)
 
     # Run validations in parallel
-    results = await asyncio.gather(
-        *[validate_one(m) for m in manifests], return_exceptions=True
-    )
+    results = await asyncio.gather(*[validate_one(m) for m in manifests], return_exceptions=True)
 
     # Handle exceptions
     validated_results = []
     for i, result in enumerate(results):
         if isinstance(result, Exception):
             slug = manifests[i].get("slug", "unknown")
-            validated_results.append(
-                (False, f"Validation error: {str(result)}", None, slug)
-            )
+            validated_results.append((False, f"Validation error: {str(result)}", None, slug))
         else:
             validated_results.append(result)
 
@@ -2108,9 +2384,7 @@ async def validate_developer_id(
                     f"developer_id '{developer_id}' does not exist or does not have developer role",
                 )
         except (ValueError, TypeError, AttributeError) as e:
-            logger.exception(
-                f"Validation error validating developer_id '{developer_id}'"
-            )
+            logger.exception(f"Validation error validating developer_id '{developer_id}'")
             return False, f"Error validating developer_id: {e}"
 
     return True, None
@@ -2190,15 +2464,11 @@ def validate_manifest(
 
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 future = executor.submit(
-                    lambda: asyncio.run(
-                        _validate_manifest_async(manifest_data, use_cache)
-                    )
+                    lambda: asyncio.run(_validate_manifest_async(manifest_data, use_cache))
                 )
                 return future.result()
         else:
-            return loop.run_until_complete(
-                _validate_manifest_async(manifest_data, use_cache)
-            )
+            return loop.run_until_complete(_validate_manifest_async(manifest_data, use_cache))
     except RuntimeError:
         # No event loop, create one
         return asyncio.run(_validate_manifest_async(manifest_data, use_cache))
@@ -2222,8 +2492,7 @@ def _validate_regular_index(
     ):
         return (
             False,
-            f"Regular index '{index_name}' in collection "
-            f"'{collection_name}' has empty 'keys'",
+            f"Regular index '{index_name}' in collection " f"'{collection_name}' has empty 'keys'",
         )
 
     # Check for _id index
@@ -2250,8 +2519,7 @@ def _validate_ttl_index(
     if "keys" not in index_def:
         return (
             False,
-            f"TTL index '{index_name}' in collection '{collection_name}' "
-            f"requires 'keys' field",
+            f"TTL index '{index_name}' in collection '{collection_name}' " f"requires 'keys' field",
         )
     options = index_def.get("options", {})
     if "expireAfterSeconds" not in options:
@@ -2341,9 +2609,7 @@ def _validate_geospatial_index(
     if isinstance(keys, dict):
         has_geo = any(v in ["2dsphere", "2d", "geoHaystack"] for v in keys.values())
     elif isinstance(keys, list):
-        has_geo = any(
-            len(k) >= 2 and k[1] in ["2dsphere", "2d", "geoHaystack"] for k in keys
-        )
+        has_geo = any(len(k) >= 2 and k[1] in ["2dsphere", "2d", "geoHaystack"] for k in keys)
     if not has_geo:
         return (
             False,
@@ -2484,8 +2750,7 @@ def validate_index_definition(
     if not index_type:
         return (
             False,
-            f"Index '{index_name}' in collection '{collection_name}' "
-            f"is missing 'type' field",
+            f"Index '{index_name}' in collection '{collection_name}' " f"is missing 'type' field",
         )
 
     # Type-specific validation
@@ -2500,9 +2765,7 @@ def validate_index_definition(
     elif index_type == "geospatial":
         return _validate_geospatial_index(index_def, collection_name, index_name)
     elif index_type in ("vectorSearch", "search"):
-        return _validate_vector_search_index(
-            index_def, collection_name, index_name, index_type
-        )
+        return _validate_vector_search_index(index_def, collection_name, index_name, index_type)
     elif index_type == "hybrid":
         return _validate_hybrid_index(index_def, collection_name, index_name)
     else:
@@ -2514,7 +2777,7 @@ def validate_index_definition(
 
 
 def validate_managed_indexes(
-    managed_indexes: Dict[str, List[Dict[str, Any]]]
+    managed_indexes: Dict[str, List[Dict[str, Any]]],
 ) -> Tuple[bool, Optional[str]]:
     """
     Validate all managed indexes with collection and index context.
@@ -2552,9 +2815,7 @@ def validate_managed_indexes(
                 )
 
             index_name = index_def.get("name", f"index_{idx}")
-            is_valid, error_msg = validate_index_definition(
-                index_def, collection_name, index_name
-            )
+            is_valid, error_msg = validate_index_definition(index_def, collection_name, index_name)
             if not is_valid:
                 return False, error_msg
 
@@ -2636,13 +2897,11 @@ class ManifestValidator:
         Returns:
             Tuple of (is_valid, error_message, error_paths)
         """
-        return await validate_manifest_with_db(
-            manifest, db_validator, use_cache=use_cache
-        )
+        return await validate_manifest_with_db(manifest, db_validator, use_cache=use_cache)
 
     @staticmethod
     def validate_managed_indexes(
-        managed_indexes: Dict[str, List[Dict[str, Any]]]
+        managed_indexes: Dict[str, List[Dict[str, Any]]],
     ) -> Tuple[bool, Optional[str]]:
         """
         Validate managed indexes configuration.
@@ -2756,17 +3015,13 @@ class ManifestParser:
         if validate:
             is_valid, error, paths = ManifestValidator.validate(manifest_data)
             if not is_valid:
-                error_path_str = (
-                    f" (errors in: {', '.join(paths[:3])})" if paths else ""
-                )
+                error_path_str = f" (errors in: {', '.join(paths[:3])})" if paths else ""
                 raise ValueError(f"Manifest validation failed: {error}{error_path_str}")
 
         return manifest_data
 
     @staticmethod
-    async def load_from_dict(
-        data: Dict[str, Any], validate: bool = True
-    ) -> Dict[str, Any]:
+    async def load_from_dict(data: Dict[str, Any], validate: bool = True) -> Dict[str, Any]:
         """
         Load and validate manifest from dictionary.
 
@@ -2784,9 +3039,7 @@ class ManifestParser:
         if validate:
             is_valid, error, paths = ManifestValidator.validate(data)
             if not is_valid:
-                error_path_str = (
-                    f" (errors in: {', '.join(paths[:3])})" if paths else ""
-                )
+                error_path_str = f" (errors in: {', '.join(paths[:3])})" if paths else ""
                 raise ValueError(f"Manifest validation failed: {error}{error_path_str}")
 
         return data.copy()

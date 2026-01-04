@@ -11,8 +11,12 @@ import logging
 from typing import Any, Dict, List
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
-from pymongo.errors import (CollectionInvalid, ConnectionFailure,
-                            OperationFailure, ServerSelectionTimeoutError)
+from pymongo.errors import (
+    CollectionInvalid,
+    ConnectionFailure,
+    OperationFailure,
+    ServerSelectionTimeoutError,
+)
 
 # Import constants
 from ..constants import INDEX_TYPE_REGULAR, INDEX_TYPE_TTL, MIN_TTL_SECONDS
@@ -25,8 +29,12 @@ except ImportError:
     logging.warning("AsyncAtlasIndexManager not available")
 
 # Import helper functions
-from .helpers import (check_and_update_index, is_id_index, normalize_keys,
-                      validate_index_definition_basic)
+from .helpers import (
+    check_and_update_index,
+    is_id_index,
+    normalize_keys,
+    validate_index_definition_basic,
+)
 
 # Check if index manager is available
 INDEX_MANAGER_AVAILABLE = AsyncAtlasIndexManager is not None
@@ -48,10 +56,7 @@ async def _handle_regular_index(
     is_valid, error_msg = validate_index_definition_basic(
         index_def, index_name, ["keys"], log_prefix
     )
-    logger.info(
-        f"{log_prefix} Validation result: is_valid={is_valid}, "
-        f"error_msg={error_msg}"
-    )
+    logger.info(f"{log_prefix} Validation result: is_valid={is_valid}, " f"error_msg={error_msg}")
     if not is_valid:
         logger.error(f"{log_prefix} ❌ Validation failed: {error_msg}")
         return
@@ -78,8 +83,7 @@ async def _handle_regular_index(
         index_manager, index_name, keys, options, log_prefix
     )
     logger.debug(
-        f"{log_prefix} Index exists check result: exists={exists}, "
-        f"existing={existing}"
+        f"{log_prefix} Index exists check result: exists={exists}, " f"existing={existing}"
     )
 
     if exists and existing:
@@ -113,8 +117,7 @@ async def _handle_regular_index(
 
             if verify_index:
                 logger.info(
-                    f"{log_prefix} ✅ Verified index '{index_name}' exists "
-                    f"after {waited:.1f}s."
+                    f"{log_prefix} ✅ Verified index '{index_name}' exists " f"after {waited:.1f}s."
                 )
                 break
 
@@ -168,11 +171,7 @@ async def _handle_ttl_index(
 
     options = index_def.get("options", {})
     expire_after = options.get("expireAfterSeconds")
-    if (
-        not expire_after
-        or not isinstance(expire_after, int)
-        or expire_after < MIN_TTL_SECONDS
-    ):
+    if not expire_after or not isinstance(expire_after, int) or expire_after < MIN_TTL_SECONDS:
         logger.warning(
             f"{log_prefix} TTL index '{index_name}' missing or "
             f"invalid 'expireAfterSeconds' in options. "
@@ -290,15 +289,9 @@ async def _handle_text_index(
         text_keys = keys
 
     has_text = any(
-        (
-            isinstance(k, list)
-            and len(k) >= 2
-            and (k[1] == "text" or k[1] == "TEXT" or k[1] == 1)
-        )
+        (isinstance(k, list) and len(k) >= 2 and (k[1] == "text" or k[1] == "TEXT" or k[1] == 1))
         or (
-            isinstance(k, tuple)
-            and len(k) >= 2
-            and (k[1] == "text" or k[1] == "TEXT" or k[1] == 1)
+            isinstance(k, tuple) and len(k) >= 2 and (k[1] == "text" or k[1] == "TEXT" or k[1] == 1)
         )
         for k in text_keys
     ) or any(
@@ -335,9 +328,7 @@ async def _handle_text_index(
             logger.info(f"{log_prefix} Text index '{index_name}' matches; skipping.")
             return
 
-    logger.info(
-        f"{log_prefix} Creating text index '{index_name}' on field(s) {text_keys}..."
-    )
+    logger.info(f"{log_prefix} Creating text index '{index_name}' on field(s) {text_keys}...")
     await index_manager.create_index(text_keys, **options)
     logger.info(f"{log_prefix} ✔️ Created text index '{index_name}'.")
 
@@ -369,9 +360,7 @@ async def _handle_geospatial_index(
         (isinstance(k, list) and len(k) >= 2 and k[1] in geo_types)
         or (isinstance(k, tuple) and len(k) >= 2 and k[1] in geo_types)
         for k in geo_keys
-    ) or any(
-        v in geo_types for k, v in (keys.items() if isinstance(keys, dict) else [])
-    )
+    ) or any(v in geo_types for k, v in (keys.items() if isinstance(keys, dict) else []))
 
     if not has_geo:
         logger.warning(
@@ -399,14 +388,11 @@ async def _handle_geospatial_index(
             )
             await index_manager.drop_index(index_name)
         else:
-            logger.info(
-                f"{log_prefix} Geospatial index '{index_name}' matches; skipping."
-            )
+            logger.info(f"{log_prefix} Geospatial index '{index_name}' matches; skipping.")
             return
 
     logger.info(
-        f"{log_prefix} Creating geospatial index '{index_name}' "
-        f"on field(s) {geo_keys}..."
+        f"{log_prefix} Creating geospatial index '{index_name}' " f"on field(s) {geo_keys}..."
     )
     await index_manager.create_index(geo_keys, **options)
     logger.info(f"{log_prefix} ✔️ Created geospatial index '{index_name}'.")
@@ -447,21 +433,14 @@ async def _handle_search_index(
         )
     existing_index = await index_manager.get_search_index(index_name)
     if existing_index:
-        current_def = existing_index.get(
-            "latestDefinition", existing_index.get("definition")
-        )
+        current_def = existing_index.get("latestDefinition", existing_index.get("definition"))
         normalized_current = normalize_json_def(current_def)
         normalized_expected = normalize_json_def(definition)
 
         if normalized_current == normalized_expected:
             logger.info(f"{log_prefix} Search index '{index_name}' definition matches.")
-            if (
-                not existing_index.get("queryable")
-                and existing_index.get("status") != "FAILED"
-            ):
-                logger.info(
-                    f"{log_prefix} Index '{index_name}' not queryable yet; waiting."
-                )
+            if not existing_index.get("queryable") and existing_index.get("status") != "FAILED":
+                logger.info(f"{log_prefix} Index '{index_name}' not queryable yet; waiting.")
                 await index_manager._wait_for_search_index_ready(
                     index_name, index_manager.DEFAULT_SEARCH_TIMEOUT
                 )
@@ -479,13 +458,10 @@ async def _handle_search_index(
                 logger.info(f"{log_prefix} Index '{index_name}' is ready.")
         else:
             logger.warning(
-                f"{log_prefix} Search index '{index_name}' "
-                f"definition changed; updating."
+                f"{log_prefix} Search index '{index_name}' " f"definition changed; updating."
             )
             current_fields = (
-                normalized_current.get("fields", [])
-                if isinstance(normalized_current, dict)
-                else []
+                normalized_current.get("fields", []) if isinstance(normalized_current, dict) else []
             )
             expected_fields = (
                 normalized_expected.get("fields", [])
@@ -493,12 +469,8 @@ async def _handle_search_index(
                 else []
             )
 
-            current_paths = [
-                f.get("path", "?") for f in current_fields if isinstance(f, dict)
-            ]
-            expected_paths = [
-                f.get("path", "?") for f in expected_fields if isinstance(f, dict)
-            ]
+            current_paths = [f.get("path", "?") for f in current_fields if isinstance(f, dict)]
+            expected_paths = [f.get("path", "?") for f in expected_fields if isinstance(f, dict)]
 
             logger.info(f"{log_prefix} Current index filter fields: {current_paths}")
             logger.info(f"{log_prefix} Expected index filter fields: {expected_paths}")
@@ -588,8 +560,7 @@ async def _handle_hybrid_index(
 
     # Process vector index
     logger.info(
-        f"{log_prefix} Processing vector index '{vector_index_name}' "
-        f"for hybrid search..."
+        f"{log_prefix} Processing vector index '{vector_index_name}' " f"for hybrid search..."
     )
     existing_vector_index = await index_manager.get_search_index(vector_index_name)
     if existing_vector_index:
@@ -600,9 +571,7 @@ async def _handle_hybrid_index(
         normalized_expected_vector = normalize_json_def(vector_definition)
 
         if normalized_current_vector == normalized_expected_vector:
-            logger.info(
-                f"{log_prefix} Vector index '{vector_index_name}' definition matches."
-            )
+            logger.info(f"{log_prefix} Vector index '{vector_index_name}' definition matches.")
             if (
                 not existing_vector_index.get("queryable")
                 and existing_vector_index.get("status") != "FAILED"
@@ -614,9 +583,7 @@ async def _handle_hybrid_index(
                 await index_manager._wait_for_search_index_ready(
                     vector_index_name, index_manager.DEFAULT_SEARCH_TIMEOUT
                 )
-                logger.info(
-                    f"{log_prefix} Vector index '{vector_index_name}' now ready."
-                )
+                logger.info(f"{log_prefix} Vector index '{vector_index_name}' now ready.")
             elif existing_vector_index.get("status") == "FAILED":
                 logger.error(
                     f"{log_prefix} Vector index '{vector_index_name}' "
@@ -624,13 +591,10 @@ async def _handle_hybrid_index(
                     f"Check Atlas UI for detailed error messages."
                 )
             else:
-                logger.info(
-                    f"{log_prefix} Vector index '{vector_index_name}' is ready."
-                )
+                logger.info(f"{log_prefix} Vector index '{vector_index_name}' is ready.")
         else:
             logger.warning(
-                f"{log_prefix} Vector index '{vector_index_name}' "
-                f"definition changed; updating."
+                f"{log_prefix} Vector index '{vector_index_name}' " f"definition changed; updating."
             )
             # Type 4: Let index update errors bubble up to framework handler
             await index_manager.update_search_index(
@@ -639,8 +603,7 @@ async def _handle_hybrid_index(
                 wait_for_ready=True,
             )
             logger.info(
-                f"{log_prefix} ✔️ Successfully updated vector index "
-                f"'{vector_index_name}'."
+                f"{log_prefix} ✔️ Successfully updated vector index " f"'{vector_index_name}'."
             )
     else:
         logger.info(f"{log_prefix} Creating new vector index '{vector_index_name}'...")
@@ -653,10 +616,7 @@ async def _handle_hybrid_index(
         logger.info(f"{log_prefix} ✔️ Created vector index '{vector_index_name}'.")
 
     # Process text index
-    logger.info(
-        f"{log_prefix} Processing text index '{text_index_name}' "
-        f"for hybrid search..."
-    )
+    logger.info(f"{log_prefix} Processing text index '{text_index_name}' " f"for hybrid search...")
     existing_text_index = await index_manager.get_search_index(text_index_name)
     if existing_text_index:
         current_text_def = existing_text_index.get(
@@ -666,16 +626,13 @@ async def _handle_hybrid_index(
         normalized_expected_text = normalize_json_def(text_definition)
 
         if normalized_current_text == normalized_expected_text:
-            logger.info(
-                f"{log_prefix} Text index '{text_index_name}' definition matches."
-            )
+            logger.info(f"{log_prefix} Text index '{text_index_name}' definition matches.")
             if (
                 not existing_text_index.get("queryable")
                 and existing_text_index.get("status") != "FAILED"
             ):
                 logger.info(
-                    f"{log_prefix} Text index '{text_index_name}' "
-                    f"not queryable yet; waiting."
+                    f"{log_prefix} Text index '{text_index_name}' " f"not queryable yet; waiting."
                 )
                 await index_manager._wait_for_search_index_ready(
                     text_index_name, index_manager.DEFAULT_SEARCH_TIMEOUT
@@ -690,8 +647,7 @@ async def _handle_hybrid_index(
                 logger.info(f"{log_prefix} Text index '{text_index_name}' is ready.")
         else:
             logger.warning(
-                f"{log_prefix} Text index '{text_index_name}' "
-                f"definition changed; updating."
+                f"{log_prefix} Text index '{text_index_name}' " f"definition changed; updating."
             )
             # Type 4: Let index update errors bubble up to framework handler
             await index_manager.update_search_index(
@@ -699,10 +655,7 @@ async def _handle_hybrid_index(
                 definition=text_definition,
                 wait_for_ready=True,
             )
-            logger.info(
-                f"{log_prefix} ✔️ Successfully updated text index "
-                f"'{text_index_name}'."
-            )
+            logger.info(f"{log_prefix} ✔️ Successfully updated text index " f"'{text_index_name}'.")
     else:
         logger.info(f"{log_prefix} Creating new text index '{text_index_name}'...")
         await index_manager.create_search_index(
@@ -758,20 +711,16 @@ async def run_index_creation_for_collection(
             # Try to create the collection explicitly
             await db.create_collection(collection_name)
             logger.debug(
-                f"{log_prefix} Created collection '{collection_name}' "
-                f"for index operations."
+                f"{log_prefix} Created collection '{collection_name}' " f"for index operations."
             )
         except CollectionInvalid as e:
             if "already exists" in str(e).lower():
                 # Collection already exists, which is fine
-                logger.debug(
-                    f"{log_prefix} Collection '{collection_name}' already exists."
-                )
+                logger.debug(f"{log_prefix} Collection '{collection_name}' already exists.")
             else:
                 # Some other CollectionInvalid error - log but continue
                 logger.warning(
-                    f"{log_prefix} CollectionInvalid when ensuring collection "
-                    f"exists: {e}"
+                    f"{log_prefix} CollectionInvalid when ensuring collection " f"exists: {e}"
                 )
         except (
             OperationFailure,
@@ -794,8 +743,7 @@ async def run_index_creation_for_collection(
                 ServerSelectionTimeoutError,
             ) as ensure_error:
                 logger.warning(
-                    f"{log_prefix} Could not ensure collection exists: "
-                    f"{ensure_error}"
+                    f"{log_prefix} Could not ensure collection exists: " f"{ensure_error}"
                 )
 
         index_manager = AsyncAtlasIndexManager(real_collection)
@@ -832,37 +780,25 @@ async def run_index_creation_for_collection(
         index_type = index_def.get("type")
         try:
             if index_type == INDEX_TYPE_REGULAR:
-                await _handle_regular_index(
-                    index_manager, index_def, index_name, log_prefix
-                )
+                await _handle_regular_index(index_manager, index_def, index_name, log_prefix)
                 # Wait for index to be ready after creation
                 import asyncio
 
                 await asyncio.sleep(0.5)  # Give MongoDB time to make index visible
             elif index_type == INDEX_TYPE_TTL:
-                await _handle_ttl_index(
-                    index_manager, index_def, index_name, log_prefix
-                )
+                await _handle_ttl_index(index_manager, index_def, index_name, log_prefix)
             elif index_type == "partial":
-                await _handle_partial_index(
-                    index_manager, index_def, index_name, log_prefix
-                )
+                await _handle_partial_index(index_manager, index_def, index_name, log_prefix)
             elif index_type == "text":
-                await _handle_text_index(
-                    index_manager, index_def, index_name, log_prefix
-                )
+                await _handle_text_index(index_manager, index_def, index_name, log_prefix)
             elif index_type == "geospatial":
-                await _handle_geospatial_index(
-                    index_manager, index_def, index_name, log_prefix
-                )
+                await _handle_geospatial_index(index_manager, index_def, index_name, log_prefix)
             elif index_type in ("vectorSearch", "search"):
                 await _handle_search_index(
                     index_manager, index_def, index_name, index_type, slug, log_prefix
                 )
             elif index_type == "hybrid":
-                await _handle_hybrid_index(
-                    index_manager, index_def, index_name, slug, log_prefix
-                )
+                await _handle_hybrid_index(index_manager, index_def, index_name, slug, log_prefix)
             else:
                 from ..constants import SUPPORTED_INDEX_TYPES
 

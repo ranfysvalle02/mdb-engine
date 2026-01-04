@@ -2,7 +2,77 @@
 
 This directory contains example applications demonstrating how to use MDB_ENGINE. **All examples follow best practices and use mdb-engine abstractions consistently.**
 
+---
+
+## When to Use What
+
+### Choose Your Pattern
+
+| If you need... | Use this | Example |
+|----------------|----------|---------|
+| **Simple single app** | `engine.create_app()` | [simple_app](./simple_app/) |
+| **Custom FastAPI setup** | Manual `initialize()`/`shutdown()` | [hello_world](./hello_world/) |
+| **Multiple apps with SSO** | Shared auth mode | [multi_app_shared](./multi_app_shared/) |
+| **Multiple apps (isolated auth)** | Multi-app with `read_scopes` | [multi_app](./multi_app/) |
+| **Authorization/permissions** | OSO or Casbin from manifest | [oso_hello_world](./oso_hello_world/) |
+| **Vector search/RAG** | EmbeddingService + Atlas Search | [interactive_rag](./interactive_rag/) |
+| **Distributed processing** | `enable_ray=True` | [simple_app](./simple_app/) |
+
+### Feature Decision Tree
+
+```
+Do you need a FastAPI web app?
+├── YES → Do you need custom middleware or complex setup?
+│         ├── YES → Use manual pattern with on_event("startup")
+│         └── NO  → Use engine.create_app() ⭐ RECOMMENDED
+│
+└── NO  → Use engine directly:
+          await engine.initialize()
+          db = engine.get_scoped_db("my_app")
+```
+
+### When to Enable Features
+
+| Feature | Enable When... | How |
+|---------|---------------|-----|
+| **Ray** | Heavy computation, distributed processing, isolated actors | `enable_ray=True` |
+| **Multi-site** | Multiple apps need to share data securely | `read_scopes` in manifest |
+| **Shared Auth (SSO)** | Multi-app with single sign-on | `"auth": {"mode": "shared"}` in manifest |
+| **Per-App Auth** | Isolated auth per app (default) | `"auth": {"mode": "app"}` in manifest |
+| **App Secrets** | Production deployment, need encrypted tokens | Set `MDB_ENGINE_MASTER_KEY` |
+| **OSO Auth** | Fine-grained permission rules | `"provider": "oso"` in manifest |
+| **Casbin Auth** | RBAC with simple roles | `"provider": "casbin"` in manifest |
+| **Memory Service** | AI chat with persistent memory | `memory_config` in manifest |
+| **Embeddings** | Semantic search, RAG applications | `embedding_config` in manifest |
+
+---
+
 ## Available Examples
+
+### [Simple App](./simple_app/) ⭐ Start Here
+
+A minimal task management app demonstrating the **unified MongoDBEngine pattern** with `create_app()`:
+
+```python
+from mdb_engine import MongoDBEngine
+from pathlib import Path
+
+engine = MongoDBEngine(mongo_uri="...", db_name="...")
+app = engine.create_app(slug="my_app", manifest=Path("manifest.json"))
+```
+
+- Automatic lifecycle management (no startup/shutdown boilerplate)
+- Scoped database access with `get_scoped_db()`
+- Manifest-driven indexes
+- Optional Ray support
+
+**Perfect for:** Getting started with the recommended pattern
+
+**Run it:**
+```bash
+cd simple_app
+docker-compose up --build
+```
 
 ### [Hello World](./hello_world/)
 
@@ -66,12 +136,13 @@ A demonstration of:
 ### [Multi-App](./multi_app/)
 
 An advanced example demonstrating:
+- **Unified MongoDBEngine pattern** with `create_app()`
 - Secure cross-app data access with app-level authentication
 - Envelope encryption for app secrets
 - Manifest-level authorization via `read_scopes`
+- Automatic app token retrieval
 - OSO authorization for fine-grained access control
 - Docker Compose orchestration of multiple apps
-- Two-phase startup for secret management
 
 **Perfect for:** Understanding multi-tenant security and cross-app access patterns
 
@@ -80,6 +151,39 @@ An advanced example demonstrating:
 cd multi_app
 ./scripts/setup.sh
 docker-compose up
+```
+
+### [Multi-App Shared Auth](./multi_app_shared/) 🆕
+
+SSO (Single Sign-On) example with shared user pool across multiple apps:
+
+```python
+# In manifest.json
+{
+  "auth": {
+    "mode": "shared",
+    "roles": ["viewer", "editor", "admin"],
+    "require_role": "viewer"
+  }
+}
+```
+
+Demonstrates:
+- **Shared auth mode** (`auth.mode="shared"`)
+- Single Sign-On across apps
+- Per-app role requirements
+- Auto-configured `SharedAuthMiddleware`
+- Cross-app data access with SSO
+
+**Perfect for:** Building platforms with SSO, multi-app user management
+
+**Run it:**
+```bash
+cd multi_app_shared
+docker-compose up --build
+# Visit:
+#   Click Tracker: http://localhost:8000 (viewer role)
+#   Dashboard: http://localhost:8001 (editor role required)
 ```
 
 ## Docker Compose Setup
@@ -266,6 +370,22 @@ await db.collection.find_one({})
 7. **Embedding Service**: Provider-agnostic embeddings via EmbeddingService
 
 ### Common Patterns
+
+#### Pattern 0: Unified create_app() (Recommended)
+```python
+from mdb_engine import MongoDBEngine
+from pathlib import Path
+
+engine = MongoDBEngine(mongo_uri="...", db_name="...")
+
+# Automatic lifecycle management - no startup/shutdown boilerplate
+app = engine.create_app(slug="my_app", manifest=Path("manifest.json"))
+
+@app.get("/items")
+async def get_items():
+    db = engine.get_scoped_db("my_app")
+    return await db.items.find({}).to_list(10)
+```
 
 #### Pattern 1: App-Scoped Data (Most Common)
 ```python

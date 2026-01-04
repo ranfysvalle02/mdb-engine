@@ -11,8 +11,11 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 try:
-    from pymongo.errors import (ConnectionFailure, OperationFailure,
-                                ServerSelectionTimeoutError)
+    from pymongo.errors import (
+        ConnectionFailure,
+        OperationFailure,
+        ServerSelectionTimeoutError,
+    )
 except ImportError:
     ConnectionFailure = Exception
     OperationFailure = Exception
@@ -54,9 +57,7 @@ class TokenBlacklist:
 
         try:
             # Create unique index on jti
-            await self.collection.create_index(
-                "jti", unique=True, name="jti_unique_idx"
-            )
+            await self.collection.create_index("jti", unique=True, name="jti_unique_idx")
 
             # Create TTL index on expires_at (auto-delete expired entries)
             await self.collection.create_index(
@@ -110,9 +111,7 @@ class TokenBlacklist:
             }
 
             # Use upsert to handle duplicate jti gracefully
-            await self.collection.update_one(
-                {"jti": jti}, {"$set": blacklist_entry}, upsert=True
-            )
+            await self.collection.update_one({"jti": jti}, {"$set": blacklist_entry}, upsert=True)
 
             logger.debug(f"Token {jti} added to blacklist (reason: {reason})")
             return True
@@ -158,15 +157,11 @@ class TokenBlacklist:
             ValueError,
             TypeError,
         ) as e:
-            logger.error(
-                f"Error checking token revocation status for {jti}: {e}", exc_info=True
-            )
+            logger.error(f"Error checking token revocation status for {jti}: {e}", exc_info=True)
             # On error, assume not revoked (fail open for availability)
             return False
 
-    async def revoke_all_user_tokens(
-        self, user_id: str, reason: Optional[str] = None
-    ) -> int:
+    async def revoke_all_user_tokens(self, user_id: str, reason: Optional[str] = None) -> int:
         """
         Revoke all tokens for a specific user.
 
@@ -189,8 +184,7 @@ class TokenBlacklist:
                 "user_id": user_id,
                 "revoked_at": datetime.utcnow(),
                 "reason": reason or "logout_all",
-                "expires_at": datetime.utcnow()
-                + timedelta(days=30),  # Keep for 30 days
+                "expires_at": datetime.utcnow() + timedelta(days=30),  # Keep for 30 days
             }
 
             # Use upsert to update or create marker
@@ -213,9 +207,7 @@ class TokenBlacklist:
             ValueError,
             TypeError,
         ) as e:
-            logger.error(
-                f"Error revoking all tokens for user {user_id}: {e}", exc_info=True
-            )
+            logger.error(f"Error revoking all tokens for user {user_id}: {e}", exc_info=True)
             return 0
 
     async def is_user_revoked(self, user_id: str) -> bool:
@@ -231,9 +223,7 @@ class TokenBlacklist:
         try:
             await self.ensure_indexes()
 
-            marker = await self.collection.find_one(
-                {"user_id": user_id, "type": "user_revocation"}
-            )
+            marker = await self.collection.find_one({"user_id": user_id, "type": "user_revocation"})
 
             if marker:
                 # Check if marker hasn't expired
@@ -269,9 +259,7 @@ class TokenBlacklist:
             Number of entries deleted
         """
         try:
-            result = await self.collection.delete_many(
-                {"expires_at": {"$lt": datetime.utcnow()}}
-            )
+            result = await self.collection.delete_many({"expires_at": {"$lt": datetime.utcnow()}})
             deleted_count = result.deleted_count
             if deleted_count > 0:
                 logger.info(f"Cleared {deleted_count} expired blacklist entries")
@@ -283,7 +271,5 @@ class TokenBlacklist:
             ValueError,
             TypeError,
         ) as e:
-            logger.error(
-                f"Error clearing expired blacklist entries: {e}", exc_info=True
-            )
+            logger.error(f"Error clearing expired blacklist entries: {e}", exc_info=True)
             return 0

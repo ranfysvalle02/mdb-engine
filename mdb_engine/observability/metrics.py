@@ -55,16 +55,12 @@ class OperationMetrics:
             "count": self.count,
             "avg_duration_ms": round(self.avg_duration_ms, 2),
             "min_duration_ms": (
-                round(self.min_duration_ms, 2)
-                if self.min_duration_ms != float("inf")
-                else 0.0
+                round(self.min_duration_ms, 2) if self.min_duration_ms != float("inf") else 0.0
             ),
             "max_duration_ms": round(self.max_duration_ms, 2),
             "error_count": self.error_count,
             "error_rate_percent": round(self.error_rate, 2),
-            "last_execution": (
-                self.last_execution.isoformat() if self.last_execution else None
-            ),
+            "last_execution": (self.last_execution.isoformat() if self.last_execution else None),
         }
 
 
@@ -138,9 +134,7 @@ class MetricsCollector:
         with self._lock:
             if operation_name:
                 metrics = {
-                    k: v.to_dict()
-                    for k, v in self._metrics.items()
-                    if k.startswith(operation_name)
+                    k: v.to_dict() for k, v in self._metrics.items() if k.startswith(operation_name)
                 }
                 # Move accessed metrics to end (LRU)
                 for key in list(self._metrics.keys()):
@@ -178,7 +172,7 @@ class MetricsCollector:
             # Aggregate by base operation name (without tags)
             aggregated: Dict[str, OperationMetrics] = {}
 
-            for key, metric in self._metrics.items():
+            for _key, metric in self._metrics.items():
                 base_name = metric.operation_name
                 if base_name not in aggregated:
                     aggregated[base_name] = OperationMetrics(operation_name=base_name)
@@ -260,6 +254,32 @@ def timed_operation(operation_name: str, **tags: Any):
             ...
     """
 
+    # Common exceptions that indicate operation failure (not system-level exits)
+    # This is comprehensive to handle any decorated function's failures
+    _OPERATION_FAILURES = (
+        RuntimeError,
+        ValueError,
+        TypeError,
+        KeyError,
+        AttributeError,
+        IndexError,
+        LookupError,
+        IOError,
+        OSError,
+        ConnectionError,
+        TimeoutError,
+        PermissionError,
+        FileNotFoundError,
+        AssertionError,
+        ArithmeticError,
+        BufferError,
+        ImportError,
+        MemoryError,
+        StopIteration,
+        StopAsyncIteration,
+        UnicodeError,
+    )
+
     def decorator(func: Callable) -> Callable:
         if hasattr(func, "__code__") and func.__code__.co_flags & 0x80:  # CO_COROUTINE
             # Async function
@@ -269,7 +289,7 @@ def timed_operation(operation_name: str, **tags: Any):
                 try:
                     result = await func(*args, **kwargs)
                     return result
-                except Exception:
+                except _OPERATION_FAILURES:
                     success = False
                     raise
                 finally:
@@ -285,7 +305,7 @@ def timed_operation(operation_name: str, **tags: Any):
                 try:
                     result = func(*args, **kwargs)
                     return result
-                except Exception:
+                except _OPERATION_FAILURES:
                     success = False
                     raise
                 finally:

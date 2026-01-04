@@ -30,9 +30,13 @@ from ..exceptions import MongoDBEngineError
 from .scoped_wrapper import ScopedMongoWrapper
 
 try:
-    from pymongo.errors import (AutoReconnect, ConnectionFailure,
-                                InvalidOperation, OperationFailure,
-                                ServerSelectionTimeoutError)
+    from pymongo.errors import (
+        AutoReconnect,
+        ConnectionFailure,
+        InvalidOperation,
+        OperationFailure,
+        ServerSelectionTimeoutError,
+    )
 except ImportError:
     OperationFailure = Exception
     AutoReconnect = Exception
@@ -41,8 +45,12 @@ except ImportError:
 
 try:
     from motor.motor_asyncio import AsyncIOMotorCursor
-    from pymongo.results import (DeleteResult, InsertManyResult,
-                                 InsertOneResult, UpdateResult)
+    from pymongo.results import (
+        DeleteResult,
+        InsertManyResult,
+        InsertOneResult,
+        UpdateResult,
+    )
 except ImportError:
     AsyncIOMotorCursor = None
     InsertOneResult = None
@@ -112,9 +120,7 @@ class Collection:
                 context={"operation": "find_one"},
             ) from e
 
-    def find(
-        self, filter: Optional[Dict[str, Any]] = None, *args, **kwargs
-    ) -> AsyncIOMotorCursor:
+    def find(self, filter: Optional[Dict[str, Any]] = None, *args, **kwargs) -> AsyncIOMotorCursor:
         """
         Find documents matching the filter.
 
@@ -140,9 +146,7 @@ class Collection:
         """
         return self._collection.find(filter or {}, *args, **kwargs)
 
-    async def insert_one(
-        self, document: Dict[str, Any], *args, **kwargs
-    ) -> InsertOneResult:
+    async def insert_one(self, document: Dict[str, Any], *args, **kwargs) -> InsertOneResult:
         """
         Insert a single document.
 
@@ -460,9 +464,7 @@ class Collection:
                 context={"operation": "count_documents"},
             ) from e
 
-    def aggregate(
-        self, pipeline: List[Dict[str, Any]], *args, **kwargs
-    ) -> AsyncIOMotorCursor:
+    def aggregate(self, pipeline: List[Dict[str, Any]], *args, **kwargs) -> AsyncIOMotorCursor:
         """
         Perform aggregation pipeline.
 
@@ -564,9 +566,7 @@ class AppDB:
 
         # Only proxy collection names, not internal attributes
         if name.startswith("_"):
-            raise AttributeError(
-                f"'{type(self).__name__}' object has no attribute '{name}'"
-            )
+            raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
         return self.collection(name)
 
     @property

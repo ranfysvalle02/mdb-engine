@@ -709,7 +709,7 @@ class ExternalAPIAuthProvider:
             response.raise_for_status()
             result = response.json()
             return result.get("allowed", False)
-        except Exception as e:
+        except (httpx.HTTPError, ValueError, KeyError) as e:
             logger.error(f"Authorization check failed: {e}")
             return False  # Fail closed
 

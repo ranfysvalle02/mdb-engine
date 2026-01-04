@@ -573,7 +573,7 @@ try:
         collection_name="users",
         index_definitions=index_definitions
     )
-except Exception as e:
+except (PyMongoError, ValueError, TypeError) as e:
     logger.error(f"Failed to create indexes: {e}", exc_info=True)
     raise
 ```

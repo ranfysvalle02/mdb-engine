@@ -2,6 +2,26 @@
 
 The central orchestration engine for MDB_ENGINE that manages database connections, app registration, manifest validation, index management, and resource lifecycle.
 
+## When to Use What
+
+### Integration Patterns
+
+| Pattern | Best For | Code |
+|---------|----------|------|
+| **`create_app()`** | New FastAPI apps | `app = engine.create_app(slug, manifest)` |
+| **`lifespan()`** | Custom FastAPI setup | `FastAPI(lifespan=engine.lifespan(...))` |
+| **Manual** | Existing apps, scripts | `await engine.initialize()` / `await engine.shutdown()` |
+| **Context Manager** | Scripts, tests | `async with engine: ...` |
+
+### Feature Activation
+
+| Feature | When to Enable | Configuration |
+|---------|---------------|---------------|
+| **Ray** | Distributed processing, isolated actors | `enable_ray=True` |
+| **Multi-site** | Cross-app data sharing | `read_scopes` in manifest |
+| **Auto-indexing** | Let engine optimize queries | Default ON (`auto_index=True`) |
+| **App Tokens** | Production security | Set `MDB_ENGINE_MASTER_KEY` |
+
 ## Features
 
 - **MongoDBEngine**: Central orchestration for all engine components
@@ -54,10 +74,55 @@ engine = MongoDBEngine(
     manifests_dir=Path("./manifests"),  # Optional
     authz_provider=authz_provider,      # Optional
     max_pool_size=10,                   # Optional
-    min_pool_size=1                     # Optional
+    min_pool_size=1,                    # Optional
+    enable_ray=False,                   # Optional: Enable Ray support
+    ray_namespace="modular_labs"        # Optional: Ray namespace
 )
 
 await engine.initialize()
+```
+
+### FastAPI Integration
+
+The simplest way to create a FastAPI app with automatic lifecycle management:
+
+```python
+from mdb_engine import MongoDBEngine
+from pathlib import Path
+
+engine = MongoDBEngine(
+    mongo_uri="mongodb://localhost:27017",
+    db_name="my_database"
+)
+
+# Create FastAPI app with automatic initialization and cleanup
+app = engine.create_app(
+    slug="my_app",
+    manifest=Path("manifest.json")
+)
+
+@app.get("/items")
+async def get_items():
+    db = engine.get_scoped_db("my_app")
+    return await db.items.find({}).to_list(10)
+```
+
+This automatically:
+- Initializes the engine on startup
+- Loads and registers the manifest
+- Auto-detects multi-site mode from manifest
+- Auto-retrieves app tokens
+- Shuts down cleanly on app exit
+
+### Custom Lifespan
+
+For more control, use the `lifespan()` helper:
+
+```python
+from fastapi import FastAPI
+
+engine = MongoDBEngine(...)
+app = FastAPI(lifespan=engine.lifespan("my_app", Path("manifest.json")))
 ```
 
 ### Get Scoped Database
@@ -90,6 +155,33 @@ manifest = await engine.load_manifest("manifest.json")
 # Register app (creates indexes, sets up auth, etc.)
 await engine.register_app(manifest)
 ```
+
+### Optional Ray Integration
+
+Enable Ray for distributed processing (Ray must be installed):
+
+```python
+from mdb_engine import MongoDBEngine
+
+# Enable Ray support
+engine = MongoDBEngine(
+    mongo_uri="mongodb://localhost:27017",
+    db_name="my_database",
+    enable_ray=True,
+    ray_namespace="my_namespace"
+)
+
+await engine.initialize()
+
+# Check if Ray is available
+if engine.has_ray:
+    print(f"Ray initialized in namespace: {engine.ray_namespace}")
+```
+
+Ray integration features:
+- Isolated app environments via Ray actors
+- Automatic graceful degradation if Ray not installed
+- App-specific namespaces for isolation
 
 ### Health Checks
 
@@ -302,11 +394,23 @@ is_valid, error, paths = await validate_manifest_with_db(
 - `get_app_info(app_slug)` - Get information about registered app
 - `unregister_app(app_slug)` - Unregister an app
 
+**FastAPI Integration Methods:**
+
+- `create_app(slug, manifest, title=None, **fastapi_kwargs)` - Create a FastAPI app with automatic lifecycle management
+- `lifespan(slug, manifest)` - Create a lifespan context manager for FastAPI
+
+**App Token Methods:**
+
+- `auto_retrieve_app_token(slug)` - Auto-retrieve app token from environment or database
+- `get_app_token(slug)` - Get cached app token for a slug
+
 #### Properties
 
-- `mongo_client` - MongoDB client instance
-- `mongo_db` - MongoDB database instance
+- `mongo_client` - MongoDB client instance (for observability only)
 - `initialized` - Whether engine is initialized
+- `has_ray` - Whether Ray is enabled and initialized
+- `enable_ray` - Whether Ray support is enabled
+- `ray_namespace` - Ray namespace for actor isolation
 
 ### ManifestValidator
 
@@ -357,6 +461,8 @@ export MONGO_SERVER_SELECTION_TIMEOUT_MS=5000
 - `authz_provider` (optional): Authorization provider instance
 - `max_pool_size` (optional): Maximum connection pool size (default: 10)
 - `min_pool_size` (optional): Minimum connection pool size (default: 1)
+- `enable_ray` (optional): Enable Ray support for distributed processing (default: False)
+- `ray_namespace` (optional): Ray namespace for actor isolation (default: "modular_labs")
 
 ## Manifest Schema Features
 
@@ -483,13 +589,15 @@ Define various index types:
 ```python
 from mdb_engine.exceptions import InitializationError
 
+from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError
+
 try:
     await engine.initialize()
 except InitializationError as e:
     print(f"Initialization failed: {e}")
     print(f"MongoDB URI: {e.mongo_uri}")
-except Exception as e:
-    print(f"Unexpected error: {e}")
+except (ConnectionFailure, ServerSelectionTimeoutError) as e:
+    print(f"MongoDB connection error: {e}")
 ```
 
 ## Integration Examples

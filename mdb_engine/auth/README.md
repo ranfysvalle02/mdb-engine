@@ -10,6 +10,76 @@ The engine provides **MongoDB-backed conveniences** without imposing solutions:
 - **MongoDB-first**: All auth data (policies, sessions, tokens) is stored in MongoDB, leveraging the engine's scoping and isolation features
 - **Pluggable authorization**: Choose Casbin (MongoDB-backed RBAC) or OSO (Cloud or library) - both auto-configured from manifest
 - **App-level flexibility**: Apps can implement OAuth, custom auth flows, or use the provided app-level user management utilities
+- **Two auth modes**: Choose between per-app isolation (`mode: "app"`) or shared user pool with SSO (`mode: "shared"`)
+
+## Auth Modes
+
+MDB_ENGINE supports two authentication modes, configured in manifest.json:
+
+### Per-App Auth (`mode: "app"`) - Default
+
+Each app has isolated authentication. Users, tokens, and sessions are specific to each app.
+
+```json
+{
+  "auth": {
+    "mode": "app",
+    "token_required": true
+  }
+}
+```
+
+**When to use:**
+- Apps are independent
+- Each app manages its own users
+- No need for SSO between apps
+
+### Shared Auth (`mode: "shared"`) - SSO
+
+All apps share a central user pool. Users authenticate once and can access any app (subject to role requirements).
+
+```json
+{
+  "auth": {
+    "mode": "shared",
+    "roles": ["viewer", "editor", "admin"],
+    "default_role": "viewer",
+    "require_role": "viewer",
+    "public_routes": ["/health", "/api/public"]
+  }
+}
+```
+
+**When to use:**
+- Building a platform with multiple related apps
+- You want Single Sign-On (SSO)
+- You need per-app role management
+- Apps should share user identity
+
+**Shared auth fields:**
+| Field | Description |
+|-------|-------------|
+| `roles` | Available roles for this app |
+| `default_role` | Role assigned to new users |
+| `require_role` | Minimum role required to access app |
+| `public_routes` | Routes that don't require authentication |
+
+**How it works:**
+1. Users are stored in `_mdb_engine_shared_users` collection
+2. JWT tokens work across all apps (SSO)
+3. `SharedAuthMiddleware` is auto-configured by `engine.create_app()`
+4. User info is available via `request.state.user`
+
+```python
+# Accessing user in shared auth mode
+@app.get("/protected")
+async def protected(request: Request):
+    user = request.state.user  # Populated by middleware
+    roles = request.state.user_roles
+    return {"email": user["email"], "roles": roles}
+```
+
+See `examples/multi_app_shared/` for a complete SSO example.
 
 ## Features
 
@@ -535,12 +605,70 @@ async def logout(response: Response):
 - `get_or_create_anonymous_user(db, app_slug, device_id)` - Get/create anonymous user
 - `get_or_create_demo_user(db, app_slug, device_id)` - Get/create demo user
 
+### Shared Auth (SSO)
+
+- `SharedUserPool(mongo_db, jwt_secret, jwt_public_key, jwt_algorithm, ...)` - Shared user pool for SSO
+  - `create_user(email, password, app_roles)` - Create user in shared pool
+  - `authenticate(email, password, ip_address, fingerprint, session_binding)` - Authenticate with session binding
+  - `validate_token(token)` - Validate JWT and get user (checks blacklist)
+  - `revoke_token(token, reason)` - Revoke token by adding JTI to blacklist
+  - `revoke_all_user_tokens(user_id, reason)` - Revoke all user tokens
+  - `update_user_roles(email, app_slug, roles)` - Update user's roles for an app
+  - `user_has_role(user, app_slug, role)` - Check if user has role
+  - `get_secure_cookie_config(request)` - Get secure cookie settings
+  - `jwt_algorithm` - Property: configured algorithm (HS256, RS256, ES256)
+  - `is_asymmetric` - Property: True if using asymmetric algorithm
+- `JWTSecretError` - Raised when JWT secret is missing
+- `JWTKeyError` - Raised when JWT key configuration is invalid
+- `SharedAuthMiddleware` - ASGI middleware for shared auth (supports session binding)
+- `create_shared_auth_middleware(pool, slug, manifest_auth)` - Factory for configured middleware
+- `create_shared_auth_middleware_lazy(slug, manifest_auth)` - Lazy factory for engine integration
+
+### Rate Limiting
+
+- `AuthRateLimitMiddleware(app, limits, store)` - ASGI rate limiting middleware
+- `RateLimit(max_attempts, window_seconds)` - Rate limit configuration
+- `InMemoryRateLimitStore` - In-memory storage for rate limiting
+- `MongoDBRateLimitStore(db)` - MongoDB-backed distributed rate limiting
+- `create_rate_limit_middleware(manifest_auth, store)` - Factory from manifest config
+- `@rate_limit(max_attempts, window_seconds)` - Decorator for individual endpoints
+
+### Audit Logging
+
+- `AuthAuditLog(mongo_db, retention_days=90)` - Audit logger for auth events
+  - `log_event(action, success, user_email, ip_address, details)` - Log any event
+  - `log_login_success(email, ip_address, ...)` - Log successful login
+  - `log_login_failed(email, reason, ip_address, ...)` - Log failed login
+  - `log_logout(email, ip_address, ...)` - Log logout
+  - `log_register(email, ip_address, ...)` - Log registration
+  - `log_role_change(email, app_slug, old_roles, new_roles, ...)` - Log role change
+  - `log_token_revoked(email, reason, ...)` - Log token revocation
+  - `get_recent_events(hours, action, success)` - Query recent events
+  - `get_failed_logins(email, ip_address, hours)` - Query failed logins
+  - `get_security_summary(hours)` - Get security statistics
+- `AuthAction` - Enum of audit action types
+
+### CSRF Protection
+
+- `CSRFMiddleware(app, secret, exempt_routes, ...)` - CSRF protection middleware
+- `create_csrf_middleware(manifest_auth)` - Factory from manifest config
+- `generate_csrf_token(secret)` - Generate CSRF token
+- `validate_csrf_token(token, secret, max_age)` - Validate CSRF token
+- `get_csrf_token(request)` - FastAPI dependency for getting CSRF token
+
+### Password Policy
+
+- `validate_password_strength(password, config)` - Validate password strength
+- `validate_password_strength_async(password, config, check_breaches)` - Async validation with breach check
+- `calculate_password_entropy(password)` - Calculate entropy in bits
+- `is_common_password(password)` - Check against common password list
+- `check_password_breach(password)` - Check against HaveIBeenPwned (async)
+
 ### Utilities
 
 - `login_user(db, email, password, response)` - Login user and set cookies
 - `register_user(db, email, password, **kwargs)` - Register new user
 - `logout_user(response)` - Logout user and clear cookies
-- `validate_password_strength(password)` - Validate password strength
 
 ## Decorators
 
@@ -596,16 +724,410 @@ async def login(credentials: dict):
 9. **Log authentication events** - Track login, logout, and permission failures
 10. **Use sub-authentication** - Isolate app-level users for multi-tenant applications
 
+## Enterprise Security Features
+
+MDB_ENGINE auth includes enterprise-grade security features for production deployments.
+
+### JWT Secret Validation (Fail-Fast)
+
+The `SharedUserPool` now **requires** a JWT secret - it will fail at startup if not configured:
+
+```python
+from mdb_engine.auth import SharedUserPool, JWTSecretError
+
+# Production: Requires MDB_ENGINE_JWT_SECRET env var or explicit secret
+try:
+    pool = SharedUserPool(db)  # Will raise JWTSecretError if no secret
+except JWTSecretError:
+    print("Set MDB_ENGINE_JWT_SECRET environment variable!")
+
+# Development: Use allow_insecure_dev for local testing (NOT for production!)
+pool = SharedUserPool(db, allow_insecure_dev=True)  # Auto-generates ephemeral secret
+```
+
+**Generate a secure secret:**
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+
+### Token Revocation (JTI)
+
+Tokens now include a unique JWT ID (JTI) that enables server-side revocation:
+
+```python
+# Revoke a specific token (e.g., on logout)
+await user_pool.revoke_token(token, reason="logout")
+
+# Token is now blacklisted and will fail validation
+user = await user_pool.validate_token(token)  # Returns None
+
+# Revoke all user tokens (e.g., password change)
+await user_pool.revoke_all_user_tokens(user_id, reason="password_change")
+```
+
+**How it works:**
+- Each token contains a `jti` (JWT ID) claim
+- `revoke_token()` adds the JTI to a blacklist collection
+- `validate_token()` checks the blacklist before accepting the token
+- Blacklist entries auto-expire via MongoDB TTL index
+
+### Rate Limiting
+
+Protect auth endpoints from brute-force attacks with built-in rate limiting:
+
+**Manifest Configuration:**
+```json
+{
+  "auth": {
+    "mode": "shared",
+    "rate_limits": {
+      "/login": {"max_attempts": 5, "window_seconds": 300},
+      "/register": {"max_attempts": 3, "window_seconds": 3600}
+    }
+  }
+}
+```
+
+**Programmatic Usage:**
+```python
+from mdb_engine.auth import AuthRateLimitMiddleware, RateLimit, rate_limit
+
+# Via middleware (auto-configured by engine.create_app())
+app.add_middleware(
+    AuthRateLimitMiddleware,
+    limits={"/login": RateLimit(max_attempts=5, window_seconds=300)}
+)
+
+# Via decorator
+@app.post("/login")
+@rate_limit(max_attempts=5, window_seconds=300)
+async def login(request: Request):
+    ...
+```
+
+**Features:**
+- IP + email tracking for granular rate limiting
+- Sliding window algorithm
+- In-memory (single instance) or MongoDB (distributed) storage
+- 429 responses with `Retry-After` header
+- Automatic reset on successful login
+
+### Audit Logging
+
+Comprehensive audit trail for authentication events:
+
+**Manifest Configuration:**
+```json
+{
+  "auth": {
+    "audit": {
+      "enabled": true,
+      "retention_days": 90
+    }
+  }
+}
+```
+
+**Programmatic Usage:**
+```python
+from mdb_engine.auth import AuthAuditLog, AuthAction
+
+audit = AuthAuditLog(db, retention_days=90)
+await audit.ensure_indexes()
+
+# Log authentication events
+await audit.log_login_success(email="user@example.com", ip_address="192.168.1.1")
+await audit.log_login_failed(email="user@example.com", reason="invalid_password")
+await audit.log_logout(email="user@example.com")
+await audit.log_register(email="new@example.com")
+await audit.log_role_change(email="user@example.com", app_slug="my_app", 
+                            old_roles=["viewer"], new_roles=["editor"])
+
+# Query audit logs
+failed_logins = await audit.get_failed_logins(email="user@example.com", hours=24)
+user_activity = await audit.get_user_activity(email="user@example.com", hours=168)
+summary = await audit.get_security_summary(hours=24)
+```
+
+**Audit Actions:**
+| Action | Description |
+|--------|-------------|
+| `login_success` | Successful login |
+| `login_failed` | Failed login attempt |
+| `logout` | User logout |
+| `register` | New user registration |
+| `token_revoked` | Token was revoked |
+| `role_granted` | User received new role |
+| `role_revoked` | User role was removed |
+| `rate_limit_exceeded` | Rate limit was hit |
+
+### Secure Cookies
+
+Auto-configured secure cookie settings based on environment:
+
+```python
+# Get secure cookie config (auto-detects HTTPS/production)
+cookie_config = user_pool.get_secure_cookie_config(request)
+response.set_cookie(value=token, **cookie_config)
+```
+
+**Cookie settings by environment:**
+| Setting | Development | Production |
+|---------|-------------|------------|
+| `httponly` | True | True |
+| `secure` | False | True |
+| `samesite` | lax | strict |
+
+### Security Checklist
+
+Before deploying to production:
+
+- [ ] `MDB_ENGINE_JWT_SECRET` is set to a secure, unique value
+- [ ] Rate limiting is configured for `/login` and `/register`
+- [ ] Audit logging is enabled
+- [ ] HTTPS is enforced (cookie `secure` flag)
+- [ ] Token expiry is appropriately short (default: 24h)
+- [ ] Logout endpoints call `revoke_token()`
+
+## Advanced Security Features
+
+### CSRF Protection
+
+CSRF protection is **auto-enabled for shared auth mode**. The middleware uses the double-submit cookie pattern.
+
+**Manifest Configuration:**
+```json
+{
+  "auth": {
+    "mode": "shared",
+    "csrf_protection": true
+  }
+}
+```
+
+**Advanced Configuration:**
+```json
+{
+  "auth": {
+    "csrf_protection": {
+      "enabled": true,
+      "exempt_routes": ["/api/*"],
+      "rotate_tokens": false,
+      "token_ttl": 3600
+    }
+  }
+}
+```
+
+**How it works:**
+1. GET requests receive a CSRF token in a cookie
+2. POST/PUT/DELETE must include the token in `X-CSRF-Token` header
+3. Token is validated using constant-time comparison
+4. SameSite=Lax cookies provide additional protection
+
+**Frontend Integration:**
+```javascript
+// Read token from cookie
+const csrfToken = document.cookie
+  .split('; ')
+  .find(row => row.startsWith('csrf_token='))
+  ?.split('=')[1];
+
+// Include in requests
+fetch('/api/submit', {
+  method: 'POST',
+  headers: {'X-CSRF-Token': csrfToken}
+});
+```
+
+### HSTS (HTTP Strict Transport Security)
+
+HSTS forces HTTPS connections in production, protecting against protocol downgrade attacks.
+
+**Manifest Configuration:**
+```json
+{
+  "auth": {
+    "security": {
+      "hsts": {
+        "enabled": true,
+        "max_age": 31536000,
+        "include_subdomains": true,
+        "preload": false
+      }
+    }
+  }
+}
+```
+
+**Header Output:**
+```
+Strict-Transport-Security: max-age=31536000; includeSubDomains
+```
+
+**Note:** Only enable `preload` if you're ready for permanent HTTPS commitment.
+
+### JWT Algorithm Support
+
+MDB_ENGINE supports multiple JWT signing algorithms for different security requirements.
+
+| Algorithm | Type | Key | Use Case |
+|-----------|------|-----|----------|
+| HS256 | Symmetric | Shared secret | Default, simple deployments |
+| RS256 | Asymmetric | RSA key pair | Microservices, token verification by multiple parties |
+| ES256 | Asymmetric | ECDSA key pair | Modern alternative to RSA, smaller keys |
+
+**Manifest Configuration:**
+```json
+{
+  "auth": {
+    "jwt": {
+      "algorithm": "RS256",
+      "token_expiry_hours": 24
+    }
+  }
+}
+```
+
+**Environment Variables:**
+```bash
+# For HS256 (symmetric)
+export MDB_ENGINE_JWT_SECRET="your-secret-key"
+
+# For RS256/ES256 (asymmetric)
+export MDB_ENGINE_JWT_SECRET="-----BEGIN RSA PRIVATE KEY-----..."
+export MDB_ENGINE_JWT_PUBLIC_KEY="-----BEGIN PUBLIC KEY-----..."
+```
+
+**Programmatic Usage:**
+```python
+pool = SharedUserPool(
+    db,
+    jwt_secret=private_key,
+    jwt_public_key=public_key,
+    jwt_algorithm="RS256"
+)
+
+# Check algorithm
+print(pool.jwt_algorithm)  # "RS256"
+print(pool.is_asymmetric)  # True
+```
+
+### Password Policy
+
+Configurable password strength requirements with entropy calculation and breach detection.
+
+**Manifest Configuration:**
+```json
+{
+  "auth": {
+    "password_policy": {
+      "min_length": 12,
+      "min_entropy_bits": 50,
+      "require_uppercase": true,
+      "require_lowercase": true,
+      "require_numbers": true,
+      "require_special": false,
+      "check_common_passwords": true,
+      "check_breaches": false
+    }
+  }
+}
+```
+
+**Programmatic Usage:**
+```python
+from mdb_engine.auth import (
+    validate_password_strength,
+    validate_password_strength_async,
+    calculate_password_entropy,
+    is_common_password,
+)
+
+# Synchronous validation
+is_valid, errors = validate_password_strength(
+    "MyPassword123",
+    config=manifest.get("auth", {}).get("password_policy", {})
+)
+
+# Async validation with breach check
+is_valid, errors = await validate_password_strength_async(
+    "MyPassword123",
+    config=config,
+    check_breaches=True  # Queries HaveIBeenPwned
+)
+
+# Calculate entropy
+entropy = calculate_password_entropy("MyP@ssw0rd!")
+print(f"Entropy: {entropy} bits")  # ~65 bits
+
+# Check common passwords
+if is_common_password("password123"):
+    print("Password is too common!")
+```
+
+**Entropy Guidelines:**
+| Entropy (bits) | Strength | Example |
+|----------------|----------|---------|
+| < 28 | Very Weak | "password" |
+| 28-35 | Weak | "Password1" |
+| 36-59 | Fair | "P@ssw0rd" |
+| 60-127 | Strong | "MyS3cur3P@ss!" |
+| 128+ | Very Strong | Random 20+ char |
+
+### Session Binding
+
+Tie sessions to client characteristics to prevent session hijacking.
+
+**Manifest Configuration:**
+```json
+{
+  "auth": {
+    "session_binding": {
+      "bind_ip": false,
+      "bind_fingerprint": true,
+      "allow_ip_change_with_reauth": true
+    }
+  }
+}
+```
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `bind_ip` | false | Strict: reject if client IP changes |
+| `bind_fingerprint` | true | Soft: log warning if fingerprint changes |
+| `allow_ip_change_with_reauth` | true | Allow IP change if user re-authenticates |
+
+**How it works:**
+1. On login, IP and/or fingerprint are embedded in JWT claims
+2. Middleware validates these claims on each request
+3. IP binding = strict (rejects on mismatch)
+4. Fingerprint binding = soft (logs warning, useful for security monitoring)
+
+**Token Claims:**
+```json
+{
+  "sub": "user123",
+  "email": "user@example.com",
+  "ip": "192.168.1.100",
+  "fp": "sha256-of-browser-fingerprint",
+  "jti": "unique-token-id",
+  "exp": 1234567890
+}
+```
+
 ## Security Considerations
 
 - **Token Storage**: Store tokens in secure, HttpOnly cookies (not localStorage)
-- **CSRF Protection**: Use SameSite cookies and CSRF tokens for state-changing operations
-- **Password Hashing**: Always hash passwords using bcrypt or similar
-- **Rate Limiting**: Implement rate limiting on authentication endpoints
-- **Token Expiration**: Use short-lived access tokens (1 hour) and longer refresh tokens (30 days)
-- **Token Blacklisting**: Implement token blacklisting for immediate revocation
-- **Session Management**: Limit concurrent sessions per user
-- **Device Tracking**: Track devices for security monitoring
+- **CSRF Protection**: Auto-enabled for shared auth mode with double-submit cookie pattern
+- **Password Hashing**: Always hash passwords using bcrypt (built-in)
+- **Password Policy**: Enforce entropy requirements and check common passwords
+- **Rate Limiting**: Configure via manifest for `/login` and `/register`
+- **Token Expiration**: Use short-lived access tokens (default: 24h)
+- **Token Blacklisting**: Revoke tokens on logout via JTI
+- **Session Binding**: Bind sessions to IP/fingerprint for hijacking protection
+- **HSTS**: Force HTTPS in production
+- **Audit Logging**: Track all auth events for forensics
 
 ## Integration with MongoDBEngine
 

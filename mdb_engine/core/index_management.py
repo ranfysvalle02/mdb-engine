@@ -11,8 +11,12 @@ import logging
 from typing import TYPE_CHECKING
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
-from pymongo.errors import (ConnectionFailure, InvalidOperation,
-                            OperationFailure, ServerSelectionTimeoutError)
+from pymongo.errors import (
+    ConnectionFailure,
+    InvalidOperation,
+    OperationFailure,
+    ServerSelectionTimeoutError,
+)
 
 from ..indexes import run_index_creation_for_collection
 
@@ -56,20 +60,16 @@ class IndexManager:
         )
         if not managed_indexes:
             logger.warning(
-                f"[{slug}] No 'managed_indexes' found in manifest. "
-                f"Skipping index creation."
+                f"[{slug}] No 'managed_indexes' found in manifest. " f"Skipping index creation."
             )
             return
 
         # Validate indexes
         logger.info(
-            f"[{slug}] Validating {len(managed_indexes)} collection(s) "
-            f"with managed indexes..."
+            f"[{slug}] Validating {len(managed_indexes)} collection(s) " f"with managed indexes..."
         )
         is_valid, error = validate_managed_indexes(managed_indexes)
-        logger.info(
-            f"[{slug}] Index validation result: is_valid={is_valid}, " f"error={error}"
-        )
+        logger.info(f"[{slug}] Index validation result: is_valid={is_valid}, " f"error={error}")
         if not is_valid:
             logger.error(
                 f"[{slug}] ❌ Invalid 'managed_indexes' configuration: {error}. "
@@ -79,8 +79,7 @@ class IndexManager:
 
         # Create indexes for each collection
         logger.info(
-            f"[{slug}] Processing {len(managed_indexes)} collection(s) "
-            f"with managed indexes"
+            f"[{slug}] Processing {len(managed_indexes)} collection(s) " f"with managed indexes"
         )
         for collection_base_name, indexes in managed_indexes.items():
             logger.info(
@@ -98,9 +97,7 @@ class IndexManager:
 
             prefixed_collection_name = f"{slug}_{collection_base_name}"
             prefixed_defs = []
-            logger.debug(
-                f"[{slug}] Prefixed collection name: '{prefixed_collection_name}'"
-            )
+            logger.debug(f"[{slug}] Prefixed collection name: '{prefixed_collection_name}'")
 
             for idx_def in indexes:
                 idx_n = idx_def.get("name")
@@ -143,8 +140,7 @@ class IndexManager:
                 # Wait a bit after all indexes are created to ensure they're all ready
                 await asyncio.sleep(1.0)  # Extra wait after all indexes are created
                 logger.info(
-                    f"[{slug}] ✅ Completed index creation for "
-                    f"'{prefixed_collection_name}'"
+                    f"[{slug}] ✅ Completed index creation for " f"'{prefixed_collection_name}'"
                 )
             except (
                 OperationFailure,

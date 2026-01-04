@@ -55,9 +55,7 @@ class TestShowCommand:
             manifest_path = Path(f.name)
 
         try:
-            result = runner.invoke(
-                cli, ["show", str(manifest_path), "--format", "pretty"]
-            )
+            result = runner.invoke(cli, ["show", str(manifest_path), "--format", "pretty"])
             assert result.exit_code == 0
             assert "test_app" in result.output
             assert "Test App" in result.output
@@ -79,9 +77,7 @@ class TestShowCommand:
 
         try:
             runner_no_mix = CliRunner(mix_stderr=False)
-            result = runner_no_mix.invoke(
-                cli, ["show", str(manifest_path), "--validate"]
-            )
+            result = runner_no_mix.invoke(cli, ["show", str(manifest_path), "--validate"])
             assert result.exit_code == 0
             # Should not show warnings for valid manifest
             output_lower = (result.output + result.stderr).lower()
@@ -102,9 +98,7 @@ class TestShowCommand:
 
         try:
             runner_no_mix = CliRunner(mix_stderr=False)
-            result = runner_no_mix.invoke(
-                cli, ["show", str(manifest_path), "--validate"]
-            )
+            result = runner_no_mix.invoke(cli, ["show", str(manifest_path), "--validate"])
             assert result.exit_code == 0  # Show still works, just warns
             # Check both stdout and stderr for warning/invalid message
             output_lower = (result.output + result.stderr).lower()

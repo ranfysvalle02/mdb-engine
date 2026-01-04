@@ -570,8 +570,8 @@ except OperationFailure as e:
     print(f"MongoDB operation failed: {e.details}")
 except AutoReconnect as e:
     print(f"MongoDB reconnection: {e}")
-except Exception as e:
-    print(f"Unexpected error: {e}")
+except (ConnectionFailure, ServerSelectionTimeoutError) as e:
+    print(f"Connection error: {e}")
 ```
 
 ## Integration Examples

@@ -116,7 +116,7 @@ Is the error from your code or a called function?
 
 ## The Dangers and Risks of Catching `Exception`
 
-**Never catch `except Exception` unless you're at the top-level framework handler.** Here's why this is dangerous:
+**NEVER catch `except Exception`. Be intentional about your exception handling.** Here's why catching broad exceptions is dangerous:
 
 ### 1. Hides Bugs in Your Own Code
 
@@ -169,53 +169,57 @@ Code with `except Exception` scattered throughout:
 - Is harder to debug (errors are hidden)
 - Is harder to maintain (unclear error handling logic)
 
-## When `except Exception` is Acceptable
+## Always Be Specific About Exceptions
 
-`except Exception` is **ONLY** allowed at:
+**`except Exception` is NEVER acceptable.** Even at top-level handlers, be intentional:
 
 ### Framework-Level Exception Handlers
 
-These are the "safety nets" that prevent the application from crashing:
-- FastAPI's `@app.exception_handler(Exception)`
-- Flask's error handlers
-- Django's middleware exception handlers
+Instead of catching `Exception`, define specific handlers:
 
-These handlers are at the top level of the application and are responsible for:
-- Logging all unhandled exceptions
-- Returning appropriate error responses
-- Ensuring the application doesn't crash
+```python
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+from pymongo.errors import PyMongoError
+
+app = FastAPI()
+
+@app.exception_handler(PyMongoError)
+async def database_error_handler(request: Request, exc: PyMongoError):
+    return JSONResponse(status_code=503, content={"detail": "Database error"})
+
+@app.exception_handler(ValueError)
+async def validation_error_handler(request: Request, exc: ValueError):
+    return JSONResponse(status_code=400, content={"detail": str(exc)})
+```
 
 ### Top-Level CLI Handlers
 
-In CLI applications, the entry point should catch all exceptions:
+In CLI applications, catch the specific exceptions you expect:
 
 ```python
 if __name__ == '__main__':
     try:
         my_cli()
-    except Exception as error:
-        print(f"Unexpected error: {error}")
+    except (ValueError, TypeError, IOError, RuntimeError, KeyboardInterrupt) as error:
+        print(f"Error: {error}")
         sys.exit(1)
 ```
 
-This ensures the CLI application exits gracefully instead of crashing.
+### The Rule
 
-### Application Entry Points
-
-Where the application starts and needs to prevent crashes. These are the outermost exception handlers.
-
-**Key Point**: These are the only places where `except Exception` is acceptable. All other code should let exceptions bubble up.
+**Be intentional.** Every `except` block should catch exactly the exceptions you know can occur and know how to handle. If you don't know what exceptions a function raises, read its documentation or source code.
 
 ## Top-Level Exception Handlers
 
-Framework-level handlers catch all exceptions and handle them appropriately. These handlers:
+Framework-level handlers should catch **specific** exception types. Configure handlers for:
 
-- Log errors with full stack traces
-- Return appropriate HTTP error responses
-- Roll back database transactions (if configured)
-- Provide consistent error handling across the application
+- `PyMongoError` - Database errors → 503 Service Unavailable
+- `ValueError` - Validation errors → 400 Bad Request  
+- `PermissionError` - Authorization errors → 403 Forbidden
+- `FileNotFoundError` - Missing resources → 404 Not Found
 
-**Key Point**: `except Exception` is ONLY allowed at these top-level handlers.
+**Key Point**: Define separate handlers for each exception type. Never use a blanket `Exception` catch.
 
 ## Common Patterns (Conceptual)
 

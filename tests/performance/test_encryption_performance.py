@@ -69,19 +69,14 @@ class TestEncryptionPerformance:
         start = time.perf_counter()
         with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
             futures = [
-                executor.submit(encryption_service.encrypt_secret, secret)
-                for secret in secrets
+                executor.submit(encryption_service.encrypt_secret, secret) for secret in secrets
             ]
-            results = [
-                future.result() for future in concurrent.futures.as_completed(futures)
-            ]
+            results = [future.result() for future in concurrent.futures.as_completed(futures)]
         elapsed = (time.perf_counter() - start) * 1000
 
         # Average should be < 10ms per operation
         avg_time = elapsed / len(secrets)
-        assert (
-            avg_time < 10
-        ), f"Average encryption time: {avg_time:.2f}ms, target is < 10ms"
+        assert avg_time < 10, f"Average encryption time: {avg_time:.2f}ms, target is < 10ms"
         assert len(results) == len(secrets)
 
     def test_concurrent_decryption(self, encryption_service):
@@ -89,26 +84,18 @@ class TestEncryptionPerformance:
         import concurrent.futures
 
         # Pre-encrypt secrets
-        encrypted_pairs = [
-            encryption_service.encrypt_secret(f"secret_{i}") for i in range(100)
-        ]
+        encrypted_pairs = [encryption_service.encrypt_secret(f"secret_{i}") for i in range(100)]
 
         start = time.perf_counter()
         with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
             futures = [
-                executor.submit(
-                    encryption_service.decrypt_secret, encrypted_secret, encrypted_dek
-                )
+                executor.submit(encryption_service.decrypt_secret, encrypted_secret, encrypted_dek)
                 for encrypted_secret, encrypted_dek in encrypted_pairs
             ]
-            results = [
-                future.result() for future in concurrent.futures.as_completed(futures)
-            ]
+            results = [future.result() for future in concurrent.futures.as_completed(futures)]
         elapsed = (time.perf_counter() - start) * 1000
 
         # Average should be < 10ms per operation
         avg_time = elapsed / len(encrypted_pairs)
-        assert (
-            avg_time < 10
-        ), f"Average decryption time: {avg_time:.2f}ms, target is < 10ms"
+        assert avg_time < 10, f"Average decryption time: {avg_time:.2f}ms, target is < 10ms"
         assert len(results) == len(encrypted_pairs)

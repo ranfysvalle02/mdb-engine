@@ -1,0 +1,373 @@
+"""
+CSRF Protection Middleware
+
+Implements the Double-Submit Cookie pattern for Cross-Site Request Forgery protection.
+Auto-enabled for shared auth mode, with manifest-configurable options.
+
+This module is part of MDB_ENGINE - MongoDB Engine.
+
+Security Features:
+    - Double-submit cookie pattern (industry standard)
+    - Cryptographically secure token generation
+    - Configurable exempt routes for APIs
+    - SameSite cookie attribute for additional protection
+    - Token rotation on each request (optional)
+
+Usage:
+    # Auto-enabled for shared auth mode in engine.create_app()
+
+    # Or manual usage:
+    from mdb_engine.auth.csrf import CSRFMiddleware
+    app.add_middleware(CSRFMiddleware, exempt_routes=["/api/*"])
+
+    # In templates, include the token:
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+    # Or in JavaScript:
+    fetch('/endpoint', {
+        headers: {'X-CSRF-Token': getCookie('csrf_token')}
+    })
+"""
+
+import fnmatch
+import hashlib
+import hmac
+import logging
+import os
+import secrets
+import time
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Set
+
+from fastapi import Request, Response, status
+from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
+
+logger = logging.getLogger(__name__)
+
+# Token settings
+CSRF_TOKEN_LENGTH = 32  # 256 bits
+CSRF_COOKIE_NAME = "csrf_token"
+CSRF_HEADER_NAME = "X-CSRF-Token"
+CSRF_FORM_FIELD = "csrf_token"
+DEFAULT_TOKEN_TTL = 3600  # 1 hour
+
+# Methods that require CSRF validation
+UNSAFE_METHODS = {"POST", "PUT", "DELETE", "PATCH"}
+
+
+def generate_csrf_token(secret: Optional[str] = None) -> str:
+    """
+    Generate a cryptographically secure CSRF token.
+
+    Args:
+        secret: Optional secret for HMAC signing (adds tamper detection)
+
+    Returns:
+        URL-safe base64 encoded token
+    """
+    raw_token = secrets.token_urlsafe(CSRF_TOKEN_LENGTH)
+
+    if secret:
+        # Add HMAC signature for tamper detection
+        timestamp = str(int(time.time()))
+        message = f"{raw_token}:{timestamp}"
+        signature = hmac.new(secret.encode(), message.encode(), hashlib.sha256).hexdigest()[:16]
+        return f"{raw_token}:{timestamp}:{signature}"
+
+    return raw_token
+
+
+def validate_csrf_token(
+    token: str,
+    secret: Optional[str] = None,
+    max_age: int = DEFAULT_TOKEN_TTL,
+) -> bool:
+    """
+    Validate a CSRF token.
+
+    Args:
+        token: The token to validate
+        secret: Optional secret for HMAC verification
+        max_age: Maximum token age in seconds
+
+    Returns:
+        True if valid, False otherwise
+    """
+    if not token:
+        return False
+
+    if secret and ":" in token:
+        # Verify HMAC-signed token
+        try:
+            parts = token.split(":")
+            if len(parts) != 3:
+                return False
+
+            raw_token, timestamp_str, signature = parts
+            timestamp = int(timestamp_str)
+
+            # Check age
+            if time.time() - timestamp > max_age:
+                logger.debug("CSRF token expired")
+                return False
+
+            # Verify signature
+            message = f"{raw_token}:{timestamp_str}"
+            expected_sig = hmac.new(secret.encode(), message.encode(), hashlib.sha256).hexdigest()[
+                :16
+            ]
+
+            if not hmac.compare_digest(signature, expected_sig):
+                logger.warning("CSRF token signature mismatch")
+                return False
+
+            return True
+        except (ValueError, IndexError) as e:
+            logger.warning(f"CSRF token validation error: {e}")
+            return False
+
+    # Simple token validation (just check it exists and has reasonable length)
+    return len(token) >= CSRF_TOKEN_LENGTH
+
+
+class CSRFMiddleware(BaseHTTPMiddleware):
+    """
+    CSRF Protection Middleware using Double-Submit Cookie pattern.
+
+    The double-submit cookie pattern works by:
+    1. Setting a CSRF token in a cookie (with HttpOnly=False so JS can read it)
+    2. Requiring the same token in a header or form field
+    3. Since attackers can't read cookies from other domains, they can't forge requests
+
+    Additional protection from SameSite=Lax cookies prevents the browser from
+    sending cookies on cross-site requests.
+    """
+
+    def __init__(
+        self,
+        app,
+        secret: Optional[str] = None,
+        exempt_routes: Optional[List[str]] = None,
+        exempt_methods: Optional[Set[str]] = None,
+        cookie_name: str = CSRF_COOKIE_NAME,
+        header_name: str = CSRF_HEADER_NAME,
+        form_field: str = CSRF_FORM_FIELD,
+        token_ttl: int = DEFAULT_TOKEN_TTL,
+        rotate_tokens: bool = False,
+        secure_cookies: bool = True,
+    ):
+        """
+        Initialize CSRF middleware.
+
+        Args:
+            app: FastAPI application
+            secret: Secret for HMAC token signing (recommended for production)
+            exempt_routes: Routes exempt from CSRF (supports wildcards: /api/*)
+            exempt_methods: HTTP methods exempt from CSRF (default: safe methods)
+            cookie_name: Name of the CSRF cookie
+            header_name: Name of the CSRF header
+            form_field: Name of the CSRF form field
+            token_ttl: Token time-to-live in seconds
+            rotate_tokens: Rotate token on each request (more secure, less convenient)
+            secure_cookies: Use Secure cookie flag (auto-detect HTTPS)
+        """
+        super().__init__(app)
+        self.secret = secret or os.getenv("MDB_ENGINE_CSRF_SECRET")
+        self.exempt_routes = exempt_routes or []
+        self.exempt_methods = exempt_methods or {"GET", "HEAD", "OPTIONS", "TRACE"}
+        self.cookie_name = cookie_name
+        self.header_name = header_name
+        self.form_field = form_field
+        self.token_ttl = token_ttl
+        self.rotate_tokens = rotate_tokens
+        self.secure_cookies = secure_cookies
+
+        logger.info(
+            f"CSRFMiddleware initialized (exempt_routes={self.exempt_routes}, "
+            f"rotate_tokens={rotate_tokens})"
+        )
+
+    def _is_exempt(self, path: str) -> bool:
+        """Check if a path is exempt from CSRF validation."""
+        for pattern in self.exempt_routes:
+            if fnmatch.fnmatch(path, pattern):
+                return True
+        return False
+
+    async def dispatch(
+        self,
+        request: Request,
+        call_next: Callable[[Request], Awaitable[Response]],
+    ) -> Response:
+        """
+        Process request through CSRF middleware.
+        """
+        path = request.url.path
+        method = request.method
+
+        # Skip exempt routes
+        if self._is_exempt(path):
+            return await call_next(request)
+
+        # Skip safe methods
+        if method in self.exempt_methods:
+            # Generate and set token for GET requests (for forms)
+            response = await call_next(request)
+
+            # Set CSRF token cookie if not present
+            if not request.cookies.get(self.cookie_name):
+                token = generate_csrf_token(self.secret)
+                self._set_csrf_cookie(request, response, token)
+
+            # Make token available in request state for templates
+            request.state.csrf_token = request.cookies.get(self.cookie_name) or generate_csrf_token(
+                self.secret
+            )
+
+            return response
+
+        # Validate CSRF token for unsafe methods
+        cookie_token = request.cookies.get(self.cookie_name)
+        if not cookie_token:
+            logger.warning(f"CSRF cookie missing for {method} {path}")
+            return JSONResponse(
+                status_code=status.HTTP_403_FORBIDDEN,
+                content={"detail": "CSRF token missing"},
+            )
+
+        # Get token from header or form
+        header_token = request.headers.get(self.header_name)
+        form_token = None
+
+        # Note: Form-based CSRF token extraction not implemented.
+        # For now, we rely on header-based CSRF for all requests.
+        # TODO: Implement request.form() based extraction if needed.
+
+        submitted_token = header_token or form_token
+
+        if not submitted_token:
+            logger.warning(f"CSRF token not submitted for {method} {path}")
+            return JSONResponse(
+                status_code=status.HTTP_403_FORBIDDEN,
+                content={"detail": "CSRF token not provided in header or form"},
+            )
+
+        # Compare tokens (constant-time comparison)
+        if not hmac.compare_digest(cookie_token, submitted_token):
+            logger.warning(f"CSRF token mismatch for {method} {path}")
+            return JSONResponse(
+                status_code=status.HTTP_403_FORBIDDEN,
+                content={"detail": "CSRF token invalid"},
+            )
+
+        # Validate token (check signature if secret is used)
+        if self.secret and not validate_csrf_token(cookie_token, self.secret, self.token_ttl):
+            logger.warning(f"CSRF token validation failed for {method} {path}")
+            return JSONResponse(
+                status_code=status.HTTP_403_FORBIDDEN,
+                content={"detail": "CSRF token expired or invalid"},
+            )
+
+        # Process request
+        response = await call_next(request)
+
+        # Optionally rotate token
+        if self.rotate_tokens:
+            new_token = generate_csrf_token(self.secret)
+            self._set_csrf_cookie(request, response, new_token)
+
+        return response
+
+    def _set_csrf_cookie(
+        self,
+        request: Request,
+        response: Response,
+        token: str,
+    ) -> None:
+        """Set the CSRF token cookie."""
+        is_https = request.url.scheme == "https"
+        is_production = os.getenv("ENVIRONMENT", "").lower() == "production"
+
+        response.set_cookie(
+            key=self.cookie_name,
+            value=token,
+            httponly=False,  # Must be readable by JavaScript
+            secure=self.secure_cookies and (is_https or is_production),
+            samesite="lax",  # Provides CSRF protection + allows top-level navigation
+            max_age=self.token_ttl,
+            path="/",
+        )
+
+
+def create_csrf_middleware(
+    manifest_auth: Dict[str, Any],
+    secret: Optional[str] = None,
+) -> type:
+    """
+    Create CSRF middleware from manifest configuration.
+
+    Args:
+        manifest_auth: Auth section from manifest
+        secret: Optional CSRF secret (defaults to env var)
+
+    Returns:
+        Configured CSRFMiddleware class
+    """
+    csrf_config = manifest_auth.get("csrf_protection", True)
+
+    # Handle boolean or object config
+    if isinstance(csrf_config, bool):
+        if not csrf_config:
+            # Return a no-op middleware
+            class NoOpMiddleware(BaseHTTPMiddleware):
+                async def dispatch(self, request, call_next):
+                    return await call_next(request)
+
+            return NoOpMiddleware
+
+        # Use defaults
+        exempt_routes = manifest_auth.get("public_routes", [])
+        rotate_tokens = False
+        token_ttl = DEFAULT_TOKEN_TTL
+    else:
+        # Object configuration
+        exempt_routes = csrf_config.get("exempt_routes", manifest_auth.get("public_routes", []))
+        rotate_tokens = csrf_config.get("rotate_tokens", False)
+        token_ttl = csrf_config.get("token_ttl", DEFAULT_TOKEN_TTL)
+
+    # Create configured middleware class
+    class ConfiguredCSRFMiddleware(CSRFMiddleware):
+        def __init__(self, app):
+            super().__init__(
+                app,
+                secret=secret or os.getenv("MDB_ENGINE_CSRF_SECRET"),
+                exempt_routes=exempt_routes,
+                rotate_tokens=rotate_tokens,
+                token_ttl=token_ttl,
+            )
+
+    return ConfiguredCSRFMiddleware
+
+
+# Dependency for getting CSRF token in routes
+def get_csrf_token(request: Request) -> str:
+    """
+    Get or generate CSRF token for use in templates.
+
+    Usage in FastAPI route:
+        @app.get("/form")
+        def form_page(csrf_token: str = Depends(get_csrf_token)):
+            return templates.TemplateResponse("form.html", {"csrf_token": csrf_token})
+    """
+    # Try to get from request state (set by middleware)
+    if hasattr(request.state, "csrf_token"):
+        return request.state.csrf_token
+
+    # Try to get from cookie
+    token = request.cookies.get(CSRF_COOKIE_NAME)
+    if token:
+        return token
+
+    # Generate new token
+    secret = os.getenv("MDB_ENGINE_CSRF_SECRET")
+    return generate_csrf_token(secret)

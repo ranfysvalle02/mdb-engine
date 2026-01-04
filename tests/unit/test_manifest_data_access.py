@@ -82,9 +82,7 @@ class TestManifestDataAccess:
             },
         }
 
-        is_valid, error, paths = await manifest_validator.validate_async(
-            manifest, use_cache=False
-        )
+        is_valid, error, paths = await manifest_validator.validate_async(manifest, use_cache=False)
         assert is_valid is False, f"Expected validation to fail, but got: {error}"
 
     async def test_manifest_write_scope_validation(self, manifest_validator):
@@ -111,9 +109,7 @@ class TestManifestDataAccess:
             },
         }
 
-        is_valid, error, paths = await manifest_validator.validate_async(
-            manifest, use_cache=False
-        )
+        is_valid, error, paths = await manifest_validator.validate_async(manifest, use_cache=False)
         assert is_valid is False, f"Expected validation to fail, but got: {error}"
 
     async def test_manifest_cross_app_policy_validation(self, manifest_validator):
@@ -141,9 +137,7 @@ class TestManifestDataAccess:
             },
         }
 
-        is_valid, error, paths = await manifest_validator.validate_async(
-            manifest, use_cache=False
-        )
+        is_valid, error, paths = await manifest_validator.validate_async(manifest, use_cache=False)
         assert is_valid is False, f"Expected validation to fail, but got: {error}"
 
     async def test_manifest_data_access_migration(self, manifest_validator):

@@ -33,9 +33,7 @@ class TestSeedInitialData:
         mock_mongo_collection.insert_many = AsyncMock(
             return_value=MagicMock(inserted_ids=["id1", "id2"])
         )
-        mock_mongo_collection.insert_one = AsyncMock(
-            return_value=MagicMock(inserted_id="meta_id")
-        )
+        mock_mongo_collection.insert_one = AsyncMock(return_value=MagicMock(inserted_id="meta_id"))
 
         initial_data = {
             "test_collection": [
@@ -81,12 +79,8 @@ class TestSeedInitialData:
 
         # Mock metadata showing no seeding, but collection has data
         mock_mongo_collection.find_one = AsyncMock(return_value=None)
-        mock_mongo_collection.count_documents = AsyncMock(
-            return_value=5
-        )  # Collection has 5 docs
-        mock_mongo_collection.insert_one = AsyncMock(
-            return_value=MagicMock(inserted_id="meta_id")
-        )
+        mock_mongo_collection.count_documents = AsyncMock(return_value=5)  # Collection has 5 docs
+        mock_mongo_collection.insert_one = AsyncMock(return_value=MagicMock(inserted_id="meta_id"))
 
         initial_data = {"test_collection": [{"name": "Test 1", "value": 100}]}
 
@@ -105,13 +99,9 @@ class TestSeedInitialData:
 
         mock_mongo_collection.find_one = AsyncMock(return_value=None)
         mock_mongo_collection.count_documents = AsyncMock(return_value=0)
-        mock_mongo_collection.insert_one = AsyncMock(
-            return_value=MagicMock(inserted_id="meta_id")
-        )
+        mock_mongo_collection.insert_one = AsyncMock(return_value=MagicMock(inserted_id="meta_id"))
 
-        initial_data = {
-            "test_collection": [{"name": "Test 1", "value": 100}]
-        }  # No created_at
+        initial_data = {"test_collection": [{"name": "Test 1", "value": 100}]}  # No created_at
 
         with patch("mdb_engine.core.seeding.datetime") as mock_datetime:
             mock_datetime.utcnow.return_value = datetime(2024, 1, 1, 12, 0, 0)
@@ -134,14 +124,10 @@ class TestSeedInitialData:
 
         mock_mongo_collection.find_one = AsyncMock(return_value=None)
         mock_mongo_collection.count_documents = AsyncMock(return_value=0)
-        mock_mongo_collection.insert_one = AsyncMock(
-            return_value=MagicMock(inserted_id="meta_id")
-        )
+        mock_mongo_collection.insert_one = AsyncMock(return_value=MagicMock(inserted_id="meta_id"))
 
         existing_date = datetime(2023, 6, 15, 10, 30, 0)
-        initial_data = {
-            "test_collection": [{"name": "Test 1", "created_at": existing_date}]
-        }
+        initial_data = {"test_collection": [{"name": "Test 1", "created_at": existing_date}]}
 
         await seed_initial_data(mock_db, "test_app", initial_data)
 
@@ -159,13 +145,9 @@ class TestSeedInitialData:
 
         mock_mongo_collection.find_one = AsyncMock(return_value=None)
         mock_mongo_collection.count_documents = AsyncMock(return_value=0)
-        mock_mongo_collection.insert_one = AsyncMock(
-            return_value=MagicMock(inserted_id="meta_id")
-        )
+        mock_mongo_collection.insert_one = AsyncMock(return_value=MagicMock(inserted_id="meta_id"))
 
-        initial_data = {
-            "test_collection": [{"name": "Test 1", "date": "2024-01-01T12:00:00Z"}]
-        }
+        initial_data = {"test_collection": [{"name": "Test 1", "date": "2024-01-01T12:00:00Z"}]}
 
         with patch("dateutil.parser.parse") as mock_parse:
             # Mock dateutil.parser.parse
@@ -191,9 +173,7 @@ class TestSeedInitialData:
 
         mock_mongo_collection.find_one = AsyncMock(return_value=None)
         mock_mongo_collection.count_documents = AsyncMock(return_value=0)
-        mock_mongo_collection.insert_one = AsyncMock(
-            return_value=MagicMock(inserted_id="meta_id")
-        )
+        mock_mongo_collection.insert_one = AsyncMock(return_value=MagicMock(inserted_id="meta_id"))
 
         # Test invalid datetime string (will fail to parse)
         initial_data = {
@@ -221,9 +201,7 @@ class TestSeedInitialData:
         assert inserted_docs[1]["date"] == {"$date": "invalid-extended-json"}
 
     @pytest.mark.asyncio
-    async def test_seed_handles_value_error_datetime_parsing(
-        self, mock_mongo_collection
-    ):
+    async def test_seed_handles_value_error_datetime_parsing(self, mock_mongo_collection):
         """Test handling ValueError during datetime parsing (line 102)."""
         mock_db = MagicMock()
         mock_db.app_seeding_metadata = mock_mongo_collection
@@ -231,9 +209,7 @@ class TestSeedInitialData:
 
         mock_mongo_collection.find_one = AsyncMock(return_value=None)
         mock_mongo_collection.count_documents = AsyncMock(return_value=0)
-        mock_mongo_collection.insert_one = AsyncMock(
-            return_value=MagicMock(inserted_id="meta_id")
-        )
+        mock_mongo_collection.insert_one = AsyncMock(return_value=MagicMock(inserted_id="meta_id"))
 
         # Mock insert_many to capture what was inserted
         inserted_docs = []
@@ -246,9 +222,7 @@ class TestSeedInitialData:
 
         # Test ValueError during datetime parsing (invalid format)
         initial_data = {
-            "test_collection": [
-                {"name": "Test 1", "date": "2023-13-45"}
-            ]  # Invalid date format
+            "test_collection": [{"name": "Test 1", "date": "2023-13-45"}]  # Invalid date format
         }
 
         await seed_initial_data(mock_db, "test_app", initial_data)
@@ -268,19 +242,13 @@ class TestSeedInitialData:
 
         mock_mongo_collection.find_one = AsyncMock(return_value=None)
         mock_mongo_collection.count_documents = AsyncMock(return_value=0)
-        mock_mongo_collection.insert_many = AsyncMock(
-            return_value=MagicMock(inserted_ids=["id1"])
-        )
-        mock_mongo_collection.insert_one = AsyncMock(
-            return_value=MagicMock(inserted_id="meta_id")
-        )
+        mock_mongo_collection.insert_many = AsyncMock(return_value=MagicMock(inserted_ids=["id1"]))
+        mock_mongo_collection.insert_one = AsyncMock(return_value=MagicMock(inserted_id="meta_id"))
 
         initial_data = {"test_collection": [{"name": "Test 1"}]}
 
         # Test OperationFailure
-        mock_mongo_collection.update_one = AsyncMock(
-            side_effect=OperationFailure("Update failed")
-        )
+        mock_mongo_collection.update_one = AsyncMock(side_effect=OperationFailure("Update failed"))
         results = await seed_initial_data(mock_db, "test_app", initial_data)
         assert results["test_collection"] == 1  # Should still return results
 
@@ -292,23 +260,17 @@ class TestSeedInitialData:
         assert results["test_collection"] == 1
 
         # Test ValueError
-        mock_mongo_collection.update_one = AsyncMock(
-            side_effect=ValueError("Invalid value")
-        )
+        mock_mongo_collection.update_one = AsyncMock(side_effect=ValueError("Invalid value"))
         results = await seed_initial_data(mock_db, "test_app", initial_data)
         assert results["test_collection"] == 1
 
         # Test TypeError
-        mock_mongo_collection.update_one = AsyncMock(
-            side_effect=TypeError("Invalid type")
-        )
+        mock_mongo_collection.update_one = AsyncMock(side_effect=TypeError("Invalid type"))
         results = await seed_initial_data(mock_db, "test_app", initial_data)
         assert results["test_collection"] == 1
 
         # Test KeyError
-        mock_mongo_collection.update_one = AsyncMock(
-            side_effect=KeyError("Missing key")
-        )
+        mock_mongo_collection.update_one = AsyncMock(side_effect=KeyError("Missing key"))
         results = await seed_initial_data(mock_db, "test_app", initial_data)
         assert results["test_collection"] == 1
 
@@ -320,12 +282,8 @@ class TestSeedInitialData:
         mock_db.test_collection = mock_mongo_collection
 
         mock_mongo_collection.find_one = AsyncMock(return_value=None)
-        mock_mongo_collection.count_documents = AsyncMock(
-            side_effect=Exception("Database error")
-        )
-        mock_mongo_collection.insert_one = AsyncMock(
-            return_value=MagicMock(inserted_id="meta_id")
-        )
+        mock_mongo_collection.count_documents = AsyncMock(side_effect=Exception("Database error"))
+        mock_mongo_collection.insert_one = AsyncMock(return_value=MagicMock(inserted_id="meta_id"))
 
         initial_data = {"test_collection": [{"name": "Test 1", "value": 100}]}
 
@@ -344,12 +302,8 @@ class TestSeedInitialData:
 
         mock_mongo_collection.find_one = AsyncMock(return_value=None)
         mock_mongo_collection.count_documents = AsyncMock(return_value=0)
-        mock_mongo_collection.insert_many = AsyncMock(
-            return_value=MagicMock(inserted_ids=["id1"])
-        )
-        mock_mongo_collection.insert_one = AsyncMock(
-            return_value=MagicMock(inserted_id="meta_id")
-        )
+        mock_mongo_collection.insert_many = AsyncMock(return_value=MagicMock(inserted_ids=["id1"]))
+        mock_mongo_collection.insert_one = AsyncMock(return_value=MagicMock(inserted_id="meta_id"))
 
         initial_data = {
             "collection1": [{"name": "Test 1"}],
@@ -371,9 +325,7 @@ class TestSeedInitialData:
 
         mock_mongo_collection.find_one = AsyncMock(return_value=None)
         mock_mongo_collection.count_documents = AsyncMock(return_value=0)
-        mock_mongo_collection.insert_one = AsyncMock(
-            return_value=MagicMock(inserted_id="meta_id")
-        )
+        mock_mongo_collection.insert_one = AsyncMock(return_value=MagicMock(inserted_id="meta_id"))
 
         initial_data = {"test_collection": []}  # Empty list
 

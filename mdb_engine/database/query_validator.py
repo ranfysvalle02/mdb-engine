@@ -16,9 +16,14 @@ import logging
 import re
 from typing import Any, Dict, List, Optional, Set
 
-from ..constants import (DANGEROUS_OPERATORS, MAX_PIPELINE_STAGES,
-                         MAX_QUERY_DEPTH, MAX_REGEX_COMPLEXITY,
-                         MAX_REGEX_LENGTH, MAX_SORT_FIELDS)
+from ..constants import (
+    DANGEROUS_OPERATORS,
+    MAX_PIPELINE_STAGES,
+    MAX_QUERY_DEPTH,
+    MAX_REGEX_COMPLEXITY,
+    MAX_REGEX_LENGTH,
+    MAX_SORT_FIELDS,
+)
 from ..exceptions import QueryValidationError
 
 logger = logging.getLogger(__name__)
@@ -282,9 +287,7 @@ class QueryValidator:
                 # Direct $regex value (less common but possible)
                 self.validate_regex(value, current_path)
 
-    def _check_query_depth(
-        self, query: Dict[str, Any], path: str = "", depth: int = 0
-    ) -> None:
+    def _check_query_depth(self, query: Dict[str, Any], path: str = "", depth: int = 0) -> None:
         """
         Check query nesting depth.
 

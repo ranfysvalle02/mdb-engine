@@ -1,118 +1,175 @@
-# MDB_ENGINE
+# mdb-engine
 
-**The Missing Engine for Your Python and MongoDB Projects.**
+**The MongoDB Engine for Python Apps** — Auto-sandboxing, index management, and auth in one package.
 
+[![PyPI](https://img.shields.io/pypi/v/mdb-engine)](https://pypi.org/project/mdb-engine/)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](https://opensource.org/licenses/AGPL-3.0)
 
 ---
 
-![](mdb_engine.png)
-
-## The "Prototype Graveyard" Problem
-
-If you are a builder, you know the feeling. You have a "digital garden" of scripts, tools, and prototypes. It's the data-entry tool for a friend, the internal dashboard, the AI chatbot.
-
-Each one was a great idea. Each one lives in its own isolated folder. And each one, slowly, becomes a maintenance burden.
-
-**Why? Because 70% of your time is spent on the "Scaffolding":**
-
-* Writing the same MongoDB connection boilerplate.
-* Manually creating indexes to prevent slow queries.
-* Building another login page and JWT handler.
-* Worrying about data leaks between your "dev" and "prod" logic.
-
-**MDB_ENGINE** is the engine that solves this. It is a "WordPress-like" platform for the modern Python/MongoDB stack, designed to minimize the friction between an idea and a live application.
-
----
-
-## How It Works
-
-**MDB_ENGINE** acts as a hyper-intelligent proxy between your code and MongoDB. It handles the "boring" stuff so you can focus on the differentiation.
-
-### 1. The Magic: Automatic Data Sandboxing 🛡️
-
-The biggest pain point in multi-app (or even single-app) development is data isolation. MDB_ENGINE solves this via a **two-layer scoping system** that requires zero effort from you.
-
-* **Layer 1 (Physical Scoping):** All collection access is prefixed. When your app writes to `db.users`, the engine actually writes to `db.my_app_users`.
-* **Layer 2 (Logical Scoping):** All writes are automatically tagged with `{"app_id": "my_app"}`. All reads are automatically filtered by this ID.
-
-```python
-# YOU WRITE THIS (Clean, Naive Code):
-await db.tasks.find({}).to_list(length=10)
-
-# THE ENGINE EXECUTES THIS (Secure, Scoped Query):
-# Collection: my_app_tasks
-# Query: {"app_id": "my_app"}
-```
-
-### 2. Manifest-Driven "DNA" 🧬
-
-Your application's configuration lives in a simple `manifest.json`. This is the "genome" of your project. It defines your indexes, authentication rules, and WebSocket endpoints declaratively.
-
-### 3. Automatic Index Management ⚙️
-
-Stop manually running `createIndex` in the Mongo shell. Define your indexes in your manifest, and MDB_ENGINE ensures they exist on startup.
-
-```json
-"managed_indexes": {
-  "tasks": [
-    {
-      "type": "regular",
-      "keys": {"status": 1, "created_at": -1},
-      "name": "status_sort"
-    }
-  ]
-}
-```
-
----
-
-## Quick Start
+## Installation
 
 ```bash
 pip install mdb-engine
-
-# Set required environment variable for JWT security
-export FLASK_SECRET_KEY=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')
 ```
 
-### 1. Define Your Manifest
+---
 
-Create `manifest.json` in your project root.
+## 30-Second Quick Start
+
+```python
+from pathlib import Path
+from mdb_engine import MongoDBEngine
+
+# 1. Initialize the engine
+engine = MongoDBEngine(
+    mongo_uri="mongodb://localhost:27017",
+    db_name="my_database"
+)
+
+# 2. Create a FastAPI app with automatic lifecycle management
+app = engine.create_app(slug="my_app", manifest=Path("manifest.json"))
+
+# 3. Use the scoped database - all queries automatically isolated
+@app.post("/tasks")
+async def create_task(task: dict):
+    db = engine.get_scoped_db("my_app")
+    result = await db.tasks.insert_one(task)
+    return {"id": str(result.inserted_id)}
+```
+
+That's it. Your data is automatically sandboxed, indexes are created, and cleanup is handled.
+
+---
+
+## Basic Examples
+
+### 1. Index Management
+
+Define indexes in your `manifest.json` — they're auto-created on startup:
 
 ```json
 {
   "schema_version": "2.0",
   "slug": "my_app",
-  "name": "My First App",
+  "name": "My App",
   "status": "active",
-  "auth": {
-    "policy": {
-      "provider": "casbin",
-      "required": false,
-      "allow_anonymous": true,
-      "authorization": {
-        "model": "rbac",
-        "link_users_roles": true
-      }
-    }
-  },
   "managed_indexes": {
     "tasks": [
       {
         "type": "regular",
+        "keys": {"status": 1, "created_at": -1},
+        "name": "status_sort"
+      },
+      {
+        "type": "regular",
         "keys": {"priority": -1},
         "name": "priority_idx"
+      }
+    ],
+    "users": [
+      {
+        "type": "regular",
+        "keys": {"email": 1},
+        "name": "email_unique",
+        "unique": true
       }
     ]
   }
 }
 ```
 
-### 2. Initialize the Engine
+Supported index types: `regular`, `text`, `vector`, `ttl`, `compound`.
 
-In your `main.py` (FastAPI example):
+### 2. CRUD Operations (Auto-Scoped)
+
+All database operations are automatically scoped to your app:
+
+```python
+db = engine.get_scoped_db("my_app")
+
+# Create
+await db.tasks.insert_one({"title": "Build feature", "status": "pending"})
+
+# Read  
+tasks = await db.tasks.find({"status": "pending"}).to_list(length=10)
+
+# Update
+await db.tasks.update_one({"_id": task_id}, {"$set": {"status": "done"}})
+
+# Delete
+await db.tasks.delete_one({"_id": task_id})
+```
+
+**What happens under the hood:**
+```python
+# You write:
+await db.tasks.find({}).to_list(length=10)
+
+# Engine executes:
+# Collection: my_app_tasks
+# Query: {"app_id": "my_app"}
+```
+
+### 3. Health Checks
+
+Built-in observability:
+
+```python
+@app.get("/health")
+async def health():
+    status = await engine.get_health_status()
+    return {"status": status.get("status", "unknown")}
+```
+
+---
+
+## Why mdb-engine?
+
+- **Zero boilerplate** — No more connection setup, index creation scripts, or auth handlers
+- **Data isolation** — Multi-tenant ready with automatic app sandboxing
+- **Manifest-driven** — Define your app's "DNA" in JSON, not scattered code
+- **No lock-in** — Standard Motor/PyMongo underneath; export anytime with `mongodump --query='{"app_id":"my_app"}'`
+
+---
+
+## Advanced Features
+
+| Feature | Description | Learn More |
+|---------|-------------|------------|
+| **Authentication** | JWT + Casbin/OSO RBAC | [Auth Guide](https://github.com/ranfysvalle02/mdb-engine/blob/main/docs/AUTHZ.md) |
+| **Vector Search** | Atlas Vector Search + embeddings | [RAG Example](https://github.com/ranfysvalle02/mdb-engine/tree/main/examples/basic/interactive_rag) |
+| **Memory Service** | Persistent AI memory with Mem0 | [Chat Example](https://github.com/ranfysvalle02/mdb-engine/tree/main/examples/basic/chit_chat) |
+| **WebSockets** | Real-time updates from manifest | [Docs](https://github.com/ranfysvalle02/mdb-engine/blob/main/docs/ARCHITECTURE.md) |
+| **Multi-App** | Secure cross-app data access | [Multi-App Example](https://github.com/ranfysvalle02/mdb-engine/tree/main/examples/multi_app) |
+| **SSO** | Shared auth across apps | [Shared Auth Example](https://github.com/ranfysvalle02/mdb-engine/tree/main/examples/multi_app_shared) |
+
+---
+
+## Full Examples
+
+Clone and run:
+
+```bash
+git clone https://github.com/ranfysvalle02/mdb-engine.git
+cd mdb-engine/examples/simple_app
+docker-compose up --build
+```
+
+| Example | Description |
+|---------|-------------|
+| [simple_app](https://github.com/ranfysvalle02/mdb-engine/tree/main/examples/simple_app) | Task management with `create_app()` pattern |
+| [interactive_rag](https://github.com/ranfysvalle02/mdb-engine/tree/main/examples/basic/interactive_rag) | RAG with vector search |
+| [chit_chat](https://github.com/ranfysvalle02/mdb-engine/tree/main/examples/basic/chit_chat) | AI chat with persistent memory |
+| [oso_hello_world](https://github.com/ranfysvalle02/mdb-engine/tree/main/examples/basic/oso_hello_world) | OSO Cloud authorization |
+| [multi_app](https://github.com/ranfysvalle02/mdb-engine/tree/main/examples/multi_app) | Multi-tenant with cross-app access |
+
+---
+
+## Manual Setup (Alternative)
+
+If you need more control over the FastAPI lifecycle:
 
 ```python
 from pathlib import Path
@@ -125,244 +182,28 @@ engine = MongoDBEngine(mongo_uri="mongodb://localhost:27017", db_name="my_databa
 @app.on_event("startup")
 async def startup():
     await engine.initialize()
-
-    # Load and register app from manifest
-    manifest_path = Path("manifest.json")
-    manifest = await engine.load_manifest(manifest_path)
+    manifest = await engine.load_manifest(Path("manifest.json"))
     await engine.register_app(manifest, create_indexes=True)
 
-# 3. Use the Scoped Database
-@app.post("/tasks")
-async def create_task(task: dict):
-    # This DB instance is physically and logically sandboxed to 'my_app'
+@app.on_event("shutdown")
+async def shutdown():
+    await engine.shutdown()
+
+@app.get("/items")
+async def get_items():
     db = engine.get_scoped_db("my_app")
-
-    # Auto-tagged with app_id; indexes auto-managed
-    result = await db.tasks.insert_one(task)
-    return {"id": str(result.inserted_id)}
+    return await db.items.find({}).to_list(length=10)
 ```
 
 ---
 
-## Core Features Breakdown
+## Links
 
-### 🔐 Authentication & Authorization
-
-Stop rewriting auth. The engine provides a unified authentication and authorization system with automatic Casbin provider setup.
-
-**Unified Auth Stack:**
-* **Auto-created Provider:** Casbin authorization provider is automatically created from manifest (default)
-* **MongoDB-backed Policies:** Policies stored in MongoDB with zero configuration
-* **App-Level User Management:** App-level users automatically get Casbin roles assigned
-* **Zero Boilerplate:** Just configure in manifest, everything works automatically
-
-**Manifest Configuration:**
-```json
-{
-  "auth": {
-    "policy": {
-      "provider": "casbin",
-      "required": true,
-      "authorization": {
-        "model": "rbac",
-        "policies_collection": "casbin_policies",
-        "link_users_roles": true,
-        "default_roles": ["user", "admin"]
-      }
-    },
-    "users": {
-      "enabled": true,
-      "strategy": "app_users"
-    }
-  }
-}
-```
-
-**Usage:**
-```python
-from mdb_engine.auth import setup_auth_from_manifest, get_authz_provider, get_current_user
-
-# Auto-setup (in startup)
-await setup_auth_from_manifest(app, engine, "my_app")
-
-# Use in routes
-@app.get("/protected")
-async def protected_route(
-    user: dict = Depends(get_current_user),
-    authz: AuthorizationProvider = Depends(get_authz_provider)
-):
-    has_access = await authz.check(
-        subject=user.get("email"),
-        resource="my_app",
-        action="access"
-    )
-    return {"user_id": user["user_id"]}
-```
-
-**Extensibility:**
-* **Custom Providers:** Implement `AuthorizationProvider` protocol for custom auth logic
-* **OSO Support:** Use `"provider": "oso"` for OSO/Polar-based authorization
-* **Custom Models:** Provide custom Casbin model files or use built-in RBAC/ACL
-* **Manual Setup:** Override auto-creation by setting `app.state.authz_provider` manually
-
-### 🛡️ Security Helpers (Optional)
-
-MDB_ENGINE provides optional security helpers and decorators that you can opt-in to use. These are **not enforced** by default - the engine provides the building blocks, you choose which security features to enable.
-
-**Optional Decorators:**
-
-* **`@rate_limit_auth`** - Rate limiting for authentication endpoints
-  ```python
-  from mdb_engine.auth import rate_limit_auth
-
-  @app.post("/login")
-  @rate_limit_auth(max_attempts=5, window_seconds=300)
-  async def login(credentials: dict):
-      return await authenticate(credentials)
-  ```
-
-* **`@token_security`** - CSRF protection and HTTPS enforcement
-  ```python
-  from mdb_engine.auth import token_security
-
-  @app.post("/sensitive")
-  @token_security(enforce_https=True, check_csrf=True)
-  async def sensitive_operation(user: dict = Depends(get_current_user)):
-      return {"data": "sensitive"}
-  ```
-
-* **`@require_auth`** - Authentication requirement decorator
-  ```python
-  from mdb_engine.auth import require_auth
-
-  @app.get("/dashboard")
-  @require_auth(redirect_to="/login")
-  async def dashboard(request: Request):
-      user = request.state.user
-      return {"user": user}
-  ```
-
-**Optional Middleware:**
-
-* **`SecurityMiddleware`** - Security headers and CSRF token management
-  ```python
-  from mdb_engine.auth import SecurityMiddleware
-
-  app.add_middleware(
-      SecurityMiddleware,
-      require_https=True,
-      csrf_protection=True,
-      security_headers=True
-  )
-  ```
-
-These helpers are **opt-in** - use them when you need additional security layers beyond the core engine functionality.
-
-### 📡 Built-in WebSockets
-
-Real-time features usually require a lot of setup. MDB_ENGINE makes it configuration-based.
-
-1. **Define:** Add `"websockets": {"realtime": {"path": "/ws"}}` to your manifest.
-2. **Register:** WebSocket routes are automatically registered when you register your app with the engine.
-3. **Broadcast:** `await broadcast_to_app("my_app", {"type": "update", "data": ...})`.
-
-### 📊 Observability (The "Black Box" Recorder)
-
-You shouldn't have to add logging manually to every function.
-
-* **Contextual Logs:** Every log entry is automatically tagged with the active `app_id`.
-* **Metrics:** Record operation durations and success rates automatically.
-* **Health Checks:** Built-in endpoints to monitor DB connectivity.
-
----
-
-## No Lock-In: The Graduation Path 🎓
-
-MDB_ENGINE is an incubator, not a cage. Because all data is tagged with `app_id`, "graduating" an app to its own dedicated infrastructure is a simple database operation.
-
-**To export your app:**
-
-1. **Dump:** Use `mongodump` with a query filter:
-```bash
-mongodump --query='{"app_id":"my_app"}' --out=./export
-```
-
-
-2. **Restore:** Load it into a fresh MongoDB cluster.
-3. **Code:** Your code is already standard PyMongo/Motor code. Just remove the `engine.get_scoped_db` wrapper and replace it with a standard `AsyncIOMotorClient`.
-
----
-
-## Project Structure
-
-```text
-.
-├── mdb_engine/              # Core engine package
-│   ├── core/                # Manifest validation & registration
-│   ├── database/            # ScopedMongoWrapper (The Proxy)
-│   ├── auth/                # JWT & RBAC logic
-│   ├── indexes/             # Auto-index management
-│   ├── embeddings/          # EmbeddingService for semantic text splitting
-│   ├── memory/              # Mem0MemoryService for intelligent memory
-│   ├── routing/             # WebSocket routing and management
-│   └── observability/       # Logging, metrics, and health checks
-├── examples/                # Example applications
-├── tests/                   # Test suite
-├── docs/                    # Documentation
-└── scripts/                 # Utility scripts
-```
-
-The project structure is shown above. Each module is documented in its respective README.md file.
-
----
-
-## Examples
-
-Check out the examples in the repository to see MDB_ENGINE in action:
-
-- **[`chit_chat`](examples/chit_chat/)**: AI chat application with persistent memory using Mem0 — demonstrates authentication, WebSockets, and memory management
-- **[`interactive_rag`](examples/interactive_rag/)**: Full RAG application — semantic search with vector indexes and embedding service
-- **[`vector_hacking`](examples/vector_hacking/)**: Advanced LLM usage — vector inversion attacks with real-time updates
-- **[`parallax`](examples/parallax/)**: Schema generation and management — demonstrates dynamic schema handling
-
-Each example includes a complete `manifest.json`, Docker setup, and working code you can run immediately.
-
----
-
-## Contributing
-
-We welcome contributions! Please read our [Contributing Guide](CONTRIBUTING.md) for:
-
-- Exception handling best practices (Staff Engineer level)
-- Code style guidelines
-- Makefile commands for development
-- Code quality checks (`make lint`, `make format`)
-- Testing requirements
-- Pull request process
-
-**Key Requirements:**
-- All exception handling must follow our [best practices](CONTRIBUTING.md#exception-handling-best-practices)
-- Code quality checks must pass (`make lint`) before submitting PRs
-- Tests must be included for new features
-
-**Quick Start for Contributors:**
-```bash
-# Install development dependencies
-make install-dev
-
-# Run quick quality check (lint + unit tests)
-make check
-
-# View all available commands
-make help
-```
-
-**Quick Links:**
-- [Contributing Guide](CONTRIBUTING.md)
-- [Development Setup](SETUP.md)
-- [Testing Guide](docs/guides/testing.md)
-- [Documentation](docs/README.md)
-- [Quick Start Guide](docs/QUICK_START.md)
+- [GitHub Repository](https://github.com/ranfysvalle02/mdb-engine)
+- [Documentation](https://github.com/ranfysvalle02/mdb-engine/tree/main/docs)
+- [All Examples](https://github.com/ranfysvalle02/mdb-engine/tree/main/examples)
+- [Quick Start Guide](https://github.com/ranfysvalle02/mdb-engine/blob/main/docs/QUICK_START.md)
+- [Contributing](https://github.com/ranfysvalle02/mdb-engine/blob/main/CONTRIBUTING.md)
 
 ---
 

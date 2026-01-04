@@ -9,8 +9,11 @@ import secrets
 
 import pytest
 
-from mdb_engine.core.encryption import (AES_KEY_SIZE, MASTER_KEY_ENV_VAR,
-                                        EnvelopeEncryptionService)
+from mdb_engine.core.encryption import (
+    AES_KEY_SIZE,
+    MASTER_KEY_ENV_VAR,
+    EnvelopeEncryptionService,
+)
 
 
 class TestEnvelopeEncryptionService:

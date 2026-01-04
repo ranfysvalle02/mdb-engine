@@ -9,7 +9,7 @@ UNIT_TEST_DIR := tests/unit
 INTEGRATION_TEST_DIR := tests/integration
 COV_ARGS := --cov=mdb_engine/core --cov=mdb_engine/database --cov-fail-under=$(COV_FAIL_UNDER)
 
-.PHONY: help install install-dev test test-unit test-integration test-coverage test-coverage-html lint lint-check format clean clean-pyc clean-cache check _check-tools _lint-flake8 _lint-isort _lint-exceptions build build-check publish
+.PHONY: help install install-dev test test-unit test-integration test-coverage test-coverage-html lint fix format clean clean-pyc clean-cache check _check-tools _lint-exceptions build build-check publish
 
 # Default target
 help:
@@ -22,10 +22,10 @@ help:
 	@echo "  make test-integration - Run integration tests only (requires Docker)"
 	@echo "  make test-coverage    - Run tests with coverage report (terminal)"
 	@echo "  make test-coverage-html - Run tests with HTML coverage report"
-	@echo "  make lint             - Run linters (flake8, isort check) - fails on errors"
-	@echo "  make lint-check       - Run linters (non-failing, for CI)"
-	@echo "  make format           - Format code (black, isort)"
-	@echo "  make check            - Run lint + unit tests (quick quality check)"
+	@echo "  make fix              - Auto-fix all linting issues (format + lint fixes)"
+	@echo "  make lint             - Check for linting issues (strict, fails on errors)"
+	@echo "  make format           - Alias for 'make fix'"
+	@echo "  make check            - Run fix + lint + unit tests (quick quality check)"
 	@echo "  make clean            - Remove build artifacts and caches"
 	@echo "  make clean-pyc        - Remove Python cache files"
 	@echo "  make clean-cache      - Remove pytest cache"
@@ -74,58 +74,31 @@ test-coverage-html:
 
 # Code quality helpers
 _check-tools:
-	@python -m flake8 --version > /dev/null 2>&1 || (echo "⚠️  flake8 not installed. Install with: pip install -e '.[dev]'" && exit 1)
-	@python -m isort --version > /dev/null 2>&1 || (echo "⚠️  isort not installed. Install with: pip install -e '.[dev]'" && exit 1)
+	@ruff --version > /dev/null 2>&1 || (echo "⚠️  ruff not installed. Install with: pip install -e '.[dev]'" && exit 1)
+	@semgrep --version > /dev/null 2>&1 || (echo "⚠️  semgrep not installed. Install with: pip install -e '.[dev]'" && exit 1)
 
-_lint-flake8:
-	@echo "Checking flake8..."
-	@flake8 $(SOURCE_DIRS) || (echo "❌ flake8 found issues. Run 'make format' to auto-fix some issues." && exit 1)
+_lint-semgrep:
+	@echo "Checking exception handling (Semgrep + Grinberg framework)..."
+	@semgrep scan --config .semgrep.yml --error --quiet mdb_engine/ || (echo "❌ Semgrep violations found. See output above." && exit 1)
+	@echo "✅ Semgrep checks passed!"
 
-_lint-isort:
-	@echo "Checking import sorting (isort)..."
-	@isort --check-only $(SOURCE_DIRS) || (echo "❌ isort found import ordering issues. Run 'make format' to auto-fix." && exit 1)
+# Code quality - Auto-fix everything
+fix: _check-tools
+	@echo "Fixing all auto-fixable issues..."
+	@ruff check --fix $(SOURCE_DIRS) || true
+	@ruff format $(SOURCE_DIRS)
+	@echo "✅ Auto-fix complete!"
 
-_lint-exceptions:
-	@echo "Checking exception handling (Grinberg framework)..."
-	@$(PYTHON) scripts/check_exception_handling.py $$(find mdb_engine -name "*.py" -not -path "*/test*" -not -path "*/__pycache__/*") || (echo "❌ Exception handling violations found. See output above." && exit 1)
+# Alias for backwards compatibility
+format: fix
 
-# Code quality
-lint: _check-tools _lint-flake8 _lint-isort _lint-exceptions
+# Code quality - Check only (strict)
+lint: _check-tools
+	@echo "Checking code quality..."
+	@ruff check $(SOURCE_DIRS)
+	@ruff format --check $(SOURCE_DIRS)
+	@$(MAKE) _lint-semgrep
 	@echo "✅ All linting checks passed!"
-
-lint-check:
-	@echo "Running lint check (non-failing)..."
-	@if command -v flake8 &> /dev/null; then \
-		flake8 $(SOURCE_DIRS) 2>&1 | tee /tmp/flake8_output.txt || true; \
-		if grep -qE "^mdb_engine|^tests|^scripts" /tmp/flake8_output.txt 2>/dev/null; then \
-			echo "⚠️  flake8 found issues"; \
-		fi; \
-	else \
-		echo "⚠️  flake8 not installed"; \
-	fi
-	@if command -v isort &> /dev/null; then \
-		isort --check-only $(SOURCE_DIRS) 2>&1 | tee /tmp/isort_output.txt || true; \
-		if grep -q "ERROR:" /tmp/isort_output.txt 2>/dev/null; then \
-			echo "⚠️  isort found issues"; \
-		fi; \
-	else \
-		echo "⚠️  isort not installed"; \
-	fi
-	@$(PYTHON) scripts/check_exception_handling.py $$(find mdb_engine -name "*.py" -not -path "*/test*" -not -path "*/__pycache__/*") 2>&1 | tee /tmp/exception_check_output.txt || true
-	@$(PYTHON) scripts/count_lint_errors.py || true
-
-format:
-	@echo "Formatting code..."
-	@if command -v black &> /dev/null; then \
-		black $(SOURCE_DIRS); \
-	else \
-		echo "⚠️  black not installed. Install with: pip install -e '.[dev]'"; \
-	fi
-	@if command -v isort &> /dev/null; then \
-		isort $(SOURCE_DIRS); \
-	else \
-		echo "⚠️  isort not installed. Install with: pip install -e '.[dev]'"; \
-	fi
 
 # Cleanup
 clean: clean-pyc clean-cache
@@ -138,8 +111,8 @@ clean-pyc:
 clean-cache:
 	rm -rf .pytest_cache/ .mypy_cache/ .ruff_cache/
 
-# Quick quality check (lint + unit tests)
-check: lint test-unit
+# Quick quality check (fix + lint + unit tests)
+check: fix lint test-unit
 	@echo ""
 	@echo "✅ Quality check complete: linting and unit tests passed!"
 

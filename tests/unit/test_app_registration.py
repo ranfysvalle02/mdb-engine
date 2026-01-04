@@ -52,7 +52,6 @@ class TestAppRegistrationErrorHandling:
             "validate",
             return_value=(True, None, None),
         ):
-
             # Mock database operations
             mock_collection = MagicMock()
             mock_collection.replace_one = AsyncMock(
@@ -85,8 +84,7 @@ class TestAppRegistrationErrorHandling:
         self, app_registration_manager, sample_manifest, mock_mongo_database
     ):
         """Test handling MongoDB persistence errors."""
-        from pymongo.errors import (ConnectionFailure, InvalidOperation,
-                                    OperationFailure)
+        from pymongo.errors import ConnectionFailure, InvalidOperation, OperationFailure
 
         # Mock successful validation
         with patch.object(
@@ -117,9 +115,7 @@ class TestAppRegistrationErrorHandling:
             assert result is True
 
             # Test InvalidOperation
-            mock_collection.replace_one = AsyncMock(
-                side_effect=InvalidOperation("Client closed")
-            )
+            mock_collection.replace_one = AsyncMock(side_effect=InvalidOperation("Client closed"))
             result = await app_registration_manager.register_app(sample_manifest)
             assert result is True
 
@@ -188,7 +184,6 @@ class TestAppRegistrationEdgeCases:
             "validate",
             return_value=(True, None, None),
         ):
-
             # Mock database operations
             mock_collection = MagicMock()
             mock_collection.replace_one = AsyncMock(
@@ -210,9 +205,7 @@ class TestAppRegistrationEdgeCases:
             manifest_with_all = {
                 **sample_manifest,
                 "managed_indexes": {
-                    "collection": [
-                        {"name": "idx", "type": "regular", "keys": [("field", 1)]}
-                    ]
+                    "collection": [{"name": "idx", "type": "regular", "keys": [("field", 1)]}]
                 },
                 "initial_data": {"collection": [{"field": "value"}]},
                 "memory_config": {"enabled": True},
@@ -248,7 +241,6 @@ class TestAppRegistrationEdgeCases:
             "validate",
             return_value=(True, None, None),
         ):
-
             # Mock database operations
             mock_collection = MagicMock()
             mock_collection.replace_one = AsyncMock(
@@ -319,9 +311,7 @@ class TestAppRegistrationEdgeCases:
             manifest_with_callbacks = {
                 **sample_manifest,
                 "managed_indexes": {
-                    "collection": [
-                        {"name": "idx", "type": "regular", "keys": [("field", 1)]}
-                    ]
+                    "collection": [{"name": "idx", "type": "regular", "keys": [("field", 1)]}]
                 },
                 "initial_data": {"collection": [{"field": "value"}]},
                 "memory_config": {"enabled": True},
@@ -388,9 +378,7 @@ class TestAppRegistrationEdgeCases:
             manifest_with_callbacks = {
                 **sample_manifest,
                 "managed_indexes": {
-                    "collection": [
-                        {"name": "idx", "type": "regular", "keys": [("field", 1)]}
-                    ]
+                    "collection": [{"name": "idx", "type": "regular", "keys": [("field", 1)]}]
                 },
                 "initial_data": {"collection": [{"field": "value"}]},
             }
@@ -436,9 +424,7 @@ class TestAppRegistrationEdgeCases:
             manifest_with_callbacks = {
                 **sample_manifest,
                 "managed_indexes": {
-                    "collection": [
-                        {"name": "idx", "type": "regular", "keys": [("field", 1)]}
-                    ]
+                    "collection": [{"name": "idx", "type": "regular", "keys": [("field", 1)]}]
                 },
             }
 
@@ -458,9 +444,7 @@ class TestAppRegistrationEdgeCases:
                 assert "Callback" in warning_call and "failed" in warning_call
 
     @pytest.mark.asyncio
-    async def test_reload_apps_empty(
-        self, app_registration_manager, mock_mongo_database
-    ):
+    async def test_reload_apps_empty(self, app_registration_manager, mock_mongo_database):
         """Test reloading when no apps exist."""
         # Mock empty cursor - find() returns a cursor, then limit(), then to_list()
         mock_cursor = MagicMock()
@@ -476,9 +460,7 @@ class TestAppRegistrationEdgeCases:
         app_registration_manager._mongo_db = mock_mongo_database
 
         register_callback = AsyncMock()
-        count = await app_registration_manager.reload_apps(
-            register_app_callback=register_callback
-        )
+        count = await app_registration_manager.reload_apps(register_app_callback=register_callback)
 
         assert count == 0
         register_callback.assert_not_called()
@@ -506,15 +488,11 @@ class TestAppRegistrationEdgeCases:
         # Callback that fails with a MongoDB exception (which will be caught)
         from pymongo.errors import OperationFailure
 
-        failing_callback = AsyncMock(
-            side_effect=OperationFailure("Registration failed")
-        )
+        failing_callback = AsyncMock(side_effect=OperationFailure("Registration failed"))
 
         # Should handle MongoDB errors gracefully and return 0
         # Note: reload_apps catches MongoDB exceptions and returns 0
-        count = await app_registration_manager.reload_apps(
-            register_app_callback=failing_callback
-        )
+        count = await app_registration_manager.reload_apps(register_app_callback=failing_callback)
 
         # Should return 0 when MongoDB errors occur
         assert count == 0
@@ -544,9 +522,7 @@ class TestAppRegistrationEdgeCases:
 
         register_callback = AsyncMock(return_value=True)
 
-        count = await app_registration_manager.reload_apps(
-            register_app_callback=register_callback
-        )
+        count = await app_registration_manager.reload_apps(register_app_callback=register_callback)
 
         assert count == 1
         # reload_apps calls callback with manifest and create_indexes=True

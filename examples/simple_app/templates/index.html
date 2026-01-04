@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple App - MDB Engine Example</title>
+    <style>
+        :root {
+            --bg-primary: #0a0a0f;
+            --bg-secondary: #12121a;
+            --bg-tertiary: #1a1a24;
+            --accent: #6366f1;
+            --accent-hover: #818cf8;
+            --text-primary: #f1f5f9;
+            --text-secondary: #94a3b8;
+            --border: #2d2d3a;
+            --success: #22c55e;
+            --danger: #ef4444;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            padding: 2rem;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        
+        header {
+            margin-bottom: 2rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid var(--border);
+        }
+        
+        h1 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(135deg, var(--accent), #a855f7);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .subtitle {
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 0.25rem 0.5rem;
+            font-size: 0.75rem;
+            border-radius: 4px;
+            margin-left: 0.5rem;
+        }
+        
+        .badge-ray {
+            background: rgba(34, 197, 94, 0.2);
+            color: var(--success);
+            border: 1px solid rgba(34, 197, 94, 0.3);
+        }
+        
+        .badge-no-ray {
+            background: rgba(148, 163, 184, 0.2);
+            color: var(--text-secondary);
+            border: 1px solid rgba(148, 163, 184, 0.3);
+        }
+        
+        .add-task-form {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 2rem;
+        }
+        
+        input[type="text"] {
+            flex: 1;
+            padding: 0.75rem 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 0.875rem;
+        }
+        
+        input[type="text"]:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+        }
+        
+        button {
+            padding: 0.75rem 1.5rem;
+            background: var(--accent);
+            border: none;
+            border-radius: 8px;
+            color: white;
+            font-family: inherit;
+            font-size: 0.875rem;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        
+        button:hover {
+            background: var(--accent-hover);
+        }
+        
+        .tasks-list {
+            list-style: none;
+        }
+        
+        .task-item {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            padding: 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            margin-bottom: 0.5rem;
+            transition: border-color 0.2s;
+        }
+        
+        .task-item:hover {
+            border-color: var(--accent);
+        }
+        
+        .task-item.completed {
+            opacity: 0.6;
+        }
+        
+        .task-item.completed .task-title {
+            text-decoration: line-through;
+            color: var(--text-secondary);
+        }
+        
+        .task-checkbox {
+            width: 20px;
+            height: 20px;
+            border: 2px solid var(--border);
+            border-radius: 4px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+        
+        .task-checkbox:hover {
+            border-color: var(--accent);
+        }
+        
+        .task-item.completed .task-checkbox {
+            background: var(--success);
+            border-color: var(--success);
+        }
+        
+        .task-checkbox::after {
+            content: '✓';
+            color: white;
+            font-size: 12px;
+            opacity: 0;
+        }
+        
+        .task-item.completed .task-checkbox::after {
+            opacity: 1;
+        }
+        
+        .task-content {
+            flex: 1;
+        }
+        
+        .task-title {
+            font-weight: 500;
+            margin-bottom: 0.25rem;
+        }
+        
+        .task-meta {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+        
+        .task-delete {
+            padding: 0.5rem;
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            border-radius: 4px;
+            cursor: pointer;
+            opacity: 0;
+            transition: all 0.2s;
+        }
+        
+        .task-item:hover .task-delete {
+            opacity: 1;
+        }
+        
+        .task-delete:hover {
+            background: var(--danger);
+            border-color: var(--danger);
+            color: white;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 3rem;
+            color: var(--text-secondary);
+        }
+        
+        .code-block {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1rem;
+            margin-top: 2rem;
+            font-size: 0.75rem;
+            overflow-x: auto;
+        }
+        
+        .code-block pre {
+            color: var(--text-secondary);
+        }
+        
+        .code-comment {
+            color: #6b7280;
+        }
+        
+        .code-keyword {
+            color: var(--accent);
+        }
+        
+        .code-string {
+            color: #22c55e;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Simple App Example</h1>
+            <p class="subtitle">
+                Unified MongoDBEngine Pattern with create_app()
+                {% if ray_enabled %}
+                <span class="badge badge-ray">Ray Enabled</span>
+                {% else %}
+                <span class="badge badge-no-ray">Standard Mode</span>
+                {% endif %}
+            </p>
+        </header>
+        
+        <form class="add-task-form" onsubmit="addTask(event)">
+            <input type="text" id="taskTitle" placeholder="Add a new task..." required>
+            <button type="submit">Add Task</button>
+        </form>
+        
+        <ul class="tasks-list" id="tasksList">
+            {% if tasks %}
+                {% for task in tasks %}
+                <li class="task-item {% if task.completed %}completed{% endif %}" data-id="{{ task._id }}">
+                    <div class="task-checkbox" onclick="toggleTask('{{ task._id }}')"></div>
+                    <div class="task-content">
+                        <div class="task-title">{{ task.title }}</div>
+                        <div class="task-meta">
+                            Created: {{ task.created_at.strftime('%Y-%m-%d %H:%M') if task.created_at else 'Unknown' }}
+                        </div>
+                    </div>
+                    <button class="task-delete" onclick="deleteTask('{{ task._id }}')">✕</button>
+                </li>
+                {% endfor %}
+            {% else %}
+                <li class="empty-state">No tasks yet. Add one above!</li>
+            {% endif %}
+        </ul>
+        
+        <div class="code-block">
+            <pre><span class="code-comment"># This example uses the unified MongoDBEngine pattern:</span>
+
+<span class="code-keyword">from</span> mdb_engine <span class="code-keyword">import</span> MongoDBEngine
+
+engine = MongoDBEngine(
+    mongo_uri=<span class="code-string">"mongodb://localhost:27017"</span>,
+    db_name=<span class="code-string">"mdb_runtime"</span>,
+)
+
+<span class="code-comment"># One line - automatic lifecycle management</span>
+app = engine.create_app(
+    slug=<span class="code-string">"simple_app"</span>,
+    manifest=Path(<span class="code-string">"manifest.json"</span>)
+)</pre>
+        </div>
+    </div>
+    
+    <script>
+        async function addTask(event) {
+            event.preventDefault();
+            const title = document.getElementById('taskTitle').value;
+            
+            const response = await fetch('/api/tasks', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({title})
+            });
+            
+            if (response.ok) {
+                window.location.reload();
+            }
+        }
+        
+        async function toggleTask(taskId) {
+            const response = await fetch(`/api/tasks/${taskId}/toggle`, {
+                method: 'POST'
+            });
+            
+            if (response.ok) {
+                window.location.reload();
+            }
+        }
+        
+        async function deleteTask(taskId) {
+            const response = await fetch(`/api/tasks/${taskId}`, {
+                method: 'DELETE'
+            });
+            
+            if (response.ok) {
+                window.location.reload();
+            }
+        }
+    </script>
+</body>
+</html>
+

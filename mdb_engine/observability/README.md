@@ -99,9 +99,11 @@ record_operation(
 )
 
 # Record failed operation
+from pymongo.errors import PyMongoError
+
 try:
     await db.collection.insert_one(document)
-except Exception as e:
+except PyMongoError as e:
     record_operation(
         operation_name="database.insert_one",
         duration_ms=0,
@@ -368,7 +370,7 @@ async def check_custom_service():
                 message="Service responded with error",
                 details={"status_code": response.status_code}
             )
-    except Exception as e:
+    except (httpx.HTTPError, ConnectionError, TimeoutError) as e:
         return HealthCheckResult(
             name="custom_service",
             status=HealthStatus.UNHEALTHY,

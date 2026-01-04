@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Click Tracker - Shared Auth</title>
+    <style>
+        :root {
+            --bg-dark: #0f0f10;
+            --bg-card: #1a1a1d;
+            --accent: #00d9ff;
+            --accent-dim: #00a0b8;
+            --text: #e4e4e7;
+            --text-dim: #a1a1aa;
+            --success: #22c55e;
+            --error: #ef4444;
+        }
+        
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: 'SF Mono', 'JetBrains Mono', monospace;
+            background: var(--bg-dark);
+            color: var(--text);
+            min-height: 100vh;
+            padding: 2rem;
+        }
+        
+        .container { max-width: 800px; margin: 0 auto; }
+        
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid var(--bg-card);
+        }
+        
+        h1 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--accent);
+        }
+        
+        .badge {
+            background: var(--accent-dim);
+            color: var(--bg-dark);
+            padding: 0.25rem 0.75rem;
+            border-radius: 999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+        
+        .card {
+            background: var(--bg-card);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+        }
+        
+        .card h2 {
+            font-size: 1rem;
+            color: var(--text-dim);
+            margin-bottom: 1rem;
+        }
+        
+        .user-info {
+            display: grid;
+            gap: 0.5rem;
+        }
+        
+        .user-info span {
+            color: var(--accent);
+        }
+        
+        .roles {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 0.5rem;
+        }
+        
+        .role-badge {
+            background: var(--bg-dark);
+            border: 1px solid var(--accent-dim);
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+        }
+        
+        .auth-form {
+            display: grid;
+            gap: 1rem;
+        }
+        
+        input {
+            background: var(--bg-dark);
+            border: 1px solid var(--text-dim);
+            padding: 0.75rem;
+            border-radius: 8px;
+            color: var(--text);
+            font-family: inherit;
+        }
+        
+        input:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+        
+        button {
+            background: var(--accent);
+            color: var(--bg-dark);
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 8px;
+            font-family: inherit;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        
+        button:hover { background: var(--accent-dim); }
+        
+        .btn-secondary {
+            background: transparent;
+            border: 1px solid var(--accent);
+            color: var(--accent);
+        }
+        
+        .btn-secondary:hover {
+            background: var(--accent);
+            color: var(--bg-dark);
+        }
+        
+        .actions {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+        
+        .message {
+            padding: 0.75rem;
+            border-radius: 8px;
+            margin-top: 1rem;
+            font-size: 0.875rem;
+        }
+        
+        .message.success { background: rgba(34, 197, 94, 0.2); border: 1px solid var(--success); }
+        .message.error { background: rgba(239, 68, 68, 0.2); border: 1px solid var(--error); }
+        
+        .sso-note {
+            background: rgba(0, 217, 255, 0.1);
+            border: 1px solid var(--accent-dim);
+            padding: 1rem;
+            border-radius: 8px;
+            font-size: 0.875rem;
+            margin-top: 1rem;
+        }
+        
+        .click-count {
+            font-size: 3rem;
+            font-weight: 700;
+            color: var(--accent);
+        }
+        
+        .password-requirements {
+            background: var(--bg-dark);
+            border: 1px solid var(--text-dim);
+            border-radius: 8px;
+            padding: 0.75rem;
+            font-size: 0.75rem;
+        }
+        
+        .password-requirements .req-title {
+            color: var(--text-dim);
+            font-weight: 600;
+        }
+        
+        .password-requirements ul {
+            list-style: none;
+            margin-top: 0.5rem;
+        }
+        
+        .password-requirements li {
+            color: var(--error);
+            padding: 0.125rem 0;
+        }
+        
+        .password-requirements li.valid {
+            color: var(--success);
+        }
+        
+        .password-requirements li::before {
+            content: '✗ ';
+        }
+        
+        .password-requirements li.valid::before {
+            content: '✓ ';
+        }
+        
+        #entropy-value {
+            font-weight: 600;
+        }
+        
+        #entropy-value.low { color: var(--error); }
+        #entropy-value.medium { color: #f59e0b; }
+        #entropy-value.high { color: var(--success); }
+        
+        .nav-links {
+            display: flex;
+            gap: 1rem;
+        }
+        
+        .nav-links a {
+            color: var(--text-dim);
+            text-decoration: none;
+            font-size: 0.875rem;
+            transition: color 0.2s;
+        }
+        
+        .nav-links a:hover { color: var(--accent); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div>
+                <h1>🖱️ Click Tracker</h1>
+                <div style="display: flex; gap: 0.5rem; align-items: center; margin-top: 0.5rem;">
+                    <span class="badge">Shared Auth</span>
+                </div>
+            </div>
+            <div class="nav-links">
+                <a href="http://localhost:8000" style="color: var(--accent);">🖱️ Click Tracker</a>
+                <a href="http://localhost:8001">📊 Dashboard</a>
+            </div>
+        </header>
+        
+        {% if user %}
+        <!-- Authenticated View -->
+        <div class="card">
+            <h2>Welcome back</h2>
+            <div class="user-info">
+                <div>Email: <span>{{ user.email }}</span></div>
+                <div class="roles">
+                    Roles:
+                    {% for role in roles %}
+                    <span class="role-badge">{{ role }}</span>
+                    {% endfor %}
+                </div>
+            </div>
+            <div class="actions" style="margin-top: 1rem;">
+                <button onclick="trackClick()">Track Click</button>
+                <button class="btn-secondary" onclick="viewClicks()">View My Clicks</button>
+                <button class="btn-secondary" onclick="logout()">Logout</button>
+            </div>
+            <div id="message"></div>
+        </div>
+        
+        <div class="card">
+            <h2>Click Counter</h2>
+            <div class="click-count" id="clickCount">-</div>
+            <p style="color: var(--text-dim); margin-top: 0.5rem;">Your tracked clicks</p>
+        </div>
+        
+        <div class="sso-note">
+            <strong>SSO Enabled:</strong> Your login works across all apps using shared auth.
+            Try accessing the <a href="http://localhost:8001" style="color: var(--accent);">Dashboard</a>
+            (requires "editor" role).
+        </div>
+        
+        {% else %}
+        <!-- Not Authenticated View -->
+        <div class="card">
+            <h2>Login</h2>
+            <form class="auth-form" onsubmit="login(event)">
+                <input type="email" id="loginEmail" placeholder="Email" required>
+                <input type="password" id="loginPassword" placeholder="Password" required>
+                <button type="submit">Login</button>
+            </form>
+            <div id="loginMessage"></div>
+        </div>
+        
+        <div class="card">
+            <h2>Register</h2>
+            <form class="auth-form" onsubmit="register(event)">
+                <input type="email" id="registerEmail" placeholder="Email" required>
+                <input type="password" id="registerPassword" placeholder="Password" minlength="12" required>
+                <div class="password-requirements">
+                    <span class="req-title">Password requirements:</span>
+                    <ul>
+                        <li id="req-length">At least 12 characters</li>
+                        <li id="req-upper">At least one uppercase letter</li>
+                        <li id="req-lower">At least one lowercase letter</li>
+                        <li id="req-digit">At least one number</li>
+                        <li id="req-special">At least one special character (!@#$%^&*)</li>
+                        <li id="req-entropy">Entropy: <span id="entropy-value">calculating...</span></li>
+                    </ul>
+                </div>
+                <button type="submit">Create Account</button>
+            </form>
+            <div id="registerMessage"></div>
+        </div>
+        
+        <div class="sso-note">
+            <strong>🔒 Security Features:</strong><br>
+            • Password policy with entropy check<br>
+            • Session binding (fingerprint)<br>
+            • CSRF protection on all forms<br>
+            • Rate limiting on auth endpoints<br>
+            <br>
+            <strong>Shared Auth Mode:</strong> Register once, access multiple apps.
+            After registering, you'll have "viewer" role for Click Tracker.
+        </div>
+        {% endif %}
+    </div>
+    
+    <script>
+        // =====================================================================
+        // CSRF Token Handling
+        // =====================================================================
+        function getCsrfToken() {
+            // CSRF token is set via double-submit cookie pattern
+            const match = document.cookie.match(/csrf_token=([^;]+)/);
+            return match ? match[1] : null;
+        }
+        
+        // =====================================================================
+        // Password Validation (Client-Side)
+        // =====================================================================
+        function calculateEntropy(password) {
+            if (!password) return 0;
+            const charset = new Set(password).size;
+            let poolSize = 0;
+            if (/[a-z]/.test(password)) poolSize += 26;
+            if (/[A-Z]/.test(password)) poolSize += 26;
+            if (/[0-9]/.test(password)) poolSize += 10;
+            if (/[^a-zA-Z0-9]/.test(password)) poolSize += 32;
+            return Math.floor(password.length * Math.log2(poolSize || 1));
+        }
+        
+        function validatePassword(password) {
+            const checks = {
+                length: password.length >= 12,
+                upper: /[A-Z]/.test(password),
+                lower: /[a-z]/.test(password),
+                digit: /[0-9]/.test(password),
+                special: /[!@#$%^&*(),.?":{}|<>]/.test(password),
+            };
+            
+            // Update UI
+            document.getElementById('req-length').classList.toggle('valid', checks.length);
+            document.getElementById('req-upper').classList.toggle('valid', checks.upper);
+            document.getElementById('req-lower').classList.toggle('valid', checks.lower);
+            document.getElementById('req-digit').classList.toggle('valid', checks.digit);
+            document.getElementById('req-special').classList.toggle('valid', checks.special);
+            
+            // Calculate and display entropy
+            const entropy = calculateEntropy(password);
+            const entropyEl = document.getElementById('entropy-value');
+            entropyEl.textContent = `${entropy} bits`;
+            entropyEl.className = entropy < 40 ? 'low' : entropy < 60 ? 'medium' : 'high';
+            document.getElementById('req-entropy').classList.toggle('valid', entropy >= 40);
+            
+            return Object.values(checks).every(Boolean) && entropy >= 40;
+        }
+        
+        // Add real-time validation
+        document.addEventListener('DOMContentLoaded', () => {
+            const pwInput = document.getElementById('registerPassword');
+            if (pwInput) {
+                pwInput.addEventListener('input', (e) => validatePassword(e.target.value));
+            }
+        });
+        
+        // =====================================================================
+        // Auth Functions
+        // =====================================================================
+        async function login(e) {
+            e.preventDefault();
+            const email = document.getElementById('loginEmail').value;
+            const password = document.getElementById('loginPassword').value;
+            
+            try {
+                const res = await fetch('/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-Token': getCsrfToken(),
+                    },
+                    body: JSON.stringify({email, password})
+                });
+                const data = await res.json();
+                
+                if (res.ok) {
+                    showMessage('loginMessage', 'Login successful! Reloading...', 'success');
+                    setTimeout(() => location.reload(), 1000);
+                } else {
+                    showMessage('loginMessage', data.detail || 'Login failed', 'error');
+                }
+            } catch (err) {
+                showMessage('loginMessage', 'Network error', 'error');
+            }
+        }
+        
+        async function register(e) {
+            e.preventDefault();
+            const email = document.getElementById('registerEmail').value;
+            const password = document.getElementById('registerPassword').value;
+            
+            // Client-side validation first
+            if (!validatePassword(password)) {
+                showMessage('registerMessage', 'Password does not meet requirements', 'error');
+                return;
+            }
+            
+            try {
+                const res = await fetch('/register', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-Token': getCsrfToken(),
+                    },
+                    body: JSON.stringify({email, password})
+                });
+                const data = await res.json();
+                
+                if (res.ok) {
+                    showMessage('registerMessage', 
+                        `Registration successful! Entropy: ${data.security?.password_entropy_bits || '?'} bits. Reloading...`, 
+                        'success');
+                    setTimeout(() => location.reload(), 1000);
+                } else {
+                    // Handle password policy errors with detail
+                    if (data.detail?.errors) {
+                        showMessage('registerMessage', 
+                            `Password error: ${data.detail.errors.join(', ')}`, 'error');
+                    } else {
+                        showMessage('registerMessage', data.detail || 'Registration failed', 'error');
+                    }
+                }
+            } catch (err) {
+                showMessage('registerMessage', 'Network error', 'error');
+            }
+        }
+        
+        async function trackClick() {
+            try {
+                const res = await fetch('/track', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-Token': getCsrfToken(),
+                    },
+                    body: JSON.stringify({url: window.location.pathname, element: 'track-button'})
+                });
+                const data = await res.json();
+                
+                if (res.ok) {
+                    showMessage('message', `Click tracked! ID: ${data.click_id}`, 'success');
+                    loadClickCount();
+                } else {
+                    showMessage('message', data.detail || 'Failed to track', 'error');
+                }
+            } catch (err) {
+                showMessage('message', 'Network error', 'error');
+            }
+        }
+        
+        async function viewClicks() {
+            try {
+                const res = await fetch('/clicks?limit=10');
+                const data = await res.json();
+                showMessage('message', `You have ${data.count} clicks`, 'success');
+            } catch (err) {
+                showMessage('message', 'Failed to load clicks', 'error');
+            }
+        }
+        
+        async function logout() {
+            await fetch('/logout', {
+                method: 'POST',
+                headers: {'X-CSRF-Token': getCsrfToken()},
+            });
+            location.reload();
+        }
+        
+        async function loadClickCount() {
+            try {
+                const res = await fetch('/clicks');
+                const data = await res.json();
+                document.getElementById('clickCount').textContent = data.count;
+            } catch (err) {
+                document.getElementById('clickCount').textContent = '?';
+            }
+        }
+        
+        function showMessage(id, text, type) {
+            const el = document.getElementById(id);
+            el.className = `message ${type}`;
+            el.textContent = text;
+        }
+        
+        // Load click count on page load if authenticated
+        {% if user %}
+        loadClickCount();
+        {% endif %}
+    </script>
+</body>
+</html>
+

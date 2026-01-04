@@ -9,8 +9,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from mdb_engine.core.encryption import (MASTER_KEY_ENV_VAR,
-                                        EnvelopeEncryptionService)
+from mdb_engine.core.encryption import MASTER_KEY_ENV_VAR, EnvelopeEncryptionService
 from mdb_engine.core.engine import MongoDBEngine
 
 
@@ -26,9 +25,7 @@ async def mongodb_engine_with_secrets(master_key, mock_mongo_client):
     # Set master key in environment
     os.environ[MASTER_KEY_ENV_VAR] = master_key
     # Patch AsyncIOMotorClient to use mock client (same as mongodb_engine fixture)
-    with patch(
-        "mdb_engine.core.connection.AsyncIOMotorClient", return_value=mock_mongo_client
-    ):
+    with patch("mdb_engine.core.connection.AsyncIOMotorClient", return_value=mock_mongo_client):
         engine = MongoDBEngine(
             mongo_uri="mongodb://localhost:27017",
             db_name="test_db",
@@ -201,9 +198,7 @@ class TestEngineAppAuthentication:
                 read_scopes=["test_app", "unauthorized_app"],
             )
 
-    async def test_register_app_extracts_data_access(
-        self, mongodb_engine_with_secrets, master_key
-    ):
+    async def test_register_app_extracts_data_access(self, mongodb_engine_with_secrets, master_key):
         """Test that register_app extracts data_access from manifest."""
         engine = mongodb_engine_with_secrets
         await engine.initialize()
@@ -217,9 +212,7 @@ class TestEngineAppAuthentication:
             },
         }
 
-        secrets_collection = engine._connection_manager.mongo_db[
-            "_mdb_engine_app_secrets"
-        ]
+        secrets_collection = engine._connection_manager.mongo_db["_mdb_engine_app_secrets"]
         secrets_collection.find_one = AsyncMock(return_value=None)
         secrets_collection.insert_one = AsyncMock()
 
@@ -230,9 +223,7 @@ class TestEngineAppAuthentication:
         assert "test_app" in engine._app_read_scopes["test_app"]
         assert "shared_app" in engine._app_read_scopes["test_app"]
 
-    async def test_register_app_warns_missing_apps(
-        self, mongodb_engine_with_secrets, master_key
-    ):
+    async def test_register_app_warns_missing_apps(self, mongodb_engine_with_secrets, master_key):
         """Test that register_app warns if referenced apps don't exist."""
         engine = mongodb_engine_with_secrets
         await engine.initialize()
@@ -245,9 +236,7 @@ class TestEngineAppAuthentication:
             },
         }
 
-        secrets_collection = engine._connection_manager.mongo_db[
-            "_mdb_engine_app_secrets"
-        ]
+        secrets_collection = engine._connection_manager.mongo_db["_mdb_engine_app_secrets"]
         secrets_collection.find_one = AsyncMock(return_value=None)
         secrets_collection.insert_one = AsyncMock()
 

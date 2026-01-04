@@ -13,8 +13,11 @@ This module is part of MDB_ENGINE - MongoDB Engine.
 import logging
 from typing import Any, Callable, Dict, List, Optional
 
-from pymongo.errors import (ConnectionFailure, OperationFailure,
-                            ServerSelectionTimeoutError)
+from pymongo.errors import (
+    ConnectionFailure,
+    OperationFailure,
+    ServerSelectionTimeoutError,
+)
 
 from ..database import ScopedMongoWrapper
 from ..observability import get_logger as get_contextual_logger
@@ -50,9 +53,7 @@ class ServiceInitializer:
         self._memory_services: Dict[str, Any] = {}
         self._websocket_configs: Dict[str, Dict[str, Any]] = {}
 
-    async def initialize_memory_service(
-        self, slug: str, memory_config: Dict[str, Any]
-    ) -> None:
+    async def initialize_memory_service(self, slug: str, memory_config: Dict[str, Any]) -> None:
         """
         Initialize Mem0 memory service for an app.
 
@@ -79,9 +80,7 @@ class ServiceInitializer:
             f"Initializing Mem0 memory service for app '{slug}'",
             extra={
                 "app_slug": slug,
-                "collection_name": memory_config.get(
-                    "collection_name", f"{slug}_memories"
-                ),
+                "collection_name": memory_config.get("collection_name", f"{slug}_memories"),
                 "enable_graph": memory_config.get("enable_graph", False),
                 "embedding_model_dims": memory_config.get("embedding_model_dims", 1536),
                 "infer": memory_config.get("infer", True),
@@ -152,9 +151,7 @@ class ServiceInitializer:
                 exc_info=True,
             )
 
-    async def register_websockets(
-        self, slug: str, websockets_config: Dict[str, Any]
-    ) -> None:
+    async def register_websockets(self, slug: str, websockets_config: Dict[str, Any]) -> None:
         """
         Register WebSocket endpoints for an app.
 
@@ -190,9 +187,7 @@ class ServiceInitializer:
             try:
                 await get_websocket_manager(slug)
             except (ImportError, AttributeError, RuntimeError) as e:
-                contextual_logger.warning(
-                    f"Could not initialize WebSocket manager for {slug}: {e}"
-                )
+                contextual_logger.warning(f"Could not initialize WebSocket manager for {slug}: {e}")
                 continue
             contextual_logger.debug(
                 f"Configured WebSocket endpoint '{endpoint_name}' at path '{path}'",
@@ -221,9 +216,7 @@ class ServiceInitializer:
                     f"Seeded initial data for app '{slug}'",
                     extra={
                         "app_slug": slug,
-                        "collections_seeded": len(
-                            [c for c, count in results.items() if count > 0]
-                        ),
+                        "collections_seeded": len([c for c, count in results.items() if count > 0]),
                         "total_documents": total_inserted,
                     },
                 )
@@ -276,9 +269,7 @@ class ServiceInitializer:
                 contextual_logger.info(
                     f"Metrics collection configured for {slug}",
                     extra={
-                        "operation_metrics": metrics_config.get(
-                            "collect_operation_metrics", True
-                        ),
+                        "operation_metrics": metrics_config.get("collect_operation_metrics", True),
                         "performance_metrics": metrics_config.get(
                             "collect_performance_metrics", True
                         ),
@@ -296,9 +287,7 @@ class ServiceInitializer:
                     extra={
                         "level": log_level,
                         "format": log_format,
-                        "include_request_id": logging_config.get(
-                            "include_request_id", True
-                        ),
+                        "include_request_id": logging_config.get("include_request_id", True),
                     },
                 )
 

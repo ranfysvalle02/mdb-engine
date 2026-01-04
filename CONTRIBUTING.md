@@ -168,7 +168,7 @@ Following this framework results in:
 
 ### The Dangers of Catching `Exception`
 
-**Never catch `except Exception` unless you're at the top-level framework handler.** Here's why:
+**NEVER catch `except Exception`. Be intentional about your exception handling.** Here's why:
 
 1. **Hides Bugs in Your Own Code**: If you catch `Exception`, you'll catch bugs like `AttributeError`, `TypeError`, `KeyError` that indicate problems in your code. These should crash the application so you can fix them.
 
@@ -184,14 +184,14 @@ Following this framework results in:
 
 5. **Only Catches What You Can Recover From**: If you can't actually recover from an error, catching it is pointless. Let it bubble up to a level that can handle it.
 
-### When `except Exception` is Acceptable
+### Always Be Specific
 
-`except Exception` is **ONLY** allowed at:
-- **Framework-level exception handlers**: FastAPI's `@app.exception_handler(Exception)`, Flask's error handlers
-- **Top-level CLI handlers**: `if __name__ == '__main__': try/except Exception` blocks
-- **Application entry points**: Where the application starts and needs to prevent crashes
+**`except Exception` is NEVER acceptable.** Even at top-level handlers, be intentional:
+- **Framework-level exception handlers**: Define specific handlers for `PyMongoError`, `ValueError`, etc.
+- **Top-level CLI handlers**: Catch `(ValueError, TypeError, IOError, RuntimeError)` - be explicit
+- **Application entry points**: Know what exceptions can occur and catch them specifically
 
-These are the "safety nets" that prevent the application from crashing. All other code should let exceptions bubble up.
+Being intentional means understanding what can fail and handling it appropriately.
 
 ### Decision-Making Guide
 

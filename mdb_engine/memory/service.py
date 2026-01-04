@@ -48,9 +48,7 @@ def _check_mem0_available():
             MEM0_AVAILABLE = False
             Memory = None
         except OSError as e:
-            logger.warning(
-                f"Failed to set up mem0 directory: {e}. Memory features may be limited."
-            )
+            logger.warning(f"Failed to set up mem0 directory: {e}. Memory features may be limited.")
             MEM0_AVAILABLE = False
             Memory = None
 
@@ -140,9 +138,7 @@ def _build_vector_store_config(
     }
 
 
-def _build_embedder_config(
-    provider: str, embedding_model: str, app_slug: str
-) -> Dict[str, Any]:
+def _build_embedder_config(provider: str, embedding_model: str, app_slug: str) -> Dict[str, Any]:
     """Build embedder configuration for mem0."""
     clean_embedding_model = embedding_model.replace("azure/", "").replace("openai/", "")
     if provider == "azure":
@@ -256,14 +252,10 @@ def _initialize_memory_instance(mem0_config: Dict[str, Any], app_slug: str) -> t
         extra={
             "app_slug": app_slug,
             "config_keys": list(mem0_config.keys()),
-            "vector_store_provider": mem0_config.get("vector_store", {}).get(
-                "provider"
-            ),
+            "vector_store_provider": mem0_config.get("vector_store", {}).get("provider"),
             "embedder_provider": mem0_config.get("embedder", {}).get("provider"),
             "llm_provider": (
-                mem0_config.get("llm", {}).get("provider")
-                if mem0_config.get("llm")
-                else None
+                mem0_config.get("llm", {}).get("provider") if mem0_config.get("llm") else None
             ),
             "full_config": mem0_config,
         },
@@ -305,9 +297,7 @@ def _initialize_memory_instance(mem0_config: Dict[str, Any], app_slug: str) -> t
                 "error": error_msg,
                 "error_type": type(init_error).__name__,
                 "config_keys": (
-                    list(mem0_config.keys())
-                    if isinstance(mem0_config, dict)
-                    else "not_dict"
+                    list(mem0_config.keys()) if isinstance(mem0_config, dict) else "not_dict"
                 ),
             },
         )
@@ -372,9 +362,7 @@ class Mem0MemoryService:
         self.app_slug = app_slug
 
         # Extract config with defaults
-        self.collection_name = (config or {}).get(
-            "collection_name", f"{app_slug}_memories"
-        )
+        self.collection_name = (config or {}).get("collection_name", f"{app_slug}_memories")
         config_embedding_dims = (config or {}).get(
             "embedding_model_dims"
         )  # Optional - will be auto-detected
@@ -392,18 +380,14 @@ class Mem0MemoryService:
             or os.getenv("CHAT_MODEL")
             or os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4o")
         )
-        temperature = (config or {}).get(
-            "temperature", float(os.getenv("LLM_TEMPERATURE", "0.0"))
-        )
+        temperature = (config or {}).get("temperature", float(os.getenv("LLM_TEMPERATURE", "0.0")))
 
         # Detect provider from environment variables
         provider = _detect_provider_from_env()
 
         # Verify required environment variables are set
         if provider == "azure":
-            if not os.getenv("AZURE_OPENAI_API_KEY") or not os.getenv(
-                "AZURE_OPENAI_ENDPOINT"
-            ):
+            if not os.getenv("AZURE_OPENAI_API_KEY") or not os.getenv("AZURE_OPENAI_ENDPOINT"):
                 raise Mem0MemoryServiceError(
                     "Azure OpenAI provider requires AZURE_OPENAI_API_KEY and "
                     "AZURE_OPENAI_ENDPOINT environment variables to be set."
@@ -418,9 +402,7 @@ class Mem0MemoryService:
             # Detect embedding dimensions using model name (fallback method)
             detected_dims = _detect_embedding_dimensions(embedding_model)
             self.embedding_model_dims = (
-                detected_dims
-                if detected_dims is not None
-                else (config_embedding_dims or 1536)
+                detected_dims if detected_dims is not None else (config_embedding_dims or 1536)
             )
 
             # Build mem0 config with MongoDB as vector store
@@ -432,17 +414,13 @@ class Mem0MemoryService:
             )
 
             # Configure mem0 embedder
-            mem0_config["embedder"] = _build_embedder_config(
-                provider, embedding_model, app_slug
-            )
+            mem0_config["embedder"] = _build_embedder_config(provider, embedding_model, app_slug)
 
             # Configure LLM for inference (if infer: true)
             if self.infer:
-                mem0_config["llm"] = _build_llm_config(
-                    provider, chat_model, temperature, app_slug
-                )
+                mem0_config["llm"] = _build_llm_config(provider, chat_model, temperature, app_slug)
         except (ValueError, TypeError, KeyError, AttributeError, ImportError) as e:
-            logger.error(
+            logger.exception(
                 f"Failed to configure mem0: {e}",
                 extra={"app_slug": app_slug, "error": str(e)},
             )
@@ -464,9 +442,7 @@ class Mem0MemoryService:
 
         try:
             # Initialize Mem0 Memory instance
-            self.memory, init_method = _initialize_memory_instance(
-                mem0_config, app_slug
-            )
+            self.memory, init_method = _initialize_memory_instance(mem0_config, app_slug)
 
             # Verify the memory instance has required methods
             if not hasattr(self.memory, "get_all"):
@@ -491,16 +467,12 @@ class Mem0MemoryService:
                     "infer": self.infer,
                     "has_get_all": hasattr(self.memory, "get_all"),
                     "has_add": hasattr(self.memory, "add"),
-                    "embedder_provider": mem0_config.get("embedder", {}).get(
-                        "provider"
-                    ),
+                    "embedder_provider": mem0_config.get("embedder", {}).get("provider"),
                     "embedder_model": mem0_config.get("embedder", {})
                     .get("config", {})
                     .get("model"),
                     "llm_provider": (
-                        mem0_config.get("llm", {}).get("provider")
-                        if self.infer
-                        else None
+                        mem0_config.get("llm", {}).get("provider") if self.infer else None
                     ),
                     "llm_model": (
                         mem0_config.get("llm", {}).get("config", {}).get("model")
@@ -522,9 +494,7 @@ class Mem0MemoryService:
                 exc_info=True,
                 extra={"app_slug": app_slug, "error": str(e)},
             )
-            raise Mem0MemoryServiceError(
-                f"Failed to initialize Mem0 Memory Service: {e}"
-            ) from e
+            raise Mem0MemoryServiceError(f"Failed to initialize Mem0 Memory Service: {e}") from e
 
     def add(
         self,
@@ -628,8 +598,7 @@ class Mem0MemoryService:
 
             result_length = len(result) if isinstance(result, list) else 0
             logger.debug(
-                f"Raw result from mem0.add(): type={type(result)}, "
-                f"length={result_length}",
+                f"Raw result from mem0.add(): type={type(result)}, " f"length={result_length}",
                 extra={
                     "app_slug": self.app_slug,
                     "user_id": user_id,
@@ -652,11 +621,7 @@ class Mem0MemoryService:
                     "message_count": len(messages),
                     "memory_count": len(result) if isinstance(result, list) else 0,
                     "memory_ids": (
-                        [
-                            m.get("id") or m.get("_id")
-                            for m in result
-                            if isinstance(m, dict)
-                        ]
+                        [m.get("id") or m.get("_id") for m in result if isinstance(m, dict)]
                         if result
                         else []
                     ),
@@ -790,9 +755,7 @@ class Mem0MemoryService:
                     result = self.memory.get_all(
                         user_id=str(user_id), limit=limit, **kwargs
                     )  # Ensure string
-                    result_length = (
-                        len(result) if isinstance(result, (list, dict)) else "N/A"
-                    )
+                    result_length = len(result) if isinstance(result, (list, dict)) else "N/A"
                     logger.debug(
                         f"🟢 RESULT RECEIVED: type={type(result).__name__}, "
                         f"length={result_length}",
@@ -807,7 +770,7 @@ class Mem0MemoryService:
                         },
                     )
                 except AttributeError as attr_error:
-                    logger.error(
+                    logger.exception(
                         f"Memory.get_all method not available: {attr_error}",
                         extra={
                             "app_slug": self.app_slug,
@@ -828,9 +791,7 @@ class Mem0MemoryService:
                         "result_type": str(type(result)),
                         "is_dict": isinstance(result, dict),
                         "is_list": isinstance(result, list),
-                        "result_length": (
-                            len(result) if isinstance(result, (list, dict)) else 0
-                        ),
+                        "result_length": (len(result) if isinstance(result, (list, dict)) else 0),
                     },
                 )
 
@@ -843,16 +804,12 @@ class Mem0MemoryService:
                             extra={
                                 "app_slug": self.app_slug,
                                 "user_id": user_id,
-                                "result_count": (
-                                    len(result) if isinstance(result, list) else 0
-                                ),
+                                "result_count": (len(result) if isinstance(result, list) else 0),
                             },
                         )
                     elif "data" in result:
                         # Alternative format: {"data": [...]}
-                        result = (
-                            result["data"] if isinstance(result["data"], list) else []
-                        )
+                        result = result["data"] if isinstance(result["data"], list) else []
 
                 # Ensure result is always a list for backward compatibility
                 if not isinstance(result, list):
@@ -883,9 +840,7 @@ class Mem0MemoryService:
             return result
 
         except (AttributeError, TypeError, ValueError, RuntimeError, KeyError) as e:
-            attempt_num = (
-                attempt + 1 if "attempt" in locals() and attempt is not None else 1
-            )
+            attempt_num = attempt + 1 if "attempt" in locals() and attempt is not None else 1
             logger.error(
                 f"Failed to get memories: {e}",
                 exc_info=True,
@@ -961,9 +916,7 @@ class Mem0MemoryService:
 
             # Call search - try with filters first, fallback to metadata if needed
             try:
-                result = self.memory.search(
-                    query=query, user_id=user_id, **search_kwargs
-                )
+                result = self.memory.search(query=query, user_id=user_id, **search_kwargs)
             except (TypeError, ValueError) as e:
                 # If filters parameter doesn't work, try with metadata (backward compatibility)
                 if "filters" in search_kwargs and metadata:
@@ -973,9 +926,7 @@ class Mem0MemoryService:
                     )
                     search_kwargs.pop("filters", None)
                     search_kwargs["metadata"] = metadata
-                    result = self.memory.search(
-                        query=query, user_id=user_id, **search_kwargs
-                    )
+                    result = self.memory.search(query=query, user_id=user_id, **search_kwargs)
                 else:
                     raise
 
@@ -1019,9 +970,7 @@ class Mem0MemoryService:
             )
             raise Mem0MemoryServiceError(f"Failed to search memories: {e}") from e
 
-    def get(
-        self, memory_id: str, user_id: Optional[str] = None, **kwargs
-    ) -> Dict[str, Any]:
+    def get(self, memory_id: str, user_id: Optional[str] = None, **kwargs) -> Dict[str, Any]:
         """
         Get a single memory by ID.
 
@@ -1047,9 +996,7 @@ class Mem0MemoryService:
             # If user_id is provided, verify the memory belongs to that user
             # by checking metadata or user_id field in the result
             if user_id and isinstance(result, dict):
-                result_user_id = result.get("user_id") or result.get(
-                    "metadata", {}
-                ).get("user_id")
+                result_user_id = result.get("user_id") or result.get("metadata", {}).get("user_id")
                 if result_user_id and result_user_id != user_id:
                     logger.warning(
                         f"Memory {memory_id} does not belong to user {user_id}",
@@ -1189,9 +1136,7 @@ class Mem0MemoryService:
             # Mem0's delete() may not accept user_id directly
             # Try with user_id first, fall back without it if it fails
             try:
-                result = self.memory.delete(
-                    memory_id=memory_id, user_id=user_id, **kwargs
-                )
+                result = self.memory.delete(memory_id=memory_id, user_id=user_id, **kwargs)
             except TypeError as e:
                 if "unexpected keyword argument 'user_id'" in str(e):
                     # Mem0 doesn't accept user_id, try without it
@@ -1280,6 +1225,4 @@ def get_memory_service(
             "Mem0 dependencies not available. Install with: pip install mem0ai"
         )
 
-    return Mem0MemoryService(
-        mongo_uri=mongo_uri, db_name=db_name, app_slug=app_slug, config=config
-    )
+    return Mem0MemoryService(mongo_uri=mongo_uri, db_name=db_name, app_slug=app_slug, config=config)

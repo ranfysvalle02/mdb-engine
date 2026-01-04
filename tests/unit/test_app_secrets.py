@@ -10,8 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from mdb_engine.core.app_secrets import (SECRETS_COLLECTION_NAME,
-                                         AppSecretsManager)
+from mdb_engine.core.app_secrets import SECRETS_COLLECTION_NAME, AppSecretsManager
 from mdb_engine.core.encryption import EnvelopeEncryptionService
 
 
@@ -130,16 +129,12 @@ class TestAppSecretsManager:
         result = await app_secrets_manager.verify_app_secret("test_app", "wrong_secret")
         assert result is False
 
-    async def test_verify_app_secret_not_found(
-        self, app_secrets_manager, mock_mongo_db
-    ):
+    async def test_verify_app_secret_not_found(self, app_secrets_manager, mock_mongo_db):
         """Test verifying secret for non-existent app."""
         mock_db, mock_collection = mock_mongo_db
         mock_collection.find_one.return_value = None
 
-        result = await app_secrets_manager.verify_app_secret(
-            "nonexistent_app", "secret"
-        )
+        result = await app_secrets_manager.verify_app_secret("nonexistent_app", "secret")
         assert result is False
 
     async def test_rotate_app_secret(self, app_secrets_manager, mock_mongo_db):
@@ -154,9 +149,7 @@ class TestAppSecretsManager:
         assert len(new_secret) > 0
         assert mock_collection.insert_one.called
 
-    async def test_get_app_secret(
-        self, app_secrets_manager, mock_mongo_db, encryption_service
-    ):
+    async def test_get_app_secret(self, app_secrets_manager, mock_mongo_db, encryption_service):
         """Test getting decrypted app secret."""
         mock_db, mock_collection = mock_mongo_db
 
@@ -215,9 +208,7 @@ class TestAppSecretsManager:
         assert "updated_at" in call_args
         assert "rotation_count" in call_args
 
-    def test_verify_app_secret_sync(
-        self, app_secrets_manager, mock_mongo_db, encryption_service
-    ):
+    def test_verify_app_secret_sync(self, app_secrets_manager, mock_mongo_db, encryption_service):
         """Test synchronous secret verification."""
         mock_db, mock_collection = mock_mongo_db
 

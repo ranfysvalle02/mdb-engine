@@ -11,13 +11,19 @@ Features:
 - Connection limit tracking
 """
 
-import json
 import logging
 from typing import Any, Dict, Optional
 
-from ..constants import (DEFAULT_MAX_TIME_MS, MAX_CURSOR_BATCH_SIZE,
-                         MAX_DOCUMENT_SIZE, MAX_QUERY_RESULT_SIZE,
-                         MAX_QUERY_TIME_MS)
+from bson import encode as bson_encode
+from bson.errors import InvalidDocument
+
+from ..constants import (
+    DEFAULT_MAX_TIME_MS,
+    MAX_CURSOR_BATCH_SIZE,
+    MAX_DOCUMENT_SIZE,
+    MAX_QUERY_RESULT_SIZE,
+    MAX_QUERY_TIME_MS,
+)
 from ..exceptions import ResourceLimitExceeded
 
 logger = logging.getLogger(__name__)
@@ -73,9 +79,7 @@ class ResourceLimiter:
         """
         kwargs = dict(kwargs)  # Create a copy to avoid mutating original
 
-        default = (
-            default_timeout if default_timeout is not None else self.default_timeout_ms
-        )
+        default = default_timeout if default_timeout is not None else self.default_timeout_ms
 
         # Check if maxTimeMS is already set
         if "maxTimeMS" in kwargs:
@@ -93,9 +97,7 @@ class ResourceLimiter:
 
         return kwargs
 
-    def enforce_result_limit(
-        self, limit: Optional[int], max_limit: Optional[int] = None
-    ) -> int:
+    def enforce_result_limit(self, limit: Optional[int], max_limit: Optional[int] = None) -> int:
         """
         Enforce maximum result limit.
 
@@ -114,16 +116,13 @@ class ResourceLimiter:
 
         if limit > max_allowed:
             logger.warning(
-                f"Result limit {limit} exceeds maximum {max_allowed}. "
-                f"Capping to {max_allowed}"
+                f"Result limit {limit} exceeds maximum {max_allowed}. " f"Capping to {max_allowed}"
             )
             return max_allowed
 
         return limit
 
-    def enforce_batch_size(
-        self, batch_size: Optional[int], max_batch: Optional[int] = None
-    ) -> int:
+    def enforce_batch_size(self, batch_size: Optional[int], max_batch: Optional[int] = None) -> int:
         """
         Enforce maximum batch size for cursor operations.
 
@@ -152,34 +151,34 @@ class ResourceLimiter:
         """
         Validate that a document doesn't exceed size limits.
 
+        Uses actual BSON encoding for accurate size calculation.
+
         Args:
             document: Document to validate
 
         Raises:
             ResourceLimitExceeded: If document exceeds size limit
         """
-        # Estimate document size by serializing to BSON-like format
-        # This is an approximation - MongoDB uses BSON which may differ slightly
         try:
-            # Convert to JSON to estimate size (BSON is similar but not identical)
-            json_str = json.dumps(document, default=str)
-            size_bytes = len(json_str.encode("utf-8"))
+            # Use actual BSON encoding for accurate size
+            bson_bytes = bson_encode(document)
+            actual_size = len(bson_bytes)
 
-            # Add some overhead for BSON encoding (BSON is typically slightly larger)
-            estimated_size = int(size_bytes * 1.1)
-
-            if estimated_size > self.max_document_size:
+            if actual_size > self.max_document_size:
                 raise ResourceLimitExceeded(
-                    f"Document size {estimated_size} bytes exceeds maximum "
+                    f"Document size {actual_size} bytes exceeds maximum "
                     f"{self.max_document_size} bytes",
                     limit_type="document_size",
                     limit_value=self.max_document_size,
-                    actual_value=estimated_size,
+                    actual_value=actual_size,
                 )
-        except (TypeError, ValueError) as e:
-            # If we can't serialize, log warning but don't fail
-            # MongoDB will catch this anyway
-            logger.warning(f"Could not estimate document size: {e}")
+        except ResourceLimitExceeded:
+            # Re-raise our validation exceptions immediately
+            raise
+        except InvalidDocument as e:
+            # If BSON encoding fails, log warning but don't fail
+            # MongoDB will catch this anyway during actual insert
+            logger.warning(f"Could not encode document as BSON for size validation: {e}")
 
     def validate_documents_size(self, documents: list[Dict[str, Any]]) -> None:
         """

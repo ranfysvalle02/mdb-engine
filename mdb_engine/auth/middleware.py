@@ -4,18 +4,36 @@ Security Middleware
 Middleware for enforcing security settings from manifest configuration.
 
 This module is part of MDB_ENGINE - MongoDB Engine.
+
+Security Features:
+    - HTTPS enforcement in production
+    - HSTS (HTTP Strict Transport Security) header
+    - Security headers (X-Content-Type-Options, X-Frame-Options, etc.)
+    - CSRF token generation (legacy, prefer CSRFMiddleware for new apps)
 """
 
 import logging
 import os
 import secrets
-from typing import Awaitable, Callable
+from typing import Any, Awaitable, Callable, Dict, Optional
 
 from fastapi import HTTPException, Request, Response, status
 from fastapi.responses import RedirectResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 logger = logging.getLogger(__name__)
+
+# Default HSTS settings
+DEFAULT_HSTS_MAX_AGE = 31536000  # 1 year in seconds
+
+
+def _is_production() -> bool:
+    """Check if we're running in production environment."""
+    return (
+        os.getenv("MDB_ENGINE_ENV", "").lower() == "production"
+        or os.getenv("ENVIRONMENT", "").lower() == "production"
+        or os.getenv("G_NOME_ENV", "").lower() == "production"
+    )
 
 
 class SecurityMiddleware(BaseHTTPMiddleware):
@@ -24,9 +42,9 @@ class SecurityMiddleware(BaseHTTPMiddleware):
 
     Features:
     - HTTPS enforcement in production
-    - CSRF token generation and validation
-    - Security headers
-    - Token validation
+    - HSTS header for forcing HTTPS
+    - Security headers (X-Content-Type-Options, X-Frame-Options, etc.)
+    - Legacy CSRF token generation (prefer CSRFMiddleware for new apps)
     """
 
     def __init__(
@@ -35,6 +53,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         require_https: bool = False,
         csrf_protection: bool = True,
         security_headers: bool = True,
+        hsts_config: Optional[Dict[str, Any]] = None,
     ):
         """
         Initialize security middleware.
@@ -42,13 +61,37 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         Args:
             app: FastAPI application
             require_https: Require HTTPS in production (default: False, auto-detected)
-            csrf_protection: Enable CSRF protection (default: True)
+            csrf_protection: Enable legacy CSRF protection (default: True)
             security_headers: Add security headers (default: True)
+            hsts_config: HSTS configuration dict with keys:
+                - enabled: Enable HSTS (default: True in production)
+                - max_age: Max-age in seconds (default: 31536000)
+                - include_subdomains: Include subdomains (default: True)
+                - preload: Add preload directive (default: False)
         """
         super().__init__(app)
         self.require_https = require_https
         self.csrf_protection = csrf_protection
         self.security_headers = security_headers
+
+        # HSTS configuration
+        self.hsts_config = hsts_config or {}
+        self.hsts_enabled = self.hsts_config.get("enabled", True)
+        self.hsts_max_age = self.hsts_config.get("max_age", DEFAULT_HSTS_MAX_AGE)
+        self.hsts_include_subdomains = self.hsts_config.get("include_subdomains", True)
+        self.hsts_preload = self.hsts_config.get("preload", False)
+
+    def _build_hsts_header(self) -> str:
+        """Build the HSTS header value."""
+        parts = [f"max-age={self.hsts_max_age}"]
+
+        if self.hsts_include_subdomains:
+            parts.append("includeSubDomains")
+
+        if self.hsts_preload:
+            parts.append("preload")
+
+        return "; ".join(parts)
 
     async def dispatch(
         self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
@@ -56,24 +99,22 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         """
         Process request through security middleware.
         """
-        # Check HTTPS requirement
-        if self.require_https:
-            is_production = (
-                os.getenv("G_NOME_ENV") == "production"
-                or os.getenv("ENVIRONMENT") == "production"
-            )
-            if is_production and request.url.scheme != "https":
-                if request.method == "GET":
-                    # Redirect to HTTPS
-                    https_url = str(request.url).replace("http://", "https://", 1)
-                    return RedirectResponse(url=https_url, status_code=301)
-                else:
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail="HTTPS required in production",
-                    )
+        is_production = _is_production()
+        is_https = request.url.scheme == "https"
 
-        # Generate CSRF token if not present (for GET requests)
+        # Check HTTPS requirement
+        if self.require_https and is_production and not is_https:
+            if request.method == "GET":
+                # Redirect to HTTPS
+                https_url = str(request.url).replace("http://", "https://", 1)
+                return RedirectResponse(url=https_url, status_code=301)
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="HTTPS required in production",
+                )
+
+        # Generate CSRF token if not present (for GET requests) - legacy support
         if self.csrf_protection and request.method == "GET":
             csrf_token = request.cookies.get("csrf_token")
             if not csrf_token:
@@ -90,19 +131,27 @@ class SecurityMiddleware(BaseHTTPMiddleware):
             response.headers["X-XSS-Protection"] = "1; mode=block"
             response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
 
+            # Permissions-Policy (modern replacement for some legacy headers)
+            response.headers["Permissions-Policy"] = (
+                "accelerometer=(), camera=(), geolocation=(), gyroscope=(), "
+                "magnetometer=(), microphone=(), payment=(), usb=()"
+            )
+
             # Content Security Policy (basic)
             if request.url.path.startswith("/api"):
                 response.headers["Content-Security-Policy"] = "default-src 'self'"
 
-        # Set CSRF token cookie if generated
+        # Add HSTS header in production (only over HTTPS or always if configured)
+        if self.hsts_enabled and (is_production or is_https):
+            response.headers["Strict-Transport-Security"] = self._build_hsts_header()
+
+        # Set CSRF token cookie if generated (legacy support)
         if (
             self.csrf_protection
             and request.method == "GET"
             and not request.cookies.get("csrf_token")
         ):
             csrf_token = secrets.token_urlsafe(32)
-            is_https = request.url.scheme == "https"
-            is_production = os.getenv("G_NOME_ENV") == "production"
             response.set_cookie(
                 key="csrf_token",
                 value=csrf_token,
@@ -154,10 +203,7 @@ class StaleSessionMiddleware(BaseHTTPMiddleware):
         # Check if we need to clear a stale session cookie
         # Only act if explicitly flagged - this ensures we don't interfere with
         # apps that don't use get_app_user()
-        if (
-            hasattr(request.state, "clear_stale_session")
-            and request.state.clear_stale_session
-        ):
+        if hasattr(request.state, "clear_stale_session") and request.state.clear_stale_session:
             try:
                 # Get cookie name from app config
                 cookie_name = None
@@ -197,8 +243,7 @@ class StaleSessionMiddleware(BaseHTTPMiddleware):
 
                 # Get cookie settings to match how it was set
                 should_use_secure = (
-                    request.url.scheme == "https"
-                    or os.getenv("G_NOME_ENV") == "production"
+                    request.url.scheme == "https" or os.getenv("G_NOME_ENV") == "production"
                 )
 
                 # Delete the stale cookie
@@ -208,9 +253,7 @@ class StaleSessionMiddleware(BaseHTTPMiddleware):
                     secure=should_use_secure,
                     samesite="lax",
                 )
-                logger.debug(
-                    f"Cleared stale session cookie '{cookie_name}' for {self.slug_id}"
-                )
+                logger.debug(f"Cleared stale session cookie '{cookie_name}' for {self.slug_id}")
             except (ValueError, TypeError, AttributeError, RuntimeError) as e:
                 # Don't fail the request if cookie cleanup fails
                 logger.warning(

@@ -12,9 +12,12 @@ from typing import Any, Dict, Optional
 
 from fastapi import FastAPI
 
-from .config_defaults import (CORS_DEFAULTS, OBSERVABILITY_DEFAULTS,
-                              SECURITY_CONFIG_DEFAULTS,
-                              TOKEN_MANAGEMENT_DEFAULTS)
+from .config_defaults import (
+    CORS_DEFAULTS,
+    OBSERVABILITY_DEFAULTS,
+    SECURITY_CONFIG_DEFAULTS,
+    TOKEN_MANAGEMENT_DEFAULTS,
+)
 from .config_helpers import merge_config_with_defaults
 from .helpers import initialize_token_management
 
@@ -45,8 +48,7 @@ def _has_cors_middleware(app: FastAPI) -> bool:
                 middleware_cls = middleware[0]
                 # Check if it's CORSMiddleware or a subclass
                 if middleware_cls == CORSMiddleware or (
-                    hasattr(middleware_cls, "__name__")
-                    and "CORS" in middleware_cls.__name__
+                    hasattr(middleware_cls, "__name__") and "CORS" in middleware_cls.__name__
                 ):
                     return True
         return False
@@ -131,18 +133,12 @@ async def _setup_authorization_provider(
         try:
             from .casbin_factory import initialize_casbin_from_manifest
 
-            authz_provider = await initialize_casbin_from_manifest(
-                engine, slug_id, config
-            )
+            authz_provider = await initialize_casbin_from_manifest(engine, slug_id, config)
             if authz_provider:
                 app.state.authz_provider = authz_provider
-                logger.info(
-                    f"Authorization provider (Casbin) auto-created for {slug_id}"
-                )
+                logger.info(f"Authorization provider (Casbin) auto-created for {slug_id}")
             else:
-                logger.debug(
-                    f"Casbin provider not created for {slug_id} (may not be installed)"
-                )
+                logger.debug(f"Casbin provider not created for {slug_id} (may not be installed)")
         except (
             ImportError,
             AttributeError,
@@ -160,9 +156,7 @@ async def _setup_authorization_provider(
             authz_provider = await initialize_oso_from_manifest(engine, slug_id, config)
             if authz_provider:
                 app.state.authz_provider = authz_provider
-                logger.info(
-                    f"✅ Authorization provider (OSO Cloud) auto-created for {slug_id}"
-                )
+                logger.info(f"✅ Authorization provider (OSO Cloud) auto-created for {slug_id}")
             else:
                 logger.error(
                     f"❌ OSO Cloud provider not created for {slug_id}. "
@@ -187,9 +181,7 @@ async def _setup_authorization_provider(
         logger.info(f"Custom provider specified for {slug_id} - manual setup required")
 
 
-async def _setup_demo_users(
-    app: FastAPI, engine, slug_id: str, config: Dict[str, Any]
-) -> list:
+async def _setup_demo_users(app: FastAPI, engine, slug_id: str, config: Dict[str, Any]) -> list:
     """Set up demo users and link with OSO roles if applicable."""
     auth = config.get("auth", {})
     users_config = auth.get("users", {})
@@ -260,9 +252,7 @@ async def _setup_demo_users(
             f"Demo user creation disabled for {slug_id} (demo_user_seed_strategy: disabled)"
         )
     elif seed_strategy == "manual":
-        logger.debug(
-            f"Demo user creation set to manual for {slug_id} - skipping auto-creation"
-        )
+        logger.debug(f"Demo user creation set to manual for {slug_id} - skipping auto-creation")
 
     # Link demo users with OSO initial_roles if auth provider is OSO
     if hasattr(app.state, "authz_provider") and demo_users:
@@ -330,9 +320,7 @@ async def _setup_token_management(
             # Configure session fingerprinting if session manager exists
             session_mgr = getattr(app.state, "session_manager", None)
             if session_mgr:
-                fingerprinting_config = app.state.security_config.get(
-                    "session_fingerprinting", {}
-                )
+                fingerprinting_config = app.state.security_config.get("session_fingerprinting", {})
                 session_mgr.configure_fingerprinting(
                     enabled=fingerprinting_config.get("enabled", True),
                     strict=fingerprinting_config.get("strict_mode", False),
@@ -355,9 +343,7 @@ async def _setup_security_middleware(
     app: FastAPI, slug_id: str, security_config: Dict[str, Any]
 ) -> None:
     """Set up security middleware (if not already added)."""
-    if security_config.get("csrf_protection", True) or security_config.get(
-        "require_https", False
-    ):
+    if security_config.get("csrf_protection", True) or security_config.get("require_https", False):
         try:
             from .middleware import SecurityMiddleware
 
@@ -384,9 +370,7 @@ async def _setup_security_middleware(
                         f"This is normal when using lifespan context managers."
                     )
                 else:
-                    logger.warning(
-                        f"Could not set up security middleware for {slug_id}: {e}"
-                    )
+                    logger.warning(f"Could not set up security middleware for {slug_id}: {e}")
         except (AttributeError, TypeError, ValueError, RuntimeError, ImportError) as e:
             logger.warning(f"Could not set up security middleware for {slug_id}: {e}")
 
@@ -409,9 +393,7 @@ async def _setup_cors_and_observability(
     app.state.cors_config = merge_config_with_defaults(cors_config, CORS_DEFAULTS)
 
     # Extract and store observability config
-    observability_config = (
-        manifest_data.get("observability", {}) if manifest_data else {}
-    )
+    observability_config = manifest_data.get("observability", {}) if manifest_data else {}
     app.state.observability_config = merge_config_with_defaults(
         observability_config, OBSERVABILITY_DEFAULTS
     )
@@ -421,9 +403,7 @@ async def _setup_cors_and_observability(
         try:
             # Check if CORS middleware already exists to avoid duplication
             if _has_cors_middleware(app):
-                logger.debug(
-                    f"CORS middleware already exists for {slug_id}, skipping addition"
-                )
+                logger.debug(f"CORS middleware already exists for {slug_id}, skipping addition")
             else:
                 from fastapi.middleware.cors import CORSMiddleware
 
@@ -431,44 +411,29 @@ async def _setup_cors_and_observability(
                     try:
                         app.add_middleware(
                             CORSMiddleware,
-                            allow_origins=app.state.cors_config.get(
-                                "allow_origins", ["*"]
-                            ),
-                            allow_credentials=app.state.cors_config.get(
-                                "allow_credentials", False
-                            ),
+                            allow_origins=app.state.cors_config.get("allow_origins", ["*"]),
+                            allow_credentials=app.state.cors_config.get("allow_credentials", False),
                             allow_methods=app.state.cors_config.get(
                                 "allow_methods",
                                 ["GET", "POST", "PUT", "DELETE", "PATCH"],
                             ),
-                            allow_headers=app.state.cors_config.get(
-                                "allow_headers", ["*"]
-                            ),
-                            expose_headers=app.state.cors_config.get(
-                                "expose_headers", []
-                            ),
+                            allow_headers=app.state.cors_config.get("allow_headers", ["*"]),
+                            expose_headers=app.state.cors_config.get("expose_headers", []),
                             max_age=app.state.cors_config.get("max_age", 3600),
                         )
                         logger.info(f"CORS middleware added for {slug_id}")
                     except (RuntimeError, ValueError) as e:
                         error_msg = str(e).lower()
-                        if (
-                            "cannot add middleware" in error_msg
-                            or "middleware" in error_msg
-                        ):
+                        if "cannot add middleware" in error_msg or "middleware" in error_msg:
                             logger.debug(
                                 f"CORS middleware not added for {slug_id} - "
                                 f"app middleware stack already initialized. "
                                 f"This is normal when using lifespan context managers."
                             )
                         else:
-                            logger.warning(
-                                f"Could not set up CORS middleware for {slug_id}: {e}"
-                            )
+                            logger.warning(f"Could not set up CORS middleware for {slug_id}: {e}")
                 else:
-                    logger.warning(
-                        f"CORS middleware not added for {slug_id} - app already started"
-                    )
+                    logger.warning(f"CORS middleware not added for {slug_id} - app already started")
         except (AttributeError, TypeError, ValueError, RuntimeError, ImportError) as e:
             logger.warning(f"Could not set up CORS middleware for {slug_id}: {e}")
 
@@ -480,9 +445,7 @@ async def _setup_cors_and_observability(
             from .middleware import StaleSessionMiddleware
 
             try:
-                app.add_middleware(
-                    StaleSessionMiddleware, slug_id=slug_id, engine=engine
-                )
+                app.add_middleware(StaleSessionMiddleware, slug_id=slug_id, engine=engine)
                 logger.info(f"Stale session cleanup middleware added for {slug_id}")
             except (RuntimeError, ValueError) as e:
                 error_msg = str(e).lower()
@@ -493,13 +456,9 @@ async def _setup_cors_and_observability(
                         f"This is normal when using lifespan context managers."
                     )
                 else:
-                    logger.warning(
-                        f"Could not set up stale session middleware for {slug_id}: {e}"
-                    )
+                    logger.warning(f"Could not set up stale session middleware for {slug_id}: {e}")
         except (AttributeError, TypeError, ValueError, RuntimeError, ImportError) as e:
-            logger.warning(
-                f"Could not set up stale session middleware for {slug_id}: {e}"
-            )
+            logger.warning(f"Could not set up stale session middleware for {slug_id}: {e}")
 
 
 async def setup_auth_from_manifest(app: FastAPI, engine, slug_id: str) -> bool:
@@ -572,7 +531,5 @@ async def setup_auth_from_manifest(app: FastAPI, engine, slug_id: str) -> bool:
         KeyError,
         ConnectionError,
     ) as e:
-        logger.error(
-            f"Error setting up auth from manifest for {slug_id}: {e}", exc_info=True
-        )
+        logger.error(f"Error setting up auth from manifest for {slug_id}: {e}", exc_info=True)
         return False

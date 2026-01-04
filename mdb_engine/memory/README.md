@@ -400,8 +400,8 @@ try:
     )
 except Mem0MemoryServiceError as e:
     print(f"Memory service error: {e}")
-except Exception as e:
-    print(f"Unexpected error: {e}")
+except (ValueError, TypeError, ConnectionError) as e:
+    print(f"Configuration or connection error: {e}")
 ```
 
 ## Environment Variables Reference

@@ -99,9 +99,7 @@ class TestScopedCollectionWrapperSecurityIntegration:
 
         # Verify insert_one was called (maxTimeMS is removed because insert_one doesn't accept it)
         call_kwargs = mock_mongo_collection.insert_one.call_args[1]
-        assert (
-            "maxTimeMS" not in call_kwargs
-        )  # Removed because insert_one doesn't accept it
+        assert "maxTimeMS" not in call_kwargs  # Removed because insert_one doesn't accept it
 
     @pytest.mark.asyncio
     async def test_find_with_custom_timeout(self, mock_mongo_collection):
@@ -195,7 +193,7 @@ class TestScopedCollectionWrapperSecurityIntegration:
 
     @pytest.mark.asyncio
     async def test_delete_one_with_valid_filter(self, mock_mongo_collection):
-        """Test that delete_one() validates filter and enforces timeout."""
+        """Test that delete_one() validates filter and strips maxTimeMS."""
         wrapper = ScopedCollectionWrapper(
             real_collection=mock_mongo_collection,
             read_scopes=["test_app"],
@@ -206,9 +204,9 @@ class TestScopedCollectionWrapperSecurityIntegration:
 
         await wrapper.delete_one({"status": "deleted"})
 
-        # Verify timeout was added
+        # Verify delete_one was called WITHOUT maxTimeMS (Motor doesn't support it)
         call_kwargs = mock_mongo_collection.delete_one.call_args[1]
-        assert "maxTimeMS" in call_kwargs
+        assert "maxTimeMS" not in call_kwargs
 
     @pytest.mark.asyncio
     async def test_update_one_validates_filter(self, mock_mongo_collection):
@@ -234,9 +232,7 @@ class TestScopedCollectionWrapperSecurityIntegration:
 
         # Test dangerous operator is blocked
         with pytest.raises(QueryValidationError, match="Dangerous operator"):
-            await wrapper.update_many(
-                {"$where": "true"}, {"$set": {"status": "active"}}
-            )
+            await wrapper.update_many({"$where": "true"}, {"$set": {"status": "active"}})
 
     @pytest.mark.asyncio
     async def test_insert_many_with_valid_documents(self, mock_mongo_collection):
@@ -255,9 +251,7 @@ class TestScopedCollectionWrapperSecurityIntegration:
 
         # Verify insert_many was called (maxTimeMS is removed because insert_many doesn't accept it)
         call_kwargs = mock_mongo_collection.insert_many.call_args[1]
-        assert (
-            "maxTimeMS" not in call_kwargs
-        )  # Removed because insert_many doesn't accept it
+        assert "maxTimeMS" not in call_kwargs  # Removed because insert_many doesn't accept it
 
     @pytest.mark.asyncio
     async def test_find_with_empty_filter_dict(self, mock_mongo_collection):

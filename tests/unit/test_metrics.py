@@ -9,9 +9,11 @@ Tests metrics collection functionality including:
 
 import threading
 
-from mdb_engine.observability.metrics import (MetricsCollector,
-                                              get_metrics_collector,
-                                              record_operation)
+from mdb_engine.observability.metrics import (
+    MetricsCollector,
+    get_metrics_collector,
+    record_operation,
+)
 
 
 class TestMetricsCollectorThreadSafety:
@@ -36,8 +38,7 @@ class TestMetricsCollectorThreadSafety:
                 )
 
         threads = [
-            threading.Thread(target=record_operations, args=(i,))
-            for i in range(num_threads)
+            threading.Thread(target=record_operations, args=(i,)) for i in range(num_threads)
         ]
 
         for thread in threads:
@@ -73,7 +74,7 @@ class TestMetricsCollectorThreadSafety:
             try:
                 metrics = collector.get_metrics()
                 results.append(metrics)
-            except Exception as e:
+            except (RuntimeError, ValueError, TypeError, KeyError, AttributeError) as e:
                 errors.append(e)
 
         threads = [threading.Thread(target=get_metrics) for _ in range(num_threads)]
@@ -111,7 +112,7 @@ class TestMetricsCollectorThreadSafety:
             try:
                 summary = collector.get_summary()
                 results.append(summary)
-            except Exception as e:
+            except (RuntimeError, ValueError, TypeError, KeyError, AttributeError) as e:
                 errors.append(e)
 
         threads = [threading.Thread(target=get_summary) for _ in range(num_threads)]
@@ -150,13 +151,10 @@ class TestMetricsCollectorThreadSafety:
                     collector.reset()
                 else:
                     collector.record_operation(f"test.op_{thread_id}", duration_ms=10.0)
-            except Exception as e:
+            except (RuntimeError, ValueError, TypeError, KeyError, AttributeError) as e:
                 errors.append(e)
 
-        threads = [
-            threading.Thread(target=reset_and_record, args=(i,))
-            for i in range(num_threads)
-        ]
+        threads = [threading.Thread(target=reset_and_record, args=(i,)) for i in range(num_threads)]
 
         for thread in threads:
             thread.start()

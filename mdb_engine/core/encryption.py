@@ -21,6 +21,7 @@ import os
 import secrets
 from typing import Tuple
 
+import cryptography.exceptions
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 logger = logging.getLogger(__name__)
@@ -86,7 +87,7 @@ class EnvelopeEncryptionService:
                     f"Got {len(master_key_bytes)} bytes."
                 )
             return master_key_bytes
-        except Exception as e:
+        except (ValueError, TypeError, UnicodeDecodeError) as e:
             raise ValueError(
                 f"Invalid master key format in {MASTER_KEY_ENV_VAR}. "
                 f"Expected base64-encoded {AES_KEY_SIZE}-byte key. Error: {e}"
@@ -120,9 +121,7 @@ class EnvelopeEncryptionService:
         """
         return secrets.token_bytes(AES_KEY_SIZE)
 
-    def encrypt_secret(
-        self, secret: str, master_key: bytes | None = None
-    ) -> Tuple[bytes, bytes]:
+    def encrypt_secret(self, secret: str, master_key: bytes | None = None) -> Tuple[bytes, bytes]:
         """
         Encrypt a secret using envelope encryption.
 
@@ -216,11 +215,9 @@ class EnvelopeEncryptionService:
 
             # Decrypt secret with DEK
             aesgcm_secret = AESGCM(dek)
-            secret_bytes = aesgcm_secret.decrypt(
-                nonce_secret, encrypted_secret_data, None
-            )
+            secret_bytes = aesgcm_secret.decrypt(nonce_secret, encrypted_secret_data, None)
 
             return secret_bytes.decode()
-        except Exception as e:
+        except (ValueError, TypeError, UnicodeDecodeError, cryptography.exceptions.InvalidTag) as e:
             logger.warning(f"Decryption failed: {e}")
             raise ValueError(f"Failed to decrypt secret: {e}") from e
