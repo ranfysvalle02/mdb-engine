@@ -142,8 +142,8 @@ async def health():
 | **Vector Search** | Atlas Vector Search + embeddings | [RAG Example](https://github.com/ranfysvalle02/mdb-engine/tree/main/examples/basic/interactive_rag) |
 | **Memory Service** | Persistent AI memory with Mem0 | [Chat Example](https://github.com/ranfysvalle02/mdb-engine/tree/main/examples/basic/chit_chat) |
 | **WebSockets** | Real-time updates from manifest | [Docs](https://github.com/ranfysvalle02/mdb-engine/blob/main/docs/ARCHITECTURE.md) |
-| **Multi-App** | Secure cross-app data access | [Multi-App Example](https://github.com/ranfysvalle02/mdb-engine/tree/main/examples/multi_app) |
-| **SSO** | Shared auth across apps | [Shared Auth Example](https://github.com/ranfysvalle02/mdb-engine/tree/main/examples/multi_app_shared) |
+| **Multi-App** | Secure cross-app data access | [Multi-App Example](https://github.com/ranfysvalle02/mdb-engine/tree/main/examples/advanced/multi_app) |
+| **SSO** | Shared auth across apps | [Shared Auth Example](https://github.com/ranfysvalle02/mdb-engine/tree/main/examples/advanced/multi_app_shared) |
 
 ---
 
@@ -153,17 +153,27 @@ Clone and run:
 
 ```bash
 git clone https://github.com/ranfysvalle02/mdb-engine.git
-cd mdb-engine/examples/simple_app
+cd mdb-engine/examples/basic/chit_chat
 docker-compose up --build
 ```
 
+### Basic Examples
+
 | Example | Description |
 |---------|-------------|
-| [simple_app](https://github.com/ranfysvalle02/mdb-engine/tree/main/examples/simple_app) | Task management with `create_app()` pattern |
-| [interactive_rag](https://github.com/ranfysvalle02/mdb-engine/tree/main/examples/basic/interactive_rag) | RAG with vector search |
 | [chit_chat](https://github.com/ranfysvalle02/mdb-engine/tree/main/examples/basic/chit_chat) | AI chat with persistent memory |
+| [interactive_rag](https://github.com/ranfysvalle02/mdb-engine/tree/main/examples/basic/interactive_rag) | RAG with vector search |
 | [oso_hello_world](https://github.com/ranfysvalle02/mdb-engine/tree/main/examples/basic/oso_hello_world) | OSO Cloud authorization |
-| [multi_app](https://github.com/ranfysvalle02/mdb-engine/tree/main/examples/multi_app) | Multi-tenant with cross-app access |
+| [parallax](https://github.com/ranfysvalle02/mdb-engine/tree/main/examples/basic/parallax) | Dynamic schema generation |
+| [vector_hacking](https://github.com/ranfysvalle02/mdb-engine/tree/main/examples/basic/vector_hacking) | Vector embeddings & attacks |
+
+### Advanced Examples
+
+| Example | Description |
+|---------|-------------|
+| [simple_app](https://github.com/ranfysvalle02/mdb-engine/tree/main/examples/advanced/simple_app) | Task management with `create_app()` pattern |
+| [multi_app](https://github.com/ranfysvalle02/mdb-engine/tree/main/examples/advanced/multi_app) | Multi-tenant with cross-app access |
+| [multi_app_shared](https://github.com/ranfysvalle02/mdb-engine/tree/main/examples/advanced/multi_app_shared) | SSO with shared user pool |
 
 ---
 
