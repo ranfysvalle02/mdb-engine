@@ -10,11 +10,12 @@
             Create a new account
         </p>
 
+        <div id="error-msg" class="alert alert-error" style="display: none;"></div>
         {% if error %}
         <div class="alert alert-error">{{ error }}</div>
         {% endif %}
 
-        <form method="POST" action="/register">
+        <form id="register-form" onsubmit="handleRegister(event)">
             <div class="form-group">
                 <label for="full_name">Full Name</label>
                 <input type="text" id="full_name" name="full_name" required autofocus>
@@ -30,7 +31,7 @@
                 <input type="password" id="password" name="password" required minlength="6">
             </div>
 
-            <button type="submit" class="btn" style="width: 100%;">Register</button>
+            <button type="submit" class="btn" style="width: 100%;" id="register-btn">Register</button>
         </form>
 
         <div style="margin-top: 20px; text-align: center; padding-top: 20px; border-top: 1px solid var(--mongodb-border);">
@@ -39,4 +40,52 @@
         </div>
     </div>
 </div>
+
+<script>
+// Helper to read cookies for CSRF token
+function getCookie(name) {
+    const value = `; ${document.cookie}`;
+    const parts = value.split(`; ${name}=`);
+    if (parts.length === 2) return parts.pop().split(';').shift();
+    return '';
+}
+
+async function handleRegister(event) {
+    event.preventDefault();
+    const btn = document.getElementById('register-btn');
+    const errorMsg = document.getElementById('error-msg');
+    
+    btn.disabled = true;
+    btn.textContent = 'Creating account...';
+    errorMsg.style.display = 'none';
+    
+    const formData = new FormData();
+    formData.append('full_name', document.getElementById('full_name').value);
+    formData.append('email', document.getElementById('email').value);
+    formData.append('password', document.getElementById('password').value);
+    
+    try {
+        const response = await fetch('/register', {
+            method: 'POST',
+            body: formData,
+            headers: { 'X-CSRF-Token': getCookie('csrf_token') }
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            window.location.href = data.redirect || '/conversations';
+        } else {
+            errorMsg.textContent = data.detail || 'Registration failed';
+            errorMsg.style.display = 'block';
+        }
+    } catch (error) {
+        errorMsg.textContent = 'Connection error. Please try again.';
+        errorMsg.style.display = 'block';
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Register';
+    }
+}
+</script>
 {% endblock %}

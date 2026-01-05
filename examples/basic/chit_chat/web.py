@@ -56,53 +56,29 @@ engine = MongoDBEngine(
     db_name=os.getenv("MONGO_DB_NAME", "conversations_db"),
 )
 
+# Startup callback - runs after engine is fully initialized
+async def on_startup(app, engine, manifest):
+    """Additional startup tasks beyond what create_app() handles."""
+    # Register WebSocket message handlers
+    register_websocket_message_handlers()
+    logger.info("Conversations application ready!")
+
+
 # Create FastAPI app with automatic lifecycle management
 # This automatically handles:
 # - Engine initialization and shutdown
 # - Manifest loading and validation
 # - Auth setup from manifest (CORS, sessions, etc.)
 # - WebSocket route registration
+# - Custom startup via on_startup callback
 app = engine.create_app(
     slug=APP_SLUG,
     manifest=Path(__file__).parent / "manifest.json",
     title="Conversations",
     description="AI Chat Application",
     version="1.0.0",
+    on_startup=on_startup,
 )
-
-
-# Additional setup that runs after engine is initialized
-@app.on_event("startup")
-async def additional_startup():
-    """Additional startup tasks beyond what create_app() handles."""
-    # Set global engine for embedding dependency injection
-    try:
-        from mdb_engine.embeddings.dependencies import set_global_engine
-
-        set_global_engine(engine, app_slug=APP_SLUG)
-    except ImportError:
-        logger.debug("Embedding dependencies not available")
-
-    # Initialize embedding service if configured in manifest.json
-    try:
-        from mdb_engine.embeddings import get_embedding_service
-
-        app_config = engine.get_app(APP_SLUG)
-        embedding_config = app_config.get("embedding_config", {}) if app_config else {}
-        if embedding_config:
-            get_embedding_service(config=embedding_config)
-            logger.info("EmbeddingService initialized from manifest.json")
-        else:
-            logger.debug(
-                "No embedding_config found in manifest.json - embedding service not initialized"
-            )
-    except ImportError:
-        logger.debug("EmbeddingService dependencies not available")
-
-    # Register WebSocket message handlers
-    register_websocket_message_handlers()
-
-    logger.info("Conversations application ready!")
 
 
 # Global exception handler to catch any unhandled exceptions
@@ -156,13 +132,11 @@ async def health_check():
     # Check MongoDB connection if engine is initialized
     if engine.initialized:
         try:
-            db = engine.get_scoped_db(APP_SLUG)
-            # Simple ping to verify connection
-            await db.command("ping")
-            health_status["database"] = "connected"
-        except Exception as e:
+            engine_health = await engine.get_health_status()
+            health_status["database"] = engine_health.get("mongodb", "unknown")
+        except (ConnectionError, TimeoutError, OSError):
             health_status["status"] = "degraded"
-            health_status["database"] = f"error: {str(e)}"
+            health_status["database"] = "connection_failed"
     else:
         health_status["status"] = "starting"
         health_status["database"] = "not_connected"
@@ -171,16 +145,11 @@ async def health_check():
     return JSONResponse(health_status, status_code=status_code)
 
 
-def get_db():
-    """Get the scoped database."""
-    if not engine.initialized:
-        raise HTTPException(status_code=503, detail="Engine not initialized")
-    return engine.get_scoped_db(APP_SLUG)
-
-
 async def get_current_app_user(request: Request):
     """Helper to get current app user for conversations app."""
-    db = get_db()
+    if not engine.initialized:
+        raise HTTPException(status_code=503, detail="Engine not initialized")
+    db = engine.get_scoped_db(APP_SLUG)
 
     # Get app config for auth.users
     app_config = engine.get_app(APP_SLUG)
@@ -242,14 +211,11 @@ async def login(
     email: str = Form(...),
     password: str = Form(...),
 ):
-    """Handle login"""
-    db = get_db()
-
-    # Get auth config from manifest
+    """Handle login - returns JSON for JavaScript frontend"""
+    db = engine.get_scoped_db(APP_SLUG)
     auth_config = await get_auth_config(APP_SLUG, engine)
     token_config = auth_config.get("token_management", {})
 
-    # Use login_user utility
     result = await login_user(
         request=request,
         email=email,
@@ -261,9 +227,9 @@ async def login(
 
     if result["success"]:
         response = result["response"]
-
-        # Create app-specific session
         user = result["user"]
+        
+        # Create app-specific session
         app_config = engine.get_app(APP_SLUG)
         if app_config:
             try:
@@ -277,14 +243,17 @@ async def login(
             except (ValueError, TypeError) as e:
                 logger.warning(f"Failed to create app session: {e}", exc_info=True)
 
-        return response
-    else:
-        return templates.TemplateResponse(
-            request,
-            "login.html",
-            {"error": result.get("error", "Login failed")},
-            status_code=status.HTTP_401_UNAUTHORIZED,
-        )
+        # Return JSON with cookies
+        json_response = JSONResponse({"success": True, "redirect": "/conversations"})
+        for key, value in response.headers.items():
+            if key.lower() == "set-cookie":
+                json_response.headers.append(key, value)
+        return json_response
+    
+    return JSONResponse(
+        {"success": False, "detail": result.get("error", "Login failed")},
+        status_code=status.HTTP_401_UNAUTHORIZED,
+    )
 
 
 @app.get("/register", response_class=HTMLResponse)
@@ -307,31 +276,26 @@ async def register(
     password: str = Form(...),
     full_name: str = Form(...),
 ):
-    """Handle registration"""
-    db = get_db()
-
-    # Get auth config from manifest
+    """Handle registration - returns JSON for JavaScript frontend"""
+    db = engine.get_scoped_db(APP_SLUG)
     auth_config = await get_auth_config(APP_SLUG, engine)
     token_config = auth_config.get("token_management", {})
 
-    # Use register_user utility
     result = await register_user(
         request=request,
         email=email,
         password=password,
         db=db,
         config=token_config,
-        extra_data={
-            "full_name": full_name,
-        },
+        extra_data={"full_name": full_name},
         redirect_url="/conversations",
     )
 
     if result["success"]:
         response = result["response"]
-
-        # Create app-specific session
         user = result["user"]
+        
+        # Create app-specific session
         app_config = engine.get_app(APP_SLUG)
         if app_config:
             try:
@@ -345,22 +309,23 @@ async def register(
             except (ValueError, TypeError) as e:
                 logger.warning(f"Failed to create app session: {e}", exc_info=True)
 
-        return response
-    else:
-        return templates.TemplateResponse(
-            request,
-            "register.html",
-            {"error": result.get("error", "Registration failed")},
-            status_code=status.HTTP_400_BAD_REQUEST,
-        )
+        # Return JSON with cookies
+        json_response = JSONResponse({"success": True, "redirect": "/conversations"})
+        for key, value in response.headers.items():
+            if key.lower() == "set-cookie":
+                json_response.headers.append(key, value)
+        return json_response
+    
+    return JSONResponse(
+        {"success": False, "detail": result.get("error", "Registration failed")},
+        status_code=status.HTTP_400_BAD_REQUEST,
+    )
 
 
-@app.get("/logout")
+@app.post("/logout")
 async def logout(request: Request):
-    """Handle logout"""
-    response = RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
-
-    # Use logout_user utility
+    """Handle logout - returns JSON for JavaScript frontend"""
+    response = JSONResponse(content={"success": True})
     response = await logout_user(request, response)
 
     # Clear app-specific session cookie
@@ -384,7 +349,7 @@ async def conversations_list(request: Request):
     if not app_user:
         return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
 
-    db = get_db()
+    db = engine.get_scoped_db(APP_SLUG)
     user_id = str(app_user["_id"])
 
     # Get user's conversations
@@ -411,7 +376,7 @@ async def conversation_view(request: Request, conversation_id: str):
     if not app_user:
         return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
 
-    db = get_db()
+    db = engine.get_scoped_db(APP_SLUG)
     user_id = str(app_user["_id"])
 
     # Get conversation
@@ -458,7 +423,7 @@ async def create_conversation(request: Request):
     if not app_user:
         raise HTTPException(status_code=401, detail="Authentication required")
 
-    db = get_db()
+    db = engine.get_scoped_db(APP_SLUG)
     user_id = str(app_user["_id"])
 
     # Create conversation
@@ -493,7 +458,7 @@ async def send_message(request: Request, conversation_id: str, message: str = Fo
     if not app_user:
         raise HTTPException(status_code=401, detail="Authentication required")
 
-    db = get_db()
+    db = engine.get_scoped_db(APP_SLUG)
     user_id = str(app_user["_id"])
 
     # Verify conversation belongs to user
@@ -776,7 +741,7 @@ async def delete_conversation(request: Request, conversation_id: str):
     if not app_user:
         raise HTTPException(status_code=401, detail="Authentication required")
 
-    db = get_db()
+    db = engine.get_scoped_db(APP_SLUG)
     user_id = str(app_user["_id"])
 
     # Verify conversation belongs to user

@@ -20,7 +20,9 @@ pip install mdb-engine
 
 ```python
 from pathlib import Path
+from fastapi import Depends
 from mdb_engine import MongoDBEngine
+from mdb_engine.dependencies import get_scoped_db
 
 # 1. Initialize the engine
 engine = MongoDBEngine(
@@ -31,10 +33,9 @@ engine = MongoDBEngine(
 # 2. Create a FastAPI app with automatic lifecycle management
 app = engine.create_app(slug="my_app", manifest=Path("manifest.json"))
 
-# 3. Use the scoped database - all queries automatically isolated
+# 3. Use request-scoped dependencies - all queries automatically isolated
 @app.post("/tasks")
-async def create_task(task: dict):
-    db = engine.get_scoped_db("my_app")
+async def create_task(task: dict, db=Depends(get_scoped_db)):
     result = await db.tasks.insert_one(task)
     return {"id": str(result.inserted_id)}
 ```
@@ -84,22 +85,29 @@ Supported index types: `regular`, `text`, `vector`, `ttl`, `compound`.
 
 ### 2. CRUD Operations (Auto-Scoped)
 
-All database operations are automatically scoped to your app:
+All database operations are automatically scoped to your app. Use `Depends(get_scoped_db)` in route handlers:
 
 ```python
-db = engine.get_scoped_db("my_app")
+from mdb_engine.dependencies import get_scoped_db
 
-# Create
-await db.tasks.insert_one({"title": "Build feature", "status": "pending"})
+@app.post("/tasks")
+async def create_task(task: dict, db=Depends(get_scoped_db)):
+    result = await db.tasks.insert_one(task)
+    return {"id": str(result.inserted_id)}
 
-# Read  
-tasks = await db.tasks.find({"status": "pending"}).to_list(length=10)
+@app.get("/tasks")
+async def list_tasks(db=Depends(get_scoped_db)):
+    return await db.tasks.find({"status": "pending"}).to_list(length=10)
 
-# Update
-await db.tasks.update_one({"_id": task_id}, {"$set": {"status": "done"}})
+@app.put("/tasks/{task_id}")
+async def update_task(task_id: str, db=Depends(get_scoped_db)):
+    await db.tasks.update_one({"_id": task_id}, {"$set": {"status": "done"}})
+    return {"updated": True}
 
-# Delete
-await db.tasks.delete_one({"_id": task_id})
+@app.delete("/tasks/{task_id}")
+async def delete_task(task_id: str, db=Depends(get_scoped_db)):
+    await db.tasks.delete_one({"_id": task_id})
+    return {"deleted": True}
 ```
 
 **What happens under the hood:**
@@ -144,6 +152,26 @@ async def health():
 | **WebSockets** | Real-time updates from manifest | [Docs](https://github.com/ranfysvalle02/mdb-engine/blob/main/docs/ARCHITECTURE.md) |
 | **Multi-App** | Secure cross-app data access | [Multi-App Example](https://github.com/ranfysvalle02/mdb-engine/tree/main/examples/advanced/multi_app) |
 | **SSO** | Shared auth across apps | [Shared Auth Example](https://github.com/ranfysvalle02/mdb-engine/tree/main/examples/advanced/multi_app_shared) |
+
+### AppContext — All Services in One Place ✨
+
+```python
+from fastapi import Depends
+from mdb_engine.dependencies import AppContext
+
+@app.post("/ai-chat")
+async def chat(query: str, ctx: AppContext = Depends()):
+    user = ctx.require_user()  # 401 if not logged in
+    ctx.require_role("user")   # 403 if missing role
+    
+    # Everything available: ctx.db, ctx.embedding_service, ctx.memory, ctx.llm
+    if ctx.llm:
+        response = ctx.llm.chat.completions.create(
+            model=ctx.llm_model,
+            messages=[{"role": "user", "content": query}]
+        )
+        return {"response": response.choices[0].message.content}
+```
 
 ---
 

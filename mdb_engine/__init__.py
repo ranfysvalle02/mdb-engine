@@ -21,6 +21,22 @@ Usage:
 # Authentication
 from .auth import AuthorizationProvider, get_current_user, require_admin
 
+# Request-scoped FastAPI dependencies
+from .dependencies import (
+    AppContext,
+    get_app_config,
+    get_app_slug,
+    get_authz_provider,
+    get_current_user,
+    get_embedding_service,
+    get_engine,
+    get_llm_client,
+    get_llm_model_name,
+    get_memory_service,
+    get_scoped_db,
+    get_user_roles,
+)
+
 # Optional Ray integration
 # Core MongoDB Engine
 from .core import (
@@ -62,6 +78,19 @@ __all__ = [
     "AuthorizationProvider",
     "get_current_user",
     "require_admin",
+    # Request-scoped FastAPI dependencies
+    "get_engine",
+    "get_app_slug",
+    "get_app_config",
+    "get_scoped_db",
+    "get_embedding_service",
+    "get_memory_service",
+    "get_llm_client",
+    "get_llm_model_name",
+    "get_authz_provider",
+    "get_current_user",
+    "get_user_roles",
+    "AppContext",
     # Indexes
     "AsyncAtlasIndexManager",
     "AutoIndexManager",

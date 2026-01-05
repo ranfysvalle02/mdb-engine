@@ -2,37 +2,92 @@
   "schema_version": "2.0",
   "slug": "click_tracker",
   "name": "Click Tracker",
-  "description": "Tracks user clicks and events",
+  "description": "Tracks user clicks and events with role-based access control",
   "status": "active",
   "data_access": {
     "read_scopes": ["click_tracker"],
     "write_scope": "click_tracker",
     "cross_app_policy": "explicit"
   },
+  "auth": {
+    "policy": {
+      "provider": "casbin",
+      "required": true,
+      "allow_anonymous": false,
+      "authorization": {
+        "model": "rbac",
+        "policies_collection": "casbin_policies",
+        "initial_policies": [
+          ["admin", "clicks", "read"],
+          ["admin", "clicks", "write"],
+          ["admin", "clicks", "delete"],
+          ["editor", "clicks", "read"],
+          ["editor", "clicks", "write"],
+          ["viewer", "clicks", "read"]
+        ],
+        "initial_roles": [
+          {"user": "alice@example.com", "role": "admin"},
+          {"user": "bob@example.com", "role": "editor"},
+          {"user": "charlie@example.com", "role": "viewer"}
+        ]
+      }
+    },
+    "users": {
+      "enabled": true,
+      "strategy": "app_users",
+      "collection_name": "users",
+      "session_cookie_name": "click_tracker_session",
+      "session_ttl_seconds": 86400,
+      "demo_users": [
+        {"email": "alice@example.com", "password": "password123", "role": "admin"},
+        {"email": "bob@example.com", "password": "password123", "role": "editor"},
+        {"email": "charlie@example.com", "password": "password123", "role": "viewer"}
+      ],
+      "demo_user_seed_strategy": "auto"
+    }
+  },
+  "cors": {
+    "enabled": true,
+    "allow_origins": ["*"],
+    "allow_credentials": true,
+    "allow_methods": ["*"],
+    "allow_headers": ["*"]
+  },
   "managed_indexes": {
     "clicks": [
       {
         "type": "regular",
         "name": "timestamp_idx",
-        "keys": {
-          "timestamp": -1
-        }
+        "keys": {"timestamp": -1}
       },
       {
         "type": "regular",
         "name": "user_id_idx",
-        "keys": {
-          "user_id": 1
-        }
+        "keys": {"user_id": 1}
       },
       {
         "type": "regular",
         "name": "session_id_idx",
-        "keys": {
-          "session_id": 1
-        }
+        "keys": {"session_id": 1}
+      }
+    ]
+  },
+  "initial_data": {
+    "clicks": [
+      {
+        "user_id": "demo_user",
+        "url": "/home",
+        "element": "hero-button",
+        "session_id": "demo_session_1",
+        "timestamp": "2024-01-01T00:00:00Z"
+      },
+      {
+        "user_id": "demo_user",
+        "url": "/products",
+        "element": "nav-link",
+        "session_id": "demo_session_1",
+        "timestamp": "2024-01-01T00:01:00Z"
       }
     ]
   }
 }
-

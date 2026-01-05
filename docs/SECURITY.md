@@ -11,13 +11,14 @@
 7. [Data Isolation](#data-isolation)
 8. [Configuration](#configuration)
 9. [Error Handling](#error-handling)
-10. [Security Best Practices](#security-best-practices)
-11. [Security Monitoring](#security-monitoring)
-12. [Compliance](#compliance)
-13. [Troubleshooting](#troubleshooting)
-14. [Future Enhancements](#future-enhancements)
-15. [Conclusion](#conclusion)
-16. [Appendix A: Security Testing](#appendix-a-security-testing)
+10. [CSRF Protection](#csrf-protection)
+11. [Security Best Practices](#security-best-practices)
+12. [Security Monitoring](#security-monitoring)
+13. [Compliance](#compliance)
+14. [Troubleshooting](#troubleshooting)
+15. [Future Enhancements](#future-enhancements)
+16. [Conclusion](#conclusion)
+17. [Appendix A: Security Testing](#appendix-a-security-testing)
 
 ## Overview
 
@@ -848,6 +849,196 @@ except ResourceLimitExceeded as e:
     print(f"Actual value: {e.actual_value}")
     print(f"Context: {e.context}")
 ```
+
+## CSRF Protection
+
+Cross-Site Request Forgery (CSRF) protection is automatically enabled for apps using shared authentication mode. The implementation uses the **double-submit cookie pattern**.
+
+### How It Works
+
+1. **Token Generation**: A CSRF token is generated and set as a cookie (`csrf_token`)
+2. **Token Submission**: State-changing requests must include the token in the `X-CSRF-Token` header
+3. **Token Validation**: The server validates the header matches the cookie value
+
+### Configuration
+
+CSRF protection is configured in your manifest.json:
+
+```json
+{
+  "auth": {
+    "mode": "shared",
+    "csrf_protection": true
+  }
+}
+```
+
+Advanced configuration options:
+
+```json
+{
+  "auth": {
+    "csrf_protection": {
+      "enabled": true,
+      "exempt_routes": ["/api/webhooks/*", "/health"],
+      "token_ttl": 3600,
+      "rotate_tokens": false
+    }
+  }
+}
+```
+
+### Frontend Integration
+
+#### Reading the CSRF Token
+
+```javascript
+// Helper function to read cookies
+function getCookie(name) {
+    const value = `; ${document.cookie}`;
+    const parts = value.split(`; ${name}=`);
+    if (parts.length === 2) return parts.pop().split(';').shift();
+    return null;
+}
+```
+
+#### Including in Requests
+
+All POST, PUT, and DELETE requests must include the CSRF token:
+
+```javascript
+// Example: POST request with CSRF token
+async function submitData(data) {
+    const response = await fetch('/api/data', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': getCookie('csrf_token')
+        },
+        credentials: 'same-origin',
+        body: JSON.stringify(data)
+    });
+    return response.json();
+}
+
+// Example: DELETE request with CSRF token
+async function deleteItem(id) {
+    const response = await fetch(`/api/items/${id}`, {
+        method: 'DELETE',
+        headers: {
+            'X-CSRF-Token': getCookie('csrf_token')
+        },
+        credentials: 'same-origin'
+    });
+    return response.json();
+}
+```
+
+### Logout Must Be POST
+
+For security reasons, logout endpoints should use POST method with CSRF protection, not GET:
+
+```javascript
+// Correct: POST with CSRF token
+async function logout() {
+    const response = await fetch('/logout', {
+        method: 'POST',
+        headers: {
+            'X-CSRF-Token': getCookie('csrf_token')
+        },
+        credentials: 'same-origin'
+    });
+    
+    const result = await response.json();
+    if (result.success) {
+        window.location.href = result.redirect || '/login';
+    }
+}
+```
+
+Backend implementation:
+
+```python
+from fastapi.responses import JSONResponse
+
+@app.post("/logout")
+async def logout(request: Request):
+    """Logout must be POST with CSRF token."""
+    response = JSONResponse({"success": True, "redirect": "/login"})
+    response = await logout_user(request, response)
+    return response
+```
+
+### AJAX Authentication Pattern
+
+Login and registration endpoints should return JSON for JavaScript frontends:
+
+```python
+@app.post("/login")
+async def login(request: Request, email: str = Form(...), password: str = Form(...)):
+    """Login returning JSON for AJAX frontend."""
+    result = await authenticate_user(email, password)
+    
+    if result["success"]:
+        json_response = JSONResponse({
+            "success": True,
+            "redirect": "/dashboard"
+        })
+        # Copy auth cookies
+        for key, value in result["response"].headers.items():
+            if key.lower() == "set-cookie":
+                json_response.headers.append(key, value)
+        return json_response
+    
+    return JSONResponse(
+        {"success": False, "detail": result.get("error", "Login failed")},
+        status_code=401
+    )
+```
+
+### Error Responses
+
+When CSRF validation fails, the server returns a 403 status:
+
+```json
+{
+  "detail": "Invalid or missing CSRF token"
+}
+```
+
+Handle this in your frontend:
+
+```javascript
+async function makeRequest(url, options) {
+    const response = await fetch(url, {
+        ...options,
+        headers: {
+            ...options.headers,
+            'X-CSRF-Token': getCookie('csrf_token')
+        },
+        credentials: 'same-origin'
+    });
+    
+    if (response.status === 403) {
+        const data = await response.json();
+        if (data.detail && data.detail.includes('CSRF')) {
+            // Token may have expired - refresh the page
+            window.location.reload();
+            return;
+        }
+    }
+    
+    return response;
+}
+```
+
+### Best Practices
+
+1. **Always use POST for state changes** - Never use GET for logout, delete, or update operations
+2. **Include credentials** - Use `credentials: 'same-origin'` in fetch requests
+3. **Handle 403 errors** - Refresh the page or prompt the user if CSRF token expires
+4. **Don't expose tokens in URLs** - Always use headers, never query parameters
+5. **Test CSRF protection** - Verify that requests without valid tokens are rejected
 
 ## Security Best Practices
 

@@ -1,82 +1,71 @@
-version: '3.8'
-
-# Multi-App with Shared Authentication (SSO)
-# 
-# This example demonstrates:
-# - Shared user pool across multiple apps (auth.mode="shared")
-# - Single Sign-On (SSO) - login once, access multiple apps
-# - Role-based access control per app
-# - Cross-app data access (dashboard reads from click_tracker)
-# - Rate limiting on auth endpoints
-# - Audit logging for compliance
+# Multi-App SSO Demo
 #
-# SECURITY NOTE:
-#   In production, replace MDB_ENGINE_JWT_SECRET with a secure, unique secret:
-#   python -c "import secrets; print(secrets.token_urlsafe(32))"
+# Demonstrates:
+# - Single Sign-On (SSO) - login once, authenticated on both apps
+# - Role-based access control (clicker, tracker, admin)
+# - Cross-app data access (dashboard reads click_tracker data)
+# - Shared user pool with per-app roles
 #
 # Run: docker-compose up --build
 # Then visit:
-#   - Click Tracker: http://localhost:8000 (requires "viewer" role)
-#   - Dashboard: http://localhost:8001 (requires "viewer" role)
+#   - Click Tracker: http://localhost:8000
+#   - Dashboard: http://localhost:8001
+#
+# Login on either app = logged into BOTH apps!
 
 services:
-  # Click Tracker App - Port 8000
-  # Requires "viewer" role (granted on registration)
   click_tracker:
     build:
-      context: ../..
-      dockerfile: examples/multi_app_shared/Dockerfile
+      context: ../../..
+      dockerfile: examples/advanced/multi_app_shared/Dockerfile
     ports:
       - "8000:8000"
     environment:
-      - MONGODB_URI=mongodb://mongo:27017
+      - MONGODB_URI=mongodb://mongo:27017/?directConnection=true
       - MONGODB_DB=mdb_runtime_shared
-      # SECURITY: Use a strong, unique secret in production!
-      - MDB_ENGINE_JWT_SECRET=change-me-in-production-use-secrets-token-urlsafe-32
-      - DEBUG=true  # Enables development mode (relaxed security)
+      - MDB_ENGINE_MASTER_KEY=iDMXrti3uG3Exh9iN3H2TY2+T/g1igVh1+qFg+ZxSJo=
+      - MDB_ENGINE_JWT_SECRET=shared_sso_jwt_secret_change_in_production_abc123
+      - PYTHONUNBUFFERED=1
     depends_on:
       mongo:
         condition: service_healthy
     volumes:
       - ./apps/click_tracker:/app
-      - ../../mdb_engine:/opt/venv/lib/python3.11/site-packages/mdb_engine
+      - ../../../mdb_engine:/opt/venv/lib/python3.11/site-packages/mdb_engine
     command: uvicorn web:app --host 0.0.0.0 --port 8000 --reload
 
-  # Dashboard App - Port 8001
-  # Requires "viewer" role
   dashboard:
     build:
-      context: ../..
-      dockerfile: examples/multi_app_shared/Dockerfile
+      context: ../../..
+      dockerfile: examples/advanced/multi_app_shared/Dockerfile
     ports:
       - "8001:8001"
     environment:
-      - MONGODB_URI=mongodb://mongo:27017
+      - MONGODB_URI=mongodb://mongo:27017/?directConnection=true
       - MONGODB_DB=mdb_runtime_shared
-      # SECURITY: Must match click_tracker's secret for SSO to work!
-      - MDB_ENGINE_JWT_SECRET=change-me-in-production-use-secrets-token-urlsafe-32
-      - DEBUG=true  # Enables development mode (relaxed security)
+      - MDB_ENGINE_MASTER_KEY=iDMXrti3uG3Exh9iN3H2TY2+T/g1igVh1+qFg+ZxSJo=
+      - MDB_ENGINE_JWT_SECRET=shared_sso_jwt_secret_change_in_production_abc123
+      - PYTHONUNBUFFERED=1
     depends_on:
       mongo:
         condition: service_healthy
     volumes:
       - ./apps/dashboard:/app
-      - ../../mdb_engine:/opt/venv/lib/python3.11/site-packages/mdb_engine
+      - ../../../mdb_engine:/opt/venv/lib/python3.11/site-packages/mdb_engine
     command: uvicorn web:app --host 0.0.0.0 --port 8001 --reload
 
-  # MongoDB
   mongo:
-    image: mongo:7.0
+    image: mongodb/mongodb-atlas-local:latest
     ports:
       - "27017:27017"
     volumes:
       - mongo_data:/data/db
     healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      test: mongosh "mongodb://localhost:27017/?directConnection=true" --quiet --eval "rs.status().ok && rs.status().myState === 1"
+      interval: 5s
+      timeout: 10s
+      retries: 20
+      start_period: 15s
 
 volumes:
   mongo_data:
-

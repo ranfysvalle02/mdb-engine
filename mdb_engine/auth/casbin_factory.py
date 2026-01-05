@@ -135,7 +135,7 @@ async def initialize_casbin_from_manifest(
     Args:
         engine: MongoDBEngine instance
         app_slug: App slug identifier
-        auth_config: Auth configuration dict from manifest (contains auth_policy)
+        auth_config: Full manifest config dict (contains auth.policy or auth_policy)
 
     Returns:
         CasbinAdapter instance if successfully created, None otherwise
@@ -143,18 +143,25 @@ async def initialize_casbin_from_manifest(
     try:
         from .provider import CasbinAdapter
 
-        auth_policy = auth_config.get("auth_policy", {})
+        # Support both old (auth_policy) and new (auth.policy) structures
+        auth = auth_config.get("auth", {})
+        auth_policy = auth.get("policy", {}) or auth_config.get("auth_policy", {})
         provider = auth_policy.get("provider", "casbin")
 
         # Only proceed if provider is casbin
         if provider != "casbin":
+            logger.debug(f"Provider is '{provider}', not 'casbin' - skipping Casbin initialization")
             return None
+
+        logger.info(f"Initializing Casbin provider for app '{app_slug}'...")
 
         # Get authorization config
         authorization = auth_policy.get("authorization", {})
         model = authorization.get("model", "rbac")
         policies_collection = authorization.get("policies_collection", "casbin_policies")
         default_roles = authorization.get("default_roles", [])
+        initial_policies = authorization.get("initial_policies", [])
+        initial_roles = authorization.get("initial_roles", [])
 
         # Get scoped database from engine
         db = engine.get_scoped_db(app_slug)
@@ -169,8 +176,40 @@ async def initialize_casbin_from_manifest(
 
         # Create adapter
         adapter = CasbinAdapter(enforcer)
+        logger.info(f"✅ CasbinAdapter created successfully")
 
-        logger.info(f"Casbin provider initialized for app '{app_slug}'")
+        # Set up initial policies if configured
+        if initial_policies:
+            logger.info(f"Setting up {len(initial_policies)} initial policies...")
+            for policy in initial_policies:
+                if isinstance(policy, (list, tuple)) and len(policy) >= 3:
+                    role, resource, action = policy[0], policy[1], policy[2]
+                    try:
+                        added = await adapter.add_policy(role, resource, action)
+                        if added:
+                            logger.debug(f"  Added policy: {role} -> {resource}:{action}")
+                    except Exception as e:
+                        logger.warning(f"  Failed to add policy {policy}: {e}")
+
+        # Set up initial role assignments if configured
+        if initial_roles:
+            logger.info(f"Setting up {len(initial_roles)} initial role assignments...")
+            for role_assignment in initial_roles:
+                if isinstance(role_assignment, dict):
+                    user = role_assignment.get("user")
+                    role = role_assignment.get("role")
+                    if user and role:
+                        try:
+                            added = await adapter.add_role_for_user(user, role)
+                            if added:
+                                logger.debug(f"  Assigned role '{role}' to user '{user}'")
+                        except Exception as e:
+                            logger.warning(f"  Failed to assign role {role_assignment}: {e}")
+
+        # Save policies to persist them
+        await adapter.save_policy()
+
+        logger.info(f"✅ Casbin provider initialized for app '{app_slug}'")
 
         return adapter
 

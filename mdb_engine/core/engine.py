@@ -30,7 +30,7 @@ import os
 import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import PyMongoError
@@ -280,7 +280,21 @@ class MongoDBEngine:
 
     @property
     def _initialized(self) -> bool:
-        """Check if engine is initialized."""
+        """Check if engine is initialized (internal)."""
+        return self._connection_manager.initialized
+
+    @property
+    def initialized(self) -> bool:
+        """
+        Check if engine is initialized.
+
+        Returns:
+            True if the engine has been initialized, False otherwise.
+
+        Example:
+            if engine.initialized:
+                db = engine.get_scoped_db("my_app")
+        """
         return self._connection_manager.initialized
 
     def get_scoped_db(
@@ -861,6 +875,30 @@ class MongoDBEngine:
             return self._service_initializer.get_memory_service(slug)
         return None
 
+    def get_embedding_service(self, slug: str) -> Optional[Any]:
+        """
+        Get EmbeddingService for an app.
+
+        Auto-detects OpenAI or AzureOpenAI from environment variables.
+        Uses embedding_config from manifest.json if available.
+
+        Args:
+            slug: App slug
+
+        Returns:
+            EmbeddingService instance if embedding is enabled for this app, None otherwise
+
+        Example:
+            ```python
+            embedding_service = engine.get_embedding_service("my_app")
+            if embedding_service:
+                vectors = await embedding_service.embed_chunks(["Hello world"])
+            ```
+        """
+        from ..embeddings.dependencies import get_embedding_service_for_app
+
+        return get_embedding_service_for_app(slug, self)
+
     @property
     def _apps(self) -> Dict[str, Any]:
         """
@@ -1052,6 +1090,8 @@ class MongoDBEngine:
         slug: str,
         manifest: Path,
         title: Optional[str] = None,
+        on_startup: Optional[Callable[["FastAPI", "MongoDBEngine", Dict[str, Any]], Awaitable[None]]] = None,
+        on_shutdown: Optional[Callable[["FastAPI", "MongoDBEngine", Dict[str, Any]], Awaitable[None]]] = None,
         **fastapi_kwargs: Any,
     ) -> "FastAPI":
         """
@@ -1065,20 +1105,33 @@ class MongoDBEngine:
            - "app" (default): Per-app token authentication
            - "shared": Shared user pool with SSO, auto-adds SharedAuthMiddleware
         5. Auto-retrieves app tokens (for "app" mode)
-        6. Shuts down the engine on shutdown
+        6. Calls on_startup callback (if provided)
+        7. Shuts down the engine on shutdown (calls on_shutdown first if provided)
 
         Args:
             slug: Application slug (must match manifest slug)
             manifest: Path to manifest.json file
             title: FastAPI app title. Defaults to app name from manifest
+            on_startup: Optional async callback called after engine initialization.
+                       Signature: async def callback(app, engine, manifest) -> None
+            on_shutdown: Optional async callback called before engine shutdown.
+                        Signature: async def callback(app, engine, manifest) -> None
             **fastapi_kwargs: Additional arguments passed to FastAPI()
 
         Returns:
             Configured FastAPI application
 
         Example:
+            async def my_startup(app, engine, manifest):
+                db = engine.get_scoped_db("my_app")
+                await db.config.insert_one({"initialized": True})
+
             engine = MongoDBEngine(mongo_uri=..., db_name=...)
-            app = engine.create_app(slug="my_app", manifest=Path("manifest.json"))
+            app = engine.create_app(
+                slug="my_app",
+                manifest=Path("manifest.json"),
+                on_startup=my_startup,
+            )
 
             @app.get("/")
             async def index():
@@ -1151,11 +1204,81 @@ class MongoDBEngine:
                 logger.info(f"Shared auth mode for '{slug}' - SSO enabled")
                 # Initialize shared user pool and set on app.state
                 # Middleware was already added at app creation time (lazy version)
-                await engine._initialize_shared_user_pool(app)
+                await engine._initialize_shared_user_pool(app, app_manifest)
             else:
                 logger.info(f"Per-app auth mode for '{slug}'")
                 # Auto-retrieve app token for "app" mode
                 await engine.auto_retrieve_app_token(slug)
+
+            # Auto-initialize authorization provider from manifest config
+            auth_policy = auth_config.get("policy", {})
+            authz_provider_type = auth_policy.get("provider")
+
+            if authz_provider_type == "oso":
+                # Initialize OSO Cloud provider
+                try:
+                    from ..auth.oso_factory import initialize_oso_from_manifest
+
+                    authz_provider = await initialize_oso_from_manifest(
+                        engine, slug, app_manifest
+                    )
+                    if authz_provider:
+                        app.state.authz_provider = authz_provider
+                        logger.info(f"✅ OSO Cloud provider auto-initialized for '{slug}'")
+                    else:
+                        logger.warning(
+                            f"⚠️  OSO provider not initialized for '{slug}' - "
+                            "check OSO_AUTH and OSO_URL environment variables"
+                        )
+                except ImportError as e:
+                    logger.warning(
+                        f"⚠️  OSO Cloud SDK not available for '{slug}': {e}. "
+                        "Install with: pip install oso-cloud"
+                    )
+                except Exception as e:
+                    logger.error(f"❌ Failed to initialize OSO provider for '{slug}': {e}")
+
+            elif authz_provider_type == "casbin":
+                # Initialize Casbin provider
+                try:
+                    from ..auth.casbin_factory import initialize_casbin_from_manifest
+
+                    authz_provider = await initialize_casbin_from_manifest(
+                        engine, slug, app_manifest
+                    )
+                    if authz_provider:
+                        app.state.authz_provider = authz_provider
+                        logger.info(f"✅ Casbin provider auto-initialized for '{slug}'")
+                    else:
+                        logger.warning(
+                            f"⚠️  Casbin provider not initialized for '{slug}'"
+                        )
+                except ImportError as e:
+                    logger.warning(
+                        f"⚠️  Casbin not available for '{slug}': {e}. "
+                        "Install with: pip install mdb-engine[casbin]"
+                    )
+                except Exception as e:
+                    logger.error(f"❌ Failed to initialize Casbin provider for '{slug}': {e}")
+
+            # Auto-seed demo users if configured in manifest
+            users_config = auth_config.get("users", {})
+            if users_config.get("enabled") and users_config.get("demo_users"):
+                try:
+                    from ..auth import ensure_demo_users_exist
+
+                    db = engine.get_scoped_db(slug)
+                    demo_users = await ensure_demo_users_exist(
+                        db=db,
+                        slug_id=slug,
+                        config=app_manifest,
+                    )
+                    if demo_users:
+                        logger.info(
+                            f"✅ Seeded {len(demo_users)} demo user(s) for '{slug}'"
+                        )
+                except Exception as e:
+                    logger.warning(f"⚠️  Failed to seed demo users for '{slug}': {e}")
 
             # Expose engine state on app.state
             app.state.engine = engine
@@ -1165,7 +1288,24 @@ class MongoDBEngine:
             app.state.auth_mode = auth_mode
             app.state.ray_actor = engine.ray_actor
 
+            # Call on_startup callback if provided
+            if on_startup:
+                try:
+                    await on_startup(app, engine, app_manifest)
+                    logger.info(f"on_startup callback completed for '{slug}'")
+                except Exception as e:
+                    logger.error(f"on_startup callback failed for '{slug}': {e}")
+                    raise
+
             yield
+
+            # Call on_shutdown callback if provided
+            if on_shutdown:
+                try:
+                    await on_shutdown(app, engine, app_manifest)
+                    logger.info(f"on_shutdown callback completed for '{slug}'")
+                except Exception as e:
+                    logger.warning(f"on_shutdown callback failed for '{slug}': {e}")
 
             await engine.shutdown()
 
@@ -1236,6 +1376,7 @@ class MongoDBEngine:
     async def _initialize_shared_user_pool(
         self,
         app: "FastAPI",
+        manifest: Optional[Dict[str, Any]] = None,
     ) -> None:
         """
         Initialize shared user pool, audit log, and set them on app.state.
@@ -1251,6 +1392,7 @@ class MongoDBEngine:
 
         Args:
             app: FastAPI application instance
+            manifest: Optional manifest dict for seeding demo users
         """
         from ..auth.audit import AuthAuditLog
         from ..auth.shared_users import SharedUserPool
@@ -1275,8 +1417,35 @@ class MongoDBEngine:
         # Expose user pool on app.state for middleware to access
         app.state.user_pool = self._shared_user_pool
 
+        # Seed demo users to SharedUserPool if configured in manifest
+        if manifest:
+            auth_config = manifest.get("auth", {})
+            users_config = auth_config.get("users", {})
+            demo_users = users_config.get("demo_users", [])
+
+            if demo_users and users_config.get("demo_user_seed_strategy", "auto") != "disabled":
+                for demo in demo_users:
+                    try:
+                        email = demo.get("email")
+                        password = demo.get("password")
+                        app_roles = demo.get("app_roles", {})
+
+                        existing = await self._shared_user_pool.get_user_by_email(email)
+
+                        if not existing:
+                            await self._shared_user_pool.create_user(
+                                email=email,
+                                password=password,
+                                app_roles=app_roles,
+                            )
+                            logger.info(f"✅ Created shared demo user: {email}")
+                        else:
+                            logger.debug(f"ℹ️  Shared demo user exists: {email}")
+                    except Exception as e:
+                        logger.warning(f"⚠️  Failed to create shared demo user {demo.get('email')}: {e}")
+
         # Initialize audit logging if enabled
-        auth_config = getattr(app.state, "manifest", {}).get("auth", {})
+        auth_config = (manifest or {}).get("auth", {})
         audit_config = auth_config.get("audit", {})
         audit_enabled = audit_config.get("enabled", True)  # Default: enabled for shared auth
 

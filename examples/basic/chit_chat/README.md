@@ -92,10 +92,10 @@ uvicorn web:app --host 0.0.0.0 --port 8000 --reload
 
 ### Authentication
 - `GET /login` - Login page
-- `POST /login` - Authenticate user
+- `POST /login` - Authenticate user (returns JSON)
 - `GET /register` - Registration page
-- `POST /register` - Create new user
-- `GET /logout` - Logout user
+- `POST /register` - Create new user (returns JSON)
+- `POST /logout` - Logout user (returns JSON, requires CSRF token)
 
 ### Conversations
 - `GET /conversations` - List all conversations
@@ -115,11 +115,14 @@ uvicorn web:app --host 0.0.0.0 --port 8000 --reload
 
 ## Usage Examples
 
+**Note:** All POST/PUT/DELETE requests require the `X-CSRF-Token` header with the value from the `csrf_token` cookie.
+
 ### Create a Conversation
 
 ```bash
 curl -X POST "http://localhost:8000/api/conversations" \
-  -H "Cookie: your-session-cookie"
+  -H "Cookie: your-session-cookie; csrf_token=your-csrf-token" \
+  -H "X-CSRF-Token: your-csrf-token"
 ```
 
 ### Send a Message
@@ -127,8 +130,17 @@ curl -X POST "http://localhost:8000/api/conversations" \
 ```bash
 curl -X POST "http://localhost:8000/api/conversations/{conversation_id}/messages" \
   -H "Content-Type: application/x-www-form-urlencoded" \
-  -H "Cookie: your-session-cookie" \
+  -H "Cookie: your-session-cookie; csrf_token=your-csrf-token" \
+  -H "X-CSRF-Token: your-csrf-token" \
   -d "message=What was my first message to you?"
+```
+
+### Logout
+
+```bash
+curl -X POST "http://localhost:8000/logout" \
+  -H "Cookie: your-session-cookie; csrf_token=your-csrf-token" \
+  -H "X-CSRF-Token: your-csrf-token"
 ```
 
 ### Search Memories

@@ -169,7 +169,7 @@
             <nav class="nav-links">
                 {% if user %}
                     <a href="/conversations">Conversations</a>
-                    <a href="/logout">Logout</a>
+                    <a href="#" onclick="logout(); return false;">Logout</a>
                 {% else %}
                     <a href="/login">Login</a>
                     <a href="/register">Register</a>
@@ -182,6 +182,22 @@
         {% block content %}{% endblock %}
     </main>
 
+    <script>
+    function getCookie(name) {
+        const value = `; ${document.cookie}`;
+        const parts = value.split(`; ${name}=`);
+        if (parts.length === 2) return parts.pop().split(';').shift();
+        return '';
+    }
+    
+    async function logout() {
+        await fetch('/logout', {
+            method: 'POST',
+            headers: { 'X-CSRF-Token': getCookie('csrf_token') }
+        });
+        window.location.href = '/login';
+    }
+    </script>
     {% block extra_js %}{% endblock %}
 </body>
 </html>

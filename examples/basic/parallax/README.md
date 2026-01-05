@@ -154,13 +154,15 @@ The dashboard displays each repository in a 2-column layout, showing Relevance a
 |----------|--------|-------------|
 | `/` | GET | Parallax dashboard (HTML) |
 | `/health` | GET | Health check for container healthchecks |
-| `/api/refresh` | POST | Trigger analysis of GitHub repositories |
+| `/api/refresh` | POST | Trigger analysis of GitHub repositories (requires CSRF token) |
 | `/api/reports` | GET | Get recent Parallax reports (JSON) |
 | `/api/reports/{repo_id}` | GET | Get a single report by repo ID |
 | `/api/watchlist` | GET | Get current watchlist and search configuration |
-| `/api/watchlist` | POST | Update watchlist keywords and search parameters |
+| `/api/watchlist` | POST | Update watchlist keywords and search parameters (requires CSRF token) |
 | `/api/lenses` | GET | Get all lens configurations |
-| `/api/lenses/{lens_name}` | GET/POST | Get or update a specific lens configuration |
+| `/api/lenses/{lens_name}` | GET/POST | Get or update a specific lens configuration (POST requires CSRF token) |
+
+**Note:** POST endpoints require the `X-CSRF-Token` header with the value from the `csrf_token` cookie.
 
 ## MDB_ENGINE Integration
 
@@ -182,9 +184,12 @@ app = engine.create_app(
     version="1.0.0",
 )
 
-# Get scoped database from request
-def get_db(request: Request):
-    return request.app.state.engine.get_scoped_db("parallax")
+# Use dependency injection for database access
+from mdb_engine.dependencies import get_scoped_db
+
+@app.get("/reports")
+async def get_reports(db=Depends(get_scoped_db)):
+    return await db.reports.find({}).to_list(100)
 ```
 
 This automatically handles:

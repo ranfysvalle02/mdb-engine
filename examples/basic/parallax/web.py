@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Optional
 
 from dotenv import load_dotenv
-from fastapi import HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from openai import AzureOpenAI
@@ -24,6 +24,7 @@ from parallax import WATCHLIST, ParallaxEngine
 from schema_generator import get_default_lens_configs
 
 from mdb_engine import MongoDBEngine
+from mdb_engine.dependencies import get_scoped_db
 
 # Load environment variables
 load_dotenv()
@@ -45,105 +46,21 @@ db_name = os.getenv("MONGO_DB_NAME", "parallax_db")
 # Initialize the MongoDB Engine
 engine = MongoDBEngine(mongo_uri=mongo_uri, db_name=db_name)
 
-# Create FastAPI app with automatic lifecycle management
-app = engine.create_app(
-    slug=APP_SLUG,
-    manifest=Path(__file__).parent / "manifest.json",
-    title="Parallax - GitHub Repository Intelligence",
-    description="Focused intelligence tool analyzing GitHub repositories (with AGENTS.md/LLMs.md files) from Relevance and Technical perspectives",
-    version="1.0.0",
-)
-
-
-# WebSocket connection manager for real-time updates
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: list[WebSocket] = []
-
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
-        logger.info(f"WebSocket connected. Total connections: {len(self.active_connections)}")
-
-    def disconnect(self, websocket: WebSocket):
-        if websocket in self.active_connections:
-            self.active_connections.remove(websocket)
-        logger.info(f"WebSocket disconnected. Total connections: {len(self.active_connections)}")
-
-    async def send_personal_message(self, message: dict, websocket: WebSocket):
-        # Type 4: Let WebSocket errors bubble up to framework handler
-        await websocket.send_json(message)
-
-    async def broadcast(self, message: dict):
-        disconnected = []
-        for connection in self.active_connections:
-            try:
-                await connection.send_json(message)
-            except (RuntimeError, ConnectionError, OSError):
-                # Type 2: Recoverable - connection error, mark for cleanup
-                disconnected.append(connection)
-
-        # Remove disconnected connections
-        for conn in disconnected:
-            self.disconnect(conn)
-
-
-manager = ConnectionManager()
-
-# Templates directory
-templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
-
-# Parallax engine instance (initialized on startup)
+# Parallax engine instance (initialized via on_startup callback)
 parallax: Optional[ParallaxEngine] = None
 
 
-def get_db(request: Request):
-    """Get the scoped database from app state"""
-    return request.app.state.engine.get_scoped_db(APP_SLUG)
-
-
-# Global exception handler to ensure all errors return valid JSON
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    """Handle all unhandled exceptions and return valid JSON"""
-    logger.error(f"Unhandled exception: {exc}", exc_info=True)
-    return JSONResponse(
-        status_code=500,
-        content={
-            "success": False,
-            "error": str(exc),
-            "detail": f"Internal server error: {str(exc)}",
-        },
-    )
-
-
-@app.on_event("startup")
-async def post_startup():
-    """Initialize Parallax-specific components after engine is ready"""
+async def on_startup(app, eng, manifest):
+    """Initialize Parallax-specific components after engine is ready.
+    
+    Called by engine.create_app() after full initialization.
+    """
     global parallax
 
     logger.info("Initializing Parallax-specific components...")
 
     # Get scoped database
-    db = engine.get_scoped_db(APP_SLUG)
-
-    # Set global engine for embedding dependency injection
-    from mdb_engine.embeddings.dependencies import set_global_engine
-
-    set_global_engine(engine, app_slug=APP_SLUG)
-
-    # Initialize embedding service if configured in manifest.json
-    from mdb_engine.embeddings import get_embedding_service
-
-    app_config = engine.get_app(APP_SLUG)
-    embedding_config = app_config.get("embedding_config", {}) if app_config else {}
-    if embedding_config:
-        embedding_service = get_embedding_service(config=embedding_config)
-        logger.info("EmbeddingService initialized from manifest.json")
-    else:
-        logger.debug(
-            "No embedding_config found in manifest.json - embedding service not initialized"
-        )
+    db = eng.get_scoped_db(APP_SLUG)
 
     # Initialize default watchlist config if it doesn't exist
     existing_config = await db.watchlist_config.find_one({"config_type": "watchlist"})
@@ -218,6 +135,72 @@ async def post_startup():
         raise RuntimeError(f"Parallax Engine initialization failed: {str(e)}") from e
 
     logger.info("Parallax ready!")
+
+
+# Create FastAPI app with automatic lifecycle management
+# on_startup callback runs within the engine's lifespan context
+app = engine.create_app(
+    slug=APP_SLUG,
+    manifest=Path(__file__).parent / "manifest.json",
+    title="Parallax - GitHub Repository Intelligence",
+    description="Focused intelligence tool analyzing GitHub repositories (with AGENTS.md/LLMs.md files) from Relevance and Technical perspectives",
+    version="1.0.0",
+    on_startup=on_startup,
+)
+
+
+# WebSocket connection manager for real-time updates
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: list[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+        logger.info(f"WebSocket connected. Total connections: {len(self.active_connections)}")
+
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+        logger.info(f"WebSocket disconnected. Total connections: {len(self.active_connections)}")
+
+    async def send_personal_message(self, message: dict, websocket: WebSocket):
+        # Type 4: Let WebSocket errors bubble up to framework handler
+        await websocket.send_json(message)
+
+    async def broadcast(self, message: dict):
+        disconnected = []
+        for connection in self.active_connections:
+            try:
+                await connection.send_json(message)
+            except (RuntimeError, ConnectionError, OSError):
+                # Type 2: Recoverable - connection error, mark for cleanup
+                disconnected.append(connection)
+
+        # Remove disconnected connections
+        for conn in disconnected:
+            self.disconnect(conn)
+
+
+manager = ConnectionManager()
+
+# Templates directory
+templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
+
+
+# Global exception handler to ensure all errors return valid JSON
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Handle all unhandled exceptions and return valid JSON"""
+    logger.error(f"Unhandled exception: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={
+            "success": False,
+            "error": str(exc),
+            "detail": f"Internal server error: {str(exc)}",
+        },
+    )
 
 
 @app.get("/health", response_class=JSONResponse)
@@ -310,7 +293,7 @@ async def websocket_scan(websocket: WebSocket):
 
 
 @app.post("/api/refresh", response_class=JSONResponse)
-async def trigger_refresh(request: Request):
+async def trigger_refresh(db=Depends(get_scoped_db)):
     """Trigger the multi-agent analysis manually"""
     global parallax
 
@@ -325,7 +308,6 @@ async def trigger_refresh(request: Request):
         reports = await asyncio.wait_for(parallax.analyze_feed(), timeout=300.0)
 
         # Update last scan timestamp
-        db = get_db(request)
         try:
             await db.watchlist_config.update_one(
                 {"config_type": "watchlist"},
@@ -366,9 +348,8 @@ async def trigger_refresh(request: Request):
 
 
 @app.get("/api/reports/{repo_id:path}", response_class=JSONResponse)
-async def get_report(request: Request, repo_id: str):
+async def get_report(repo_id: str, db=Depends(get_scoped_db)):
     """Get a single Parallax report by repo_id (supports slashes in repo_id like 'owner/repo')"""
-    db = get_db(request)
 
     # FastAPI automatically URL-decodes the path parameter, so repo_id should be correct
     # But let's also try URL-decoding just in case
@@ -412,11 +393,11 @@ async def get_report(request: Request, repo_id: str):
 
 @app.get("/api/reports", response_class=JSONResponse)
 async def get_reports(
-    request: Request,
     limit: int = 50,
     keyword: str = None,
     sort_by: str = "date_desc",
     max_limit: int = None,
+    db=Depends(get_scoped_db),
 ):
     """
     Get Parallax reports
@@ -427,7 +408,6 @@ async def get_reports(
         sort_by: Sort order - "date_desc", "date_asc", "relevance"
         max_limit: Maximum limit allowed (if set, limits the limit parameter)
     """
-    db = get_db(request)
 
     # Apply max_limit if specified
     if max_limit is not None and limit > max_limit:
@@ -530,18 +510,12 @@ async def get_watchlist(request: Request):
     min_stars = parallax.min_stars
     language_filter = parallax.language_filter or ""
 
-    # Get max_limit from config
-    db = get_db(request)
-    config = await db.watchlist_config.find_one({"config_type": "watchlist"})
-    max_limit = config.get("max_limit") if config else None
-
     return {
         "success": True,
         "watchlist": keywords,
         "scan_limit": scan_limit,
         "min_stars": min_stars,
         "language_filter": language_filter,
-        "max_limit": max_limit,
     }
 
 
@@ -604,12 +578,6 @@ async def update_watchlist(request: Request):
         keywords, scan_limit=scan_limit, min_stars=min_stars, language_filter=language_filter
     )
 
-    # Update max_limit in watchlist_config if provided
-    if max_limit is not None:
-        db = get_db(request)
-        await db.watchlist_config.update_one(
-            {"config_type": "watchlist"}, {"$set": {"max_limit": max_limit}}, upsert=True
-        )
     if success:
         return {
             "success": True,
@@ -624,9 +592,8 @@ async def update_watchlist(request: Request):
 
 
 @app.get("/api/lenses", response_class=JSONResponse)
-async def get_lenses(request: Request):
+async def get_lenses(db=Depends(get_scoped_db)):
     """Get all lens configurations"""
-    db = get_db(request)
 
     # Type 4: Let errors bubble up to framework handler
     lenses = await db.lens_configs.find({}).to_list(length=10)
@@ -641,9 +608,8 @@ async def get_lenses(request: Request):
 
 
 @app.get("/api/lenses/{lens_name}", response_class=JSONResponse)
-async def get_lens(request: Request, lens_name: str):
+async def get_lens(lens_name: str, db=Depends(get_scoped_db)):
     """Get a specific lens configuration"""
-    db = get_db(request)
 
     # Type 4: Let errors bubble up to framework handler
     lens = await db.lens_configs.find_one({"lens_name": lens_name})
@@ -659,10 +625,9 @@ async def get_lens(request: Request, lens_name: str):
 
 
 @app.post("/api/lenses/{lens_name}", response_class=JSONResponse)
-async def update_lens(request: Request, lens_name: str):
+async def update_lens(request: Request, lens_name: str, db=Depends(get_scoped_db)):
     """Update a lens configuration"""
     global parallax
-    db = get_db(request)
 
     if not parallax:
         return JSONResponse(
@@ -711,7 +676,7 @@ async def dashboard(
     keyword: str = None,
     sort_by: str = "date_desc",
     limit: int = 50,
-    max_limit: int = None,
+    db=Depends(get_scoped_db),
 ):
     """
     The Parallax Dashboard.
@@ -721,14 +686,7 @@ async def dashboard(
         keyword: Optional keyword to filter by
         sort_by: Sort order - "date_desc", "date_asc", "relevance"
         limit: Maximum number of reports to display (default: 50)
-        max_limit: Maximum limit allowed (if set, limits the limit parameter)
     """
-    db = get_db(request)
-
-    # Apply max_limit if specified
-    if max_limit is not None and limit > max_limit:
-        limit = max_limit
-
     # Ensure limit is reasonable
     limit = max(1, min(1000, limit))
 
@@ -795,38 +753,26 @@ async def dashboard(
                 for r in reports:
                     r["is_fresh"] = r.get("timestamp") and r["timestamp"] > last_scan_iso
 
-        # Get current watchlist and max_limit
+        # Get current watchlist
         watchlist = WATCHLIST
-        max_limit_val = None
         global parallax
         if parallax:
             watchlist = await parallax.get_watchlist()
-            # Get max_limit from config
-            config = await db.watchlist_config.find_one({"config_type": "watchlist"})
-            max_limit_val = config.get("max_limit") if config else None
-
-        # Apply max_limit to limit if specified
-        if max_limit_val is not None and limit > max_limit_val:
-            limit = max_limit_val
 
     except (AttributeError, RuntimeError, ConnectionError, ValueError, TypeError, KeyError):
-        # Type 2: Recoverable - dashboard data fetch failed, use defaults
         logger.error("Error fetching reports for dashboard", exc_info=True)
         reports = []
         watchlist = WATCHLIST
-        max_limit_val = None
 
-    # Render the dashboard template
     return templates.TemplateResponse(
         "parallax_dashboard.html",
         {
             "request": request,
             "reports": reports,
-            "watchlist": watchlist,  # Pass as list, not joined string
+            "watchlist": watchlist,
             "selected_keyword": keyword,
             "sort_by": sort_by,
             "limit": limit,
-            "max_limit": max_limit_val,
         },
     )
 

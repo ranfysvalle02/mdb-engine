@@ -6,6 +6,7 @@ Welcome to the MDB Engine documentation. This directory contains comprehensive d
 
 ### Getting Started
 - **[Quick Start Guide](QUICK_START.md)** - Get up and running quickly
+- **[Best Practices](BEST_PRACTICES.md)** - Dependency injection, patterns, and clean code
 - **[Setup Guide](../SETUP.md)** - Development environment setup
 
 ### Guides

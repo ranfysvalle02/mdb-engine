@@ -17,7 +17,7 @@ services:
     ports:
       - "${APP_PORT:-8000}:8000"
     environment:
-      - MONGO_URI=${MONGO_URI:-mongodb://mongodb:27017/}
+      - MONGO_URI=${MONGO_URI:-mongodb://mongodb:27017/?directConnection=true}
       - MONGO_DB_NAME=${MONGO_DB_NAME:-conversations_db}
       - APP_SLUG=${APP_SLUG:-conversations}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}

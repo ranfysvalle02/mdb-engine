@@ -46,8 +46,9 @@ from openai import AzureOpenAI
 from pydantic import BaseModel
 
 from mdb_engine import MongoDBEngine
-from mdb_engine.embeddings import EmbeddingService, get_embedding_service
-# get_embedding_service_dependency is defined locally for this example
+from mdb_engine.dependencies import get_embedding_service, get_scoped_db
+from mdb_engine.embeddings import EmbeddingService
+from mdb_engine.embeddings.dependencies import get_embedding_service_for_app
 
 # Load environment variables
 load_dotenv()
@@ -122,32 +123,7 @@ engine = MongoDBEngine(
     db_name=os.getenv("MONGO_DB_NAME", "interactive_rag_db"),
 )
 
-# Create FastAPI app with automatic lifecycle management
-# This automatically handles:
-# - Engine initialization and shutdown
-# - Manifest loading and validation
-# - Auth setup from manifest (CORS, etc.)
-app = engine.create_app(
-    slug=APP_SLUG,
-    manifest=Path(__file__).parent / "manifest.json",
-    title="Interactive RAG - MDB_ENGINE Demo",
-    description="An interactive RAG system with knowledge base management",
-    version="1.0.0",
-)
-COLLECTION_NAME = "knowledge_base_sessions"
-SESSION_FIELD = "session_id"
-
-# In-memory state
-chat_history: Dict[str, List[Dict[str, str]]] = {}
-current_session: str = "default"
-last_retrieved_sources: List[str] = []
-last_retrieved_chunks: List[Dict[str, Any]] = []
-background_tasks: Dict[str, Dict[str, Any]] = {}
-
-# Track which indexes are being created to prevent duplicate attempts
-index_creation_in_progress: set = set()
-
-# Application status tracking
+# Application status tracking (needed by on_startup callback)
 app_status: Dict[str, Any] = {
     "initialized": False,
     "status": "initializing",
@@ -181,16 +157,124 @@ def add_status_log(message: str, level: str = "info", component: str = None):
         logger.info(message)
 
 
+# Global references (set during startup callback)
+_global_db = None
+
+
+async def on_startup_callback(fastapi_app, eng, manifest):
+    """Additional startup tasks beyond what engine.create_app() handles.
+
+    This is passed to engine.create_app(on_startup=...) to run after
+    the engine is fully initialized.
+    """
+    global _global_db
+
+    app_status["startup_time"] = datetime.now().isoformat()
+    app_status["status"] = "initializing"
+    add_status_log("🚀 Starting Interactive RAG Web Application...", "info", "startup")
+
+    try:
+        # Ensure cache directories exist and are writable
+        cache_dirs = ["/app/.cache", "/app/.cache/huggingface", "/app/cache"]
+        for cache_dir in cache_dirs:
+            try:
+                os.makedirs(cache_dir, exist_ok=True)
+                os.chmod(cache_dir, 0o755)
+            except OSError:
+                pass  # May fail in some environments, not critical
+        add_status_log("✅ Cache directories initialized", "info", "startup")
+
+        # Update status - engine is already initialized by create_app()
+        db_name = os.getenv("MONGO_DB_NAME", "interactive_rag_db")
+        app_status["components"]["mongodb"]["status"] = "connected"
+        app_status["components"]["mongodb"]["message"] = f"Connected to {db_name}"
+        app_status["components"]["engine"]["status"] = "initialized"
+        app_status["components"]["engine"]["message"] = "MongoDBEngine ready"
+        add_status_log("✅ Engine initialized successfully", "info", "engine")
+
+        # Set global references for tools
+        _global_db = eng.get_scoped_db(APP_SLUG)
+
+        # Check Azure OpenAI configuration
+        endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+        key = os.getenv("AZURE_OPENAI_API_KEY")
+        deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4o")
+
+        if endpoint and key:
+            add_status_log(f"✅ Azure OpenAI configured: {deployment}", "info", "llm")
+        else:
+            add_status_log("⚠️  Azure OpenAI not configured", "warning", "llm")
+
+        # Update docling status
+        if DOCLING_AVAILABLE:
+            app_status["components"]["docling"]["status"] = "available"
+            app_status["components"]["docling"]["message"] = "Document conversion enabled"
+            add_status_log("✅ Docling available", "info", "docling")
+        else:
+            app_status["components"]["docling"]["status"] = "unavailable"
+            app_status["components"]["docling"]["message"] = "Docling not installed"
+            add_status_log("⚠️  Docling not available", "warning", "docling")
+
+        # RapidOCR status will be updated when actually used
+        app_status["components"]["rapidocr"]["status"] = "pending"
+        app_status["components"]["rapidocr"]["message"] = "Will initialize on first use"
+
+        # Check if embedding service is available
+        embedding_service = get_embedding_service_for_app(APP_SLUG, eng)
+
+        if embedding_service:
+            app_status["components"]["embedding_service"]["status"] = "available"
+            app_status["components"]["embedding_service"]["message"] = "EmbeddingService initialized"
+            add_status_log("✅ EmbeddingService initialized (from manifest.json)", "info", "embedding")
+        else:
+            app_status["components"]["embedding_service"]["status"] = "unavailable"
+            app_status["components"]["embedding_service"]["message"] = "EmbeddingService not configured"
+            add_status_log("⚠️ EmbeddingService not configured", "warning", "embedding")
+
+        app_status["initialized"] = True
+        app_status["status"] = "ready"
+        add_status_log("✅ Web application ready!", "info", "startup")
+
+    except (AttributeError, RuntimeError, ConnectionError, ValueError, TypeError, KeyError) as e:
+        app_status["status"] = "error"
+        app_status["initialized"] = False
+        error_msg = f"Startup failed: {str(e)}"
+        add_status_log(error_msg, "error", "startup")
+        logger.error(error_msg, exc_info=True)
+        raise
+
+
+# Create FastAPI app with automatic lifecycle management
+# This automatically handles:
+# - Engine initialization and shutdown
+# - Manifest loading and validation
+# - Auth setup from manifest (CORS, etc.)
+# - Custom startup via on_startup callback
+app = engine.create_app(
+    slug=APP_SLUG,
+    manifest=Path(__file__).parent / "manifest.json",
+    title="Interactive RAG - MDB_ENGINE Demo",
+    description="An interactive RAG system with knowledge base management",
+    version="1.0.0",
+    on_startup=on_startup_callback,
+)
+COLLECTION_NAME = "knowledge_base_sessions"
+SESSION_FIELD = "session_id"
+
+# In-memory state
+chat_history: Dict[str, List[Dict[str, str]]] = {}
+current_session: str = "default"
+last_retrieved_sources: List[str] = []
+last_retrieved_chunks: List[Dict[str, Any]] = []
+background_tasks: Dict[str, Dict[str, Any]] = {}
+
+# Track which indexes are being created to prevent duplicate attempts
+index_creation_in_progress: set = set()
+
+
 # ============================================================================
 # Dependency Injection
 # ============================================================================
-
-
-def get_db():
-    """Get the scoped database"""
-    if not engine.initialized:
-        raise HTTPException(status_code=503, detail="Engine not initialized")
-    return engine.get_scoped_db(APP_SLUG)
 
 
 def get_azure_openai_client() -> AzureOpenAI:
@@ -245,156 +329,26 @@ def chunk_text(
     return list(chunks)
 
 
-# ============================================================================
-# Additional Startup (engine.create_app() handles core initialization)
-# ============================================================================
 
-
-@app.on_event("startup")
-async def additional_startup():
-    """Additional startup tasks beyond what engine.create_app() handles."""
-    app_status["startup_time"] = datetime.now().isoformat()
-    app_status["status"] = "initializing"
-    add_status_log("🚀 Starting Interactive RAG Web Application...", "info", "startup")
-
-    try:
-        # Ensure cache directories exist and are writable
-        cache_dirs = ["/app/.cache", "/app/.cache/huggingface", "/app/cache"]
-        for cache_dir in cache_dirs:
-            try:
-                os.makedirs(cache_dir, exist_ok=True)
-                os.chmod(cache_dir, 0o755)
-            except OSError:
-                pass  # May fail in some environments, not critical
-        add_status_log("✅ Cache directories initialized", "info", "startup")
-
-        # Update status - engine is already initialized by create_app()
-        db_name = os.getenv("MONGO_DB_NAME", "interactive_rag_db")
-        app_status["components"]["mongodb"]["status"] = "connected"
-        app_status["components"]["mongodb"]["message"] = f"Connected to {db_name}"
-        app_status["components"]["engine"]["status"] = "initialized"
-        app_status["components"]["engine"]["message"] = "MongoDBEngine ready"
-        add_status_log("✅ Engine initialized successfully", "info", "engine")
-
-        # Set global references for tools
-        global _global_db
-        _global_db = engine.get_scoped_db(APP_SLUG)
-
-        # Check Azure OpenAI configuration
-        endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
-        key = os.getenv("AZURE_OPENAI_API_KEY")
-        deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4o")
-
-        if endpoint and key:
-            add_status_log(f"✅ Azure OpenAI configured: {deployment}", "info", "llm")
-        else:
-            add_status_log("⚠️  Azure OpenAI not configured", "warning", "llm")
-
-        # Update docling status
-        if DOCLING_AVAILABLE:
-            app_status["components"]["docling"]["status"] = "available"
-            app_status["components"]["docling"]["message"] = "Document conversion enabled"
-            add_status_log("✅ Docling available", "info", "docling")
-        else:
-            app_status["components"]["docling"]["status"] = "unavailable"
-            app_status["components"]["docling"]["message"] = "Docling not installed"
-            add_status_log("⚠️  Docling not available", "warning", "docling")
-
-        # RapidOCR status will be updated when actually used
-        app_status["components"]["rapidocr"]["status"] = "pending"
-        app_status["components"]["rapidocr"]["message"] = "Will initialize on first use"
-
-        # Set global engine for embedding dependency injection
-        from mdb_engine.embeddings.dependencies import set_global_engine
-
-        set_global_engine(engine, app_slug=APP_SLUG)
-
-        # Initialize global embedding service for tools
-        global _global_embedding_service
-        app_config = engine.get_app(APP_SLUG)
-        embedding_config = app_config.get("embedding_config", {}) if app_config else {}
-        _global_embedding_service = get_embedding_service(config=embedding_config)
-        
-        app_status["components"]["embedding_service"]["status"] = "available"
-        app_status["components"]["embedding_service"]["message"] = "EmbeddingService initialized"
-        add_status_log("✅ EmbeddingService initialized (from manifest.json)", "info", "embedding")
-
-        app_status["initialized"] = True
-        app_status["status"] = "ready"
-        add_status_log("✅ Web application ready!", "info", "startup")
-
-    except (AttributeError, RuntimeError, ConnectionError, ValueError, TypeError, KeyError) as e:
-        app_status["status"] = "error"
-        app_status["initialized"] = False
-        error_msg = f"Startup failed: {str(e)}"
-        add_status_log(error_msg, "error", "startup")
-        logger.error(error_msg, exc_info=True)
-        raise
-
-
-# ============================================================================
-# Global References (set during startup)
-# ============================================================================
-
-# Global references for embedding service and database
-_global_db = None
-_global_embedding_service: Optional[EmbeddingService] = None
-
-
-def get_embedding_service_dependency() -> EmbeddingService:
-    """FastAPI dependency to get the global embedding service"""
-    global _global_embedding_service
-    if not _global_embedding_service:
-        # Type 4: Let embedding service retrieval errors bubble up
-        # Try to get it from global engine if available
-        from mdb_engine.embeddings import get_embedding_service
-        from mdb_engine.embeddings.dependencies import _global_app_slug, _global_engine
-
-        if _global_engine and _global_app_slug:
-            app_config = _global_engine.get_app(_global_app_slug)
-            embedding_config = app_config.get("embedding_config", {}) if app_config else {}
-            _global_embedding_service = get_embedding_service(config=embedding_config)
-
-    if not _global_embedding_service:
-        raise HTTPException(
-            status_code=503,
-            detail="EmbeddingService unavailable. Please ensure embedding_config is set in manifest.json.",
-        )
-    return _global_embedding_service
 
 
 async def _get_vector_search_results_async(
     query: str, session_id: str, embedding_model: str, num_sources: int = 3
 ) -> List[Dict]:
     """Async helper function for vector search (used by tools)"""
-    global _global_embedding_service
 
     if not _global_db:
         return []
 
-    # Get embedding service if not set (manifest.json magic - works with or without memory_config)
-    if not _global_embedding_service:
-        try:
-            from mdb_engine.embeddings import get_embedding_service
-            from mdb_engine.embeddings.dependencies import _global_app_slug, _global_engine
+    # Get embedding service
+    embedding_service = get_embedding_service_for_app(APP_SLUG, engine)
 
-            if _global_engine:
-                # Initialize standalone using manifest.json
-                app_config = _global_engine.get_app(_global_app_slug)
-                embedding_config = app_config.get("embedding_config", {}) if app_config else {}
-
-                _global_embedding_service = get_embedding_service(config=embedding_config)
-        except (AttributeError, RuntimeError, KeyError):
-            # Type 2: Recoverable - service initialization failed, return empty list
-            logger.warning("Failed to get embedding service", exc_info=True)
-            return []
-
-    if not _global_embedding_service:
+    if not embedding_service:
         return []
 
     try:
         # Generate query embedding
-        query_vector = await _global_embedding_service.embed_chunks([query], model=embedding_model)
+        query_vector = await embedding_service.embed_chunks([query], model=embedding_model)
         if not query_vector:
             return []
 
@@ -452,12 +406,11 @@ async def health_check():
     # Check MongoDB connection if engine is initialized
     if engine.initialized:
         try:
-            db = engine.get_scoped_db(APP_SLUG)
-            await db.command("ping")
-            health_status["database"] = "connected"
-        except Exception as e:
+            engine_health = await engine.get_health_status()
+            health_status["database"] = engine_health.get("mongodb", "unknown")
+        except (ConnectionError, TimeoutError, OSError):
             health_status["status"] = "degraded"
-            health_status["database"] = f"error: {str(e)}"
+            health_status["database"] = "connection_failed"
     else:
         health_status["status"] = "starting"
         health_status["database"] = "not_connected"
@@ -555,8 +508,8 @@ class IngestRequest(BaseModel):
 @app.post("/ingest")
 async def start_ingestion_task(
     request: IngestRequest,
-    db=Depends(get_db),
-    embedding_service: EmbeddingService = Depends(get_embedding_service_dependency),
+    db=Depends(get_scoped_db),
+    embedding_service: EmbeddingService = Depends(get_embedding_service),
 ):
     """Start an ingestion task"""
     # Check duplicates
@@ -731,7 +684,7 @@ class ChatRequest(BaseModel):
 
 
 @app.post("/chat")
-async def chat(request: ChatRequest, db=Depends(get_db)):
+async def chat(request: ChatRequest, db=Depends(get_scoped_db)):
     """Chat endpoint with RAG using direct Azure OpenAI client"""
     global current_session, chat_history, last_retrieved_sources, last_retrieved_chunks
 
@@ -822,35 +775,17 @@ async def _direct_rag_chat(
     num_sources = rag_params.get("num_sources", 3)
     max_chunk_length = rag_params.get("max_chunk_length", 2000)
 
-    # Get embedding service if not set (manifest.json magic - works with or without memory_config)
-    global _global_embedding_service
-    if not _global_embedding_service:
-        try:
-            from mdb_engine.embeddings import get_embedding_service
-            from mdb_engine.embeddings.dependencies import _global_app_slug, _global_engine
+    # Get embedding service
+    embedding_service = get_embedding_service_for_app(APP_SLUG, engine)
 
-            if _global_engine:
-                # Initialize standalone using manifest.json
-                app_config = _global_engine.get_app(_global_app_slug)
-                embedding_config = app_config.get("embedding_config", {}) if app_config else {}
-
-                _global_embedding_service = get_embedding_service(config=embedding_config)
-        except (AttributeError, RuntimeError, KeyError, ValueError):
-            # Type 2: Recoverable - service initialization failed, return error
-            logger.error("Failed to initialize EmbeddingService", exc_info=True)
-            raise HTTPException(
-                status_code=503,
-                detail="EmbeddingService unavailable. Cannot perform vector search.",
-            )
-
-    if not _global_embedding_service:
+    if not embedding_service:
         raise HTTPException(
             status_code=503, detail="EmbeddingService unavailable. Cannot perform vector search."
         )
 
     # Type 4: Let errors bubble up to framework handler
     # Generate query embedding
-    query_vector = await _global_embedding_service.embed_chunks(
+    query_vector = await embedding_service.embed_chunks(
         [request.query], model=request.embedding_model
     )
 
@@ -1152,7 +1087,7 @@ async def get_diagnostics():
 
 
 @app.get("/state")
-async def get_state(session_id: str = "default", db=Depends(get_db)):
+async def get_state(session_id: str = "default", db=Depends(get_scoped_db)):
     """Get application state"""
     try:
         # Get sessions from database
@@ -1319,7 +1254,7 @@ async def get_index_status(
     session_id: str = "default",
     embedding_model: str = "text-embedding-3-small",
     auto_create: bool = False,
-    db=Depends(get_db),
+    db=Depends(get_scoped_db),
 ):
     """Get detailed index status for a session"""
     # Type 4: Let errors bubble up to framework handler
@@ -1413,7 +1348,7 @@ async def get_index_status(
 
 
 @app.post("/indexes/create")
-async def create_indexes(db=Depends(get_db)):
+async def create_indexes(db=Depends(get_scoped_db)):
     """Create or update all vector search indexes"""
     # Type 4: Let errors bubble up to framework handler
     logger.info("Manual index creation requested...")
@@ -1458,8 +1393,8 @@ class SearchRequest(BaseModel):
 @app.post("/preview_search")
 async def preview_search(
     request: PreviewSearchRequest,
-    db=Depends(get_db),
-    embedding_service: EmbeddingService = Depends(get_embedding_service_dependency),
+    db=Depends(get_scoped_db),
+    embedding_service: EmbeddingService = Depends(get_embedding_service),
 ):
     """Preview vector search results"""
     # Generate query embedding
@@ -1698,8 +1633,8 @@ class IngestURLRequest(BaseModel):
 @app.post("/ingest_url")
 async def ingest_url(
     request: IngestURLRequest,
-    db=Depends(get_db),
-    embedding_service: EmbeddingService = Depends(get_embedding_service_dependency),
+    db=Depends(get_scoped_db),
+    embedding_service: EmbeddingService = Depends(get_embedding_service),
 ):
     """Ingest URL content directly"""
     # Check duplicates
@@ -1785,7 +1720,7 @@ async def ingest_url(
 
 
 @app.delete("/chunk/{chunk_id}")
-async def api_delete_chunk(chunk_id: str, db=Depends(get_db)):
+async def api_delete_chunk(chunk_id: str, db=Depends(get_scoped_db)):
     """Delete a chunk"""
     result = await db.knowledge_base_sessions.delete_one({"_id": ObjectId(chunk_id)})
     if result.deleted_count == 0:
@@ -1797,8 +1732,8 @@ async def api_delete_chunk(chunk_id: str, db=Depends(get_db)):
 async def api_update_chunk(
     chunk_id: str,
     content: str = Form(...),
-    db=Depends(get_db),
-    embedding_service: EmbeddingService = Depends(get_embedding_service_dependency),
+    db=Depends(get_scoped_db),
+    embedding_service: EmbeddingService = Depends(get_embedding_service),
 ):
     """Update a chunk and re-embed"""
     # Re-embed the content
@@ -1824,7 +1759,7 @@ async def api_update_chunk(
 
 
 @app.get("/sources")
-async def get_sources(session_id: str = "default", db=Depends(get_db)):
+async def get_sources(session_id: str = "default", db=Depends(get_scoped_db)):
     """Get all sources for a session"""
     try:
         collection = db.knowledge_base_sessions
@@ -1866,7 +1801,7 @@ async def get_sources(session_id: str = "default", db=Depends(get_db)):
 
 
 @app.get("/chunks")
-async def get_chunks(session_id: str = "default", source_url: str = None, db=Depends(get_db)):
+async def get_chunks(session_id: str = "default", source_url: str = None, db=Depends(get_scoped_db)):
     """Get chunks for a source"""
     if not source_url:
         raise HTTPException(status_code=400, detail="source_url required")
@@ -1880,7 +1815,7 @@ async def get_chunks(session_id: str = "default", source_url: str = None, db=Dep
 
 
 @app.get("/source_content")
-async def get_source_content(session_id: str, source: str, db=Depends(get_db)):
+async def get_source_content(session_id: str, source: str, db=Depends(get_scoped_db)):
     """Get full content for a source as HTML"""
     chunks_cursor = db.knowledge_base_sessions.find(
         {f"metadata.{SESSION_FIELD}": session_id, "metadata.source": source}, {"text": 1, "_id": 0}
@@ -1973,7 +1908,7 @@ async def chunk_preview(
     content: str = Form(...),
     chunk_size: int = Form(1000),
     chunk_overlap: int = Form(150),
-    embedding_service: EmbeddingService = Depends(get_embedding_service_dependency),
+    embedding_service: EmbeddingService = Depends(get_embedding_service),
 ):
     """Preview how content will be chunked with detailed information"""
     logs = []

@@ -805,6 +805,14 @@
         }
         createParticles();
 
+        // Helper to read cookies for CSRF token
+        function getCookie(name) {
+            const value = `; ${document.cookie}`;
+            const parts = value.split(`; ${name}=`);
+            if (parts.length === 2) return parts.pop().split(';').shift();
+            return '';
+        }
+
         // Get base path from current URL
         const currentPath = window.location.pathname;
         const basePath = currentPath.replace(/\/$/, '');
@@ -938,7 +946,7 @@
         // Update status from API
         const updateStatus = async () => {
             try {
-                const response = await fetch(`${basePath}/api/status`);
+                const response = await fetch(`${basePath}/api/attack/status`);
                 if (!response.ok) throw new Error('API Error');
                 const data = await response.json();
 
@@ -1178,10 +1186,11 @@
             targetInput.disabled = true; // Disable editing once attack starts
 
             try {
-                const res = await fetch(`${basePath}/start`, {
+                const res = await fetch(`${basePath}/api/attack/start`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
+                        'X-CSRF-Token': getCookie('csrf_token')
                     },
                     body: JSON.stringify({ target: targetPhrase })
                 });
@@ -1210,7 +1219,10 @@
             stopBtn.disabled = true;
 
             try {
-                await fetch(`${basePath}/stop`, { method: 'POST' });
+                await fetch(`${basePath}/api/attack/stop`, { 
+                    method: 'POST',
+                    headers: { 'X-CSRF-Token': getCookie('csrf_token') }
+                });
                 await checkStatus();
             } catch (e) {
                 logToTerminal('❌ Network error on stop command.', 'error', '❌');
@@ -1242,7 +1254,10 @@
             terminal.innerHTML = '<div class="terminal-line text-secondary"><span class="font-mono">[SYS]</span> System ready. Waiting for initialization...</div>';
 
             try {
-                await fetch(`${basePath}/stop`, { method: 'POST' });
+                await fetch(`${basePath}/api/attack/stop`, { 
+                    method: 'POST',
+                    headers: { 'X-CSRF-Token': getCookie('csrf_token') }
+                });
             } catch (e) {
                 // Ignore errors
             }

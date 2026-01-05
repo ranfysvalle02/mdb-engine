@@ -21,11 +21,12 @@ services:
     networks:
       - mdb_engine_network
     healthcheck:
-      test: echo 'db.runCommand("ping").ok' | mongosh "mongodb://localhost:27017/?directConnection=true" --quiet
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
+      # Wait for replica set primary to be elected (not just ping)
+      test: mongosh "mongodb://localhost:27017/?directConnection=true" --quiet --eval "rs.status().ok && rs.status().myState === 1"
+      interval: 5s
+      timeout: 10s
+      retries: 20
+      start_period: 15s
     deploy:
       resources:
         limits:
@@ -50,7 +51,7 @@ services:
     ports:
       - "${CLICK_TRACKER_PORT:-8000}:8000"
     environment:
-      - MONGODB_URI=${MONGODB_URI:-mongodb://admin:password@mongodb:27017/?authSource=admin}
+      - MONGODB_URI=${MONGODB_URI:-mongodb://mongodb:27017/?directConnection=true}
       - MONGODB_DB=${MONGODB_DB:-mdb_runtime}
       - MDB_ENGINE_MASTER_KEY=${MDB_ENGINE_MASTER_KEY}
       - CLICK_TRACKER_SECRET=${CLICK_TRACKER_SECRET:-}
@@ -93,7 +94,7 @@ services:
     ports:
       - "${DASHBOARD_PORT:-8001}:8001"
     environment:
-      - MONGODB_URI=${MONGODB_URI:-mongodb://admin:password@mongodb:27017/?authSource=admin}
+      - MONGODB_URI=${MONGODB_URI:-mongodb://mongodb:27017/?directConnection=true}
       - MONGODB_DB=${MONGODB_DB:-mdb_runtime}
       - MDB_ENGINE_MASTER_KEY=${MDB_ENGINE_MASTER_KEY}
       - DASHBOARD_SECRET=${DASHBOARD_SECRET:-}

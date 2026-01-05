@@ -3,480 +3,397 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Analytics Dashboard - Shared Auth</title>
+    <title>Analytics Dashboard (SSO)</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         :root {
-            --bg-dark: #0a0a0c;
-            --bg-card: #141418;
-            --accent: #a855f7;
-            --accent-dim: #7c3aed;
-            --text: #e4e4e7;
-            --text-dim: #a1a1aa;
+            --bg: #0f0f12;
+            --card: #1a1a1f;
+            --accent: #8b5cf6;
+            --clicker: #06b6d4;
+            --admin: #f59e0b;
+            --text: #f4f4f5;
+            --muted: #71717a;
             --success: #22c55e;
-            --warning: #f59e0b;
+            --error: #ef4444;
+            --sso: #10b981;
+            --cross: #ec4899;
         }
-        
         * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; padding: 2rem; }
+        .container { max-width: 900px; margin: 0 auto; }
         
-        body {
-            font-family: 'SF Mono', 'JetBrains Mono', monospace;
-            background: var(--bg-dark);
-            color: var(--text);
-            min-height: 100vh;
-            padding: 2rem;
-        }
+        header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; }
+        h1 { font-size: 1.5rem; display: flex; align-items: center; gap: 0.5rem; }
+        h1 i { color: var(--accent); }
         
-        .container { max-width: 1000px; margin: 0 auto; }
+        .card { background: var(--card); border-radius: 12px; padding: 1.5rem; margin-bottom: 1rem; }
+        .card h2 { font-size: 1rem; color: var(--muted); margin-bottom: 1rem; }
         
-        header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 2rem;
-            padding-bottom: 1rem;
-            border-bottom: 1px solid var(--bg-card);
-        }
+        .badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
+        .badge.clicker { background: rgba(6, 182, 212, 0.2); color: var(--clicker); }
+        .badge.tracker { background: rgba(139, 92, 246, 0.2); color: var(--accent); }
+        .badge.admin { background: rgba(245, 158, 11, 0.2); color: var(--admin); }
+        .badge.sso { background: rgba(16, 185, 129, 0.2); color: var(--sso); }
+        .badge.cross { background: rgba(236, 72, 153, 0.2); color: var(--cross); }
         
-        h1 {
-            font-size: 1.5rem;
-            font-weight: 600;
-            color: var(--accent);
-        }
+        .sso-banner { background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(139, 92, 246, 0.1)); border: 1px solid var(--sso); border-radius: 12px; padding: 1rem; margin-bottom: 1rem; display: flex; align-items: center; gap: 1rem; }
+        .sso-banner i { color: var(--sso); font-size: 1.5rem; }
+        .sso-banner .text { flex: 1; }
+        .sso-banner .text strong { color: var(--sso); }
+        .sso-banner a { color: var(--sso); text-decoration: underline; }
         
-        .badge {
-            background: var(--accent-dim);
-            color: white;
-            padding: 0.25rem 0.75rem;
-            border-radius: 999px;
-            font-size: 0.75rem;
-            font-weight: 600;
-        }
+        .cross-banner { background: linear-gradient(135deg, rgba(236, 72, 153, 0.1), rgba(139, 92, 246, 0.1)); border: 1px solid var(--cross); border-radius: 12px; padding: 1rem; margin-bottom: 1rem; display: flex; align-items: center; gap: 1rem; }
+        .cross-banner i { color: var(--cross); font-size: 1.5rem; }
+        .cross-banner .text { flex: 1; }
+        .cross-banner .text strong { color: var(--cross); }
+        .cross-banner code { background: var(--bg); padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.85rem; }
         
-        .badge.editor { background: var(--warning); color: #000; }
-        .badge.admin { background: var(--accent); }
+        .demo-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+        @media (max-width: 600px) { .demo-grid { grid-template-columns: 1fr; } }
         
-        .card {
-            background: var(--bg-card);
-            border-radius: 12px;
-            padding: 1.5rem;
-            margin-bottom: 1rem;
-        }
+        .demo-card { background: var(--bg); border: 2px solid transparent; border-radius: 12px; padding: 1.5rem; text-align: center; cursor: pointer; transition: all 0.2s; }
+        .demo-card:hover { transform: translateY(-2px); }
+        .demo-card.clicker { border-color: var(--clicker); opacity: 0.5; }
+        .demo-card.tracker { border-color: var(--accent); }
+        .demo-card.admin { border-color: var(--admin); }
+        .demo-card h3 { margin: 0.5rem 0; }
+        .demo-card p { font-size: 0.8rem; color: var(--muted); }
+        .demo-card .access { font-size: 0.7rem; margin-top: 0.5rem; }
+        .demo-card .access.yes { color: var(--success); }
+        .demo-card .access.no { color: var(--error); }
         
-        .card h2 {
-            font-size: 1rem;
-            color: var(--text-dim);
-            margin-bottom: 1rem;
-        }
+        .avatar { width: 50px; height: 50px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto; font-size: 1.25rem; }
+        .avatar.clicker { background: rgba(6, 182, 212, 0.2); color: var(--clicker); }
+        .avatar.tracker { background: rgba(139, 92, 246, 0.2); color: var(--accent); }
+        .avatar.admin { background: rgba(245, 158, 11, 0.2); color: var(--admin); }
         
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 1rem;
-        }
+        .btn { padding: 0.75rem 1.5rem; border-radius: 8px; border: none; font-weight: 600; cursor: pointer; }
+        .btn-primary { background: var(--accent); color: #fff; }
+        .btn-secondary { background: transparent; border: 1px solid var(--muted); color: var(--text); }
         
-        .stat {
-            background: var(--bg-dark);
-            padding: 1.5rem;
-            border-radius: 8px;
-            text-align: center;
-        }
+        .user-bar { display: flex; align-items: center; gap: 1rem; }
+        .user-bar .info { flex: 1; }
         
-        .stat-value {
-            font-size: 2.5rem;
-            font-weight: 700;
-            color: var(--accent);
-        }
+        .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; }
+        @media (max-width: 600px) { .stats { grid-template-columns: repeat(2, 1fr); } }
+        .stat { background: var(--bg); padding: 1.5rem; border-radius: 12px; text-align: center; }
+        .stat .num { font-size: 2rem; font-weight: 800; color: var(--accent); }
+        .stat .label { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; }
         
-        .stat-label {
-            font-size: 0.75rem;
-            color: var(--text-dim);
-            text-transform: uppercase;
-            letter-spacing: 0.1em;
-            margin-top: 0.5rem;
-        }
+        .role-bars { display: flex; gap: 1rem; margin-top: 1rem; }
+        .role-bar { flex: 1; background: var(--bg); padding: 1rem; border-radius: 8px; text-align: center; }
+        .role-bar .num { font-size: 1.5rem; font-weight: 700; }
         
-        .user-info {
-            display: flex;
-            align-items: center;
-            gap: 1rem;
-        }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 0.75rem; text-align: left; border-bottom: 1px solid var(--bg); }
+        th { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; }
         
-        .user-info span {
-            color: var(--accent);
-        }
+        .msg { padding: 1rem; border-radius: 8px; margin-bottom: 1rem; }
+        .msg.success { background: rgba(34, 197, 94, 0.2); color: var(--success); }
+        .msg.error { background: rgba(239, 68, 68, 0.2); color: var(--error); }
+        .msg.info { background: rgba(139, 92, 246, 0.1); color: var(--accent); }
         
-        .roles {
-            display: flex;
-            gap: 0.5rem;
-        }
+        .denied { text-align: center; padding: 3rem; }
+        .denied i { font-size: 4rem; color: var(--error); margin-bottom: 1rem; }
+        .denied h3 { margin-bottom: 0.5rem; }
+        .denied p { color: var(--muted); margin-bottom: 1.5rem; }
         
-        .role-badge {
-            background: var(--bg-dark);
-            border: 1px solid var(--accent-dim);
-            padding: 0.25rem 0.5rem;
-            border-radius: 4px;
-            font-size: 0.75rem;
-        }
+        .admin-panel { border: 2px dashed var(--admin); border-radius: 12px; padding: 1.5rem; margin-top: 1rem; }
+        .admin-panel h3 { color: var(--admin); margin-bottom: 1rem; }
+        .admin-form { display: flex; gap: 1rem; flex-wrap: wrap; }
+        .admin-form input, .admin-form select { flex: 1; min-width: 150px; padding: 0.75rem; background: var(--bg); border: 1px solid var(--muted); border-radius: 8px; color: var(--text); }
         
-        button {
-            background: var(--accent);
-            color: white;
-            border: none;
-            padding: 0.75rem 1.5rem;
-            border-radius: 8px;
-            font-family: inherit;
-            font-weight: 600;
-            cursor: pointer;
-            transition: background 0.2s;
-        }
-        
-        button:hover { background: var(--accent-dim); }
-        
-        .btn-secondary {
-            background: transparent;
-            border: 1px solid var(--accent);
-            color: var(--accent);
-        }
-        
-        .actions {
-            display: flex;
-            gap: 0.5rem;
-            margin-top: 1rem;
-        }
-        
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 1rem;
-        }
-        
-        th, td {
-            padding: 0.75rem;
-            text-align: left;
-            border-bottom: 1px solid var(--bg-dark);
-        }
-        
-        th {
-            color: var(--text-dim);
-            font-weight: 600;
-            font-size: 0.75rem;
-            text-transform: uppercase;
-            letter-spacing: 0.1em;
-        }
-        
-        .sso-note {
-            background: rgba(168, 85, 247, 0.1);
-            border: 1px solid var(--accent-dim);
-            padding: 1rem;
-            border-radius: 8px;
-            font-size: 0.875rem;
-            margin-top: 1rem;
-        }
-        
-        .admin-panel {
-            border: 2px dashed var(--accent-dim);
-            padding: 1.5rem;
-            border-radius: 12px;
-            margin-top: 1rem;
-        }
-        
-        .admin-panel h3 {
-            color: var(--accent);
-            margin-bottom: 1rem;
-        }
-        
-        input, select {
-            background: var(--bg-dark);
-            border: 1px solid var(--text-dim);
-            padding: 0.75rem;
-            border-radius: 8px;
-            color: var(--text);
-            font-family: inherit;
-            width: 100%;
-            margin-bottom: 0.5rem;
-        }
-        
-        input:focus, select:focus {
-            outline: none;
-            border-color: var(--accent);
-        }
-        
-        .message {
-            padding: 0.75rem;
-            border-radius: 8px;
-            margin-top: 1rem;
-            font-size: 0.875rem;
-        }
-        
-        .message.success { background: rgba(34, 197, 94, 0.2); border: 1px solid var(--success); }
-        .message.error { background: rgba(239, 68, 68, 0.2); border: 1px solid #ef4444; }
-        .nav-links {
-            display: flex;
-            gap: 1rem;
-        }
-        
-        .nav-links a {
-            color: var(--text-dim);
-            text-decoration: none;
-            font-size: 0.875rem;
-            transition: color 0.2s;
-        }
-        
-        .nav-links a:hover { color: var(--accent); }
+        nav a { color: var(--muted); text-decoration: none; margin-left: 1rem; }
+        nav a:hover { color: var(--text); }
     </style>
 </head>
 <body>
     <div class="container">
         <header>
-            <div>
-                <h1>📊 Analytics Dashboard</h1>
-                <div style="display: flex; gap: 0.5rem; align-items: center; margin-top: 0.5rem;">
-                    <span class="badge">Shared Auth</span>
-                    <span class="badge editor">Viewer Access</span>
-                </div>
-            </div>
-            <div class="nav-links">
-                <a href="http://localhost:8000">🖱️ Click Tracker</a>
-                <a href="http://localhost:8001" style="color: var(--accent);">📊 Dashboard</a>
-            </div>
+            <h1><i class="fas fa-chart-line"></i> Analytics Dashboard <span class="badge sso">SSO</span></h1>
+            <nav>
+                <a href="http://localhost:8000"><i class="fas fa-mouse-pointer"></i> Tracker</a>
+                <a href="/"><i class="fas fa-chart-line"></i> Dashboard</a>
+            </nav>
         </header>
-        
+
+        <div id="msg"></div>
+
         {% if user %}
-        <!-- Authenticated View -->
-        <div class="card">
-            <h2>Current User</h2>
-            <div class="user-info">
-                <div>
-                    <span>{{ user.email }}</span>
-                    <div class="roles" style="margin-top: 0.5rem;">
-                        {% for role in roles %}
-                        <span class="role-badge">{{ role }}</span>
-                        {% endfor %}
-                    </div>
-                </div>
-                <div style="margin-left: auto;">
-                    <button class="btn-secondary" onclick="logout()">Logout</button>
-                </div>
+        <!-- Logged In -->
+        <div class="sso-banner">
+            <i class="fas fa-link"></i>
+            <div class="text">
+                <strong>Single Sign-On Active</strong><br>
+                You're logged in across all apps! <a href="http://localhost:8000">Visit Click Tracker →</a>
             </div>
         </div>
-        
+
         <div class="card">
-            <h2>Click Analytics (Last 24h)</h2>
-            <div class="stats-grid" id="stats">
-                <div class="stat">
-                    <div class="stat-value" id="totalClicks">-</div>
-                    <div class="stat-label">Total Clicks</div>
+            <div class="user-bar">
+                <div class="avatar {{ role }}">
+                    {% if role == 'admin' %}<i class="fas fa-crown"></i>
+                    {% elif role == 'tracker' %}<i class="fas fa-chart-line"></i>
+                    {% else %}<i class="fas fa-mouse-pointer"></i>{% endif %}
                 </div>
-                <div class="stat">
-                    <div class="stat-value" id="uniqueUsers">-</div>
-                    <div class="stat-label">Unique Users</div>
+                <div class="info">
+                    <strong>{{ user.email }}</strong>
+                    <span class="badge {{ role }}">{{ role }}</span>
+                    <span class="badge sso">SSO</span>
                 </div>
-                <div class="stat">
-                    <div class="stat-value" id="topUrl">-</div>
-                    <div class="stat-label">Top URL</div>
-                </div>
-            </div>
-            <div class="actions">
-                <button onclick="loadAnalytics()">Refresh Analytics</button>
-                <button class="btn-secondary" onclick="loadAnalytics(168)">Last 7 Days</button>
+                <button class="btn btn-secondary" onclick="logout()">Logout (All Apps)</button>
             </div>
         </div>
-        
-        <div class="card">
-            <h2>Recent Clicks</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>User</th>
-                        <th>URL</th>
-                        <th>Time</th>
-                    </tr>
-                </thead>
-                <tbody id="clicksTable">
-                    <tr><td colspan="3" style="color: var(--text-dim);">Loading...</td></tr>
-                </tbody>
-            </table>
-        </div>
-        
-        {% if 'admin' in roles %}
-        <div class="admin-panel">
-            <h3>🔑 Admin Panel</h3>
-            <p style="color: var(--text-dim); margin-bottom: 1rem;">Grant roles to users (you're an admin!)</p>
-            <input type="email" id="targetEmail" placeholder="User email">
-            <select id="targetRole">
-                <option value="viewer">viewer</option>
-                <option value="editor">editor</option>
-                <option value="admin">admin</option>
-            </select>
-            <div class="actions">
-                <button onclick="grantDashboardRole()">Grant Dashboard Role</button>
-                <button class="btn-secondary" onclick="grantClickTrackerRole()">Grant ClickTracker Role</button>
+
+        {% if can_view_analytics %}
+        <!-- Has Access -->
+        <div class="cross-banner">
+            <i class="fas fa-database"></i>
+            <div class="text">
+                <strong>Cross-App Data Access</strong><br>
+                This dashboard reads data from <code>click_tracker</code> via <code>read_scopes</code> in manifest.json
             </div>
-            <div id="adminMessage"></div>
+            <span class="badge cross">CROSS-APP</span>
+        </div>
+
+        <div class="card">
+            <h2>Click Analytics (24h) <span class="badge cross" style="font-size:0.65rem">from click_tracker</span></h2>
+            <div class="stats" id="stats">
+                <div class="stat"><div class="num">-</div><div class="label">Total</div></div>
+                <div class="stat"><div class="num">-</div><div class="label">Users</div></div>
+                <div class="stat"><div class="num">-</div><div class="label">Top Hits</div></div>
+                <div class="stat"><div class="num">24h</div><div class="label">Period</div></div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Clicks by Role</h2>
+            <div class="role-bars" id="roles">
+                <div class="role-bar"><div class="num">-</div><span class="badge admin">admin</span></div>
+                <div class="role-bar"><div class="num">-</div><span class="badge tracker">tracker</span></div>
+                <div class="role-bar"><div class="num">-</div><span class="badge clicker">clicker</span></div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Recent Activity</h2>
+            <div id="recent"><p style="color:var(--muted)">Loading...</p></div>
+        </div>
+
+        {% if can_manage_users %}
+        <div class="card">
+            <h2>User Management <span class="badge sso" style="font-size:0.65rem">SharedUserPool</span></h2>
+            <p style="color:var(--muted);margin-bottom:1rem;font-size:0.85rem">Manage roles for ALL apps from here! Changes apply immediately via SSO.</p>
+            <div id="users"><p style="color:var(--muted)">Loading...</p></div>
+            <div class="admin-panel">
+                <h3><i class="fas fa-user-edit"></i> Update User Role</h3>
+                <form class="admin-form" onsubmit="updateRole(event)">
+                    <input type="email" id="email" placeholder="user@example.com" required>
+                    <select id="targetApp">
+                        <option value="dashboard">Dashboard</option>
+                        <option value="click_tracker">Click Tracker</option>
+                    </select>
+                    <select id="newRole">
+                        <option value="clicker">Clicker</option>
+                        <option value="tracker">Tracker</option>
+                        <option value="admin">Admin</option>
+                    </select>
+                    <button type="submit" class="btn btn-primary">Update</button>
+                </form>
+            </div>
         </div>
         {% endif %}
-        
-        <div class="sso-note">
-            <strong>SSO Active:</strong> You're viewing data from the ClickTracker app.
-            Both apps share the same user pool. Go to 
-            <a href="http://localhost:8000" style="color: var(--accent);">Click Tracker</a>
-            to generate more clicks!
-        </div>
+
         {% else %}
-        <!-- Not Authenticated View -->
+        <!-- No Access (Clicker) -->
         <div class="card">
-            <h2>Login</h2>
-            <form class="auth-form" onsubmit="login(event)">
-                <input type="email" id="loginEmail" placeholder="Email" required>
-                <input type="password" id="loginPassword" placeholder="Password" required>
-                <button type="submit">Login</button>
-            </form>
-            <div id="loginMessage"></div>
+            <div class="denied">
+                <i class="fas fa-lock"></i>
+                <h3>Access Restricted</h3>
+                <p>Your <strong>dashboard</strong> role is <span class="badge clicker">clicker</span> - no analytics access.<br>You need tracker or admin role on this app.</p>
+                <a href="http://localhost:8000" class="btn btn-primary">Go to Click Tracker</a>
+            </div>
         </div>
-        
-        <div class="sso-note">
-            <strong>Shared Auth Mode:</strong> Use your Click Tracker credentials.
-            Login once, access multiple apps.
+        {% endif %}
+
+        {% else %}
+        <!-- Not Logged In -->
+        <div class="sso-banner">
+            <i class="fas fa-key"></i>
+            <div class="text">
+                <strong>Single Sign-On Demo</strong><br>
+                Login here OR on <a href="http://localhost:8000">Click Tracker</a> - you'll be authenticated on BOTH apps!
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Role Permissions</h2>
+            <table>
+                <tr><th>Permission</th><th><span class="badge clicker">Clicker</span></th><th><span class="badge tracker">Tracker</span></th><th><span class="badge admin">Admin</span></th></tr>
+                <tr><td>Track clicks</td><td style="color:var(--success)">✓</td><td style="color:var(--success)">✓</td><td style="color:var(--success)">✓</td></tr>
+                <tr><td>View own clicks</td><td style="color:var(--success)">✓</td><td style="color:var(--success)">✓</td><td style="color:var(--success)">✓</td></tr>
+                <tr><td>View all clicks</td><td style="color:var(--error)">✗</td><td style="color:var(--success)">✓</td><td style="color:var(--success)">✓</td></tr>
+                <tr><td><strong>Dashboard access</strong></td><td style="color:var(--error)">✗</td><td style="color:var(--success)">✓</td><td style="color:var(--success)">✓</td></tr>
+                <tr><td>View analytics</td><td style="color:var(--error)">✗</td><td style="color:var(--success)">✓</td><td style="color:var(--success)">✓</td></tr>
+                <tr><td>Manage users</td><td style="color:var(--error)">✗</td><td style="color:var(--error)">✗</td><td style="color:var(--success)">✓</td></tr>
+            </table>
+            <p style="color:var(--muted);margin-top:1rem;font-size:0.85rem"><i class="fas fa-info-circle"></i> Roles are per-app via <code>app_roles</code> in SharedUserPool</p>
+        </div>
+
+        <div class="card">
+            <h2>Quick Login - Demo Users</h2>
+            <p style="color:var(--muted);margin-bottom:1rem">Only tracker and admin can view analytics</p>
+            <div class="demo-grid">
+                <div class="demo-card admin" onclick="login('alice@example.com')">
+                    <div class="avatar admin"><i class="fas fa-crown"></i></div>
+                    <h3>Alice</h3>
+                    <span class="badge admin">Admin</span>
+                    <p>Full access + user mgmt</p>
+                    <div class="access yes">✓ Dashboard Access</div>
+                </div>
+                <div class="demo-card tracker" onclick="login('bob@example.com')">
+                    <div class="avatar tracker"><i class="fas fa-chart-line"></i></div>
+                    <h3>Bob</h3>
+                    <span class="badge tracker">Tracker</span>
+                    <p>View analytics</p>
+                    <div class="access yes">✓ Dashboard Access</div>
+                </div>
+                <div class="demo-card clicker" onclick="login('charlie@example.com')">
+                    <div class="avatar clicker"><i class="fas fa-mouse-pointer"></i></div>
+                    <h3>Charlie</h3>
+                    <span class="badge clicker">Clicker</span>
+                    <p>Track only</p>
+                    <div class="access no">✗ No Access</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>How It Works</h2>
+            <table>
+                <tr><td><i class="fas fa-link" style="color:var(--sso)"></i></td><td><strong>SSO</strong></td><td>SharedUserPool + shared JWT cookie <code>mdb_auth_token</code></td></tr>
+                <tr><td><i class="fas fa-database" style="color:var(--cross)"></i></td><td><strong>Cross-App Data</strong></td><td>Dashboard reads <code>click_tracker_clicks</code> via <code>read_scopes</code></td></tr>
+                <tr><td><i class="fas fa-user-tag" style="color:var(--accent)"></i></td><td><strong>Per-App Roles</strong></td><td><code>app_roles: {dashboard: ["admin"], click_tracker: ["admin"]}</code></td></tr>
+            </table>
         </div>
         {% endif %}
     </div>
-    
+
     <script>
-        {% if user %}
-        async function loadAnalytics(hours = 24) {
-            try {
-                const res = await fetch(`/analytics?hours=${hours}`);
-                
-                if (res.status === 403) {
-                    const tbody = document.getElementById('clicksTable');
-                    tbody.innerHTML = '<tr><td colspan="3" style="color: var(--error);">Access Denied: You need "viewer" role to view analytics.</td></tr>';
-                    
-                    document.getElementById('totalClicks').textContent = '🔒';
-                    document.getElementById('uniqueUsers').textContent = '🔒';
-                    document.getElementById('topUrl').textContent = '🔒';
-                    return;
-                }
-                
-                const data = await res.json();
-                
-                document.getElementById('totalClicks').textContent = data.total_clicks;
-                document.getElementById('uniqueUsers').textContent = data.unique_users;
-                document.getElementById('topUrl').textContent = 
-                    data.top_urls.length > 0 ? data.top_urls[0].url : 'N/A';
-                
-                // Update clicks table
-                const tbody = document.getElementById('clicksTable');
-                if (data.recent_clicks.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="3" style="color: var(--text-dim);">No clicks yet</td></tr>';
-                } else {
-                    tbody.innerHTML = data.recent_clicks.map(click => `
-                        <tr>
-                            <td>${click.user_id || 'anonymous'}</td>
-                            <td>${click.url || '/'}</td>
-                            <td>${new Date(click.timestamp).toLocaleString()}</td>
-                        </tr>
-                    `).join('');
-                }
-            } catch (err) {
-                console.error('Failed to load analytics:', err);
-                const tbody = document.getElementById('clicksTable');
-                tbody.innerHTML = '<tr><td colspan="3" style="color: var(--error);">Error loading data</td></tr>';
-            }
+        // Helper to read cookies for CSRF token
+        function getCookie(name) {
+            const value = `; ${document.cookie}`;
+            const parts = value.split(`; ${name}=`);
+            if (parts.length === 2) return parts.pop().split(';').shift();
+            return '';
         }
-        
+
+        async function login(email) {
+            show('Logging in (SSO)...', 'info');
+            const form = new FormData();
+            form.append('email', email);
+            form.append('password', 'password123');
+            const res = await fetch('/login', { 
+                method: 'POST', 
+                body: form,
+                headers: { 'X-CSRF-Token': getCookie('csrf_token') }
+            });
+            const data = await res.json();
+            if (data.success) {
+                show('Logged in! You are now authenticated on all apps.', 'success');
+                setTimeout(() => location.reload(), 1000);
+            }
+            else show(data.detail || 'Login failed', 'error');
+        }
+
         async function logout() {
-            await fetch('/logout', {method: 'POST'}).catch(() => {});
-            // Clear cookie and redirect
-            document.cookie = 'mdb_auth_token=; Max-Age=0; path=/';
-            location.reload();  // Reload current page to show login form
+            show('Logging out from all apps...', 'info');
+            await fetch('/logout', { 
+                method: 'POST',
+                headers: { 'X-CSRF-Token': getCookie('csrf_token') }
+            });
+            setTimeout(() => location.reload(), 500);
         }
-        
-        async function grantDashboardRole() {
-            const email = document.getElementById('targetEmail').value;
-            const role = document.getElementById('targetRole').value;
+
+        async function loadAnalytics() {
+            const res = await fetch('/analytics');
+            if (!res.ok) return;
+            const data = await res.json();
             
-            try {
-                const res = await fetch('/admin/grant-role', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({email, roles: [role]})
-                });
-                const data = await res.json();
-                
-                if (res.ok) {
-                    showMessage('adminMessage', `Dashboard role '${role}' granted to ${email}`, 'success');
-                } else {
-                    showMessage('adminMessage', data.detail || 'Failed', 'error');
-                }
-            } catch (err) {
-                showMessage('adminMessage', 'Network error', 'error');
-            }
-        }
-        
-        async function grantClickTrackerRole() {
-            const email = document.getElementById('targetEmail').value;
-            const role = document.getElementById('targetRole').value;
+            // Stats
+            const stats = document.querySelectorAll('.stat .num');
+            stats[0].textContent = data.total_clicks;
+            stats[1].textContent = data.unique_users;
+            stats[2].textContent = data.top_urls[0]?.count || 0;
             
-            try {
-                const res = await fetch('/admin/grant-click-tracker-role', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({email, roles: [role]})
-                });
-                const data = await res.json();
-                
-                if (res.ok) {
-                    showMessage('adminMessage', `ClickTracker role '${role}' granted to ${email}`, 'success');
-                } else {
-                    showMessage('adminMessage', data.detail || 'Failed', 'error');
-                }
-            } catch (err) {
-                showMessage('adminMessage', 'Network error', 'error');
+            // Role breakdown
+            const roles = data.clicks_by_role;
+            document.getElementById('roles').innerHTML = `
+                <div class="role-bar"><div class="num">${roles.admin || 0}</div><span class="badge admin">admin</span></div>
+                <div class="role-bar"><div class="num">${roles.tracker || 0}</div><span class="badge tracker">tracker</span></div>
+                <div class="role-bar"><div class="num">${roles.clicker || 0}</div><span class="badge clicker">clicker</span></div>
+            `;
+            
+            // Recent
+            if (data.recent_clicks.length === 0) {
+                document.getElementById('recent').innerHTML = '<p style="color:var(--muted)">No clicks yet. Go to <a href="http://localhost:8000">Click Tracker</a> and track some clicks!</p>';
+                return;
             }
+            let html = '<table><tr><th>User</th><th>Role</th><th>URL</th><th>Time</th></tr>';
+            for (const c of data.recent_clicks) {
+                html += `<tr><td>${c.user_id}</td><td><span class="badge ${c.user_role}">${c.user_role}</span></td><td>${c.url}</td><td>${new Date(c.timestamp).toLocaleString()}</td></tr>`;
+            }
+            document.getElementById('recent').innerHTML = html + '</table>';
         }
-        
-        function showMessage(id, text, type) {
-            const el = document.getElementById(id);
-            el.className = `message ${type}`;
-            el.textContent = text;
+
+        async function loadUsers() {
+            const res = await fetch('/admin/users');
+            if (!res.ok) return;
+            const data = await res.json();
+            
+            let html = '<table><tr><th>Email</th><th>Click Tracker</th><th>Dashboard</th><th>Created</th></tr>';
+            for (const u of data.users) {
+                const ctRole = u.click_tracker_role?.[0] || 'none';
+                const dbRole = u.dashboard_role?.[0] || 'none';
+                html += `<tr>
+                    <td>${u.email}</td>
+                    <td><span class="badge ${ctRole}">${ctRole}</span></td>
+                    <td><span class="badge ${dbRole}">${dbRole}</span></td>
+                    <td>${u.created_at ? new Date(u.created_at).toLocaleDateString() : '-'}</td>
+                </tr>`;
+            }
+            document.getElementById('users').innerHTML = html + '</table>';
         }
-        
-        // Load analytics on page load
-        loadAnalytics();
-        {% else %}
-        async function login(e) {
+
+        async function updateRole(e) {
             e.preventDefault();
-            const email = document.getElementById('loginEmail').value;
-            const password = document.getElementById('loginPassword').value;
-            
-            try {
-                const res = await fetch('/login', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({email, password})
-                });
-                const data = await res.json();
-                
-                if (res.ok) {
-                    showMessage('loginMessage', 'Login successful! Reloading...', 'success');
-                    setTimeout(() => location.reload(), 1000);
-                } else {
-                    showMessage('loginMessage', data.detail || 'Login failed', 'error');
-                }
-            } catch (err) {
-                showMessage('loginMessage', 'Network error', 'error');
+            const form = new FormData();
+            form.append('email', document.getElementById('email').value);
+            form.append('role', document.getElementById('newRole').value);
+            form.append('target_app', document.getElementById('targetApp').value);
+            const res = await fetch('/admin/update-role', { 
+                method: 'POST', 
+                body: form,
+                headers: { 'X-CSRF-Token': getCookie('csrf_token') }
+            });
+            const data = await res.json();
+            if (data.success) { 
+                show(data.message, 'success'); 
+                loadUsers(); 
             }
+            else show(data.detail || 'Failed', 'error');
         }
+
+        function show(text, type) {
+            document.getElementById('msg').innerHTML = `<div class="msg ${type}">${text}</div>`;
+            if (type !== 'info') setTimeout(() => document.getElementById('msg').innerHTML = '', 3000);
+        }
+
+        {% if user and can_view_analytics %}
+        loadAnalytics();
+        {% if can_manage_users %}loadUsers();{% endif %}
         {% endif %}
-        
-        function showMessage(id, text, type) {
-            const el = document.getElementById(id);
-            if (el) {
-                el.className = `message ${type}`;
-                el.textContent = text;
-            }
-        }
     </script>
 </body>
 </html>
-

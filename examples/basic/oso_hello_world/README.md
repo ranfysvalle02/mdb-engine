@@ -131,8 +131,8 @@ async def list_documents(
 
 ### Authentication
 
-- `POST /login` - Login with email/password
-- `GET /logout` - Logout current user
+- `POST /login` - Login with email/password (returns JSON)
+- `POST /logout` - Logout current user (returns JSON, requires CSRF token)
 
 ### User Info
 
@@ -164,6 +164,8 @@ Password for both: `password123`
 
 ### Testing with curl
 
+**Note:** POST/PUT/DELETE requests require the `X-CSRF-Token` header. Extract the token from the `csrf_token` cookie.
+
 1. **Login:**
 ```bash
 curl -X POST http://localhost:8000/login \
@@ -184,9 +186,18 @@ curl http://localhost:8000/api/documents -b cookies.txt
 
 4. **Create document (requires write permission):**
 ```bash
+# First, extract CSRF token from cookies.txt (value of csrf_token cookie)
 curl -X POST http://localhost:8000/api/documents \
   -H "Content-Type: application/json" \
+  -H "X-CSRF-Token: <your-csrf-token>" \
   -d '{"title": "Test", "content": "Hello World"}' \
+  -b cookies.txt
+```
+
+5. **Logout:**
+```bash
+curl -X POST http://localhost:8000/logout \
+  -H "X-CSRF-Token: <your-csrf-token>" \
   -b cookies.txt
 ```
 

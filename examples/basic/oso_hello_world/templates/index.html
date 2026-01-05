@@ -335,6 +335,14 @@
             documents: []
         };
 
+        // Helper to read cookies for CSRF token
+        function getCookie(name) {
+            const value = `; ${document.cookie}`;
+            const parts = value.split(`; ${name}=`);
+            if (parts.length === 2) return parts.pop().split(';').shift();
+            return '';
+        }
+
         // --- Init ---
         document.addEventListener('DOMContentLoaded', async () => {
             await checkOsoStatus();
@@ -371,7 +379,8 @@
             try {
                 const res = await fetch('/login', {
                     method: 'POST',
-                    body: formData
+                    body: formData,
+                    headers: { 'X-CSRF-Token': getCookie('csrf_token') }
                 });
                 const data = await res.json();
 
@@ -391,7 +400,10 @@
         async function logout() {
             showLoader(true, "Logging out...");
             try {
-                await fetch('/logout');
+                await fetch('/logout', {
+                    method: 'POST',
+                    headers: { 'X-CSRF-Token': getCookie('csrf_token') }
+                });
                 window.location.reload();
             } catch (err) {
                 console.error(err);
@@ -440,7 +452,10 @@
             try {
                 const res = await fetch('/api/documents', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-Token': getCookie('csrf_token')
+                    },
                     body: JSON.stringify(payload)
                 });
 

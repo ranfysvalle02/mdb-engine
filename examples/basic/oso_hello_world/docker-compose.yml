@@ -32,7 +32,7 @@ services:
     ports:
       - "${APP_PORT:-8000}:8000"
     environment:
-      - MONGO_URI=${MONGO_URI:-mongodb://mongodb:27017/}
+      - MONGO_URI=${MONGO_URI:-mongodb://mongodb:27017/?directConnection=true}
       - MONGO_DB_NAME=${MONGO_DB_NAME:-oso_hello_world_db}
       - APP_SLUG=${APP_SLUG:-oso_hello_world}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
@@ -84,11 +84,12 @@ services:
     networks:
       - mdb_engine_network
     healthcheck:
-      test: echo 'db.runCommand("ping").ok' | mongosh "mongodb://localhost:27017/?directConnection=true" --quiet
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
+      # Wait for replica set primary to be elected (not just ping)
+      test: mongosh "mongodb://localhost:27017/?directConnection=true" --quiet --eval "rs.status().ok && rs.status().myState === 1"
+      interval: 5s
+      timeout: 10s
+      retries: 20
+      start_period: 15s
     deploy:
       resources:
         limits:

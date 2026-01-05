@@ -22,14 +22,44 @@ This directory contains example applications demonstrating how to use MDB_ENGINE
 
 ```
 Do you need a FastAPI web app?
-├── YES → Do you need custom middleware or complex setup?
-│         ├── YES → Use manual pattern with on_event("startup")
-│         └── NO  → Use engine.create_app() ⭐ RECOMMENDED
+├── YES → Use engine.create_app() ⭐ RECOMMENDED
+│         └── Need custom startup logic? → Use on_startup callback
 │
 └── NO  → Use engine directly:
           await engine.initialize()
           db = engine.get_scoped_db("my_app")
 ```
+
+### Database Access: Depends() vs Direct Engine
+
+Two valid patterns exist. Use the right one for your context:
+
+| Context | Pattern | Example |
+|---------|---------|---------|
+| Route handlers | `db=Depends(get_scoped_db)` | Clean, testable |
+| Startup callback | `engine.get_scoped_db(APP_SLUG)` | In on_startup |
+| Decorators/middleware | `engine.get_scoped_db(APP_SLUG)` | Runs before route DI |
+| WebSocket setup | `engine.get_scoped_db(APP_SLUG)` | Before connection |
+
+```python
+# In route handlers - use Depends()
+@app.get("/items")
+async def get_items(db=Depends(get_scoped_db)):
+    return await db.items.find({}).to_list(100)
+
+# In on_startup callback - use engine directly
+async def my_startup(app, engine, manifest):
+    db = engine.get_scoped_db(APP_SLUG)
+    await db.items.create_index("name")
+
+app = engine.create_app(slug=APP_SLUG, manifest=..., on_startup=my_startup)
+```
+
+**⚠️ IMPORTANT:** Do NOT use `@app.on_event("startup")` with `engine.create_app()`.
+FastAPI ignores `on_event` decorators when a `lifespan` context manager is provided.
+Always use the `on_startup` callback parameter instead.
+
+See [Best Practices](../docs/BEST_PRACTICES.md) for full guidance.
 
 ### When to Enable Features
 
@@ -378,14 +408,33 @@ from pathlib import Path
 
 engine = MongoDBEngine(mongo_uri="...", db_name="...")
 
-# Automatic lifecycle management - no startup/shutdown boilerplate
-app = engine.create_app(slug="my_app", manifest=Path("manifest.json"))
+# Optional: Custom startup/shutdown callbacks
+async def my_startup(app, engine, manifest):
+    """Runs after engine is fully initialized."""
+    db = engine.get_scoped_db("my_app")
+    await db.config.insert_one({"initialized": True})
+
+async def my_shutdown(app, engine, manifest):
+    """Runs before engine shuts down."""
+    print("Cleaning up...")
+
+# Automatic lifecycle management with optional callbacks
+app = engine.create_app(
+    slug="my_app",
+    manifest=Path("manifest.json"),
+    on_startup=my_startup,    # Optional
+    on_shutdown=my_shutdown,  # Optional
+)
 
 @app.get("/items")
 async def get_items():
     db = engine.get_scoped_db("my_app")
     return await db.items.find({}).to_list(10)
 ```
+
+**Note:** The `on_startup` and `on_shutdown` callbacks run within the engine's lifespan context,
+so the engine is fully initialized when `on_startup` runs. Do NOT use `@app.on_event("startup")`
+with `create_app()` - those decorators are ignored when a lifespan is provided.
 
 #### Pattern 1: App-Scoped Data (Most Common)
 ```python
@@ -423,19 +472,136 @@ embedding_service = EmbeddingService(...)
 embeddings = await embedding_service.embed_chunks(["text to embed"])
 ```
 
-#### Pattern 4: FastAPI Dependencies
+#### Pattern 4: FastAPI Dependencies (Recommended)
 ```python
 from fastapi import Depends
+from mdb_engine.dependencies import get_scoped_db, get_embedding_service
 
-def get_db():
-    """FastAPI dependency for scoped database"""
-    return engine.get_scoped_db("my_app")
-
+# Use request-scoped dependencies from mdb_engine.dependencies
 @app.get("/items")
-async def get_items(db = Depends(get_db)):
+async def get_items(db=Depends(get_scoped_db)):
     items = await db.items.find({}).to_list(length=10)
     return items
+
+@app.post("/embed")
+async def embed_text(
+    text: str,
+    db=Depends(get_scoped_db),
+    embedding_service=Depends(get_embedding_service),
+):
+    # Both dependencies are automatically bound to the current app
+    result = await embedding_service.process_and_store(
+        text_content=text,
+        source_id="doc_1",
+        collection=db.knowledge_base,
+    )
+    return {"chunks_created": result["chunks_created"]}
 ```
+
+Available dependencies from `mdb_engine.dependencies`:
+
+| Dependency | Description |
+|------------|-------------|
+| `get_engine` | Get MongoDBEngine instance |
+| `get_app_slug` | Get current app slug |
+| `get_app_config` | Get app manifest/config |
+| `get_scoped_db` | Get scoped database (most common) |
+| `get_embedding_service` | Get EmbeddingService for the current app |
+| `get_memory_service` | Get Mem0 memory service (None if not configured) |
+| `get_llm_client` | Get auto-configured OpenAI/AzureOpenAI client |
+| `get_llm_model_name` | Get LLM deployment/model name |
+| `get_authz_provider` | Get authorization provider (Casbin/OSO) |
+| `get_current_user` | Get authenticated user from request.state |
+| `get_user_roles` | Get current user's roles |
+| `AppContext` | All-in-one context with everything above |
+
+#### Pattern 5: AppContext - All-in-One Magic ✨
+```python
+from fastapi import Depends
+from mdb_engine.dependencies import AppContext
+
+# AppContext gives you everything in one place
+@app.post("/chat")
+async def chat(query: str, ctx: AppContext = Depends()):
+    # Access everything through ctx
+    user = ctx.require_user()  # Raises 401 if not authenticated
+    
+    # Get memories if memory service is configured
+    context = []
+    if ctx.memory:
+        results = ctx.memory.search(query=query, user_id=user["email"], limit=3)
+        context = [r.get("memory") for r in results]
+    
+    # Generate embeddings
+    if ctx.embedding_service:
+        embeddings = await ctx.embedding_service.embed_chunks([query])
+    
+    # Use LLM if configured
+    if ctx.llm:
+        response = ctx.llm.chat.completions.create(
+            model=ctx.llm_model,
+            messages=[{"role": "user", "content": query}],
+        )
+        return {"response": response.choices[0].message.content}
+    
+    return {"query": query, "context_count": len(context)}
+
+@app.get("/admin")
+async def admin_endpoint(ctx: AppContext = Depends()):
+    # Require admin role - raises 403 if missing
+    user = ctx.require_role("admin")
+    
+    # Check fine-grained permissions
+    if not await ctx.check_permission("settings", "write"):
+        raise HTTPException(403, "Cannot modify settings")
+    
+    return {"admin": user["email"], "app": ctx.slug}
+```
+
+#### Pattern 6: CSRF Token Handling in Frontend
+
+All examples with authentication use CSRF protection. Include the `X-CSRF-Token` header in state-changing requests:
+
+```javascript
+// Helper to read CSRF token from cookie
+function getCookie(name) {
+    const value = `; ${document.cookie}`;
+    const parts = value.split(`; ${name}=`);
+    if (parts.length === 2) return parts.pop().split(';').shift();
+    return null;
+}
+
+// Include in all POST/PUT/DELETE requests
+async function submitData(data) {
+    const response = await fetch('/api/data', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': getCookie('csrf_token')
+        },
+        credentials: 'same-origin',
+        body: JSON.stringify(data)
+    });
+    return response.json();
+}
+
+// Logout must be POST (not GET) with CSRF token
+async function logout() {
+    const response = await fetch('/logout', {
+        method: 'POST',
+        headers: {
+            'X-CSRF-Token': getCookie('csrf_token')
+        },
+        credentials: 'same-origin'
+    });
+    const result = await response.json();
+    if (result.success) {
+        window.location.href = result.redirect || '/login';
+    }
+}
+```
+
+For full CSRF documentation, see [Auth README](../mdb_engine/auth/README.md#csrf-protection) and [Security Guide](../docs/SECURITY.md#csrf-protection).
 
 ## Contributing Examples
 

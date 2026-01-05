@@ -576,7 +576,34 @@ except (ConnectionFailure, ServerSelectionTimeoutError) as e:
 
 ## Integration Examples
 
-### FastAPI Integration
+### FastAPI Integration (Recommended)
+
+Use the request-scoped `get_scoped_db` dependency from `mdb_engine.dependencies`:
+
+```python
+from fastapi import Depends
+from mdb_engine import MongoDBEngine
+from mdb_engine.dependencies import get_scoped_db
+
+engine = MongoDBEngine(mongo_uri="...", db_name="...")
+app = engine.create_app(slug="my_app", manifest=Path("manifest.json"))
+
+@app.get("/data")
+async def get_data(db=Depends(get_scoped_db)):
+    # db is automatically scoped to "my_app"
+    docs = await db.my_collection.find({}).to_list(length=10)
+    return {"data": docs}
+
+@app.post("/data")
+async def create_data(db=Depends(get_scoped_db)):
+    # Writes are automatically scoped to "my_app"
+    result = await db.my_collection.insert_one({"name": "New Document"})
+    return {"inserted_id": str(result.inserted_id)}
+```
+
+### Legacy FastAPI Integration
+
+For apps not using `engine.create_app()`:
 
 ```python
 from fastapi import FastAPI, Depends

@@ -3,509 +3,280 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Click Tracker - Shared Auth</title>
+    <title>Click Tracker (SSO)</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         :root {
-            --bg-dark: #0f0f10;
-            --bg-card: #1a1a1d;
-            --accent: #00d9ff;
-            --accent-dim: #00a0b8;
-            --text: #e4e4e7;
-            --text-dim: #a1a1aa;
+            --bg: #0f0f12;
+            --card: #1a1a1f;
+            --accent: #06b6d4;
+            --tracker: #8b5cf6;
+            --admin: #f59e0b;
+            --text: #f4f4f5;
+            --muted: #71717a;
             --success: #22c55e;
             --error: #ef4444;
+            --sso: #10b981;
         }
-        
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        
-        body {
-            font-family: 'SF Mono', 'JetBrains Mono', monospace;
-            background: var(--bg-dark);
-            color: var(--text);
-            min-height: 100vh;
-            padding: 2rem;
-        }
-        
+        body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; padding: 2rem; }
         .container { max-width: 800px; margin: 0 auto; }
         
-        header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 2rem;
-            padding-bottom: 1rem;
-            border-bottom: 1px solid var(--bg-card);
-        }
+        header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; }
+        h1 { font-size: 1.5rem; display: flex; align-items: center; gap: 0.5rem; }
+        h1 i { color: var(--accent); }
         
-        h1 {
-            font-size: 1.5rem;
-            font-weight: 600;
-            color: var(--accent);
-        }
+        .card { background: var(--card); border-radius: 12px; padding: 1.5rem; margin-bottom: 1rem; }
+        .card h2 { font-size: 1rem; color: var(--muted); margin-bottom: 1rem; }
         
-        .badge {
-            background: var(--accent-dim);
-            color: var(--bg-dark);
-            padding: 0.25rem 0.75rem;
-            border-radius: 999px;
-            font-size: 0.75rem;
-            font-weight: 600;
-        }
+        .badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
+        .badge.clicker { background: rgba(6, 182, 212, 0.2); color: var(--accent); }
+        .badge.tracker { background: rgba(139, 92, 246, 0.2); color: var(--tracker); }
+        .badge.admin { background: rgba(245, 158, 11, 0.2); color: var(--admin); }
+        .badge.sso { background: rgba(16, 185, 129, 0.2); color: var(--sso); }
         
-        .card {
-            background: var(--bg-card);
-            border-radius: 12px;
-            padding: 1.5rem;
-            margin-bottom: 1rem;
-        }
+        .sso-banner { background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(6, 182, 212, 0.1)); border: 1px solid var(--sso); border-radius: 12px; padding: 1rem; margin-bottom: 1rem; display: flex; align-items: center; gap: 1rem; }
+        .sso-banner i { color: var(--sso); font-size: 1.5rem; }
+        .sso-banner .text { flex: 1; }
+        .sso-banner .text strong { color: var(--sso); }
+        .sso-banner a { color: var(--sso); text-decoration: underline; }
         
-        .card h2 {
-            font-size: 1rem;
-            color: var(--text-dim);
-            margin-bottom: 1rem;
-        }
+        .demo-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+        @media (max-width: 600px) { .demo-grid { grid-template-columns: 1fr; } }
         
-        .user-info {
-            display: grid;
-            gap: 0.5rem;
-        }
+        .demo-card { background: var(--bg); border: 2px solid transparent; border-radius: 12px; padding: 1.5rem; text-align: center; cursor: pointer; transition: all 0.2s; }
+        .demo-card:hover { transform: translateY(-2px); }
+        .demo-card.clicker { border-color: var(--accent); }
+        .demo-card.tracker { border-color: var(--tracker); }
+        .demo-card.admin { border-color: var(--admin); }
+        .demo-card h3 { margin: 0.5rem 0; }
+        .demo-card p { font-size: 0.8rem; color: var(--muted); }
         
-        .user-info span {
-            color: var(--accent);
-        }
+        .avatar { width: 50px; height: 50px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto; font-size: 1.25rem; }
+        .avatar.clicker { background: rgba(6, 182, 212, 0.2); color: var(--accent); }
+        .avatar.tracker { background: rgba(139, 92, 246, 0.2); color: var(--tracker); }
+        .avatar.admin { background: rgba(245, 158, 11, 0.2); color: var(--admin); }
         
-        .roles {
-            display: flex;
-            gap: 0.5rem;
-            margin-top: 0.5rem;
-        }
+        .btn { padding: 0.75rem 1.5rem; border-radius: 8px; border: none; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+        .btn-primary { background: var(--accent); color: #000; }
+        .btn-primary:hover { filter: brightness(1.1); }
+        .btn-secondary { background: transparent; border: 1px solid var(--muted); color: var(--text); }
         
-        .role-badge {
-            background: var(--bg-dark);
-            border: 1px solid var(--accent-dim);
-            padding: 0.25rem 0.5rem;
-            border-radius: 4px;
-            font-size: 0.75rem;
-        }
+        .user-bar { display: flex; align-items: center; gap: 1rem; }
+        .user-bar .info { flex: 1; }
         
-        .auth-form {
-            display: grid;
-            gap: 1rem;
-        }
+        .counter { text-align: center; padding: 2rem; }
+        .counter .num { font-size: 4rem; font-weight: 800; color: var(--accent); }
+        .counter .label { color: var(--muted); }
+        .track-btn { margin-top: 1rem; padding: 1rem 3rem; font-size: 1.1rem; background: linear-gradient(135deg, var(--accent), var(--tracker)); color: #fff; border: none; border-radius: 12px; cursor: pointer; }
+        .track-btn:hover { transform: scale(1.02); }
         
-        input {
-            background: var(--bg-dark);
-            border: 1px solid var(--text-dim);
-            padding: 0.75rem;
-            border-radius: 8px;
-            color: var(--text);
-            font-family: inherit;
-        }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 0.75rem; text-align: left; border-bottom: 1px solid var(--bg); }
+        th { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; }
         
-        input:focus {
-            outline: none;
-            border-color: var(--accent);
-        }
+        .msg { padding: 1rem; border-radius: 8px; margin-bottom: 1rem; }
+        .msg.success { background: rgba(34, 197, 94, 0.2); color: var(--success); }
+        .msg.error { background: rgba(239, 68, 68, 0.2); color: var(--error); }
+        .msg.info { background: rgba(6, 182, 212, 0.1); color: var(--accent); }
         
-        button {
-            background: var(--accent);
-            color: var(--bg-dark);
-            border: none;
-            padding: 0.75rem 1.5rem;
-            border-radius: 8px;
-            font-family: inherit;
-            font-weight: 600;
-            cursor: pointer;
-            transition: background 0.2s;
-        }
+        .note { background: var(--bg); padding: 1rem; border-radius: 8px; font-size: 0.9rem; color: var(--muted); display: flex; align-items: center; gap: 0.5rem; }
+        .note i { color: var(--accent); }
         
-        button:hover { background: var(--accent-dim); }
-        
-        .btn-secondary {
-            background: transparent;
-            border: 1px solid var(--accent);
-            color: var(--accent);
-        }
-        
-        .btn-secondary:hover {
-            background: var(--accent);
-            color: var(--bg-dark);
-        }
-        
-        .actions {
-            display: flex;
-            gap: 0.5rem;
-            flex-wrap: wrap;
-        }
-        
-        .message {
-            padding: 0.75rem;
-            border-radius: 8px;
-            margin-top: 1rem;
-            font-size: 0.875rem;
-        }
-        
-        .message.success { background: rgba(34, 197, 94, 0.2); border: 1px solid var(--success); }
-        .message.error { background: rgba(239, 68, 68, 0.2); border: 1px solid var(--error); }
-        
-        .sso-note {
-            background: rgba(0, 217, 255, 0.1);
-            border: 1px solid var(--accent-dim);
-            padding: 1rem;
-            border-radius: 8px;
-            font-size: 0.875rem;
-            margin-top: 1rem;
-        }
-        
-        .click-count {
-            font-size: 3rem;
-            font-weight: 700;
-            color: var(--accent);
-        }
-        
-        .password-requirements {
-            background: var(--bg-dark);
-            border: 1px solid var(--text-dim);
-            border-radius: 8px;
-            padding: 0.75rem;
-            font-size: 0.75rem;
-        }
-        
-        .password-requirements .req-title {
-            color: var(--text-dim);
-            font-weight: 600;
-        }
-        
-        .password-requirements ul {
-            list-style: none;
-            margin-top: 0.5rem;
-        }
-        
-        .password-requirements li {
-            color: var(--error);
-            padding: 0.125rem 0;
-        }
-        
-        .password-requirements li.valid {
-            color: var(--success);
-        }
-        
-        .password-requirements li::before {
-            content: '✗ ';
-        }
-        
-        .password-requirements li.valid::before {
-            content: '✓ ';
-        }
-        
-        #entropy-value {
-            font-weight: 600;
-        }
-        
-        #entropy-value.low { color: var(--error); }
-        #entropy-value.medium { color: #f59e0b; }
-        #entropy-value.high { color: var(--success); }
-        
-        .nav-links {
-            display: flex;
-            gap: 1rem;
-        }
-        
-        .nav-links a {
-            color: var(--text-dim);
-            text-decoration: none;
-            font-size: 0.875rem;
-            transition: color 0.2s;
-        }
-        
-        .nav-links a:hover { color: var(--accent); }
+        nav a { color: var(--muted); text-decoration: none; margin-left: 1rem; }
+        nav a:hover { color: var(--text); }
     </style>
 </head>
 <body>
     <div class="container">
         <header>
-            <div>
-                <h1>🖱️ Click Tracker</h1>
-                <div style="display: flex; gap: 0.5rem; align-items: center; margin-top: 0.5rem;">
-                    <span class="badge">Shared Auth</span>
-                </div>
-            </div>
-            <div class="nav-links">
-                <a href="http://localhost:8000" style="color: var(--accent);">🖱️ Click Tracker</a>
-                <a href="http://localhost:8001">📊 Dashboard</a>
-            </div>
+            <h1><i class="fas fa-mouse-pointer"></i> Click Tracker <span class="badge sso">SSO</span></h1>
+            <nav>
+                <a href="/"><i class="fas fa-mouse-pointer"></i> Tracker</a>
+                <a href="http://localhost:8001"><i class="fas fa-chart-line"></i> Dashboard</a>
+            </nav>
         </header>
-        
+
+        <div id="msg"></div>
+
         {% if user %}
-        <!-- Authenticated View -->
+        <!-- Logged In -->
+        <div class="sso-banner">
+            <i class="fas fa-link"></i>
+            <div class="text">
+                <strong>Single Sign-On Active</strong><br>
+                You're logged in across all apps! <a href="http://localhost:8001">Visit Dashboard →</a>
+            </div>
+        </div>
+
         <div class="card">
-            <h2>Welcome back</h2>
-            <div class="user-info">
-                <div>Email: <span>{{ user.email }}</span></div>
-                <div class="roles">
-                    Roles:
-                    {% for role in roles %}
-                    <span class="role-badge">{{ role }}</span>
-                    {% endfor %}
+            <div class="user-bar">
+                <div class="avatar {{ role }}">
+                    {% if role == 'admin' %}<i class="fas fa-crown"></i>
+                    {% elif role == 'tracker' %}<i class="fas fa-chart-line"></i>
+                    {% else %}<i class="fas fa-mouse-pointer"></i>{% endif %}
                 </div>
+                <div class="info">
+                    <strong>{{ user.email }}</strong>
+                    <span class="badge {{ role }}">{{ role }}</span>
+                    <span class="badge sso">SSO</span>
+                </div>
+                <button class="btn btn-secondary" onclick="logout()">Logout (All Apps)</button>
             </div>
-            <div class="actions" style="margin-top: 1rem;">
-                <button onclick="trackClick()">Track Click</button>
-                <button class="btn-secondary" onclick="viewClicks()">View My Clicks</button>
-                <button class="btn-secondary" onclick="logout()">Logout</button>
-            </div>
-            <div id="message"></div>
         </div>
-        
+
         <div class="card">
-            <h2>Click Counter</h2>
-            <div class="click-count" id="clickCount">-</div>
-            <p style="color: var(--text-dim); margin-top: 0.5rem;">Your tracked clicks</p>
+            <div class="counter">
+                <div class="num" id="count">-</div>
+                <div class="label">{% if can_view_all %}All Clicks{% else %}Your Clicks{% endif %}</div>
+                <button class="track-btn" onclick="track()"><i class="fas fa-plus"></i> Track Click</button>
+            </div>
         </div>
-        
-        <div class="sso-note">
-            <strong>SSO Enabled:</strong> Your login works across all apps using shared auth.
-            Try accessing the <a href="http://localhost:8001" style="color: var(--accent);">Dashboard</a>
-            (requires "editor" role).
+
+        {% if not can_view_all %}
+        <div class="note"><i class="fas fa-info-circle"></i> As a clicker, you only see your own clicks. Upgrade to tracker to see all!</div>
+        {% endif %}
+
+        <div class="card">
+            <h2>Recent Clicks</h2>
+            <div id="clicks"><p style="color:var(--muted)">Loading...</p></div>
         </div>
-        
+
         {% else %}
-        <!-- Not Authenticated View -->
-        <div class="card">
-            <h2>Login</h2>
-            <form class="auth-form" onsubmit="login(event)">
-                <input type="email" id="loginEmail" placeholder="Email" required>
-                <input type="password" id="loginPassword" placeholder="Password" required>
-                <button type="submit">Login</button>
-            </form>
-            <div id="loginMessage"></div>
+        <!-- Not Logged In -->
+        <div class="sso-banner">
+            <i class="fas fa-key"></i>
+            <div class="text">
+                <strong>Single Sign-On Demo</strong><br>
+                Login here and you'll be automatically logged into <a href="http://localhost:8001">Dashboard</a> too!
+            </div>
         </div>
-        
+
         <div class="card">
-            <h2>Register</h2>
-            <form class="auth-form" onsubmit="register(event)">
-                <input type="email" id="registerEmail" placeholder="Email" required>
-                <input type="password" id="registerPassword" placeholder="Password" minlength="12" required>
-                <div class="password-requirements">
-                    <span class="req-title">Password requirements:</span>
-                    <ul>
-                        <li id="req-length">At least 12 characters</li>
-                        <li id="req-upper">At least one uppercase letter</li>
-                        <li id="req-lower">At least one lowercase letter</li>
-                        <li id="req-digit">At least one number</li>
-                        <li id="req-special">At least one special character (!@#$%^&*)</li>
-                        <li id="req-entropy">Entropy: <span id="entropy-value">calculating...</span></li>
-                    </ul>
+            <h2>Quick Login - Demo Users</h2>
+            <p style="color:var(--muted);margin-bottom:1rem">Click a user to login (password: password123)</p>
+            <div class="demo-grid">
+                <div class="demo-card admin" onclick="login('alice@example.com')">
+                    <div class="avatar admin"><i class="fas fa-crown"></i></div>
+                    <h3>Alice</h3>
+                    <span class="badge admin">Admin</span>
+                    <p>Full access to both apps</p>
                 </div>
-                <button type="submit">Create Account</button>
-            </form>
-            <div id="registerMessage"></div>
+                <div class="demo-card tracker" onclick="login('bob@example.com')">
+                    <div class="avatar tracker"><i class="fas fa-chart-line"></i></div>
+                    <h3>Bob</h3>
+                    <span class="badge tracker">Tracker</span>
+                    <p>View all clicks + analytics</p>
+                </div>
+                <div class="demo-card clicker" onclick="login('charlie@example.com')">
+                    <div class="avatar clicker"><i class="fas fa-mouse-pointer"></i></div>
+                    <h3>Charlie</h3>
+                    <span class="badge clicker">Clicker</span>
+                    <p>Own clicks only, no dashboard</p>
+                </div>
+            </div>
         </div>
-        
-        <div class="sso-note">
-            <strong>🔒 Security Features:</strong><br>
-            • Password policy with entropy check<br>
-            • Session binding (fingerprint)<br>
-            • CSRF protection on all forms<br>
-            • Rate limiting on auth endpoints<br>
-            <br>
-            <strong>Shared Auth Mode:</strong> Register once, access multiple apps.
-            After registering, you'll have "viewer" role for Click Tracker.
+
+        <div class="card">
+            <h2>Role Permissions</h2>
+            <table>
+                <tr><th>Permission</th><th><span class="badge clicker">Clicker</span></th><th><span class="badge tracker">Tracker</span></th><th><span class="badge admin">Admin</span></th></tr>
+                <tr><td>Track clicks</td><td style="color:var(--success)">✓</td><td style="color:var(--success)">✓</td><td style="color:var(--success)">✓</td></tr>
+                <tr><td>View own clicks</td><td style="color:var(--success)">✓</td><td style="color:var(--success)">✓</td><td style="color:var(--success)">✓</td></tr>
+                <tr><td>View all clicks</td><td style="color:var(--error)">✗</td><td style="color:var(--success)">✓</td><td style="color:var(--success)">✓</td></tr>
+                <tr><td>Dashboard access</td><td style="color:var(--error)">✗</td><td style="color:var(--success)">✓</td><td style="color:var(--success)">✓</td></tr>
+                <tr><td>View analytics</td><td style="color:var(--error)">✗</td><td style="color:var(--success)">✓</td><td style="color:var(--success)">✓</td></tr>
+                <tr><td>Manage users</td><td style="color:var(--error)">✗</td><td style="color:var(--error)">✗</td><td style="color:var(--success)">✓</td></tr>
+            </table>
+            <p style="color:var(--muted);margin-top:1rem;font-size:0.85rem"><i class="fas fa-info-circle"></i> Roles are per-app via <code>app_roles</code> in SharedUserPool. Managed in <code>manifest.json</code></p>
+        </div>
+
+        <div class="card">
+            <h2>How SSO Works</h2>
+            <table>
+                <tr><td><i class="fas fa-database" style="color:var(--sso)"></i></td><td><strong>SharedUserPool</strong></td><td>Centralized user storage in <code>_mdb_engine_shared_users</code></td></tr>
+                <tr><td><i class="fas fa-key" style="color:var(--sso)"></i></td><td><strong>JWT Tokens</strong></td><td>Stateless auth via shared <code>MDB_ENGINE_JWT_SECRET</code></td></tr>
+                <tr><td><i class="fas fa-cookie" style="color:var(--sso)"></i></td><td><strong>Shared Cookie</strong></td><td><code>mdb_auth_token</code> works across all apps</td></tr>
+                <tr><td><i class="fas fa-user-tag" style="color:var(--sso)"></i></td><td><strong>Per-App Roles</strong></td><td><code>app_roles: {click_tracker: ["admin"], dashboard: ["admin"]}</code></td></tr>
+            </table>
         </div>
         {% endif %}
     </div>
-    
+
     <script>
-        // =====================================================================
-        // CSRF Token Handling
-        // =====================================================================
-        function getCsrfToken() {
-            // CSRF token is set via double-submit cookie pattern
-            const match = document.cookie.match(/csrf_token=([^;]+)/);
-            return match ? match[1] : null;
+        // Helper to read cookies for CSRF token
+        function getCookie(name) {
+            const value = `; ${document.cookie}`;
+            const parts = value.split(`; ${name}=`);
+            if (parts.length === 2) return parts.pop().split(';').shift();
+            return '';
         }
-        
-        // =====================================================================
-        // Password Validation (Client-Side)
-        // =====================================================================
-        function calculateEntropy(password) {
-            if (!password) return 0;
-            const charset = new Set(password).size;
-            let poolSize = 0;
-            if (/[a-z]/.test(password)) poolSize += 26;
-            if (/[A-Z]/.test(password)) poolSize += 26;
-            if (/[0-9]/.test(password)) poolSize += 10;
-            if (/[^a-zA-Z0-9]/.test(password)) poolSize += 32;
-            return Math.floor(password.length * Math.log2(poolSize || 1));
-        }
-        
-        function validatePassword(password) {
-            const checks = {
-                length: password.length >= 12,
-                upper: /[A-Z]/.test(password),
-                lower: /[a-z]/.test(password),
-                digit: /[0-9]/.test(password),
-                special: /[!@#$%^&*(),.?":{}|<>]/.test(password),
-            };
-            
-            // Update UI
-            document.getElementById('req-length').classList.toggle('valid', checks.length);
-            document.getElementById('req-upper').classList.toggle('valid', checks.upper);
-            document.getElementById('req-lower').classList.toggle('valid', checks.lower);
-            document.getElementById('req-digit').classList.toggle('valid', checks.digit);
-            document.getElementById('req-special').classList.toggle('valid', checks.special);
-            
-            // Calculate and display entropy
-            const entropy = calculateEntropy(password);
-            const entropyEl = document.getElementById('entropy-value');
-            entropyEl.textContent = `${entropy} bits`;
-            entropyEl.className = entropy < 40 ? 'low' : entropy < 60 ? 'medium' : 'high';
-            document.getElementById('req-entropy').classList.toggle('valid', entropy >= 40);
-            
-            return Object.values(checks).every(Boolean) && entropy >= 40;
-        }
-        
-        // Add real-time validation
-        document.addEventListener('DOMContentLoaded', () => {
-            const pwInput = document.getElementById('registerPassword');
-            if (pwInput) {
-                pwInput.addEventListener('input', (e) => validatePassword(e.target.value));
+
+        async function login(email) {
+            show('Logging in (SSO)...', 'info');
+            const form = new FormData();
+            form.append('email', email);
+            form.append('password', 'password123');
+            const res = await fetch('/login', { 
+                method: 'POST', 
+                body: form,
+                headers: { 'X-CSRF-Token': getCookie('csrf_token') }
+            });
+            const data = await res.json();
+            if (data.success) {
+                show('Logged in! You are now authenticated on all apps.', 'success');
+                setTimeout(() => location.reload(), 1000);
             }
-        });
-        
-        // =====================================================================
-        // Auth Functions
-        // =====================================================================
-        async function login(e) {
-            e.preventDefault();
-            const email = document.getElementById('loginEmail').value;
-            const password = document.getElementById('loginPassword').value;
-            
-            try {
-                const res = await fetch('/login', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRF-Token': getCsrfToken(),
-                    },
-                    body: JSON.stringify({email, password})
-                });
-                const data = await res.json();
-                
-                if (res.ok) {
-                    showMessage('loginMessage', 'Login successful! Reloading...', 'success');
-                    setTimeout(() => location.reload(), 1000);
-                } else {
-                    showMessage('loginMessage', data.detail || 'Login failed', 'error');
-                }
-            } catch (err) {
-                showMessage('loginMessage', 'Network error', 'error');
-            }
+            else show(data.detail || 'Login failed', 'error');
         }
-        
-        async function register(e) {
-            e.preventDefault();
-            const email = document.getElementById('registerEmail').value;
-            const password = document.getElementById('registerPassword').value;
+
+        async function logout() {
+            show('Logging out from all apps...', 'info');
+            await fetch('/logout', { 
+                method: 'POST',
+                headers: { 'X-CSRF-Token': getCookie('csrf_token') }
+            });
+            setTimeout(() => location.reload(), 500);
+        }
+
+        async function track() {
+            const res = await fetch('/track', {
+                method: 'POST',
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'X-CSRF-Token': getCookie('csrf_token')
+                },
+                body: JSON.stringify({ url: '/', element: 'track-button' })
+            });
+            if (res.ok) { show('Click tracked!', 'success'); loadClicks(); }
+            else show('Failed to track', 'error');
+        }
+
+        async function loadClicks() {
+            const res = await fetch('/clicks');
+            const data = await res.json();
+            document.getElementById('count').textContent = data.count;
             
-            // Client-side validation first
-            if (!validatePassword(password)) {
-                showMessage('registerMessage', 'Password does not meet requirements', 'error');
+            if (data.clicks.length === 0) {
+                document.getElementById('clicks').innerHTML = '<p style="color:var(--muted)">No clicks yet. Click the button above!</p>';
                 return;
             }
             
-            try {
-                const res = await fetch('/register', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRF-Token': getCsrfToken(),
-                    },
-                    body: JSON.stringify({email, password})
-                });
-                const data = await res.json();
-                
-                if (res.ok) {
-                    showMessage('registerMessage', 
-                        `Registration successful! Entropy: ${data.security?.password_entropy_bits || '?'} bits. Reloading...`, 
-                        'success');
-                    setTimeout(() => location.reload(), 1000);
-                } else {
-                    // Handle password policy errors with detail
-                    if (data.detail?.errors) {
-                        showMessage('registerMessage', 
-                            `Password error: ${data.detail.errors.join(', ')}`, 'error');
-                    } else {
-                        showMessage('registerMessage', data.detail || 'Registration failed', 'error');
-                    }
-                }
-            } catch (err) {
-                showMessage('registerMessage', 'Network error', 'error');
+            let html = '<table><tr><th>User</th><th>Role</th><th>URL</th><th>Time</th></tr>';
+            for (const c of data.clicks) {
+                html += `<tr><td>${c.user_id}</td><td><span class="badge ${c.user_role}">${c.user_role}</span></td><td>${c.url}</td><td>${new Date(c.timestamp).toLocaleString()}</td></tr>`;
             }
+            html += '</table>';
+            if (!data.viewing_all) html += '<p style="color:var(--muted);margin-top:1rem;font-size:0.85rem">Showing only your clicks</p>';
+            document.getElementById('clicks').innerHTML = html;
         }
-        
-        async function trackClick() {
-            try {
-                const res = await fetch('/track', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRF-Token': getCsrfToken(),
-                    },
-                    body: JSON.stringify({url: window.location.pathname, element: 'track-button'})
-                });
-                const data = await res.json();
-                
-                if (res.ok) {
-                    showMessage('message', `Click tracked! ID: ${data.click_id}`, 'success');
-                    loadClickCount();
-                } else {
-                    showMessage('message', data.detail || 'Failed to track', 'error');
-                }
-            } catch (err) {
-                showMessage('message', 'Network error', 'error');
-            }
+
+        function show(text, type) {
+            document.getElementById('msg').innerHTML = `<div class="msg ${type}">${text}</div>`;
+            if (type !== 'info') setTimeout(() => document.getElementById('msg').innerHTML = '', 3000);
         }
-        
-        async function viewClicks() {
-            try {
-                const res = await fetch('/clicks?limit=10');
-                const data = await res.json();
-                showMessage('message', `You have ${data.count} clicks`, 'success');
-            } catch (err) {
-                showMessage('message', 'Failed to load clicks', 'error');
-            }
-        }
-        
-        async function logout() {
-            await fetch('/logout', {
-                method: 'POST',
-                headers: {'X-CSRF-Token': getCsrfToken()},
-            });
-            location.reload();
-        }
-        
-        async function loadClickCount() {
-            try {
-                const res = await fetch('/clicks');
-                const data = await res.json();
-                document.getElementById('clickCount').textContent = data.count;
-            } catch (err) {
-                document.getElementById('clickCount').textContent = '?';
-            }
-        }
-        
-        function showMessage(id, text, type) {
-            const el = document.getElementById(id);
-            el.className = `message ${type}`;
-            el.textContent = text;
-        }
-        
-        // Load click count on page load if authenticated
-        {% if user %}
-        loadClickCount();
-        {% endif %}
+
+        {% if user %}loadClicks();{% endif %}
     </script>
 </body>
 </html>
-

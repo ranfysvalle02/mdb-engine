@@ -559,6 +559,14 @@ let isWaitingForNewMemories = false;
 const MAX_MEMORY_RETRY_ATTEMPTS = 3;
 const MEMORY_RETRY_DELAYS = [1000, 2000, 4000]; // Exponential backoff: 1s, 2s, 4s
 
+// Helper to read cookies for CSRF token
+function getCookie(name) {
+    const value = `; ${document.cookie}`;
+    const parts = value.split(`; ${name}=`);
+    if (parts.length === 2) return parts.pop().split(';').shift();
+    return '';
+}
+
 function scrollToBottom() {
     const container = document.getElementById('messages-container');
     container.scrollTop = container.scrollHeight;
@@ -1005,7 +1013,8 @@ async function sendMessage(event) {
 
         const response = await fetch(`/api/conversations/${conversationId}/messages`, {
             method: 'POST',
-            body: formData
+            body: formData,
+            headers: { 'X-CSRF-Token': getCookie('csrf_token') }
         });
 
         if (!response.ok) {
@@ -1137,7 +1146,8 @@ async function deleteConversation() {
 
     try {
         const response = await fetch(`/api/conversations/${conversationId}`, {
-            method: 'DELETE'
+            method: 'DELETE',
+            headers: { 'X-CSRF-Token': getCookie('csrf_token') }
         });
 
         if (response.ok) {

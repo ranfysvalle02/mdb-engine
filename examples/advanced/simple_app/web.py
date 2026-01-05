@@ -21,12 +21,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from fastapi import HTTPException, Request
+from fastapi import Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
 from mdb_engine import MongoDBEngine
+from mdb_engine.dependencies import get_scoped_db
 
 # =============================================================================
 # Initialize Engine with create_app() - The Recommended Pattern
@@ -76,9 +77,8 @@ class TaskUpdate(BaseModel):
 # =============================================================================
 
 @app.get("/", response_class=HTMLResponse)
-async def index(request: Request):
+async def index(request: Request, db=Depends(get_scoped_db)):
     """Home page with task list."""
-    db = engine.get_scoped_db("simple_app")
     tasks = await db.tasks.find({}).sort("created_at", -1).to_list(length=100)
     
     return templates.TemplateResponse("index.html", {
@@ -89,10 +89,8 @@ async def index(request: Request):
 
 
 @app.get("/api/tasks")
-async def list_tasks(completed: Optional[bool] = None):
+async def list_tasks(completed: Optional[bool] = None, db=Depends(get_scoped_db)):
     """List all tasks."""
-    db = engine.get_scoped_db("simple_app")
-    
     query = {}
     if completed is not None:
         query["completed"] = completed
@@ -107,10 +105,8 @@ async def list_tasks(completed: Optional[bool] = None):
 
 
 @app.post("/api/tasks")
-async def create_task(task: TaskCreate):
+async def create_task(task: TaskCreate, db=Depends(get_scoped_db)):
     """Create a new task."""
-    db = engine.get_scoped_db("simple_app")
-    
     task_doc = {
         "title": task.title,
         "description": task.description,
@@ -128,11 +124,9 @@ async def create_task(task: TaskCreate):
 
 
 @app.put("/api/tasks/{task_id}")
-async def update_task(task_id: str, task: TaskUpdate):
+async def update_task(task_id: str, task: TaskUpdate, db=Depends(get_scoped_db)):
     """Update a task."""
     from bson import ObjectId
-    
-    db = engine.get_scoped_db("simple_app")
     
     updates = {"updated_at": datetime.utcnow()}
     if task.title is not None:
@@ -154,11 +148,9 @@ async def update_task(task_id: str, task: TaskUpdate):
 
 
 @app.delete("/api/tasks/{task_id}")
-async def delete_task(task_id: str):
+async def delete_task(task_id: str, db=Depends(get_scoped_db)):
     """Delete a task."""
     from bson import ObjectId
-    
-    db = engine.get_scoped_db("simple_app")
     
     result = await db.tasks.delete_one({"_id": ObjectId(task_id)})
     
@@ -169,11 +161,9 @@ async def delete_task(task_id: str):
 
 
 @app.post("/api/tasks/{task_id}/toggle")
-async def toggle_task(task_id: str):
+async def toggle_task(task_id: str, db=Depends(get_scoped_db)):
     """Toggle task completion status."""
     from bson import ObjectId
-    
-    db = engine.get_scoped_db("simple_app")
     
     # Get current task
     task = await db.tasks.find_one({"_id": ObjectId(task_id)})

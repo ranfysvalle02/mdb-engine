@@ -4,129 +4,488 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Click Tracker</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
+        :root {
+            --primary: #667eea;
+            --primary-dark: #5a67d8;
+            --secondary: #764ba2;
+            --bg: #f3f4f6;
+            --card: #ffffff;
+            --text: #1f2937;
+            --muted: #6b7280;
+            --success: #10b981;
+            --error: #ef4444;
+        }
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
             min-height: 100vh;
+            padding: 2rem;
+        }
+        .container { max-width: 900px; margin: 0 auto; }
+        
+        /* Header */
+        header {
+            text-align: center;
+            color: white;
+            margin-bottom: 2rem;
+        }
+        header h1 { font-size: 2.5rem; margin-bottom: 0.5rem; }
+        header p { opacity: 0.9; }
+        
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.875rem;
+            padding: 0.25rem 0.75rem;
+            border-radius: 999px;
+            background: rgba(255,255,255,0.2);
+            color: white;
+            margin-top: 1rem;
+        }
+        .status-badge.connected { background: rgba(16,185,129,0.3); }
+        
+        /* Cards */
+        .card {
+            background: var(--card);
+            border-radius: 1rem;
+            padding: 2rem;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            margin-bottom: 1.5rem;
+        }
+        
+        /* Login */
+        .login-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+        }
+        .user-option {
+            border: 2px solid #e5e7eb;
+            border-radius: 0.75rem;
+            padding: 1.5rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-align: center;
+        }
+        .user-option:hover {
+            border-color: var(--primary);
+            background: #eef2ff;
+            transform: translateY(-2px);
+        }
+        .user-avatar {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
             display: flex;
             align-items: center;
             justify-content: center;
-            padding: 20px;
+            font-size: 1.5rem;
+            margin: 0 auto 1rem;
         }
-        .container {
-            background: white;
-            border-radius: 20px;
-            padding: 60px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        .user-avatar.admin { background: #dcfce7; color: #166534; }
+        .user-avatar.editor { background: #dbeafe; color: #1e40af; }
+        .user-avatar.viewer { background: #fef3c7; color: #92400e; }
+        
+        .role-badge {
+            display: inline-block;
+            font-size: 0.75rem;
+            font-weight: 700;
+            padding: 0.25rem 0.5rem;
+            border-radius: 0.25rem;
+            text-transform: uppercase;
+            margin: 0.5rem 0;
+        }
+        .role-badge.admin { background: #dcfce7; color: #166534; }
+        .role-badge.editor { background: #dbeafe; color: #1e40af; }
+        .role-badge.viewer { background: #fef3c7; color: #92400e; }
+        
+        /* Dashboard */
+        .dashboard-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+        
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.625rem 1.25rem;
+            border-radius: 0.5rem;
+            font-weight: 600;
+            border: none;
+            cursor: pointer;
+            font-size: 0.95rem;
+            transition: all 0.2s;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            color: white;
+        }
+        .btn-primary:hover { opacity: 0.9; transform: translateY(-1px); }
+        .btn-secondary { background: #f3f4f6; color: var(--text); }
+        .btn-secondary:hover { background: #e5e7eb; }
+        .btn-danger { background: #fef2f2; color: #dc2626; }
+        .btn-danger:hover { background: #fee2e2; }
+        
+        /* Click Tracker */
+        .click-section {
             text-align: center;
-            max-width: 500px;
-            width: 100%;
+            padding: 2rem;
         }
-        h1 { color: #333; margin-bottom: 30px; font-size: 32px; }
-        .click-button {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        .click-btn {
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
             color: white;
             border: none;
-            padding: 20px 60px;
-            font-size: 24px;
+            padding: 1.5rem 4rem;
+            font-size: 1.5rem;
             font-weight: bold;
             border-radius: 50px;
             cursor: pointer;
-            transition: transform 0.2s, box-shadow 0.2s;
-            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.4);
+            transition: all 0.2s;
+            box-shadow: 0 10px 30px rgba(102,126,234,0.4);
         }
-        .click-button:hover {
+        .click-btn:hover {
             transform: translateY(-3px);
-            box-shadow: 0 15px 40px rgba(102, 126, 234, 0.5);
+            box-shadow: 0 15px 40px rgba(102,126,234,0.5);
         }
-        .click-button:active {
-            transform: translateY(-1px);
+        .click-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+        
+        .no-permission {
+            background: #fef3c7;
+            color: #92400e;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            border-left: 4px solid #f59e0b;
+            margin-top: 1rem;
         }
-        .success {
-            margin-top: 20px;
-            color: #10b981;
-            font-weight: 600;
-            display: none;
+        
+        /* Clicks List */
+        .clicks-list { margin-top: 1.5rem; }
+        .click-item {
+            background: #f9fafb;
+            padding: 1rem;
+            margin-bottom: 0.5rem;
+            border-radius: 0.5rem;
+            border-left: 4px solid var(--primary);
         }
-        .error {
-            margin-top: 20px;
-            color: #ef4444;
-            font-weight: 600;
-            display: none;
+        .click-meta { font-size: 0.875rem; color: var(--muted); }
+        
+        .hidden { display: none !important; }
+        
+        .toast {
+            position: fixed;
+            bottom: 2rem;
+            right: 2rem;
+            padding: 1rem 1.5rem;
+            border-radius: 0.5rem;
+            color: white;
+            font-weight: 500;
+            transform: translateY(150%);
+            transition: transform 0.3s;
+            z-index: 100;
         }
-        .info {
-            margin-top: 30px;
-            color: #666;
-            font-size: 14px;
+        .toast.show { transform: translateY(0); }
+        .toast.success { background: var(--success); }
+        .toast.error { background: var(--error); }
+        
+        .loader {
+            position: fixed;
+            inset: 0;
+            background: rgba(255,255,255,0.8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 50;
         }
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid #e5e7eb;
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
+    <div id="loader" class="loader hidden">
+        <div class="spinner"></div>
+    </div>
+    
     <div class="container">
-        <h1>🎯 Click Tracker</h1>
-        <p style="color: #666; margin-bottom: 40px;">Click the button to track a click event</p>
-        <button class="click-button" onclick="trackClick()">Click Me!</button>
-        <div id="success" class="success">✅ Click tracked!</div>
-        <div id="error" class="error"></div>
-        <div class="info">
-            <p>Demo User: <strong>demo_user</strong></p>
-            <p style="margin-top: 10px;">View analytics at <a href="http://localhost:8001" target="_blank" style="color: #667eea;">Dashboard</a></p>
+        <header>
+            <h1>🎯 Click Tracker</h1>
+            <p>Track user clicks with role-based access control</p>
+            <div id="authStatus" class="status-badge">
+                <i class="fas fa-circle-notch fa-spin"></i> Checking auth...
+            </div>
+        </header>
+        
+        <!-- Login View -->
+        <div id="loginView" class="card hidden">
+            <h2 style="text-align:center; margin-bottom: 1.5rem;">Select a Demo User</h2>
+            <div class="login-grid">
+                <div class="user-option" onclick="login('alice@example.com')">
+                    <div class="user-avatar admin"><i class="fas fa-crown"></i></div>
+                    <h3>Alice</h3>
+                    <div class="role-badge admin">Admin</div>
+                    <p style="color:var(--muted);font-size:0.9rem;">Read, Write, Delete</p>
+                </div>
+                <div class="user-option" onclick="login('bob@example.com')">
+                    <div class="user-avatar editor"><i class="fas fa-edit"></i></div>
+                    <h3>Bob</h3>
+                    <div class="role-badge editor">Editor</div>
+                    <p style="color:var(--muted);font-size:0.9rem;">Read, Write</p>
+                </div>
+                <div class="user-option" onclick="login('charlie@example.com')">
+                    <div class="user-avatar viewer"><i class="fas fa-eye"></i></div>
+                    <h3>Charlie</h3>
+                    <div class="role-badge viewer">Viewer</div>
+                    <p style="color:var(--muted);font-size:0.9rem;">Read Only</p>
+                </div>
+            </div>
+            <p style="text-align:center;margin-top:1.5rem;color:var(--muted);font-size:0.875rem;">
+                Password: <code>password123</code>
+            </p>
+        </div>
+        
+        <!-- Dashboard View -->
+        <div id="dashboardView" class="hidden">
+            <div class="card">
+                <div class="dashboard-header">
+                    <div class="user-info">
+                        <div class="user-avatar" id="userAvatar" style="width:48px;height:48px;font-size:1rem;">
+                            <i class="fas fa-user"></i>
+                        </div>
+                        <div>
+                            <div style="font-weight:700;" id="userEmail">...</div>
+                            <div id="userRole" class="role-badge">...</div>
+                        </div>
+                    </div>
+                    <div style="display:flex;gap:0.5rem;">
+                        <a href="http://localhost:8001" class="btn btn-secondary">
+                            <i class="fas fa-chart-bar"></i> Dashboard
+                        </a>
+                        <button class="btn btn-danger" onclick="logout()">
+                            <i class="fas fa-sign-out-alt"></i> Logout
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Track Section (for write permission) -->
+                <div id="trackSection" class="click-section hidden">
+                    <button class="click-btn" onclick="trackClick()">
+                        <i class="fas fa-mouse-pointer"></i> Click Me!
+                    </button>
+                    <p style="margin-top:1rem;color:var(--muted);">Click to track an event</p>
+                </div>
+                
+                <!-- No Permission Message -->
+                <div id="noWritePermission" class="no-permission hidden">
+                    <i class="fas fa-lock"></i> <strong>Read Only</strong> - You don't have permission to track clicks.
+                </div>
+            </div>
+            
+            <div class="card">
+                <h3 style="margin-bottom:1rem;"><i class="fas fa-history"></i> Recent Clicks</h3>
+                <button class="btn btn-secondary" onclick="loadClicks()" style="margin-bottom:1rem;">
+                    <i class="fas fa-sync"></i> Refresh
+                </button>
+                <div id="clicksList" class="clicks-list">
+                    <p style="color:var(--muted);text-align:center;">Loading...</p>
+                </div>
+            </div>
         </div>
     </div>
     
+    <div id="toast" class="toast"></div>
+    
     <script>
-        async function trackClick() {
-            const button = document.querySelector('.click-button');
-            const success = document.getElementById('success');
-            const error = document.getElementById('error');
-            
-            // Disable button
-            button.disabled = true;
-            button.textContent = 'Tracking...';
-            success.style.display = 'none';
-            error.style.display = 'none';
+        const state = { user: null };
+        
+        // Helper to read cookies for CSRF token
+        function getCookie(name) {
+            const value = `; ${document.cookie}`;
+            const parts = value.split(`; ${name}=`);
+            if (parts.length === 2) return parts.pop().split(';').shift();
+            return '';
+        }
+        
+        document.addEventListener('DOMContentLoaded', checkAuth);
+        
+        async function checkAuth() {
+            showLoader(true);
+            try {
+                const res = await fetch('/api/me');
+                if (res.ok) {
+                    state.user = await res.json();
+                    renderDashboard();
+                    loadClicks();
+                } else {
+                    showLogin();
+                }
+            } catch (e) {
+                showLogin();
+            } finally {
+                showLoader(false);
+                updateAuthStatus();
+            }
+        }
+        
+        function updateAuthStatus() {
+            const badge = document.getElementById('authStatus');
+            if (state.user) {
+                badge.classList.add('connected');
+                badge.innerHTML = '<i class="fas fa-check-circle"></i> Authenticated';
+            } else {
+                badge.innerHTML = '<i class="fas fa-user-slash"></i> Not logged in';
+            }
+        }
+        
+        async function login(email) {
+            showLoader(true);
+            const form = new FormData();
+            form.append('email', email);
+            form.append('password', 'password123');
             
             try {
-                const response = await fetch('/track', {
+                const res = await fetch('/login', { 
+                    method: 'POST', 
+                    body: form,
+                    headers: { 'X-CSRF-Token': getCookie('csrf_token') }
+                });
+                const data = await res.json();
+                if (data.success) {
+                    window.location.reload();
+                } else {
+                    showToast(data.detail || 'Login failed', 'error');
+                    showLoader(false);
+                }
+            } catch (e) {
+                showToast('Connection error', 'error');
+                showLoader(false);
+            }
+        }
+        
+        async function logout() {
+            showLoader(true);
+            await fetch('/logout', {
+                method: 'POST',
+                headers: { 'X-CSRF-Token': getCookie('csrf_token') }
+            });
+            window.location.reload();
+        }
+        
+        function showLogin() {
+            document.getElementById('loginView').classList.remove('hidden');
+            document.getElementById('dashboardView').classList.add('hidden');
+        }
+        
+        function renderDashboard() {
+            document.getElementById('loginView').classList.add('hidden');
+            document.getElementById('dashboardView').classList.remove('hidden');
+            
+            document.getElementById('userEmail').textContent = state.user.email;
+            const roleEl = document.getElementById('userRole');
+            roleEl.textContent = state.user.role;
+            roleEl.className = `role-badge ${state.user.role}`;
+            
+            const avatar = document.getElementById('userAvatar');
+            avatar.className = `user-avatar ${state.user.role}`;
+            
+            if (state.user.permissions.includes('write')) {
+                document.getElementById('trackSection').classList.remove('hidden');
+                document.getElementById('noWritePermission').classList.add('hidden');
+            } else {
+                document.getElementById('trackSection').classList.add('hidden');
+                document.getElementById('noWritePermission').classList.remove('hidden');
+            }
+        }
+        
+        async function trackClick() {
+            const btn = document.querySelector('.click-btn');
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Tracking...';
+            
+            try {
+                const res = await fetch('/track', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'X-CSRF-Token': getCookie('csrf_token')
+                    },
                     body: JSON.stringify({
-                        user_id: 'demo_user',
-                        url: window.location.pathname,
+                        url: '/',
                         element: 'click-button',
                         session_id: 'demo_session'
                     })
                 });
                 
-                // Check content type
-                const contentType = response.headers.get('content-type');
-                let data;
-                
-                if (contentType && contentType.includes('application/json')) {
-                    data = await response.json();
+                if (res.ok) {
+                    showToast('Click tracked!', 'success');
+                    loadClicks();
                 } else {
-                    // Not JSON, try to get text
-                    const text = await response.text();
-                    throw new Error(`Server returned non-JSON: ${text.substring(0, 100)}`);
+                    const err = await res.json();
+                    showToast(err.detail || 'Failed', 'error');
                 }
-                
-                if (response.ok) {
-                    success.style.display = 'block';
-                    button.textContent = 'Click Me!';
-                } else {
-                    error.textContent = `Error: ${data.detail || data.message || 'Failed to track click'}`;
-                    error.style.display = 'block';
-                    button.textContent = 'Click Me!';
-                }
-            } catch (err) {
-                error.textContent = `Error: ${err.message}`;
-                error.style.display = 'block';
-                button.textContent = 'Click Me!';
+            } catch (e) {
+                showToast('Network error', 'error');
             } finally {
-                button.disabled = false;
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-mouse-pointer"></i> Click Me!';
             }
+        }
+        
+        async function loadClicks() {
+            const list = document.getElementById('clicksList');
+            try {
+                const res = await fetch('/clicks?limit=10');
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.clicks.length === 0) {
+                        list.innerHTML = '<p style="color:var(--muted);text-align:center;">No clicks yet</p>';
+                    } else {
+                        list.innerHTML = data.clicks.map(c => `
+                            <div class="click-item">
+                                <div><strong>${c.element || 'click'}</strong> on <code>${c.url || '/'}</code></div>
+                                <div class="click-meta">
+                                    By ${c.tracked_by || c.user_id} • ${new Date(c.timestamp).toLocaleString()}
+                                </div>
+                            </div>
+                        `).join('');
+                    }
+                } else {
+                    const err = await res.json();
+                    list.innerHTML = `<p style="color:var(--error);">${err.detail}</p>`;
+                }
+            } catch (e) {
+                list.innerHTML = '<p style="color:var(--error);">Failed to load clicks</p>';
+            }
+        }
+        
+        function showLoader(show) {
+            document.getElementById('loader').classList.toggle('hidden', !show);
+        }
+        
+        function showToast(msg, type = 'success') {
+            const el = document.getElementById('toast');
+            el.textContent = msg;
+            el.className = `toast ${type} show`;
+            setTimeout(() => el.classList.remove('show'), 3000);
         }
     </script>
 </body>

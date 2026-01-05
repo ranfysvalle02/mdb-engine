@@ -2,12 +2,50 @@
   "schema_version": "2.0",
   "slug": "click_tracker_dashboard",
   "name": "Click Tracker Dashboard",
-  "description": "Admin dashboard for viewing click analytics",
+  "description": "Admin dashboard for viewing click analytics with role-based access",
   "status": "active",
   "data_access": {
     "read_scopes": ["click_tracker_dashboard", "click_tracker"],
     "write_scope": "click_tracker_dashboard",
     "cross_app_policy": "explicit"
+  },
+  "auth": {
+    "policy": {
+      "provider": "casbin",
+      "required": true,
+      "allow_anonymous": false,
+      "authorization": {
+        "model": "rbac",
+        "policies_collection": "casbin_policies",
+        "initial_policies": [
+          ["admin", "analytics", "read"],
+          ["admin", "analytics", "export"],
+          ["analyst", "analytics", "read"]
+        ],
+        "initial_roles": [
+          {"user": "alice@example.com", "role": "admin"},
+          {"user": "dana@example.com", "role": "analyst"}
+        ]
+      }
+    },
+    "users": {
+      "enabled": true,
+      "strategy": "app_users",
+      "collection_name": "users",
+      "session_cookie_name": "dashboard_session",
+      "session_ttl_seconds": 86400,
+      "demo_users": [
+        {"email": "alice@example.com", "password": "password123", "role": "admin"},
+        {"email": "dana@example.com", "password": "password123", "role": "analyst"}
+      ],
+      "demo_user_seed_strategy": "auto"
+    }
+  },
+  "cors": {
+    "enabled": true,
+    "allow_origins": ["*"],
+    "allow_credentials": true,
+    "allow_methods": ["*"],
+    "allow_headers": ["*"]
   }
 }
-

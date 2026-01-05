@@ -115,12 +115,14 @@ curl http://localhost:8000/api/status
 |----------|--------|-------------|
 | `/` | GET | HTML task list |
 | `/api/tasks` | GET | List all tasks |
-| `/api/tasks` | POST | Create a task |
-| `/api/tasks/{id}` | PUT | Update a task |
-| `/api/tasks/{id}` | DELETE | Delete a task |
-| `/api/tasks/{id}/toggle` | POST | Toggle completion |
+| `/api/tasks` | POST | Create a task (requires CSRF token) |
+| `/api/tasks/{id}` | PUT | Update a task (requires CSRF token) |
+| `/api/tasks/{id}` | DELETE | Delete a task (requires CSRF token) |
+| `/api/tasks/{id}/toggle` | POST | Toggle completion (requires CSRF token) |
 | `/health` | GET | Health check |
 | `/api/status` | GET | Engine status |
+
+**Note:** POST, PUT, and DELETE endpoints require the `X-CSRF-Token` header with the value from the `csrf_token` cookie.
 
 ## File Structure
 

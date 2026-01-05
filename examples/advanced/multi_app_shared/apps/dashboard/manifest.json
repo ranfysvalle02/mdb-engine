@@ -2,50 +2,53 @@
   "schema_version": "2.0",
   "slug": "dashboard",
   "name": "Analytics Dashboard",
-  "description": "Admin dashboard for viewing click analytics with shared authentication",
+  "description": "Dashboard for viewing click analytics with shared SSO authentication",
   "status": "active",
   "auth": {
     "mode": "shared",
-    "roles": ["viewer", "editor", "admin"],
-    "default_role": "viewer",
-    "require_role": "viewer",
+    "roles": ["clicker", "tracker", "admin"],
     "public_routes": ["/", "/health", "/api", "/login", "/logout"],
-    "rate_limits": {
-      "/login": {"max_attempts": 5, "window_seconds": 300}
-    },
-    "audit": {
+    "users": {
       "enabled": true,
-      "retention_days": 90
-    },
-    "csrf_protection": true,
-    "security": {
-      "hsts": {
-        "enabled": true,
-        "max_age": 31536000,
-        "include_subdomains": true
-      }
-    },
-    "jwt": {
-      "algorithm": "HS256",
-      "token_expiry_hours": 24
-    },
-    "password_policy": {
-      "min_length": 8,
-      "min_entropy_bits": 40,
-      "require_uppercase": true,
-      "require_lowercase": true,
-      "require_numbers": true,
-      "check_common_passwords": true
-    },
-    "session_binding": {
-      "bind_ip": false,
-      "bind_fingerprint": true
+      "strategy": "app_users",
+      "demo_users": [
+        {
+          "email": "alice@example.com",
+          "password": "password123",
+          "app_roles": {
+            "click_tracker": ["admin"],
+            "dashboard": ["admin"]
+          }
+        },
+        {
+          "email": "bob@example.com",
+          "password": "password123",
+          "app_roles": {
+            "click_tracker": ["tracker"],
+            "dashboard": ["tracker"]
+          }
+        },
+        {
+          "email": "charlie@example.com",
+          "password": "password123",
+          "app_roles": {
+            "click_tracker": ["clicker"],
+            "dashboard": ["clicker"]
+          }
+        }
+      ],
+      "demo_user_seed_strategy": "auto"
     }
+  },
+  "cors": {
+    "enabled": true,
+    "allow_origins": ["http://localhost:8000", "http://localhost:8001"],
+    "allow_credentials": true,
+    "allow_methods": ["*"],
+    "allow_headers": ["*"]
   },
   "data_access": {
     "read_scopes": ["dashboard", "click_tracker"],
-    "write_scope": "dashboard",
-    "cross_app_policy": "explicit"
+    "write_scope": "dashboard"
   }
 }
-

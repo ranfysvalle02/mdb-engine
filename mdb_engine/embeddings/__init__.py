@@ -7,6 +7,22 @@ Examples should implement their own LLM clients directly using the OpenAI SDK.
 For memory functionality, use mdb_engine.memory.Mem0MemoryService which
 handles embeddings and LLM via environment variables (.env).
 
+FastAPI Dependency Injection:
+    # RECOMMENDED: Use request-scoped dependencies
+    from mdb_engine.dependencies import get_embedding_service
+
+    @app.post("/embed")
+    async def embed_text(embedding_service=Depends(get_embedding_service)):
+        embeddings = await embedding_service.embed_chunks(["Hello world"])
+        return {"embeddings": embeddings}
+
+Standalone Usage:
+    from mdb_engine.embeddings import EmbeddingService, get_embedding_service
+
+    # Auto-detects OpenAI or Azure from environment variables
+    service = get_embedding_service(config={"default_embedding_model": "text-embedding-3-small"})
+    embeddings = await service.embed_chunks(["Hello world"])
+
 Example LLM implementation:
     from openai import AzureOpenAI
     from dotenv import load_dotenv
@@ -24,25 +40,9 @@ Example LLM implementation:
         model=os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME"),
         messages=[...]
     )
-
-Example EmbeddingService usage:
-    from mdb_engine.embeddings import EmbeddingService, get_embedding_service
-
-    # In FastAPI route
-    @app.post("/embed")
-    async def embed_text(embedding_service: EmbeddingService = Depends(get_embedding_service)):
-        embeddings = await embedding_service.embed_chunks(["Hello world"])
-        return {"embeddings": embeddings}
 """
 
-from .dependencies import (
-    create_embedding_dependency,
-    get_embedding_service_dep,
-    get_embedding_service_dependency,
-    get_embedding_service_for_app,
-    get_global_engine,
-    set_global_engine,
-)
+from .dependencies import get_embedding_service_for_app
 from .service import (
     AzureOpenAIEmbeddingProvider,
     BaseEmbeddingProvider,
@@ -54,17 +54,16 @@ from .service import (
 )
 
 __all__ = [
+    # Core service classes
     "EmbeddingService",
     "EmbeddingServiceError",
+    "EmbeddingProvider",
+    # Embedding providers
     "BaseEmbeddingProvider",
     "OpenAIEmbeddingProvider",
     "AzureOpenAIEmbeddingProvider",
-    "EmbeddingProvider",
+    # Factory function
     "get_embedding_service",
+    # Utility for standalone usage
     "get_embedding_service_for_app",
-    "create_embedding_dependency",
-    "set_global_engine",
-    "get_global_engine",
-    "get_embedding_service_dependency",
-    "get_embedding_service_dep",
 ]

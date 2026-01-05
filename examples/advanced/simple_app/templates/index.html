@@ -303,13 +303,24 @@ app = engine.create_app(
     </div>
     
     <script>
+        // Helper to read cookies for CSRF token
+        function getCookie(name) {
+            const value = `; ${document.cookie}`;
+            const parts = value.split(`; ${name}=`);
+            if (parts.length === 2) return parts.pop().split(';').shift();
+            return '';
+        }
+        
         async function addTask(event) {
             event.preventDefault();
             const title = document.getElementById('taskTitle').value;
             
             const response = await fetch('/api/tasks', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-Token': getCookie('csrf_token')
+                },
                 body: JSON.stringify({title})
             });
             
@@ -320,7 +331,8 @@ app = engine.create_app(
         
         async function toggleTask(taskId) {
             const response = await fetch(`/api/tasks/${taskId}/toggle`, {
-                method: 'POST'
+                method: 'POST',
+                headers: { 'X-CSRF-Token': getCookie('csrf_token') }
             });
             
             if (response.ok) {
@@ -330,7 +342,8 @@ app = engine.create_app(
         
         async function deleteTask(taskId) {
             const response = await fetch(`/api/tasks/${taskId}`, {
-                method: 'DELETE'
+                method: 'DELETE',
+                headers: { 'X-CSRF-Token': getCookie('csrf_token') }
             });
             
             if (response.ok) {

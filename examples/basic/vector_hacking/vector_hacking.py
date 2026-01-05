@@ -538,7 +538,7 @@ Generate ONE random phrase. Output ONLY the phrase, nothing else."""
             # Use EmbeddingService (from mem0)
             if not self.embedding_service:
                 raise RuntimeError(
-                    "EmbeddingService not provided - must be initialized from engine.get_memory_service()"
+                    "EmbeddingService not provided - must be initialized from engine.get_embedding_service()"
                 )
 
             # Embedding model is configured in constructor

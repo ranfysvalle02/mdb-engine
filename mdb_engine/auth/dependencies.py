@@ -41,15 +41,20 @@ def _get_secret_key() -> str:
     if _SECRET_KEY_CACHE is not None:
         return _SECRET_KEY_CACHE
 
-    secret_key = os.environ.get("FLASK_SECRET_KEY") or os.environ.get("SECRET_KEY")
+    secret_key = (
+        os.environ.get("FLASK_SECRET_KEY")
+        or os.environ.get("SECRET_KEY")
+        or os.environ.get("APP_SECRET_KEY")
+    )
 
     if not secret_key:
         raise ConfigurationError(
-            "FLASK_SECRET_KEY environment variable is required for JWT token security. "
-            "Set a strong secret key (minimum 32 characters, cryptographically random). "
-            "Example: export FLASK_SECRET_KEY=$(python -c "
+            "SECRET_KEY environment variable is required for JWT token security. "
+            "Set FLASK_SECRET_KEY, SECRET_KEY, or APP_SECRET_KEY with a strong secret key "
+            "(minimum 32 characters, cryptographically random). "
+            "Example: export SECRET_KEY=$(python -c "
             "'import secrets; print(secrets.token_urlsafe(32))')",
-            config_key="FLASK_SECRET_KEY",
+            config_key="SECRET_KEY",
         )
 
     if len(secret_key) < 32:

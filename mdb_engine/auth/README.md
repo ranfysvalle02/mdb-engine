@@ -926,18 +926,132 @@ CSRF protection is **auto-enabled for shared auth mode**. The middleware uses th
 4. SameSite=Lax cookies provide additional protection
 
 **Frontend Integration:**
-```javascript
-// Read token from cookie
-const csrfToken = document.cookie
-  .split('; ')
-  .find(row => row.startsWith('csrf_token='))
-  ?.split('=')[1];
 
-// Include in requests
-fetch('/api/submit', {
-  method: 'POST',
-  headers: {'X-CSRF-Token': csrfToken}
-});
+Helper function for reading cookies:
+
+```javascript
+// Reusable cookie helper
+function getCookie(name) {
+    const value = `; ${document.cookie}`;
+    const parts = value.split(`; ${name}=`);
+    if (parts.length === 2) return parts.pop().split(';').shift();
+    return null;
+}
+```
+
+Include in all state-changing requests:
+
+```javascript
+// POST request with CSRF token
+async function createItem(data) {
+    const response = await fetch('/api/items', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': getCookie('csrf_token')
+        },
+        credentials: 'same-origin',
+        body: JSON.stringify(data)
+    });
+    return response.json();
+}
+
+// DELETE request with CSRF token
+async function deleteItem(id) {
+    const response = await fetch(`/api/items/${id}`, {
+        method: 'DELETE',
+        headers: {
+            'X-CSRF-Token': getCookie('csrf_token')
+        },
+        credentials: 'same-origin'
+    });
+    return response.json();
+}
+```
+
+**Logout Must Be POST:**
+
+For security, logout endpoints should use POST method, not GET:
+
+```javascript
+// Correct: POST with CSRF token
+async function logout() {
+    const response = await fetch('/logout', {
+        method: 'POST',
+        headers: {
+            'X-CSRF-Token': getCookie('csrf_token')
+        },
+        credentials: 'same-origin'
+    });
+    
+    const result = await response.json();
+    if (result.success) {
+        window.location.href = result.redirect || '/login';
+    }
+}
+```
+
+Backend endpoint:
+
+```python
+@app.post("/logout")
+async def logout(request: Request):
+    """Logout must be POST with CSRF token."""
+    response = JSONResponse({"success": True, "redirect": "/login"})
+    response = await logout_user(request, response)
+    return response
+```
+
+**Login/Register JSON Pattern:**
+
+Return JSON responses for AJAX forms:
+
+```python
+@app.post("/login")
+async def login(request: Request, email: str = Form(...), password: str = Form(...)):
+    """Login returning JSON for JavaScript frontend."""
+    result = await authenticate_user(email, password)
+    
+    if result["success"]:
+        json_response = JSONResponse({"success": True, "redirect": "/dashboard"})
+        # Copy auth cookies from result
+        for key, value in result["response"].headers.items():
+            if key.lower() == "set-cookie":
+                json_response.headers.append(key, value)
+        return json_response
+    
+    return JSONResponse(
+        {"success": False, "detail": result.get("error", "Login failed")},
+        status_code=401
+    )
+```
+
+**Error Handling:**
+
+Handle CSRF validation failures (403 status):
+
+```javascript
+async function secureRequest(url, options = {}) {
+    const response = await fetch(url, {
+        ...options,
+        headers: {
+            ...options.headers,
+            'X-CSRF-Token': getCookie('csrf_token')
+        },
+        credentials: 'same-origin'
+    });
+    
+    if (response.status === 403) {
+        const data = await response.json();
+        if (data.detail?.includes('CSRF')) {
+            // Token expired - refresh the page
+            window.location.reload();
+            return null;
+        }
+    }
+    
+    return response;
+}
 ```
 
 ### HSTS (HTTP Strict Transport Security)

@@ -7,10 +7,11 @@ This demonstrates MDB_ENGINE with a vector hacking demo including:
 - Real-time status updates
 - Modern, responsive UI
 
-Uses engine.create_app() for automatic lifecycle management.
+Uses engine.create_app() for automatic lifecycle management with on_startup/on_shutdown callbacks.
 """
 import logging
 import os
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -26,6 +27,14 @@ from mdb_engine import MongoDBEngine
 
 # Load environment variables
 load_dotenv()
+
+# Configure logging to show INFO level (and respect LOG_LEVEL env var)
+log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(
+    level=getattr(logging, log_level, logging.INFO),
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    stream=sys.stdout,
+)
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -43,15 +52,6 @@ db_name = os.getenv("MONGO_DB_NAME", "vector_hacking_db")
 # Initialize the MongoDB Engine
 engine = MongoDBEngine(mongo_uri=mongo_uri, db_name=db_name)
 
-# Create FastAPI app with automatic lifecycle management
-app = engine.create_app(
-    slug=APP_SLUG,
-    manifest=Path(__file__).parent / "manifest.json",
-    title="Vector Hacking - MDB_ENGINE Demo",
-    description="A demonstration of vector inversion/hacking using LLMs",
-    version="1.0.0",
-)
-
 
 class StartAttackRequest(BaseModel):
     target: Optional[str] = None
@@ -64,18 +64,15 @@ if not templates_dir.exists():
     templates_dir = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(templates_dir))
 
-# Vector hacking service instance (initialized on startup)
+# Vector hacking service instance (initialized via on_startup callback)
 vector_hacking_service: Optional[VectorHackingService] = None
 
 
-def get_db(request: Request):
-    """Get the scoped database from app state"""
-    return request.app.state.engine.get_scoped_db(APP_SLUG)
-
-
-@app.on_event("startup")
-async def post_startup():
-    """Initialize vector hacking service after engine is ready"""
+async def on_startup(app, eng, manifest):
+    """Initialize vector hacking service after engine is ready.
+    
+    Called by engine.create_app() after full initialization.
+    """
     global vector_hacking_service
 
     logger.info("Initializing Vector Hacking Service...")
@@ -94,49 +91,23 @@ async def post_startup():
 
     openai_client = AzureOpenAI(api_version=api_version, azure_endpoint=endpoint, api_key=key)
 
-    # Get EmbeddingService - try memory service first, fallback to standalone
-    app_config = engine.get_app(APP_SLUG)
+    # Get EmbeddingService from engine (configured via manifest.json)
+    embedding_service = eng.get_embedding_service(APP_SLUG)
+    if not embedding_service:
+        logger.error(
+            "EmbeddingService not configured! Add 'embedding_config' to manifest.json."
+        )
+        raise RuntimeError("EmbeddingService not configured - required for vector hacking")
+
+    # Get embedding model from app config
+    app_config = eng.get_app(APP_SLUG)
     embedding_model = "text-embedding-3-small"
     temperature = 0.8
 
-    # Detect if using Azure OpenAI
-    is_azure = bool(os.getenv("AZURE_OPENAI_ENDPOINT") and os.getenv("AZURE_OPENAI_API_KEY"))
+    if app_config and "embedding_config" in app_config:
+        embedding_model = app_config["embedding_config"].get("default_embedding_model", embedding_model)
 
-    # Get embedding model and temperature from manifest.json config
-    if app_config:
-        if "embedding_config" in app_config:
-            config_embedding_model = app_config["embedding_config"].get("default_embedding_model")
-            # If using Azure OpenAI, prefer Azure-compatible models
-            if config_embedding_model:
-                if is_azure and not config_embedding_model.startswith(("text-embedding", "ada")):
-                    logger.warning(
-                        f"Embedding model '{config_embedding_model}' may not be compatible with Azure OpenAI. Using '{embedding_model}' instead."
-                    )
-                else:
-                    embedding_model = config_embedding_model
-
-    # Try memory service first (if memory_config is enabled)
-    embedding_service = None
-    memory_service = engine.get_memory_service(APP_SLUG)
-    if memory_service:
-        from mdb_engine.embeddings import get_embedding_service
-
-        embedding_service = get_embedding_service(config={})
-        logger.info("EmbeddingService initialized with mem0 (via memory service)")
-
-    # Fallback: initialize standalone using manifest.json config
-    if not embedding_service:
-        embedding_config = app_config.get("embedding_config", {}) if app_config else {}
-
-        config = {}
-        config["default_embedding_model"] = embedding_model
-
-        from mdb_engine.embeddings import get_embedding_service
-
-        embedding_service = get_embedding_service(config=config)
-        logger.info(
-            f"EmbeddingService initialized standalone (from manifest.json, model: {embedding_model})"
-        )
+    logger.info(f"EmbeddingService initialized (model: {embedding_model})")
 
     logger.info(
         f"Vector hacking config: chat={deployment_name}, embedding={embedding_model}, temp={temperature}"
@@ -159,9 +130,11 @@ async def post_startup():
     logger.info("Web application ready!")
 
 
-@app.on_event("shutdown")
-async def pre_shutdown():
-    """Cleanup vector hacking service before engine shuts down"""
+async def on_shutdown(app, eng, manifest):
+    """Cleanup vector hacking service before engine shuts down.
+    
+    Called by engine.create_app() before shutdown.
+    """
     global vector_hacking_service
 
     if vector_hacking_service:
@@ -173,148 +146,105 @@ async def pre_shutdown():
     logger.info("Vector hacking service cleaned up")
 
 
+# Create FastAPI app with automatic lifecycle management
+# on_startup and on_shutdown callbacks run within the engine's lifespan context
+app = engine.create_app(
+    slug=APP_SLUG,
+    manifest=Path(__file__).parent / "manifest.json",
+    title="Vector Hacking - MDB_ENGINE Demo",
+    description="A demonstration of vector inversion/hacking using LLMs",
+    version="1.0.0",
+    on_startup=on_startup,
+    on_shutdown=on_shutdown,
+)
+
+
 # ============================================================================
 # Routes
 # ============================================================================
 
 
 @app.get("/health", response_class=JSONResponse)
-async def health_check():
-    """Health check endpoint for container healthchecks"""
-    health = await engine.get_health_status()
-    status_code = 200 if health.get("status") == "healthy" else 503
-    return JSONResponse(content=health, status_code=status_code)
+async def health():
+    """Health check endpoint"""
+    return {
+        "status": "healthy",
+        "service_initialized": vector_hacking_service is not None,
+    }
 
 
 @app.get("/", response_class=HTMLResponse)
-async def root(request: Request):
-    """Home page - shows the vector hacking interface"""
-    if vector_hacking_service:
-        try:
-            # Render the index page using the service's template rendering
-            html_content = await vector_hacking_service.render_index()
-            return HTMLResponse(content=html_content)
-        except (AttributeError, RuntimeError):
-            # Fallback to template
-            try:
-                return templates.TemplateResponse(request, "index.html")
-            except (RuntimeError, FileNotFoundError):
-                return HTMLResponse(
-                    content="<h1>Vector Hacking Demo</h1><p>Template rendering failed. Check logs.</p>"
-                )
-    else:
-        # Fallback if service not available
-        try:
-            return templates.TemplateResponse(request, "index.html")
-        except (RuntimeError, FileNotFoundError):
-            return HTMLResponse(
-                content="<h1>Vector Hacking Demo</h1><p>Vector hacking service not initialized. Please check configuration.</p>"
-            )
+async def home(request: Request):
+    """Render the main page"""
+    return templates.TemplateResponse("index.html", {"request": request})
 
 
-@app.post("/start", response_class=JSONResponse)
-async def start_attack(request: Optional[StartAttackRequest] = None):
-    """
-    Start the vector hacking attack.
-
-    Can use:
-    - Custom target (if request.target is provided)
-    - AI-generated random target (if request.generate_random is True)
-    - Default target (if neither is provided)
-    """
-    if not vector_hacking_service:
-        raise HTTPException(
-            status_code=503,
-            detail="Vector hacking service not initialized. Check LLM service configuration.",
-        )
-
-    target = request.target if request and request.target else None
-    generate_random = request.generate_random if request else False
-
-    result = await vector_hacking_service.start_attack(
-        custom_target=target, generate_random=generate_random
-    )
-    return result
-
-
-@app.post("/stop", response_class=JSONResponse)
-async def stop_attack():
-    """Stop the vector hacking attack"""
+@app.post("/api/attack/start")
+async def start_attack(request: StartAttackRequest):
+    """Start a vector hacking attack"""
     if not vector_hacking_service:
         raise HTTPException(status_code=503, detail="Vector hacking service not initialized")
 
-    result = await vector_hacking_service.stop_attack()
-    return result
+    try:
+        # Get target (either provided or generate random)
+        target = request.target
+        if request.generate_random or not target:
+            target = await vector_hacking_service.generate_random_target()
+
+        # Start the attack
+        await vector_hacking_service.start_attack(target)
+
+        return {
+            "status": "started",
+            "target": target,
+            "message": f"Attack started against target: {target[:50]}..."
+            if len(target) > 50
+            else f"Attack started against target: {target}",
+        }
+    except (ValueError, RuntimeError, TypeError, AttributeError) as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
-@app.get("/api/status", response_class=JSONResponse)
-async def get_attack_status():
-    """Get the current status of the vector hacking attack"""
+@app.post("/api/attack/stop")
+async def stop_attack():
+    """Stop the current attack"""
+    if not vector_hacking_service:
+        raise HTTPException(status_code=503, detail="Vector hacking service not initialized")
+
+    try:
+        await vector_hacking_service.stop_attack()
+        return {"status": "stopped", "message": "Attack stopped"}
+    except (ValueError, RuntimeError, AttributeError) as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.get("/api/attack/status")
+async def get_status():
+    """Get current attack status"""
     if not vector_hacking_service:
         return {
-            "status": "not_available",
-            "running": False,
-            "error": "Vector hacking service not initialized. Check LLM service configuration.",
+            "is_running": False,
+            "iteration": 0,
+            "current_similarity": 0.0,
+            "best_similarity": 0.0,
+            "target": None,
+            "current_text": None,
+            "best_text": None,
+            "history": [],
         }
 
-    status_data = await vector_hacking_service.get_status()
-    return status_data
+    status = await vector_hacking_service.get_status()
+    return status
 
 
-@app.post("/api/generate-target", response_class=JSONResponse)
-async def generate_random_target():
-    """Generate a random target phrase using LLM"""
+@app.get("/api/attack/history")
+async def get_history(limit: int = 100):
+    """Get attack history from database"""
     if not vector_hacking_service:
-        raise HTTPException(status_code=503, detail="Vector hacking service not initialized")
+        return {"history": [], "total": 0}
 
-    target = await vector_hacking_service.generate_random_target()
-    return {"target": target, "status": "generated"}
-
-
-@app.post("/api/reset", response_class=JSONResponse)
-async def reset_attack(request: Optional[StartAttackRequest] = None):
-    """
-    Reset attack state for a new attack - game-like experience.
-
-    Can optionally set a new target or generate a random one.
-    """
-    if not vector_hacking_service:
-        raise HTTPException(status_code=503, detail="Vector hacking service not initialized")
-
-    new_target = request.target if request and request.target else None
-    generate_random = request.generate_random if request else False
-
-    result = await vector_hacking_service.reset_attack(
-        new_target=new_target, generate_random=generate_random
-    )
-    return result
-
-
-@app.post("/api/restart", response_class=JSONResponse)
-async def restart_attack():
-    """
-    Restart attack - resets state and signals frontend to reload page.
-
-    This endpoint resets the state. The frontend will reload the page
-    for a fresh game-like experience.
-    """
-    if not vector_hacking_service:
-        raise HTTPException(status_code=503, detail="Vector hacking service not initialized")
-
-    await vector_hacking_service.stop_attack()
-    await vector_hacking_service.reset_attack()
-
-    return {"status": "ready", "reload": True, "message": "State reset. Page will reload."}
-
-
-@app.get("/api/health", response_class=JSONResponse)
-async def health_api():
-    """Health status API endpoint (legacy - use /health instead)"""
-    health = await engine.get_health_status()
-    return health
-
-
-if __name__ == "__main__":
-    import uvicorn
-
-    uvicorn.run(app, host="0.0.0.0", port=8000, ws="auto")
+    try:
+        history = await vector_hacking_service.get_history(limit=limit)
+        return {"history": history, "total": len(history)}
+    except (ValueError, RuntimeError, TypeError, AttributeError) as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e

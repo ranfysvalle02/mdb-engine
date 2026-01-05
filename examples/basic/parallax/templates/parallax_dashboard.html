@@ -888,6 +888,14 @@
     </main>
 
     <script>
+        // Helper to read cookies for CSRF token
+        function getCookie(name) {
+            const value = `; ${document.cookie}`;
+            const parts = value.split(`; ${name}=`);
+            if (parts.length === 2) return parts.pop().split(';').shift();
+            return '';
+        }
+
         // Cache DOM elements
         const elements = {
             settingsModal: null,
@@ -1279,7 +1287,10 @@
 
                 const watchlistRes = await fetch('/api/watchlist', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-Token': getCookie('csrf_token')
+                    },
                     body: JSON.stringify({
                         watchlist: currentWatchlist,
                         scan_limit: scanLimit,
@@ -1300,7 +1311,10 @@
                 for(const [lensName, config] of Object.entries(currentLensConfigs)) {
                     const lensRes = await fetch(`/api/lenses/${lensName}`, {
                         method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRF-Token': getCookie('csrf_token')
+                        },
                         body: JSON.stringify(config)
                     });
 
@@ -1743,7 +1757,10 @@
             const originalHTML = btn.innerHTML;
 
             try {
-                const res = await fetch('/api/refresh', {method: 'POST'});
+                const res = await fetch('/api/refresh', {
+                    method: 'POST',
+                    headers: { 'X-CSRF-Token': getCookie('csrf_token') }
+                });
                 const data = await res.json();
                 if(data.success) {
                     showNotification(data.message || 'Scan complete', data.status === 'no_new' ? 'info' : 'success');

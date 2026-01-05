@@ -1,59 +1,88 @@
+#!/usr/bin/env python3
 """
-ClickTracker Application
+Click Tracker Application
+=========================
 
-Tracks user clicks and events. Demonstrates app-level authentication
-using the unified MongoDBEngine pattern.
+Tracks user clicks and events with role-based access control using Casbin.
 
-The engine automatically:
-- Detects multi-site mode from manifest (cross_app_policy: explicit)
-- Auto-retrieves app tokens from environment or database
-- Manages lifecycle with FastAPI integration
+Key Features:
+- Uses engine.create_app() for automatic lifecycle management
+- Casbin authorization auto-initialized from manifest
+- Demo users auto-seeded from manifest config
+- RBAC: admin (full), editor (read+write), viewer (read only)
 """
 
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any
 
-from fastapi import HTTPException, Request
-from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi import Depends, Form, HTTPException, Request
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
-from pymongo.errors import PyMongoError
 
 from mdb_engine import MongoDBEngine
+from mdb_engine.dependencies import get_scoped_db, get_authz_provider
+from mdb_engine.auth import (
+    authenticate_app_user,
+    create_app_session,
+    get_app_user,
+    logout_user,
+)
 
-# Initialize engine
+# =============================================================================
+# App Configuration
+# =============================================================================
+
+APP_SLUG = "click_tracker"
+
+# Initialize the MongoDB Engine
 engine = MongoDBEngine(
     mongo_uri=os.getenv("MONGODB_URI", "mongodb://localhost:27017"),
     db_name=os.getenv("MONGODB_DB", "mdb_runtime"),
 )
 
 # Create FastAPI app with automatic lifecycle management
-# Multi-site mode is auto-detected from manifest
+# This automatically handles:
+# - Engine initialization and shutdown
+# - Manifest loading and validation
+# - Casbin authorization provider initialization
+# - Demo user seeding
+# - Multi-site mode detection from manifest
 app = engine.create_app(
-    slug="click_tracker",
+    slug=APP_SLUG,
     manifest=Path(__file__).parent / "manifest.json",
     title="Click Tracker",
+    description="Track user clicks with role-based access control",
+    version="1.0.0",
 )
 
 # Templates
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 
-# Global exception handler to ensure JSON errors
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    import traceback
-    traceback.print_exc()
-    if isinstance(exc, HTTPException):
-        return JSONResponse(
-            status_code=exc.status_code,
-            content={"detail": exc.detail}
-        )
-    return JSONResponse(
-        status_code=500,
-        content={"detail": f"Internal server error: {str(exc)}"}
+# =============================================================================
+# Helper: Get Current User
+# =============================================================================
+
+
+async def get_current_user(request: Request):
+    """Get the currently authenticated user from session cookie."""
+    db = engine.get_scoped_db(APP_SLUG)
+    app_config = engine.get_app(APP_SLUG)
+
+    user = await get_app_user(
+        request=request,
+        slug_id=APP_SLUG,
+        db=db,
+        config=app_config,
+        allow_demo_fallback=False,
     )
+    return user
+
+
+# =============================================================================
+# Routes: Pages & Health
+# =============================================================================
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -62,112 +91,221 @@ async def root(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
 
+@app.get("/health")
+async def health():
+    """Health check endpoint."""
+    return {
+        "status": "healthy",
+        "app": APP_SLUG,
+        "engine": "initialized" if engine.initialized else "starting",
+        "authz": "configured" if hasattr(app.state, "authz_provider") else "not_configured",
+    }
+
+
 @app.get("/api")
 async def api_info():
     """API info endpoint - lists available endpoints."""
     return {
-        "app": "click_tracker",
+        "app": APP_SLUG,
         "endpoints": {
             "GET /": "HTML demo page",
-            "POST /track": "Track a click event",
-            "GET /clicks": "Get click history (optional: ?user_id=xxx&limit=100)",
+            "POST /login": "Authenticate user",
+            "GET /logout": "Logout user",
+            "GET /api/me": "Get current user info and permissions",
+            "POST /track": "Track a click event (requires write permission)",
+            "GET /clicks": "Get click history (requires read permission)",
             "GET /health": "Health check",
-            "GET /docs": "API documentation (Swagger UI)",
-        }
+        },
     }
 
 
-@app.get("/secret-info")
-async def secret_info():
-    """Get information about app secret configuration."""
-    token = engine.get_app_token("click_tracker")
-    
-    info = {
-        "secret_configured": token is not None,
-        "engine_initialized": engine._initialized,
-        "has_secrets_manager": engine._app_secrets_manager is not None,
-    }
-    
-    if engine._app_secrets_manager:
-        try:
-            secret_exists = await engine._app_secrets_manager.app_secret_exists("click_tracker")
-            info["secret_exists_in_db"] = secret_exists
-            if token:
-                info["message"] = "Secret is available (auto-retrieved)"
-            elif secret_exists:
-                info["message"] = "Secret exists in database but not yet retrieved"
-            else:
-                info["message"] = "No secret found. Register app to generate one."
-        except (PyMongoError, ValueError, RuntimeError) as e:
-            info["error"] = str(e)
-    else:
-        info["message"] = "Secrets manager not initialized (set MDB_ENGINE_MASTER_KEY)"
-    
-    return info
+# =============================================================================
+# Routes: Authentication
+# =============================================================================
 
 
-async def _get_db():
-    """Get scoped database with auto-retrieved token."""
-    token = engine.get_app_token("click_tracker")
-    if not token:
-        # Try to auto-retrieve
-        token = await engine.auto_retrieve_app_token("click_tracker")
-    
-    if not token:
-        raise HTTPException(
-            status_code=500,
-            detail="App token not available. Set CLICK_TRACKER_SECRET or ensure app is registered."
+@app.post("/login")
+async def login(
+    request: Request,
+    email: str = Form(...),
+    password: str = Form(...),
+    db=Depends(get_scoped_db),
+):
+    """Authenticate user and create session."""
+    user = await authenticate_app_user(
+        db=db,
+        email=email,
+        password=password,
+        collection_name="users",
+    )
+
+    if not user:
+        return JSONResponse(
+            status_code=401,
+            content={"success": False, "detail": "Invalid credentials"},
         )
-    
-    return engine.get_scoped_db("click_tracker", app_token=token)
+
+    response = JSONResponse(content={"success": True, "user_id": str(user["_id"])})
+    app_config = engine.get_app(APP_SLUG)
+
+    await create_app_session(
+        request=request,
+        slug_id=APP_SLUG,
+        user_id=str(user["_id"]),
+        config=app_config,
+        response=response,
+    )
+
+    return response
+
+
+@app.post("/logout")
+async def logout(request: Request):
+    """Clear session and logout user."""
+    response = JSONResponse(content={"success": True})
+    response = await logout_user(request, response)
+
+    app_config = engine.get_app(APP_SLUG)
+    if app_config:
+        auth = app_config.get("auth", {})
+        users_config = auth.get("users", {})
+        cookie_name = f"{users_config.get('session_cookie_name', 'app_session')}_{APP_SLUG}"
+        response.delete_cookie(key=cookie_name, httponly=True, samesite="lax")
+
+    return response
+
+
+# =============================================================================
+# Routes: User Info & Permissions
+# =============================================================================
+
+
+@app.get("/api/me")
+async def get_me(request: Request, authz=Depends(get_authz_provider)):
+    """Get current user info and their permissions."""
+    user = await get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    email = user.get("email", "unknown")
+    permissions = []
+
+    if authz:
+        for action in ["read", "write", "delete"]:
+            try:
+                if await authz.check(email, "clicks", action):
+                    permissions.append(action)
+            except Exception:
+                pass
+
+    return {
+        "email": email,
+        "role": user.get("role", "unknown"),
+        "permissions": permissions,
+    }
+
+
+# =============================================================================
+# Routes: Click Tracking (Protected by Casbin)
+# =============================================================================
 
 
 @app.post("/track")
-async def track_click(click_data: Dict[str, Any] = None):
-    """Track a click event - simple demo endpoint."""
+async def track_click(
+    request: Request,
+    authz=Depends(get_authz_provider),
+    db=Depends(get_scoped_db),
+):
+    """Track a click event. Requires 'write' permission on 'clicks'."""
+    user = await get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    if authz and not await authz.check(user.get("email"), "clicks", "write"):
+        raise HTTPException(status_code=403, detail="Permission denied: cannot write clicks")
+
+    # Parse request body (optional - uses defaults if not provided)
     try:
-        db = await _get_db()
-        
-        # Prepare click document (use defaults if not provided)
-        click_doc = {
-            "user_id": (click_data or {}).get("user_id", "demo_user"),
-            "timestamp": datetime.utcnow(),
-            "session_id": (click_data or {}).get("session_id", "demo_session"),
-            "url": (click_data or {}).get("url", "/"),
-            "element": (click_data or {}).get("element", "click-button"),
-        }
-        
-        # Insert click
-        result = await db.clicks.insert_one(click_doc)
-        
-        return JSONResponse(content={"click_id": str(result.inserted_id), "status": "tracked"})
-    except HTTPException:
-        raise
-    except (PyMongoError, ValueError, TypeError, KeyError) as e:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Error tracking click: {str(e)}")
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    click_doc = {
+        "user_id": body.get("user_id", user.get("email")),
+        "timestamp": datetime.utcnow(),
+        "session_id": body.get("session_id", "default_session"),
+        "url": body.get("url", "/"),
+        "element": body.get("element", "unknown"),
+        "tracked_by": user.get("email"),
+    }
+
+    result = await db.clicks.insert_one(click_doc)
+
+    return JSONResponse(content={
+        "click_id": str(result.inserted_id),
+        "status": "tracked",
+    })
 
 
 @app.get("/clicks")
-async def get_clicks(user_id: str = None, limit: int = 100):
-    """Get click history - simple API endpoint."""
-    db = await _get_db()
-    
+async def get_clicks(
+    request: Request,
+    user_id: str = None,
+    limit: int = 100,
+    authz=Depends(get_authz_provider),
+    db=Depends(get_scoped_db),
+):
+    """Get click history. Requires 'read' permission on 'clicks'."""
+    user = await get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    if authz and not await authz.check(user.get("email"), "clicks", "read"):
+        raise HTTPException(status_code=403, detail="Permission denied: cannot read clicks")
+
     query = {}
     if user_id:
         query["user_id"] = user_id
-    
+
     clicks = await db.clicks.find(query).sort("timestamp", -1).limit(limit).to_list(length=limit)
-    
+
+    # Convert for JSON
+    for click in clicks:
+        click["_id"] = str(click["_id"])
+        if click.get("timestamp"):
+            click["timestamp"] = click["timestamp"].isoformat()
+
     return {"clicks": clicks, "count": len(clicks)}
 
 
-@app.get("/health")
-async def health():
-    """Health check endpoint."""
-    return {"status": "healthy", "app": "click_tracker"}
+@app.delete("/clicks/{click_id}")
+async def delete_click(
+    click_id: str,
+    request: Request,
+    authz=Depends(get_authz_provider),
+    db=Depends(get_scoped_db),
+):
+    """Delete a click. Requires 'delete' permission on 'clicks'."""
+    user = await get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
 
+    if authz and not await authz.check(user.get("email"), "clicks", "delete"):
+        raise HTTPException(status_code=403, detail="Permission denied: cannot delete clicks")
+
+    from bson import ObjectId
+
+    result = await db.clicks.delete_one({"_id": ObjectId(click_id)})
+
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Click not found")
+
+    return {"deleted": True, "click_id": click_id}
+
+
+# =============================================================================
+# Run with uvicorn (for local development)
+# =============================================================================
 
 if __name__ == "__main__":
     import uvicorn

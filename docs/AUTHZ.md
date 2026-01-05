@@ -451,11 +451,38 @@ else:
 
 ## Configuration
 
+### Auto-Initialization from Manifest (Recommended)
+
+When using `engine.create_app()`, authorization providers are **automatically initialized** from your manifest configuration. No manual setup required!
+
+```python
+from mdb_engine import MongoDBEngine
+from pathlib import Path
+
+engine = MongoDBEngine(mongo_uri="...", db_name="...")
+
+# Authorization provider is auto-initialized based on manifest auth.policy.provider
+app = engine.create_app(
+    slug="my_app",
+    manifest=Path(__file__).parent / "manifest.json",
+)
+
+# The provider is available on app.state.authz_provider
+# Demo users are also auto-seeded if configured in manifest
+```
+
+**What gets auto-initialized:**
+- ✅ Casbin enforcer with MongoDB adapter (if `provider: "casbin"`)
+- ✅ OSO Cloud client (if `provider: "oso"`)
+- ✅ Initial policies from `authorization.initial_policies`
+- ✅ Initial role assignments from `authorization.initial_roles`
+- ✅ Demo users from `auth.users.demo_users`
+
 ### Manifest Configuration
 
 Authorization is configured in your app's `manifest.json`:
 
-**Casbin Configuration:**
+**Casbin Configuration (with auto-seeded policies and roles):**
 
 ```json
 {
@@ -468,41 +495,71 @@ Authorization is configured in your app's `manifest.json`:
       "authorization": {
         "model": "rbac",
         "policies_collection": "casbin_policies",
-        "default_roles": ["user", "admin", "editor"],
-        "link_users_roles": true
+        "initial_policies": [
+          ["admin", "documents", "read"],
+          ["admin", "documents", "write"],
+          ["admin", "documents", "delete"],
+          ["editor", "documents", "read"],
+          ["editor", "documents", "write"],
+          ["viewer", "documents", "read"]
+        ],
+        "initial_roles": [
+          {"user": "alice@example.com", "role": "admin"},
+          {"user": "bob@example.com", "role": "editor"},
+          {"user": "charlie@example.com", "role": "viewer"}
+        ]
       }
+    },
+    "users": {
+      "enabled": true,
+      "strategy": "app_users",
+      "collection_name": "users",
+      "demo_users": [
+        {"email": "alice@example.com", "password": "password123", "role": "admin"},
+        {"email": "bob@example.com", "password": "password123", "role": "editor"},
+        {"email": "charlie@example.com", "password": "password123", "role": "viewer"}
+      ],
+      "demo_user_seed_strategy": "auto"
     }
   }
 }
 ```
 
-**OSO Configuration:**
+**OSO Configuration (with auto-seeded roles and demo users):**
 
 ```json
 {
   "slug": "my_app",
-  "auth_policy": {
-    "provider": "oso",
-    "required": true,
-    "allow_anonymous": false,
-    "authorization": {
-      "api_key": "${OSO_AUTH}",
-      "url": "${OSO_URL}",
-      "initial_roles": [
-        {
-          "user": "admin@example.com",
-          "role": "admin",
-          "resource": "documents"
-        },
-        {
-          "user": "editor@example.com",
-          "role": "editor",
-          "resource": "documents"
-        }
-      ]
+  "auth": {
+    "policy": {
+      "provider": "oso",
+      "required": true,
+      "allow_anonymous": false,
+      "authorization": {
+        "initial_roles": [
+          {"user": "alice@example.com", "role": "editor"},
+          {"user": "bob@example.com", "role": "viewer"}
+        ]
+      }
+    },
+    "users": {
+      "enabled": true,
+      "strategy": "app_users",
+      "collection_name": "users",
+      "demo_users": [
+        {"email": "alice@example.com", "password": "password123", "role": "editor"},
+        {"email": "bob@example.com", "password": "password123", "role": "viewer"}
+      ],
+      "demo_user_seed_strategy": "auto"
     }
   }
 }
+```
+
+**Environment Variables for OSO:**
+```bash
+export OSO_AUTH="your-oso-api-key"
+export OSO_URL="http://oso-dev:8080"  # For OSO Dev Server (local development)
 ```
 
 **Custom Provider:**
@@ -993,6 +1050,45 @@ async def require_admin_or_developer(...) -> Dict[str, Any]
 
 See the `examples/` directory for complete working examples:
 
-- `examples/chit_chat/` - Chat application with Casbin authorization
-- `examples/oso_hello_world/` - OSO-based authorization example
-- `examples/interactive_rag/` - RAG application with authorization
+### Basic Examples
+- `examples/basic/oso_hello_world/` - **OSO Cloud authorization** with auto-seeded demo users
+- `examples/basic/chit_chat/` - Chat application with Casbin authorization
+
+### Advanced Examples
+- `examples/advanced/multi_app/` - **Multi-app with Casbin** showing cross-app data access
+  - `click_tracker` - Tracks clicks with RBAC (admin/editor/viewer)
+  - `dashboard` - Analytics dashboard with cross-app read access
+
+### Key Patterns Demonstrated
+
+**1. Auto-initialization from manifest:**
+```python
+# Everything is auto-configured from manifest.json
+app = engine.create_app(slug="my_app", manifest=Path("manifest.json"))
+```
+
+**2. Using the authorization provider in routes:**
+```python
+from mdb_engine.dependencies import get_authz_provider
+
+@app.get("/protected")
+async def protected(authz=Depends(get_authz_provider)):
+    if not await authz.check(user_email, "resource", "action"):
+        raise HTTPException(403, "Permission denied")
+    return {"message": "Access granted"}
+```
+
+**3. Demo users with automatic seeding:**
+```json
+{
+  "auth": {
+    "users": {
+      "enabled": true,
+      "demo_users": [
+        {"email": "alice@example.com", "password": "password123", "role": "admin"}
+      ],
+      "demo_user_seed_strategy": "auto"
+    }
+  }
+}
+```

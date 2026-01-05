@@ -41,6 +41,7 @@ This example demonstrates:
 - **API Keys** (required):
   - `AZURE_OPENAI_API_KEY` + `AZURE_OPENAI_ENDPOINT` - For LLM and embeddings
   - OR `OPENAI_API_KEY` - For OpenAI
+- **Manifest Configuration**: `embedding_config` must be enabled in `manifest.json`
 
 ## Quick Start
 
@@ -110,9 +111,12 @@ app = engine.create_app(
     version="1.0.0",
 )
 
-# Get scoped database from request
-def get_db(request: Request):
-    return request.app.state.engine.get_scoped_db("vector_hacking")
+# Use dependency injection for database access
+from mdb_engine.dependencies import get_scoped_db
+
+@app.get("/items")
+async def get_items(db=Depends(get_scoped_db)):
+    return await db.items.find({}).to_list(100)
 ```
 
 This automatically handles:
@@ -141,13 +145,15 @@ vector_hacking/
 |----------|--------|-------------|
 | `/` | GET | Vector hacking dashboard (HTML) |
 | `/health` | GET | Health check for container healthchecks |
-| `/start` | POST | Start the vector hacking attack |
-| `/stop` | POST | Stop the attack |
+| `/start` | POST | Start the vector hacking attack (requires CSRF token) |
+| `/stop` | POST | Stop the attack (requires CSRF token) |
 | `/api/status` | GET | Get current attack status |
-| `/api/generate-target` | POST | Generate a random target phrase |
-| `/api/reset` | POST | Reset attack state |
-| `/api/restart` | POST | Restart attack (reset + reload signal) |
+| `/api/generate-target` | POST | Generate a random target phrase (requires CSRF token) |
+| `/api/reset` | POST | Reset attack state (requires CSRF token) |
+| `/api/restart` | POST | Restart attack (requires CSRF token) |
 | `/api/health` | GET | Health status API (legacy) |
+
+**Note:** POST endpoints require the `X-CSRF-Token` header with the value from the `csrf_token` cookie.
 
 ## How Vector Inversion Works
 

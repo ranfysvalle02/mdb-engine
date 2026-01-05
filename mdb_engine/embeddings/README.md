@@ -9,6 +9,7 @@ Semantic text splitting and embedding generation for MDB_ENGINE applications.
 - **Token-Aware**: Never exceeds model token limits
 - **Batch Processing**: Efficient batch embedding generation
 - **MongoDB Integration**: Built-in support for storing embeddings with metadata
+- **Request-Scoped Dependencies**: Clean FastAPI integration via `mdb_engine.dependencies`
 
 ## Installation
 
@@ -38,7 +39,44 @@ Enable embedding service in your `manifest.json`:
 
 ## Usage
 
-### 1. Basic Usage (Auto-Detection)
+### 1. FastAPI Routes (Recommended)
+
+Use request-scoped dependencies from `mdb_engine.dependencies`:
+
+```python
+from fastapi import Depends
+from mdb_engine import MongoDBEngine
+from mdb_engine.dependencies import get_embedding_service, get_scoped_db
+
+engine = MongoDBEngine(mongo_uri=..., db_name=...)
+app = engine.create_app(slug="my_app", manifest=Path("manifest.json"))
+
+@app.post("/embed")
+async def embed_endpoint(
+    db=Depends(get_scoped_db),
+    embedding_service=Depends(get_embedding_service),
+):
+    # Services are automatically bound to the current app
+    result = await embedding_service.process_and_store(
+        text_content="Hello world",
+        source_id="doc_1",
+        collection=db.knowledge_base,
+    )
+    return {"chunks_created": result["chunks_created"]}
+
+@app.post("/search")
+async def search(
+    query: str,
+    db=Depends(get_scoped_db),
+    embedding_service=Depends(get_embedding_service),
+):
+    # Generate query embedding
+    vectors = await embedding_service.embed_chunks([query])
+    # Use vectors for vector search...
+    return {"query_vector_dims": len(vectors[0])}
+```
+
+### 2. Basic Usage (Standalone)
 
 ```python
 from mdb_engine.embeddings import EmbeddingService
@@ -56,7 +94,7 @@ chunks = await embedding_service.chunk_text(
 vectors = await embedding_service.embed_chunks(chunks, model="text-embedding-3-small")
 ```
 
-### 2. Process and Store in MongoDB
+### 3. Process and Store in MongoDB
 
 ```python
 from mdb_engine.embeddings import EmbeddingService
@@ -75,7 +113,20 @@ result = await embedding_service.process_and_store(
 print(f"Created {result['chunks_created']} chunks")
 ```
 
-### 3. Explicit Provider
+### 4. Utility Function (Background Tasks/CLI)
+
+For use outside of FastAPI request handlers:
+
+```python
+from mdb_engine.embeddings.dependencies import get_embedding_service_for_app
+
+# In a background task or CLI tool
+service = get_embedding_service_for_app("my_app", engine)
+if service:
+    embeddings = await service.embed_chunks(["Hello world"])
+```
+
+### 5. Explicit Provider
 
 ```python
 from mdb_engine.embeddings import EmbeddingService, OpenAIEmbeddingProvider, EmbeddingProvider
@@ -84,27 +135,6 @@ from mdb_engine.embeddings import EmbeddingService, OpenAIEmbeddingProvider, Emb
 openai_provider = OpenAIEmbeddingProvider(default_model="text-embedding-3-small")
 provider = EmbeddingProvider(embedding_provider=openai_provider)
 embedding_service = EmbeddingService(embedding_provider=provider)
-```
-
-### 4. In FastAPI Routes
-
-```python
-from fastapi import FastAPI, Depends
-from mdb_engine.embeddings.dependencies import get_embedding_service_dependency
-from mdb_engine.embeddings import EmbeddingService
-
-app = FastAPI()
-
-# Set global engine during startup
-from mdb_engine.embeddings.dependencies import set_global_engine
-set_global_engine(engine, app_slug="my_app")
-
-@app.post("/embed")
-async def embed_endpoint(
-    embedding_service: EmbeddingService = Depends(get_embedding_service_dependency("my_app"))
-):
-    embeddings = await embedding_service.embed_chunks(["Hello world"])
-    return {"embeddings": embeddings}
 ```
 
 ## Environment Variables

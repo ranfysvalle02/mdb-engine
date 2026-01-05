@@ -24,14 +24,15 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 
 # Copy and install mdb_engine
 COPY mdb_engine ./mdb_engine
-RUN pip install --no-cache-dir . && \
-    pip install --no-cache-dir uvicorn[standard] fastapi jinja2 pydantic[email] bcrypt PyJWT
+RUN pip install --no-cache-dir ".[casbin]" && \
+    pip install --no-cache-dir uvicorn[standard] fastapi jinja2 pydantic[email] bcrypt PyJWT python-multipart casbin casbin-motor-adapter
 
 # Verify installation (including dependencies)
 RUN python -c "from mdb_engine import MongoDBEngine; print('✓ MongoDBEngine')" && \
     python -c "from mdb_engine.auth import SharedUserPool; print('✓ SharedUserPool')" && \
     python -c "import bcrypt; print('✓ bcrypt')" && \
-    python -c "import jwt; print('✓ PyJWT')"
+    python -c "import jwt; print('✓ PyJWT')" && \
+    python -c "import casbin; print('✓ Casbin')"
 
 # Runtime stage
 FROM python:3.11-slim
