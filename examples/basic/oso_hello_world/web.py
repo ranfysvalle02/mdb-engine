@@ -2,18 +2,17 @@
 """
 OSO Cloud Hello World Example
 
-An interactive demo showing OSO Cloud authorization.
-Improved UX/UI version.
+An interactive demo showing OSO Cloud authorization with mdb-engine.
+Uses engine.create_app() pattern for automatic lifecycle management.
 """
 import logging
 import os
 import sys
-from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
-from fastapi import Depends, FastAPI, Form, HTTPException, Request
+from dotenv import load_dotenv
+from fastapi import Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
@@ -24,9 +23,11 @@ from mdb_engine.auth import (
     get_app_user,
     get_authz_provider,
     logout_user,
-    setup_auth_from_manifest,
 )
 from mdb_engine.auth.provider import AuthorizationProvider
+
+# Load environment variables
+load_dotenv()
 
 # Configure logging
 logging.basicConfig(
@@ -35,66 +36,54 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)],
 )
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
-# Global engine instance
-engine: Optional[MongoDBEngine] = None
+# App configuration
+APP_SLUG = "oso_hello_world"
 
+# Initialize the MongoDB Engine
+engine = MongoDBEngine(
+    mongo_uri=os.getenv("MONGO_URI", "mongodb://mongodb:27017/"),
+    db_name=os.getenv("MONGO_DB_NAME", "oso_hello_world_db"),
+)
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Lifespan context manager for app initialization and cleanup."""
-    global engine
+# Create FastAPI app with automatic lifecycle management
+# This automatically handles:
+# - Engine initialization and shutdown
+# - Manifest loading and validation
+# - Auth setup from manifest (OSO, CORS, etc.)
+app = engine.create_app(
+    slug=APP_SLUG,
+    manifest=Path(__file__).parent / "manifest.json",
+    title="OSO Cloud Hello World",
+    description="An interactive demo showing OSO Cloud authorization",
+    version="1.0.0",
+)
 
-    logger.info("=" * 60)
-    logger.info("🚀 LIFESPAN STARTUP: Starting OSO Cloud Hello World Application...")
-    logger.info("=" * 60)
-
-    mongo_uri = os.getenv("MONGO_URI", "mongodb://mongodb:27017/")
-    db_name = os.getenv("MONGO_DB_NAME", "oso_hello_world_db")
-
-    engine = MongoDBEngine(mongo_uri=mongo_uri, db_name=db_name)
-    await engine.initialize()
-
-    manifest_path = Path(__file__).parent / "manifest.json"
-    if manifest_path.exists():
-        manifest = await engine.load_manifest(manifest_path)
-        await engine.register_app(manifest, create_indexes=True)
-
-    await setup_auth_from_manifest(app, engine, "oso_hello_world")
-
-    if hasattr(app.state, "authz_provider"):
-        logger.info("✅ Demo ready! Users: alice@example.com (editor), bob@example.com (viewer)")
-
-    yield
-
-    if engine:
-        await engine.shutdown()
-
-
-app = FastAPI(title="OSO Cloud Hello World", version="1.0.0", lifespan=lifespan)
-
-# CORS and stale session cleanup are now handled automatically by setup_auth_from_manifest()
-# based on manifest.json configuration
-
+# Templates
 templates_dir = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(templates_dir))
 
 
+# ============================================================================
+# Dependency Injection
+# ============================================================================
+
+
 def get_db():
-    if not engine:
+    """Get the scoped database"""
+    if not engine.initialized:
         raise HTTPException(503, "Engine not initialized")
-    return engine.get_scoped_db("oso_hello_world")
+    return engine.get_scoped_db(APP_SLUG)
 
 
 async def get_current_app_user(request: Request):
     """Helper to get current app user for oso_hello_world app."""
     db = get_db()
-    app_config = engine.get_app("oso_hello_world") if engine else None
+    app_config = engine.get_app(APP_SLUG)
 
     app_user = await get_app_user(
         request=request,
-        slug_id="oso_hello_world",
+        slug_id=APP_SLUG,
         db=db,
         config=app_config,
         allow_demo_fallback=False,
@@ -104,11 +93,48 @@ async def get_current_app_user(request: Request):
         # Check for stale cookie
         auth = app_config.get("auth", {}) if app_config else {}
         users_config = auth.get("users", {})
-        cookie_name = f"{users_config.get('session_cookie_name', 'app_session')}_oso_hello_world"
+        cookie_name = f"{users_config.get('session_cookie_name', 'app_session')}_{APP_SLUG}"
         if request.cookies.get(cookie_name):
             request.state.clear_stale_session = True
 
     return app_user
+
+
+# ============================================================================
+# Health Check Endpoint (for container healthchecks)
+# ============================================================================
+
+
+@app.get("/health", response_class=JSONResponse)
+async def health_check():
+    """Health check endpoint for container orchestration."""
+    health_status = {
+        "status": "healthy",
+        "app": APP_SLUG,
+        "engine_initialized": engine.initialized,
+    }
+
+    # Check MongoDB connection
+    if engine.initialized:
+        try:
+            db = engine.get_scoped_db(APP_SLUG)
+            await db.command("ping")
+            health_status["database"] = "connected"
+        except Exception as e:
+            health_status["status"] = "degraded"
+            health_status["database"] = f"error: {str(e)}"
+    else:
+        health_status["status"] = "starting"
+        health_status["database"] = "not_connected"
+
+    # Check OSO provider
+    if hasattr(app.state, "authz_provider"):
+        health_status["oso"] = "configured"
+    else:
+        health_status["oso"] = "not_configured"
+
+    status_code = 200 if health_status["status"] == "healthy" else 503
+    return JSONResponse(health_status, status_code=status_code)
 
 
 # ============================================================================
@@ -118,6 +144,7 @@ async def get_current_app_user(request: Request):
 
 @app.get("/", response_class=HTMLResponse)
 async def root(request: Request):
+    """Render the main page."""
     return templates.TemplateResponse("index.html", {"request": request})
 
 
@@ -127,12 +154,9 @@ async def login(
     email: str = Form(...),
     password: str = Form(...),
 ):
-    """
-    Handle login returning JSON instead of Redirect for better UI/UX.
-    """
-    # Type 4: Let errors bubble up to framework handler
+    """Handle login returning JSON for better UI/UX."""
     db = get_db()
-    app_config = engine.get_app("oso_hello_world") if engine else None
+    app_config = engine.get_app(APP_SLUG)
 
     user = await authenticate_app_user(
         db=db, email=email, password=password, collection_name="users"
@@ -149,13 +173,13 @@ async def login(
     # This helper attaches the cookie to the response object
     await create_app_session(
         request=request,
-        slug_id="oso_hello_world",
+        slug_id=APP_SLUG,
         user_id=str(user["_id"]),
         config=app_config,
         response=response,
     )
 
-    logger.info(f"✅ User logged in via AJAX: {email}")
+    logger.info(f"✅ User logged in: {email}")
     return response
 
 
@@ -166,24 +190,22 @@ async def logout(request: Request):
     response = await logout_user(request, response)
 
     # Clear the app-specific session cookie
-    # Try to get cookie name from config, fallback to known values
     cookie_names_to_clear = []
 
-    if engine:
-        app_config = engine.get_app("oso_hello_world")
-        if app_config:
-            auth = app_config.get("auth", {})
-            users_config = auth.get("users", {})
-            session_cookie_name = users_config.get("session_cookie_name", "app_session")
-            cookie_name = f"{session_cookie_name}_oso_hello_world"
-            cookie_names_to_clear.append(cookie_name)
+    app_config = engine.get_app(APP_SLUG)
+    if app_config:
+        auth = app_config.get("auth", {})
+        users_config = auth.get("users", {})
+        session_cookie_name = users_config.get("session_cookie_name", "app_session")
+        cookie_name = f"{session_cookie_name}_{APP_SLUG}"
+        cookie_names_to_clear.append(cookie_name)
 
-    # Also try the default name in case config lookup fails
-    cookie_names_to_clear.append("oso_hello_world_session_oso_hello_world")
-    cookie_names_to_clear.append("app_session_oso_hello_world")
+    # Also try default names in case config lookup fails
+    cookie_names_to_clear.append(f"oso_hello_world_session_{APP_SLUG}")
+    cookie_names_to_clear.append(f"app_session_{APP_SLUG}")
 
     # Get cookie settings to match how it was set
-    should_use_secure = request.url.scheme == "https" or os.getenv("G_NOME_ENV") == "production"
+    should_use_secure = request.url.scheme == "https" or os.getenv("APP_ENV") == "production"
 
     # Delete all possible cookie names (deduplicated)
     for cookie_name in set(cookie_names_to_clear):
@@ -198,6 +220,7 @@ async def logout(request: Request):
 async def get_current_user_info(
     request: Request, authz: AuthorizationProvider = Depends(get_authz_provider)
 ):
+    """Get current user information and permissions."""
     user = await get_current_app_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
@@ -219,15 +242,14 @@ async def get_current_user_info(
 
 @app.get("/api/oso-status")
 async def get_oso_status():
+    """Check OSO Cloud connection status."""
     status = {"connected": False}
     if hasattr(app.state, "authz_provider"):
         try:
-            # Simple check
             await app.state.authz_provider.check("test", "test", "test")
             status["connected"] = True
         except (AttributeError, RuntimeError, ConnectionError, ValueError):
-            # Type 2: Recoverable - authz check failed, keep status false (health check)
-            pass  # Keep false
+            pass  # Keep connected=False
     return status
 
 
@@ -235,9 +257,10 @@ async def get_oso_status():
 async def list_documents(
     request: Request, authz: AuthorizationProvider = Depends(get_authz_provider)
 ):
+    """List all documents (requires read permission)."""
     user = await get_current_app_user(request)
     if not user:
-        raise HTTPException(401)
+        raise HTTPException(401, "Not authenticated")
 
     if not await authz.check(user.get("email"), "documents", "read"):
         raise HTTPException(403, "Permission denied")
@@ -252,7 +275,7 @@ async def list_documents(
                 "title": d.get("title"),
                 "content": d.get("content"),
                 "created_by": d.get("created_by"),
-                "created_at": d.get("created_at").isoformat(),
+                "created_at": d.get("created_at").isoformat() if d.get("created_at") else None,
             }
             for d in docs
         ]
@@ -263,9 +286,10 @@ async def list_documents(
 async def create_document(
     request: Request, authz: AuthorizationProvider = Depends(get_authz_provider)
 ):
+    """Create a new document (requires write permission)."""
     user = await get_current_app_user(request)
     if not user:
-        raise HTTPException(401)
+        raise HTTPException(401, "Not authenticated")
 
     if not await authz.check(user.get("email"), "documents", "write"):
         raise HTTPException(403, "Permission denied")

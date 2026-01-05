@@ -1,6 +1,6 @@
 # Parallax - GitHub Repository Intelligence Tool
 
-**🔭 A focused tool for analyzing GitHub repositories from two perspectives.**
+**A focused tool for analyzing GitHub repositories from two perspectives.**
 
 Parallax searches GitHub repositories matching your watchlist keywords (with AGENTS.md or LLMs.md files) and analyzes them from Relevance and Technical perspectives.
 
@@ -21,18 +21,34 @@ In astronomy, **Parallax** is the apparent displacement of an object when viewed
 - **Structured Output** - Pydantic schemas ensure consistent analysis
 - **Scannable Feed** - Compact 2-column layout for quick insights
 - **Real-time Dashboard** - Clean interface for monitoring GitHub repositories
+- **MDB_ENGINE Integration** - Uses `engine.create_app()` for automatic lifecycle management
 
 ## Architecture
 
-1. **The Source** - Searches GitHub repositories via GraphQL API
-2. **The Filter** - Detects repositories matching watchlist keywords with minimum stars threshold
-3. **File Extraction** - Extracts AGENTS.md or LLMs.md file content from matching repos
-4. **The Parallax View (Fan-Out)** - Orchestrator splits each repository into two concurrent agent streams
-5. **The Form Extractor** - Each agent enforces a strict Pydantic schema to structure code analysis
+```
+┌─────────────┐
+│   Browser   │
+│ (Dashboard) │
+└──────┬──────┘
+       │ HTTP
+       ▼
+┌─────────────┐
+│  FastAPI    │
+│  (web.py)   │
+└──────┬──────┘
+       │
+       ├──► ParallaxEngine
+       │    ├──► GitHub GraphQL API
+       │    │    └──► Search repos by keywords
+       │    │    └──► Extract AGENTS.md/LLMs.md
+       │    ├──► Relevance Agent (Code-focused)
+       │    └──► Technical Agent (Code-focused)
+       │
+       └──► MongoDB (via MDB_ENGINE)
+            └── parallax_reports
+```
 
 ## Prerequisites
-
-**⚠️ IMPORTANT: This demo REQUIRES orchestration dependencies!**
 
 - Python 3.8+
 - Docker and Docker Compose (for containerized setup)
@@ -40,12 +56,6 @@ In astronomy, **Parallax** is the apparent displacement of an object when viewed
 - MDB_ENGINE installed
 - **LLM API Key** (OpenAI, Azure OpenAI, or compatible provider) - **REQUIRED**
 - **GitHub Personal Access Token** - **REQUIRED** for GraphQL API access
-- **Dependencies** - **REQUIRED**:
-  ```bash
-  pip install langchain langchain-community langchain-core pydantic pydantic-settings httpx requests pyyaml
-  ```
-
-**Note:** Without these dependencies, the application will fail to start. This demo is focused on multi-agent orchestration capabilities.
 
 ## Setup
 
@@ -91,7 +101,7 @@ That's it! The Docker Compose setup will:
 4. Show you all the output
 
 **Access the Dashboard:**
-- 🌐 **Parallax Dashboard**: http://localhost:8000
+- **Parallax Dashboard**: http://localhost:8000
 - Click "Scan" to start searching and analyzing GitHub repositories
 
 **With optional MongoDB Express UI:**
@@ -140,66 +150,71 @@ The dashboard displays each repository in a 2-column layout, showing Relevance a
 
 ## API Endpoints
 
-- `GET /` - Parallax dashboard (HTML)
-- `POST /api/refresh` - Trigger analysis of GitHub repositories
-- `GET /api/reports` - Get recent Parallax reports (JSON)
-- `GET /api/watchlist` - Get current watchlist and search configuration
-- `POST /api/watchlist` - Update watchlist keywords and search parameters (min_stars, language_filter)
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/` | GET | Parallax dashboard (HTML) |
+| `/health` | GET | Health check for container healthchecks |
+| `/api/refresh` | POST | Trigger analysis of GitHub repositories |
+| `/api/reports` | GET | Get recent Parallax reports (JSON) |
+| `/api/reports/{repo_id}` | GET | Get a single report by repo ID |
+| `/api/watchlist` | GET | Get current watchlist and search configuration |
+| `/api/watchlist` | POST | Update watchlist keywords and search parameters |
+| `/api/lenses` | GET | Get all lens configurations |
+| `/api/lenses/{lens_name}` | GET/POST | Get or update a specific lens configuration |
 
-## Understanding the Code
+## MDB_ENGINE Integration
 
-### Manifest (`manifest.json`)
-
-The manifest defines:
-- App configuration (slug: `parallax`, name, description)
-- LLM configuration (enabled, default models, temperature: 0.0 for factual analysis)
-- Indexes for `parallax_reports` collection
-
-### App Scoping
-
-All data is automatically scoped to the `parallax` app:
+This example uses the recommended `engine.create_app()` pattern for FastAPI integration:
 
 ```python
-# You write:
-await db.parallax_reports.insert_one(report.dict())
+from mdb_engine import MongoDBEngine
+from pathlib import Path
 
-# MDB_ENGINE stores:
-{
-    "repo_id": "owner/repo-name",
-    "repo_name": "repo-name",
-    "repo_owner": "owner",
-    "stars": 150,
-    "file_found": "AGENTS.md",
-    "original_title": "repo-name",
-    "url": "https://github.com/owner/repo-name",
-    "relevance": {...},
-    "product": {...},  # Technical lens (kept for backward compatibility)
-    "matched_keywords": ["MongoDB", "vector"],
-    "timestamp": "2024-01-01T00:00:00",
-    "app_id": "parallax"  # ← Added automatically
-}
+# Initialize the MongoDB Engine
+engine = MongoDBEngine(mongo_uri=mongo_uri, db_name=db_name)
+
+# Create FastAPI app with automatic lifecycle management
+app = engine.create_app(
+    slug="parallax",
+    manifest=Path(__file__).parent / "manifest.json",
+    title="Parallax - GitHub Repository Intelligence",
+    description="...",
+    version="1.0.0",
+)
+
+# Get scoped database from request
+def get_db(request: Request):
+    return request.app.state.engine.get_scoped_db("parallax")
 ```
 
-### LLM Integration
+This automatically handles:
+- Engine initialization on startup
+- Manifest loading and app registration
+- CORS configuration from manifest
+- Graceful shutdown
 
-The example uses MDB_ENGINE's LLM service with LangChain adapters:
+## Project Structure
 
-```python
-from openai import AzureOpenAI
-from parallax import ParallaxEngine
-
-# Initialize OpenAI client directly
-client = AzureOpenAI(...)
-parallax = ParallaxEngine(client, db)
-reports = await parallax.analyze_feed()
+```
+parallax/
+├── web.py              # FastAPI app with MDB_ENGINE integration
+├── parallax.py         # ParallaxEngine - GitHub search & LLM analysis
+├── schemas.py          # Pydantic models for reports
+├── schema_generator.py # Dynamic schema generation for lenses
+├── manifest.json       # MDB_ENGINE app configuration
+├── Dockerfile          # Multi-stage Docker build
+├── docker-compose.yml  # Full stack with MongoDB
+├── requirements.txt    # Python dependencies
+└── templates/
+    └── parallax_dashboard.html  # Dashboard UI
 ```
 
 ## Watchlist Keywords and Search Configuration
 
 The default watchlist includes:
 - **MongoDB** - Database and related technologies
-- **vector** - Vector databases and embeddings
-- **AI/ML** - AI/ML related technologies
+- **agents** - AI agents and automation
+- **memory** - Memory systems and context
 
 ### Search Parameters
 
@@ -222,8 +237,6 @@ For example, with watchlist `["MongoDB", "vector"]`, `min_stars: 50`, and `langu
 - `vector agent stars:>50 language:python`
 
 Results are aggregated and deduplicated across all keyword searches. Only repositories with AGENTS.md or LLMs.md files in the root are analyzed.
-
-You can customize the watchlist and search parameters via the Settings modal in the dashboard.
 
 ## Troubleshooting
 
@@ -288,54 +301,11 @@ docker-compose up
    docker-compose logs mongodb
    ```
 
-## Architecture
+## Resources
 
-```
-┌─────────────┐
-│   Browser   │
-│ (Dashboard) │
-└──────┬──────┘
-       │ HTTP
-       ▼
-┌─────────────┐
-│  FastAPI    │
-│  (web.py)   │
-└──────┬──────┘
-       │
-       ├──► ParallaxEngine
-       │    ├──► GitHub GraphQL API
-       │    │    └──► Search repos by keywords
-       │    │    └──► Extract AGENTS.md/LLMs.md
-       │    ├──► Relevance Agent (Code-focused)
-       │    └──► Technical Agent (Code-focused)
-       │
-       └──► MongoDB (via MDB_ENGINE)
-            └── parallax_reports
-```
-
-## How It Works
-
-1. **Search Phase**: For each keyword in your watchlist, Parallax searches GitHub using GraphQL:
-   - Query: `{keyword} agent stars:>{min_stars} [language:{language}]`
-   - Fetches repositories with AGENTS.md or LLMs.md files
-   - Filters by minimum stars and optional language
-
-2. **Extraction Phase**: For each matching repository:
-   - Extracts AGENTS.md or LLMs.md file content
-   - Parses YAML frontmatter if present
-   - Stores full file content for analysis
-
-3. **Analysis Phase**: For each repository (if not already cached):
-   - Launches two concurrent LLM agents:
-     - **Relevance**: Analyzes code-level relevance to watchlist keywords
-     - **Technical**: Analyzes code architecture, patterns, and implementation
-   - Both agents use structured Pydantic schemas for consistent output
-
-4. **Storage Phase**: Results are stored in MongoDB with:
-   - Repository metadata (name, owner, stars, URL)
-   - Matched keywords
-   - Both lens analyses
-   - Timestamp for freshness tracking
+- [MDB_ENGINE Documentation](../../mdb_engine/README.md)
+- [MDB_ENGINE Core Module](../../mdb_engine/core/README.md)
+- [Examples Overview](../README.md)
 
 ## License
 

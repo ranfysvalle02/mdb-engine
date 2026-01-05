@@ -5,10 +5,9 @@ Dynamic Schema Generator for Parallax Lenses
 Generates Pydantic models on-the-fly from database-stored schema definitions.
 """
 import logging
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Dict, List, Type
 
 from pydantic import BaseModel, Field, create_model
-from pydantic.fields import FieldInfo
 
 logger = logging.getLogger("Parallax.SchemaGenerator")
 

@@ -7,7 +7,6 @@ The Parallax Engine orchestrates concurrent analysis of GitHub repositories from
 2. Technical: Concise engineering assessment - architecture, patterns, implementation details
 """
 import asyncio
-import hashlib
 import json
 import logging
 import os

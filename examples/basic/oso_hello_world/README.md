@@ -7,9 +7,25 @@ A simple, beginner-friendly example demonstrating OSO Cloud authorization integr
 - **OSO Cloud Integration**: Using OSO Cloud (via Dev Server) for authorization
 - **Manifest Auto-Setup**: OSO provider automatically initializes from `manifest.json` configuration
 - **Permission-Based Access Control**: Simple read/write permissions on documents
-- **Zero Boilerplate**: No manual OSO client initialization needed
+- **engine.create_app() Pattern**: Modern mdb-engine lifecycle management
 
 ## Architecture
+
+This example uses the `engine.create_app()` pattern for automatic lifecycle management:
+
+```python
+engine = MongoDBEngine(mongo_uri=mongo_uri, db_name=db_name)
+app = engine.create_app(
+    slug=APP_SLUG,
+    manifest=Path(__file__).parent / "manifest.json",
+    title="OSO Cloud Hello World",
+)
+```
+
+This pattern automatically handles:
+- Engine initialization and shutdown
+- Manifest loading and validation
+- Auth setup from manifest (OSO provider, CORS, etc.)
 
 ```
 ┌─────────────────┐
@@ -42,7 +58,7 @@ A simple, beginner-friendly example demonstrating OSO Cloud authorization integr
 ### Run the Example
 
 ```bash
-cd examples/oso_hello_world
+cd examples/basic/oso_hello_world
 docker-compose up
 ```
 
@@ -62,7 +78,6 @@ The OSO Dev Server is a local Docker container that provides the OSO Cloud API. 
 - Loads your `main.polar` policy file
 - Stores authorization facts (roles, permissions)
 - Watches for policy file changes
-- Persists data between restarts
 
 ### 2. Manifest Auto-Setup
 
@@ -70,30 +85,26 @@ The `manifest.json` file configures OSO Cloud:
 
 ```json
 {
-  "auth_policy": {
-    "provider": "oso",
-    "authorization": {
-      "initial_roles": [
-        {"user": "alice@example.com", "role": "editor"},
-        {"user": "bob@example.com", "role": "viewer"}
-      ],
-      "initial_policies": [
-        {"role": "viewer", "resource": "documents", "action": "read"},
-        {"role": "editor", "resource": "documents", "action": "write"}
-      ]
+  "auth": {
+    "policy": {
+      "provider": "oso",
+      "authorization": {
+        "initial_roles": [
+          {"user": "alice@example.com", "role": "editor"},
+          {"user": "bob@example.com", "role": "viewer"}
+        ]
+      }
     }
   }
 }
 ```
 
-When `setup_auth_from_manifest()` is called, it:
+When `engine.create_app()` is called, it automatically:
 1. Reads the manifest configuration
 2. Creates OSO Cloud client (reads `OSO_URL` and `OSO_AUTH` from env)
 3. Initializes `OsoAdapter` with the client
 4. Sets up initial roles and policies
 5. Makes the provider available via `get_authz_provider` dependency
-
-**No manual code needed!** ✨
 
 ### 3. Authorization Checks
 
@@ -102,28 +113,30 @@ Routes use the OSO provider to check permissions:
 ```python
 @app.get("/api/documents")
 async def list_documents(
-    user: dict = Depends(get_current_user),
+    request: Request,
     authz: AuthorizationProvider = Depends(get_authz_provider)
 ):
-    # Check permission using OSO Cloud
-    has_permission = await require_permission(
-        user_email,
-        "documents",
-        "read",
-        authz_provider=authz
-    )
+    user = await get_current_app_user(request)
+    if not await authz.check(user.get("email"), "documents", "read"):
+        raise HTTPException(403, "Permission denied")
     # ...
 ```
 
 ## API Endpoints
 
-### GET `/`
-Home page with API documentation.
+### Health & Status
 
-### GET `/api/me`
-Get current user information and permissions.
+- `GET /health` - Health check endpoint (for container orchestration)
+- `GET /api/oso-status` - Check OSO Cloud connection status
 
-**Auth:** Required
+### Authentication
+
+- `POST /login` - Login with email/password
+- `GET /logout` - Logout current user
+
+### User Info
+
+- `GET /api/me` - Get current user information and permissions
 
 **Response:**
 ```json
@@ -131,59 +144,14 @@ Get current user information and permissions.
   "user_id": "...",
   "email": "alice@example.com",
   "permissions": ["read", "write"],
-  "oso_enabled": true
+  "role": "editor"
 }
 ```
 
-### GET `/api/documents`
-List all documents.
+### Documents
 
-**Auth:** Required
-**Permission:** `read` on `documents`
-
-**Response:**
-```json
-{
-  "success": true,
-  "documents": [
-    {
-      "id": "...",
-      "title": "My Document",
-      "content": "Content here",
-      "created_by": "alice@example.com",
-      "created_at": "2024-01-01T00:00:00"
-    }
-  ]
-}
-```
-
-### POST `/api/documents`
-Create a new document.
-
-**Auth:** Required
-**Permission:** `write` on `documents`
-
-**Request Body:**
-```json
-{
-  "title": "My Document",
-  "content": "Document content"
-}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "document": {
-    "id": "...",
-    "title": "My Document",
-    "content": "Document content",
-    "created_by": "alice@example.com",
-    "created_at": "2024-01-01T00:00:00"
-  }
-}
-```
+- `GET /api/documents` - List all documents (requires `read` permission)
+- `POST /api/documents` - Create a new document (requires `write` permission)
 
 ## Demo Users
 
@@ -192,16 +160,11 @@ The manifest configures two demo users:
 - **alice@example.com** - Has `editor` role (can read and write)
 - **bob@example.com** - Has `viewer` role (can only read)
 
+Password for both: `password123`
+
 ### Testing with curl
 
-1. **Register a user:**
-```bash
-curl -X POST http://localhost:8000/register \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "email=alice@example.com&password=password123"
-```
-
-2. **Login:**
+1. **Login:**
 ```bash
 curl -X POST http://localhost:8000/login \
   -H "Content-Type: application/x-www-form-urlencoded" \
@@ -209,17 +172,17 @@ curl -X POST http://localhost:8000/login \
   -c cookies.txt
 ```
 
-3. **Get user info:**
+2. **Get user info:**
 ```bash
 curl http://localhost:8000/api/me -b cookies.txt
 ```
 
-4. **List documents (requires read permission):**
+3. **List documents (requires read permission):**
 ```bash
 curl http://localhost:8000/api/documents -b cookies.txt
 ```
 
-5. **Create document (requires write permission):**
+4. **Create document (requires write permission):**
 ```bash
 curl -X POST http://localhost:8000/api/documents \
   -H "Content-Type: application/json" \
@@ -256,7 +219,7 @@ Set in `docker-compose.yml`:
 - `OSO_AUTH` - OSO Cloud API key (any dummy token works for Dev Server)
 - `MONGO_URI` - MongoDB connection string
 - `MONGO_DB_NAME` - Database name
-- `FLASK_SECRET_KEY` - JWT secret key
+- `APP_SECRET_KEY` - Application secret key
 
 ## Adding Users and Roles
 
@@ -266,10 +229,14 @@ Add to `manifest.json`:
 
 ```json
 {
-  "authorization": {
-    "initial_roles": [
-      {"user": "newuser@example.com", "role": "editor"}
-    ]
+  "auth": {
+    "policy": {
+      "authorization": {
+        "initial_roles": [
+          {"user": "newuser@example.com", "role": "editor"}
+        ]
+      }
+    }
   }
 }
 ```
@@ -302,7 +269,22 @@ To use production OSO Cloud instead of Dev Server:
 3. **Remove the `oso-dev` service** from `docker-compose.yml`
 4. **Restart the app**
 
-The same code works for both Dev Server and production! 🎉
+The same code works for both Dev Server and production!
+
+## Project Structure
+
+```
+oso_hello_world/
+├── docker-compose.yml    # Docker Compose configuration
+├── Dockerfile            # Multi-stage Dockerfile
+├── main.polar            # OSO authorization policy
+├── manifest.json         # MDB_ENGINE manifest
+├── README.md             # This file
+├── requirements.txt      # Python dependencies
+├── templates/
+│   └── index.html        # Main HTML template
+└── web.py                # FastAPI application
+```
 
 ## Troubleshooting
 
@@ -319,7 +301,7 @@ Ensure `main.polar` exists and is valid.
 
 1. Check that OSO provider was initialized:
    ```bash
-   docker-compose logs app | grep "OSO Cloud provider"
+   docker-compose logs app | grep "OSO"
    ```
 
 2. Verify facts were added:
@@ -329,7 +311,7 @@ Ensure `main.polar` exists and is valid.
 3. Check user email matches what's in OSO:
    ```python
    # In your code
-   user_email = user.get("user_email") or user.get("email")
+   user_email = user.get("email")
    # This must match the email in initial_roles
    ```
 
@@ -338,15 +320,6 @@ Ensure `main.polar` exists and is valid.
 - Ensure user has the required role
 - Check that policies are set up correctly
 - Verify the policy file syntax is correct
-
-## Files
-
-- `web.py` - FastAPI application with OSO authorization
-- `manifest.json` - App configuration with OSO provider setup
-- `main.polar` - OSO authorization policy
-- `docker-compose.yml` - Docker services (OSO Dev Server, MongoDB, App)
-- `Dockerfile` - Application container
-- `requirements.txt` - Python dependencies
 
 ## Next Steps
 
@@ -357,6 +330,7 @@ Ensure `main.polar` exists and is valid.
 
 ## Learn More
 
+- [MDB_ENGINE Documentation](../../../README.md)
 - [OSO Cloud Documentation](https://www.osohq.com/docs)
 - [OSO Cloud Python SDK](https://pypi.org/project/oso-cloud/)
 - [Polar Policy Language](https://docs.osohq.com/polar-syntax)

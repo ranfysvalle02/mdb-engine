@@ -5,7 +5,6 @@
   "description": "A demonstration of vector inversion/hacking using LLMs with MDB_ENGINE",
   "status": "active",
   "developer_id": "developer@example.com",
-  "auth_required": false,
   "auth": {
     "policy": {
       "required": false,

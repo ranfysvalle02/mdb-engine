@@ -13,7 +13,6 @@ import asyncio
 import logging
 import os
 import tempfile
-import traceback
 import uuid
 import warnings
 from datetime import datetime
@@ -38,13 +37,9 @@ if not os.getenv("HF_DATASETS_CACHE"):
 warnings.filterwarnings("ignore", message=".*TRANSFORMERS_CACHE.*", category=UserWarning)
 warnings.filterwarnings("ignore", message=".*Use `HF_HOME` instead.*", category=UserWarning)
 
-# Removed WebSocket logging handler - using simple polling instead
-
-import os
-
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile, status
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from jinja2 import Template
 from openai import AzureOpenAI
@@ -52,7 +47,7 @@ from pydantic import BaseModel
 
 from mdb_engine import MongoDBEngine
 from mdb_engine.embeddings import EmbeddingService, get_embedding_service
-from mdb_engine.embeddings.dependencies import get_embedding_service_dep
+# get_embedding_service_dependency is defined locally for this example
 
 # Load environment variables
 load_dotenv()
@@ -77,15 +72,6 @@ except ImportError as e:
     )
 
 import requests
-
-# Initialize FastAPI app
-app = FastAPI(
-    title="Interactive RAG - MDB_ENGINE Demo",
-    description="An interactive RAG system with knowledge base management",
-    version="1.0.0",
-)
-
-# CORS is now handled automatically by setup_auth_from_manifest() based on manifest.json
 
 # Static files directory - use explicit routes instead of mount for reliability
 from fastapi.responses import FileResponse
@@ -127,12 +113,27 @@ if not template_dir.exists():
 templates = Jinja2Templates(directory=str(template_dir))
 logger.info(f"Templates directory: {template_dir}")
 
-# Global engine instance (will be initialized in startup)
-engine: Optional[MongoDBEngine] = None
-db = None
-
 # App configuration
 APP_SLUG = "interactive_rag"
+
+# Initialize the MongoDB Engine
+engine = MongoDBEngine(
+    mongo_uri=os.getenv("MONGO_URI", "mongodb://admin:password@mongodb:27017/?authSource=admin"),
+    db_name=os.getenv("MONGO_DB_NAME", "interactive_rag_db"),
+)
+
+# Create FastAPI app with automatic lifecycle management
+# This automatically handles:
+# - Engine initialization and shutdown
+# - Manifest loading and validation
+# - Auth setup from manifest (CORS, etc.)
+app = engine.create_app(
+    slug=APP_SLUG,
+    manifest=Path(__file__).parent / "manifest.json",
+    title="Interactive RAG - MDB_ENGINE Demo",
+    description="An interactive RAG system with knowledge base management",
+    version="1.0.0",
+)
 COLLECTION_NAME = "knowledge_base_sessions"
 SESSION_FIELD = "session_id"
 
@@ -142,8 +143,6 @@ current_session: str = "default"
 last_retrieved_sources: List[str] = []
 last_retrieved_chunks: List[Dict[str, Any]] = []
 background_tasks: Dict[str, Dict[str, Any]] = {}
-
-_current_user_query: Optional[str] = None  # Store current user query for tool context
 
 # Track which indexes are being created to prevent duplicate attempts
 index_creation_in_progress: set = set()
@@ -189,12 +188,9 @@ def add_status_log(message: str, level: str = "info", component: str = None):
 
 def get_db():
     """Get the scoped database"""
-    global engine, db
-    if not engine:
+    if not engine.initialized:
         raise HTTPException(status_code=503, detail="Engine not initialized")
-    if db is None:
-        return engine.get_scoped_db(APP_SLUG)
-    return db
+    return engine.get_scoped_db(APP_SLUG)
 
 
 def get_azure_openai_client() -> AzureOpenAI:
@@ -250,15 +246,13 @@ def chunk_text(
 
 
 # ============================================================================
-# Startup/Shutdown
+# Additional Startup (engine.create_app() handles core initialization)
 # ============================================================================
 
 
 @app.on_event("startup")
-async def startup_event():
-    """Initialize the MongoDB Engine on startup"""
-    global engine, db
-
+async def additional_startup():
+    """Additional startup tasks beyond what engine.create_app() handles."""
     app_status["startup_time"] = datetime.now().isoformat()
     app_status["status"] = "initializing"
     add_status_log("🚀 Starting Interactive RAG Web Application...", "info", "startup")
@@ -267,50 +261,24 @@ async def startup_event():
         # Ensure cache directories exist and are writable
         cache_dirs = ["/app/.cache", "/app/.cache/huggingface", "/app/cache"]
         for cache_dir in cache_dirs:
-            os.makedirs(cache_dir, exist_ok=True)
-            # Ensure writable permissions
-            os.chmod(cache_dir, 0o755)
+            try:
+                os.makedirs(cache_dir, exist_ok=True)
+                os.chmod(cache_dir, 0o755)
+            except OSError:
+                pass  # May fail in some environments, not critical
         add_status_log("✅ Cache directories initialized", "info", "startup")
 
-        # Get MongoDB connection from environment
-        mongo_uri = os.getenv(
-            "MONGO_URI", "mongodb://admin:password@mongodb:27017/?authSource=admin"
-        )
+        # Update status - engine is already initialized by create_app()
         db_name = os.getenv("MONGO_DB_NAME", "interactive_rag_db")
-
-        # Initialize the MongoDB Engine
-        add_status_log(f"Connecting to MongoDB: {db_name}...", "info", "mongodb")
-        engine = MongoDBEngine(mongo_uri=mongo_uri, db_name=db_name)
-
-        # Connect to MongoDB
-        await engine.initialize()
         app_status["components"]["mongodb"]["status"] = "connected"
         app_status["components"]["mongodb"]["message"] = f"Connected to {db_name}"
         app_status["components"]["engine"]["status"] = "initialized"
         app_status["components"]["engine"]["message"] = "MongoDBEngine ready"
         add_status_log("✅ Engine initialized successfully", "info", "engine")
 
-        # Load and register the app manifest
-        manifest_path = Path("/app/manifest.json")
-        if not manifest_path.exists():
-            manifest_path = Path(__file__).parent / "manifest.json"
-
-        if manifest_path.exists():
-            manifest = await engine.load_manifest(manifest_path)
-            success = await engine.register_app(manifest, create_indexes=True)
-            if success:
-                add_status_log(
-                    f"✅ App '{manifest['slug']}' registered successfully", "info", "engine"
-                )
-            else:
-                add_status_log("⚠️  Failed to register app", "warning", "engine")
-
-        # Get scoped database and store globally
-        db = engine.get_scoped_db(APP_SLUG)
-
-        # Set global references
+        # Set global references for tools
         global _global_db
-        _global_db = db
+        _global_db = engine.get_scoped_db(APP_SLUG)
 
         # Check Azure OpenAI configuration
         endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
@@ -322,6 +290,7 @@ async def startup_event():
         else:
             add_status_log("⚠️  Azure OpenAI not configured", "warning", "llm")
 
+        # Update docling status
         if DOCLING_AVAILABLE:
             app_status["components"]["docling"]["status"] = "available"
             app_status["components"]["docling"]["message"] = "Document conversion enabled"
@@ -331,30 +300,23 @@ async def startup_event():
             app_status["components"]["docling"]["message"] = "Docling not installed"
             add_status_log("⚠️  Docling not available", "warning", "docling")
 
-        # Note: RapidOCR status will be updated when it's actually used
+        # RapidOCR status will be updated when actually used
         app_status["components"]["rapidocr"]["status"] = "pending"
         app_status["components"]["rapidocr"]["message"] = "Will initialize on first use"
 
-        # Set global engine for dependency injection
+        # Set global engine for embedding dependency injection
         from mdb_engine.embeddings.dependencies import set_global_engine
 
         set_global_engine(engine, app_slug=APP_SLUG)
 
         # Initialize global embedding service for tools
-        # Uses manifest.json magic: works with or without memory_config
-        # Type 4: Let EmbeddingService initialization errors bubble up
         global _global_embedding_service
-        # Initialize embedding service using manifest.json config
         app_config = engine.get_app(APP_SLUG)
         embedding_config = app_config.get("embedding_config", {}) if app_config else {}
-
-        # Note: Memory service (Mem0MemoryService) handles its own embeddings separately
-        # EmbeddingService is for standalone embedding operations
         _global_embedding_service = get_embedding_service(config=embedding_config)
+        
         app_status["components"]["embedding_service"]["status"] = "available"
-        app_status["components"]["embedding_service"][
-            "message"
-        ] = "EmbeddingService initialized (from manifest.json)"
+        app_status["components"]["embedding_service"]["message"] = "EmbeddingService initialized"
         add_status_log("✅ EmbeddingService initialized (from manifest.json)", "info", "embedding")
 
         app_status["initialized"] = True
@@ -362,7 +324,6 @@ async def startup_event():
         add_status_log("✅ Web application ready!", "info", "startup")
 
     except (AttributeError, RuntimeError, ConnectionError, ValueError, TypeError, KeyError) as e:
-        # Type 2: Recoverable - startup failed, log and re-raise (top-level startup handler)
         app_status["status"] = "error"
         app_status["initialized"] = False
         error_msg = f"Startup failed: {str(e)}"
@@ -371,20 +332,11 @@ async def startup_event():
         raise
 
 
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Cleanup on shutdown"""
-    global engine
-    if engine:
-        await engine.shutdown()
-        logger.info("Cleaned up and shut down")
-
-
 # ============================================================================
-# LangChain Tools (using platform services)
+# Global References (set during startup)
 # ============================================================================
 
-# Global references for tools (will be set during startup)
+# Global references for embedding service and database
 _global_db = None
 _global_embedding_service: Optional[EmbeddingService] = None
 
@@ -480,289 +432,38 @@ async def _get_vector_search_results_async(
         return []
 
 
-# Note: LangChain tools removed - examples should implement their own LLM clients
-# Tools functionality can be implemented using direct Azure OpenAI client
-if False:  # Disabled - LangChain removed
-
-    @tool
-    async def search_knowledge_base(
-        query: str,
-        embedding_model: str = "text-embedding-3-small",
-        num_sources: int = 3,
-        max_chunk_length: int = 2000,
-    ) -> str:
-        """Query the knowledge base to find relevant chunks for `query`."""
-        global current_session, last_retrieved_sources, _current_user_query
-
-        try:
-            logger.info(f"[INFO] Searching with '{embedding_model}' → top {num_sources}")
-            results = await _get_vector_search_results_async(
-                query, current_session, embedding_model, num_sources
-            )
-
-            if not results:
-                last_retrieved_sources = []
-                return f"No relevant info found in session '{current_session}'."
-
-            # Remember sources
-            found_sources = [r.get("source", "N/A") for r in results]
-            last_retrieved_sources = list(set(found_sources))
-
-            # Build a context string
-            context_parts = []
-            for r in results:
-                text = r.get("content", "")
-                src = r.get("source", "N/A")
-                score = r.get("score", 0.0)
-                if max_chunk_length and len(text) > max_chunk_length:
-                    text = text[:max_chunk_length] + "... [truncated]"
-                context_parts.append(f"Source: {src} (Score: {score:.4f})\nContent: {text}")
-
-            context = "\n---\n".join(context_parts)
-            return f"Retrieved from '{embedding_model}':\n{context}"
-
-        except (AttributeError, RuntimeError, ConnectionError, ValueError, TypeError):
-            # Type 2: Recoverable - search failed, return error string to LLM
-            last_retrieved_sources = []
-            logger.error("[ERROR] search_knowledge_base", exc_info=True)
-            return "❌ Search error occurred. Please try again."
-
-    @tool
-    async def read_url(url: str, chunk_size: int = 1000, chunk_overlap: int = 150) -> str:
-        """Adds a URL's content (via Firecrawl HTTP API) into the knowledge base."""
-        global current_session, _global_db, _global_embedding_service
-
-        try:
-            if not _global_db or not _global_embedding_service:
-                return "❌ Services not initialized."
-
-            # Check if already exists
-            existing = await _global_db.knowledge_base_sessions.count_documents(
-                {"metadata.source": url, f"metadata.{SESSION_FIELD}": current_session}, limit=1
-            )
-
-            if existing > 0:
-                return f"❌ Source '{url}' already exists in session '{current_session}'."
-
-            # Use Firecrawl HTTP API
-            firecrawl_key = os.getenv("FIRECRAWL_API_KEY")
-            if not firecrawl_key:
-                return "❌ FIRECRAWL_API_KEY not set."
-
-            firecrawl_key = firecrawl_key.strip()
-            if not firecrawl_key:
-                return "❌ FIRECRAWL_API_KEY is empty or whitespace only."
-
-            logger.info(f"[INFO] Scraping & ingesting URL via Firecrawl HTTP API: {url}")
-
-            # Use Firecrawl HTTP API directly
-            api_url = "https://api.firecrawl.dev/v2/scrape"
-            headers = {
-                "Authorization": f"Bearer {firecrawl_key}",
-                "Content-Type": "application/json",
-            }
-            payload = {"url": url, "formats": ["markdown"], "onlyMainContent": False}
-
-            resp = requests.post(api_url, json=payload, headers=headers, timeout=60)
-            resp.raise_for_status()
-            scrape_result = resp.json()
-
-            # Extract markdown content from response
-            page_content = ""
-            if "data" in scrape_result:
-                if isinstance(scrape_result["data"], dict):
-                    page_content = scrape_result["data"].get("markdown", "")
-                elif isinstance(scrape_result["data"], str):
-                    page_content = scrape_result["data"]
-            elif "markdown" in scrape_result:
-                page_content = scrape_result["markdown"]
-
-            if not page_content:
-                return f"❌ No markdown content returned from {url}."
-
-            # Use EmbeddingService to process and store
-            result = await _global_embedding_service.process_and_store(
-                text_content=page_content,
-                source_id=url,
-                collection=_global_db.knowledge_base_sessions,
-                max_tokens=chunk_size,
-                metadata={"source": url, "source_type": "url", SESSION_FIELD: current_session},
-            )
-
-            return f"✅ Ingested {result['chunks_created']} chunks from {url} into '{current_session}'."
-
-        except (ConnectionError, TimeoutError, ValueError, AttributeError, RuntimeError) as e:
-            # Type 2: Recoverable - ingestion failed, return error string to LLM
-            logger.error("[ERROR] read_url", exc_info=True)
-            return f"❌ Ingestion error: {str(e)}"
-
-    @tool
-    async def update_chunk(chunk_id: str, new_content: str) -> str:
-        """Updates chunk text (and embeddings) by chunk ID."""
-        global _global_db, _global_embedding_service
-
-        try:
-            if not _global_db or not _global_embedding_service:
-                return "❌ Services not initialized."
-
-            # Re-embed the content
-            vectors = await _global_embedding_service.embed_chunks([new_content])
-            if not vectors:
-                return "❌ Failed to generate embedding"
-
-            # Update document
-            result = await _global_db.knowledge_base_sessions.update_one(
-                {"_id": ObjectId(chunk_id)},
-                {"$set": {"text": new_content, "embedding": vectors[0]}},
-            )
-
-            if result.matched_count == 0:
-                return f"❌ Could not find chunk with ID '{chunk_id}'."
-
-            return f"✅ Chunk '{chunk_id}' updated (re-embedded)."
-
-        except (ValueError, TypeError, AttributeError, RuntimeError, ConnectionError):
-            # Type 2: Recoverable - update failed, return error string to LLM
-            return "❌ Failed to update chunk. Please check the chunk ID and try again."
-
-    @tool
-    async def delete_chunk(chunk_id: str) -> str:
-        """Deletes a chunk from the knowledge base by ID."""
-        global _global_db
-
-        try:
-            if not _global_db:
-                return "❌ Database not initialized."
-
-            result = await _global_db.knowledge_base_sessions.delete_one(
-                {"_id": ObjectId(chunk_id)}
-            )
-            if result.deleted_count == 0:
-                return f"❌ Could not find chunk '{chunk_id}' to delete."
-            return f"✅ Chunk '{chunk_id}' deleted."
-
-        except (ValueError, TypeError, AttributeError, RuntimeError, ConnectionError):
-            # Type 2: Recoverable - delete failed, return error string to LLM
-            return "❌ Failed to delete chunk. Please check the chunk ID and try again."
-
-    @tool
-    def switch_session(session_id: str) -> str:
-        """Switch to another session in memory."""
-        global current_session, chat_history
-        current_session = session_id
-        if session_id not in chat_history:
-            chat_history[session_id] = []
-        return f"✅ Switched to session: **{session_id}**."
-
-    @tool
-    def create_session(session_id: str) -> str:
-        """Create a new session in memory only (no marker doc)."""
-        global current_session, chat_history, _global_db
-
-        try:
-            if _global_db:
-                # Use aggregation to get distinct session IDs
-                field_path = f"metadata.{SESSION_FIELD}"
-                pipeline = [
-                    {"$group": {"_id": f"${field_path}"}},
-                    {"$project": {"_id": 0, "value": "$_id"}},
-                ]
-                # Run aggregation synchronously (this is a sync function)
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    # If loop is running, we can't use asyncio.run, need to handle differently
-                    # For now, skip the check if loop is running
-                    existing_sessions = []
-                else:
-                    cursor = _global_db.knowledge_base_sessions.aggregate(pipeline)
-                    existing_sessions_list = asyncio.run(cursor.to_list(length=None))
-                    existing_sessions = [
-                        item["value"] for item in existing_sessions_list if item.get("value")
-                    ]
-                if session_id in existing_sessions:
-                    return f"❌ Session **'{session_id}'** already exists."
-
-            current_session = session_id
-            if session_id not in chat_history:
-                chat_history[session_id] = []
-            return f"✅ Created and switched to new session: **{session_id}**."
-
-        except (ValueError, TypeError, AttributeError, RuntimeError, ConnectionError):
-            # Type 2: Recoverable - session creation failed, return error string to LLM
-            return "❌ Failed to create session. Please try again."
-
-    @tool
-    async def list_sources() -> str:
-        """List all sources in the current session."""
-        global current_session, _global_db
-
-        try:
-            if not _global_db:
-                return "❌ Database not initialized."
-
-            # Use aggregation to get distinct sources
-            pipeline = [
-                {"$match": {f"metadata.{SESSION_FIELD}": current_session}},
-                {"$group": {"_id": "$metadata.source"}},
-                {"$project": {"_id": 0, "value": "$_id"}},
-                {"$sort": {"value": 1}},
-            ]
-            cursor = _global_db.knowledge_base_sessions.aggregate(pipeline)
-            sources_list = await cursor.to_list(length=None)
-            sources = [item["value"] for item in sources_list if item.get("value")]
-
-            if not sources:
-                return f"No sources found in session '{current_session}'."
-            return "Sources:\n" + "\n".join(f"- {s}" for s in sources)
-
-        except (AttributeError, RuntimeError, ConnectionError, ValueError, TypeError):
-            # Type 2: Recoverable - listing failed, return error string to LLM
-            return "❌ Error listing sources. Please try again."
-
-    @tool
-    async def remove_all_sources() -> str:
-        """Remove all docs from the current session."""
-        global current_session, _global_db
-
-        try:
-            if not _global_db:
-                return "❌ Database not initialized."
-
-            result = await _global_db.knowledge_base_sessions.delete_many(
-                {f"metadata.{SESSION_FIELD}": current_session}
-            )
-            return f"🗑 Removed all docs from session '{current_session}' (deleted {result.deleted_count})."
-
-        except (AttributeError, RuntimeError, ConnectionError, ValueError, TypeError):
-            # Type 2: Recoverable - removal failed, return error string to LLM
-            return "❌ Error removing sources. Please try again."
-
-    # List of all tools
-    LANGCHAIN_TOOLS = [
-        search_knowledge_base,
-        switch_session,
-        create_session,
-        list_sources,
-        remove_all_sources,
-        update_chunk,
-        delete_chunk,
-        read_url,
-    ]
-else:
-    LANGCHAIN_TOOLS = []
 
 
 # ============================================================================
-# LangChain Agent Setup
+# Health Check Endpoint (for container healthchecks)
 # ============================================================================
 
 
-def create_agent_executor(client: AzureOpenAI) -> Optional[Any]:
-    """Create LangGraph agent using platform's LLM service (modern LangGraph approach)"""
-    # LangChain agents removed - examples should implement their own agent logic
-    # This function is kept for compatibility but returns None
-    logger.warning("[Agent] LangChain agents removed - implement your own agent logic")
-    return None
+@app.get("/health", response_class=JSONResponse)
+async def health_check():
+    """Health check endpoint for container orchestration."""
+    health_status = {
+        "status": "healthy",
+        "app": APP_SLUG,
+        "engine_initialized": engine.initialized,
+        "components": app_status.get("components", {}),
+    }
+
+    # Check MongoDB connection if engine is initialized
+    if engine.initialized:
+        try:
+            db = engine.get_scoped_db(APP_SLUG)
+            await db.command("ping")
+            health_status["database"] = "connected"
+        except Exception as e:
+            health_status["status"] = "degraded"
+            health_status["database"] = f"error: {str(e)}"
+    else:
+        health_status["status"] = "starting"
+        health_status["database"] = "not_connected"
+
+    status_code = 200 if health_status["status"] == "healthy" else 503
+    return JSONResponse(health_status, status_code=status_code)
 
 
 # ============================================================================
@@ -1032,13 +733,10 @@ class ChatRequest(BaseModel):
 @app.post("/chat")
 async def chat(request: ChatRequest, db=Depends(get_db)):
     """Chat endpoint with RAG using direct Azure OpenAI client"""
-    global current_session, chat_history, last_retrieved_sources, last_retrieved_chunks, _current_user_query
+    global current_session, chat_history, last_retrieved_sources, last_retrieved_chunks
 
     if not request.query or not request.session_id:
         raise HTTPException(status_code=400, detail="Missing 'query' or 'session_id'")
-
-    # Store the original user query so tools can reference it
-    _current_user_query = request.query
 
     logger.info(f"\n--- Turn for session '{request.session_id}' ---\n")
     original_session = current_session
@@ -1056,88 +754,15 @@ async def chat(request: ChatRequest, db=Depends(get_db)):
         if len(current_chat_history) > 10:
             current_chat_history = current_chat_history[-10:]
 
-        # Convert chat history to LangGraph format (list of tuples)
-        langgraph_messages = []
-        for msg in current_chat_history:
-            role = msg.get("role", "user")
-            content = msg.get("content", "")
-            if role == "user":
-                langgraph_messages.append(("user", content))
-            elif role == "assistant":
-                langgraph_messages.append(("assistant", content))
-
         # Get Azure OpenAI client
         client = get_azure_openai_client()
         deployment_name = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4o")
 
-        # LangChain agents removed - use direct RAG
-        if False:  # LangChain disabled
-            logger.info(f"[Chat] LangChain agents removed - using direct RAG")
-            agent_executor = None
-            if agent_executor:
-                # Use LangGraph agent
-                # Add system instruction about embedding model
-                agent_input_string = (
-                    f"User query: '{request.query}'.\n\n"
-                    f"IMPORTANT INSTRUCTION: When you call the 'search_knowledge_base' tool, "
-                    f"you MUST set the 'embedding_model' parameter to '{request.embedding_model}'."
-                )
-
-                # LangGraph uses "messages" format with list of (role, content) tuples
-                # Add system message to encourage markdown formatting
-                system_message = (
-                    "You are an AI assistant designed to answer questions using a private knowledge base. "
-                    "**IMPORTANT:** Format your responses using Markdown for better readability. Use:\n"
-                    "- Headers (##, ###) for sections\n"
-                    "- **Bold** for emphasis\n"
-                    "- Lists (bulleted or numbered) for multiple points\n"
-                    "- Code blocks (```) for code or technical terms\n"
-                    "- Tables for structured data\n"
-                    "Your answers must be based ONLY on the context provided by the search_knowledge_base tool. "
-                    "If no relevant information is found, state that clearly."
-                )
-                # Include system message, chat history + new user message
-                messages = (
-                    [("system", system_message)]
-                    + langgraph_messages
-                    + [("user", agent_input_string)]
-                )
-
-                logger.info(f"[Chat] Invoking LangGraph agent with query: {request.query[:100]}...")
-                response = await agent_executor.ainvoke({"messages": messages})
-
-                # LangGraph returns the full state, extract the last message content
-                if "messages" in response and len(response["messages"]) > 0:
-                    # Get the last message (should be the assistant's response)
-                    last_message = response["messages"][-1]
-                    if hasattr(last_message, "content"):
-                        response_text = last_message.content
-                    elif isinstance(last_message, dict):
-                        response_text = last_message.get("content", str(last_message))
-                    else:
-                        response_text = str(last_message)
-                else:
-                    # Fallback: try to get "output" if it exists
-                    response_text = response.get("output", str(response))
-
-                sources_used = last_retrieved_sources
-                logger.info(
-                    f"[Chat] LangGraph agent response received ({len(response_text)} chars), sources: {sources_used}"
-                )
-            else:
-                # Use direct RAG (LangChain removed)
-                logger.info("Using direct RAG chat")
-                response_text = await _direct_rag_chat(
-                    request, db, client, deployment_name, current_chat_history
-                )
-                sources_used = last_retrieved_sources
-        else:
-            # Use direct RAG
-            logger.info("Using direct RAG chat")
-            response_text = await _direct_rag_chat(
-                request, db, client, deployment_name, current_chat_history
-            )
-            sources_used = last_retrieved_sources
+        # Direct RAG chat
+        response_text = await _direct_rag_chat(
+            request, db, client, deployment_name, current_chat_history
+        )
+        sources_used = last_retrieved_sources
 
         # Record conversation
         current_chat_history.extend(
@@ -1147,8 +772,6 @@ async def chat(request: ChatRequest, db=Depends(get_db)):
             ]
         )
         chat_history[request.session_id] = current_chat_history
-
-        # Note: Chunks are retrieved by the agent tool, sources_used contains the sources
 
         # Get all sessions using aggregation
         session_field_path = f"$metadata.{SESSION_FIELD}"
@@ -1466,10 +1089,6 @@ async def get_diagnostics():
             "PYTHONPATH": os.getenv("PYTHONPATH", "not set"),
         },
         "import_status": {
-            "langchain": {
-                "available": LANGCHAIN_AVAILABLE,
-                "errors": LANGCHAIN_ERROR_DETAILS if not LANGCHAIN_AVAILABLE else [],
-            },
             "ddgs": {"available": DDGS_AVAILABLE},
             "docling": {"available": DOCLING_AVAILABLE},
         },
@@ -1490,15 +1109,11 @@ async def get_diagnostics():
             packages = json.loads(result.stdout)
             # Filter for relevant packages
             relevant_packages = [
-                "langchain",
-                "langchain-community",
-                "langchain-openai",
-                "langchain-core",
-                "langchain-mongodb",
-                "langgraph",
                 "ddgs",
                 "docling",
                 "mdb-engine",
+                "openai",
+                "semantic-text-splitter",
             ]
             diagnostics["installed_packages"] = {
                 pkg["name"]: pkg["version"]
@@ -1514,16 +1129,11 @@ async def get_diagnostics():
     # Try to import each package individually to see which ones work
     import_tests = {}
     test_packages = [
-        ("langchain", "langchain"),
-        ("langgraph", "langgraph"),
-        ("langgraph.prebuilt", "langgraph.prebuilt"),
-        ("langchain_core", "langchain_core"),
-        ("langchain_core.prompts", "langchain_core.prompts"),
-        ("langchain_core.messages", "langchain_core.messages"),
-        ("langchain_core.tools", "langchain_core.tools"),
-        ("langchain_openai", "langchain_openai"),
         ("ddgs", "ddgs"),
         ("docling", "docling"),
+        ("openai", "openai"),
+        ("semantic_text_splitter", "semantic_text_splitter"),
+        ("mdb_engine", "mdb_engine"),
     ]
 
     for module_name, display_name in test_packages:

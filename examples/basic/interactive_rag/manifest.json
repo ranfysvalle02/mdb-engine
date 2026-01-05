@@ -5,7 +5,6 @@
   "description": "An interactive RAG (Retrieval Augmented Generation) system with knowledge base management, vector search, and AI-powered chat",
   "status": "active",
   "developer_id": "developer@example.com",
-  "auth_required": false,
   "auth": {
     "policy": {
       "required": false,

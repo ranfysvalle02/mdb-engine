@@ -6,8 +6,8 @@ services:
   # ChitChat Application
   app:
     build:
-      context: ../..
-      dockerfile: examples/chit_chat/Dockerfile
+      context: ../../..
+      dockerfile: examples/basic/chit_chat/Dockerfile
       args:
         APP_USER: appuser
         APP_UID: 1000
@@ -22,7 +22,7 @@ services:
       - APP_SLUG=${APP_SLUG:-conversations}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - PYTHONUNBUFFERED=${PYTHONUNBUFFERED:-1}
-      - FLASK_SECRET_KEY=${FLASK_SECRET_KEY:-conversations_demo_secret_key_change_in_production}
+      - APP_SECRET_KEY=${APP_SECRET_KEY:-conversations_demo_secret_key_change_in_production}
       # Azure OpenAI Configuration (recommended)
       - AZURE_OPENAI_ENDPOINT=${AZURE_OPENAI_ENDPOINT:-}
       - AZURE_OPENAI_API_KEY=${AZURE_OPENAI_API_KEY:-}
@@ -39,7 +39,7 @@ services:
     networks:
       - mdb_engine_network
     healthcheck:
-      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -75,7 +75,6 @@ services:
       - mdb_engine_network
     healthcheck:
       test: echo 'db.runCommand("ping").ok' | mongosh "mongodb://localhost:27017/?directConnection=true" --quiet
-      # No authentication required
       interval: 10s
       timeout: 5s
       retries: 5

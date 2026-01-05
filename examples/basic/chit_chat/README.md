@@ -29,7 +29,7 @@ A beautiful AI chat application with persistent memory capabilities, demonstrati
 ### Using Docker Compose (Recommended)
 
 ```bash
-cd examples/chit_chat
+cd examples/basic/chit_chat
 docker-compose up
 ```
 
@@ -60,7 +60,7 @@ pip install -r requirements.txt
 # Set environment variables
 export MONGO_URI="mongodb://localhost:27017"
 export MONGO_DB_NAME="conversations_db"
-export FLASK_SECRET_KEY="your-secret-key-here"
+export APP_SECRET_KEY="your-secret-key-here"
 
 # Configure AI provider (choose one)
 # Azure OpenAI (recommended)
@@ -82,10 +82,13 @@ export OLLAMA_BASE_URL="http://localhost:11434/v1"
 export OLLAMA_MODEL="llama2"
 
 # Run the application
-python web.py
+uvicorn web:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 ## API Endpoints
+
+### Health Check
+- `GET /health` - Health check endpoint for container orchestration (no auth required)
 
 ### Authentication
 - `GET /login` - Login page
@@ -144,15 +147,32 @@ curl "http://localhost:8000/api/memories/stats" \
 
 ## Architecture
 
-The application uses MDB_ENGINE's core features:
+The application uses MDB_ENGINE's recommended `engine.create_app()` pattern:
 
-1. **App Registration**: MongoDBEngine automatically registers the app from manifest.json
-2. **Database Scoping**: `get_scoped_db()` creates app-scoped database wrapper
-3. **Automatic Filtering**: All queries and inserts automatically include app_id
-4. **Index Management**: Indexes are created automatically from manifest configuration
-5. **Memory Service**: Mem0 integration for intelligent memory management
-6. **LLM Service**: Abstracted LLM service supporting multiple providers
-7. **WebSocket Support**: Real-time updates for memory events
+```python
+from mdb_engine import MongoDBEngine
+
+engine = MongoDBEngine(
+    mongo_uri=os.getenv("MONGO_URI"),
+    db_name=os.getenv("MONGO_DB_NAME"),
+)
+
+app = engine.create_app(
+    slug="conversations",
+    manifest=Path(__file__).parent / "manifest.json",
+)
+```
+
+This pattern automatically handles:
+
+1. **Engine Lifecycle**: Automatic initialization on startup and cleanup on shutdown
+2. **Manifest Loading**: Validates and registers the app from manifest.json
+3. **Auth Setup**: Configures authentication based on manifest settings
+4. **CORS Configuration**: Sets up CORS from manifest cors config
+5. **WebSocket Routes**: Registers WebSocket endpoints from manifest
+6. **Database Scoping**: `get_scoped_db()` provides app-isolated database access
+7. **Index Management**: Indexes are created automatically from manifest configuration
+8. **Memory Service**: Mem0 integration for intelligent memory management
 
 ## Memory Configuration
 
@@ -193,15 +213,16 @@ The application configuration is in `manifest.json`:
 
 ```
 chit_chat/
-├── web.py              # Main FastAPI application
-├── manifest.json       # App configuration
-├── seed_demo.py        # Demo data seeding script (legacy)
+├── web.py              # Main FastAPI application (uses engine.create_app())
+├── manifest.json       # App configuration (indexes, auth, memory, websockets)
 ├── templates/          # HTML templates
 │   ├── base.html       # Base template
 │   ├── conversations.html  # Conversation list
 │   ├── conversation.html   # Chat interface
 │   ├── login.html      # Login page
 │   └── register.html   # Registration page
+├── docker-compose.yml  # Docker configuration
+├── Dockerfile          # Container build configuration
 └── requirements.txt    # Python dependencies
 ```
 

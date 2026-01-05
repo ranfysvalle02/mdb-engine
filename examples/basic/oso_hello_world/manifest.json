@@ -2,29 +2,19 @@
   "schema_version": "2.0",
   "slug": "oso_hello_world",
   "name": "OSO Cloud Hello World",
-  "description": "Simple hello world example demonstrating OSO Cloud authorization with automatic setup from manifest",
+  "description": "Simple hello world example demonstrating OSO Cloud authorization",
   "status": "active",
   "developer_id": "developer@example.com",
-  "auth_required": true,
   "auth": {
     "policy": {
       "provider": "oso",
       "required": true,
       "allow_anonymous": false,
       "authorization": {
-        "api_key": null,
-        "url": null,
         "initial_roles": [
-          {
-            "user": "alice@example.com",
-            "role": "editor"
-          },
-          {
-            "user": "bob@example.com",
-            "role": "viewer"
-          }
-        ],
-        "initial_policies": []
+          {"user": "alice@example.com", "role": "editor"},
+          {"user": "bob@example.com", "role": "viewer"}
+        ]
       }
     },
     "users": {
@@ -33,41 +23,12 @@
       "collection_name": "users",
       "session_cookie_name": "oso_hello_world_session",
       "session_ttl_seconds": 86400,
-      "allow_registration": true,
       "demo_users": [
-        {
-          "email": "alice@example.com",
-          "password": "password123",
-          "role": "editor"
-        },
-        {
-          "email": "bob@example.com",
-          "password": "password123",
-          "role": "viewer"
-        }
+        {"email": "alice@example.com", "password": "password123", "role": "editor"},
+        {"email": "bob@example.com", "password": "password123", "role": "viewer"}
       ],
       "demo_user_seed_strategy": "auto"
     }
-  },
-  "token_management": {
-    "enabled": true,
-    "access_token_ttl": 3600,
-    "refresh_token_ttl": 2592000,
-    "token_rotation": true,
-    "max_sessions_per_user": 10,
-    "session_inactivity_timeout": 1800,
-    "security": {
-      "require_https": false,
-      "cookie_secure": "auto",
-      "cookie_samesite": "lax",
-      "cookie_httponly": true,
-      "csrf_protection": true,
-      "rate_limiting": {
-        "login": {"max_attempts": 5, "window_seconds": 300},
-        "register": {"max_attempts": 3, "window_seconds": 600}
-      }
-    },
-    "auto_setup": true
   },
   "cors": {
     "enabled": true,

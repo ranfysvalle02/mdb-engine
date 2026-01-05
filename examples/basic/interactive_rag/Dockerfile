@@ -12,6 +12,7 @@ WORKDIR /build
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     g++ \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy dependency files first for better layer caching
@@ -28,12 +29,12 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 COPY mdb_engine ./mdb_engine
 
 # Install mdb_engine with all dependencies
-RUN     echo "=== Installing mdb-engine ===" && \
+RUN echo "=== Installing mdb-engine ===" && \
     pip install --no-cache-dir .[llm] && \
     echo "=== Installing web dependencies ===" && \
-    pip install --no-cache-dir uvicorn[standard] jinja2 python-multipart websockets && \
+    pip install --no-cache-dir uvicorn[standard] jinja2 python-multipart python-dotenv && \
     echo "=== Installing LLM dependencies ===" && \
-    pip install --no-cache-dir instructor pydantic pydantic-settings tenacity semantic-text-splitter && \
+    pip install --no-cache-dir openai pydantic pydantic-settings tenacity semantic-text-splitter && \
     echo "=== Installing RAG dependencies ===" && \
     pip install --no-cache-dir ddgs docling requests && \
     echo "=== Installation complete ===" && \
@@ -49,10 +50,11 @@ RUN echo "=== Verifying installation in builder ===" && \
 # Stage 2: Runtime - Minimal production image
 FROM python:3.11-slim
 
-# Install system dependencies for docling/OpenCV
+# Install system dependencies for docling/OpenCV and curl for healthcheck
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 \
     libglib2.0-0 \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Set build arguments for flexibility
@@ -70,11 +72,11 @@ WORKDIR /app
 # Copy virtual environment from builder with proper ownership
 COPY --from=builder --chown=${APP_USER}:${APP_USER} /opt/venv /opt/venv
 
-# Copy example files with proper ownership
-COPY --chown=${APP_USER}:${APP_USER} examples/interactive_rag/manifest.json ./
-COPY --chown=${APP_USER}:${APP_USER} examples/interactive_rag/web.py ./
-COPY --chown=${APP_USER}:${APP_USER} examples/interactive_rag/templates ./templates
-COPY --chown=${APP_USER}:${APP_USER} examples/interactive_rag/static ./static
+# Copy example files with proper ownership (correct path: examples/basic/interactive_rag)
+COPY --chown=${APP_USER}:${APP_USER} examples/basic/interactive_rag/manifest.json ./
+COPY --chown=${APP_USER}:${APP_USER} examples/basic/interactive_rag/web.py ./
+COPY --chown=${APP_USER}:${APP_USER} examples/basic/interactive_rag/templates ./templates
+COPY --chown=${APP_USER}:${APP_USER} examples/basic/interactive_rag/static ./static
 
 # Create cache directories with proper permissions before switching user
 RUN mkdir -p /app/.cache /app/cache && \
@@ -101,9 +103,12 @@ RUN echo "=== Verifying installation in runtime stage ===" && \
 # Switch to non-root user
 USER ${APP_USER}
 
-# Health check
+# Expose port
+EXPOSE 5001
+
+# Health check - actual HTTP check against /health endpoint
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD python -c "import sys; sys.exit(0)" || exit 1
+    CMD curl -f http://localhost:5001/health || exit 1
 
 # Default command - run web server
 CMD ["uvicorn", "web:app", "--host", "0.0.0.0", "--port", "5001", "--ws", "auto"]

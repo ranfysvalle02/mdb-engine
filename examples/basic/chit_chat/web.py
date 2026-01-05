@@ -4,6 +4,9 @@ Conversations - AI Chat Application
 
 A simple, beautiful conversation app with isolated context per user.
 Each user can have multiple conversations using the abstracted LLM service.
+
+This example demonstrates the recommended `engine.create_app()` pattern
+for FastAPI integration with MDB-Engine.
 """
 import asyncio
 import logging
@@ -14,14 +17,14 @@ from typing import Any, Dict, List, Optional
 
 from bson.objectid import ObjectId
 from dotenv import load_dotenv
-from fastapi import FastAPI, Form, HTTPException, Request, WebSocket, WebSocketDisconnect, status
+from fastapi import Form, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from openai import AzureOpenAI
 
 from mdb_engine import MongoDBEngine
 from mdb_engine.auth.decorators import rate_limit_auth, require_auth, token_security
-from mdb_engine.auth.integration import get_auth_config, setup_auth_from_manifest
+from mdb_engine.auth.integration import get_auth_config
 from mdb_engine.auth.users import create_app_session, get_app_user
 from mdb_engine.auth.utils import login_user, logout_user, register_user
 from mdb_engine.routing.websockets import broadcast_to_app, register_message_handler
@@ -29,14 +32,10 @@ from mdb_engine.routing.websockets import broadcast_to_app, register_message_han
 # Load environment variables
 load_dotenv()
 
-# Memory service is imported lazily when needed to avoid permission issues
-
 logger = logging.getLogger(__name__)
 
-# Initialize FastAPI app
-app = FastAPI(title="Conversations", description="AI Chat Application", version="1.0.0")
-
-# CORS is now handled automatically by setup_auth_from_manifest() based on manifest.json
+# App slug constant
+APP_SLUG = "conversations"
 
 # Templates directory
 templates_dir = (
@@ -46,97 +45,64 @@ templates_dir = (
 )
 templates = Jinja2Templates(directory=str(templates_dir))
 
-# Global engine instance
-engine: Optional[MongoDBEngine] = None
-db = None
-
 # Secret key for JWT
 SECRET_KEY = os.environ.get(
-    "FLASK_SECRET_KEY", "conversations_demo_secret_key_change_in_production"
+    "APP_SECRET_KEY", "conversations_demo_secret_key_change_in_production"
+)
+
+# Initialize the MongoDB Engine
+engine = MongoDBEngine(
+    mongo_uri=os.getenv("MONGO_URI", "mongodb://mongodb:27017/"),
+    db_name=os.getenv("MONGO_DB_NAME", "conversations_db"),
+)
+
+# Create FastAPI app with automatic lifecycle management
+# This automatically handles:
+# - Engine initialization and shutdown
+# - Manifest loading and validation
+# - Auth setup from manifest (CORS, sessions, etc.)
+# - WebSocket route registration
+app = engine.create_app(
+    slug=APP_SLUG,
+    manifest=Path(__file__).parent / "manifest.json",
+    title="Conversations",
+    description="AI Chat Application",
+    version="1.0.0",
 )
 
 
+# Additional setup that runs after engine is initialized
 @app.on_event("startup")
-async def startup_event():
-    """Initialize the MongoDB Engine on startup."""
-    global engine, db
-
-    logger.info("Starting Conversations Application...")
-
-    # Get MongoDB connection from environment
-    # Default matches docker-compose.yml: mongodb service without authentication
-    mongo_uri = os.getenv("MONGO_URI", "mongodb://mongodb:27017/")
-    db_name = os.getenv("MONGO_DB_NAME", "conversations_db")
-
-    logger.info(
-        f"Connecting to MongoDB: {mongo_uri.replace('://', '://***@') if '@' in mongo_uri else mongo_uri} (db: {db_name})"
-    )
-
-    # Initialize the MongoDB Engine
-    engine = MongoDBEngine(mongo_uri=mongo_uri, db_name=db_name)
-
-    # Connect to MongoDB
-    await engine.initialize()
-    logger.info("Engine initialized successfully")
-
-    # Load and register the app manifest
-    manifest_path = Path(__file__).parent / "manifest.json"
-    if manifest_path.exists():
-        manifest = await engine.load_manifest(manifest_path)
-        success = await engine.register_app(manifest, create_indexes=True)
-        if success:
-            logger.info(f"App '{manifest['slug']}' registered successfully")
-        else:
-            logger.warning("Failed to register app")
-
-    # Set up enhanced auth system from manifest.json
-    await setup_auth_from_manifest(app, engine, "conversations")
-
+async def additional_startup():
+    """Additional startup tasks beyond what create_app() handles."""
     # Set global engine for embedding dependency injection
-    from mdb_engine.embeddings.dependencies import set_global_engine
+    try:
+        from mdb_engine.embeddings.dependencies import set_global_engine
 
-    set_global_engine(engine, app_slug="conversations")
+        set_global_engine(engine, app_slug=APP_SLUG)
+    except ImportError:
+        logger.debug("Embedding dependencies not available")
 
     # Initialize embedding service if configured in manifest.json
     try:
         from mdb_engine.embeddings import get_embedding_service
 
-        app_config = engine.get_app("conversations")
+        app_config = engine.get_app(APP_SLUG)
         embedding_config = app_config.get("embedding_config", {}) if app_config else {}
         if embedding_config:
-            embedding_service = get_embedding_service(config=embedding_config)
+            get_embedding_service(config=embedding_config)
             logger.info("EmbeddingService initialized from manifest.json")
         else:
             logger.debug(
                 "No embedding_config found in manifest.json - embedding service not initialized"
             )
-    except ImportError as e:
-        logger.debug("EmbeddingService dependencies not available", exc_info=True)
-    # Type 4: Let other exceptions bubble up to framework handler
-
-    # Mark app as started
-    app.state._started = True
-
-    # Get scoped database
-    db = engine.get_scoped_db("conversations")
+    except ImportError:
+        logger.debug("EmbeddingService dependencies not available")
 
     # Register WebSocket message handlers
     register_websocket_message_handlers()
 
-    # Register WebSocket routes from manifest
-    if engine:
-        engine.register_websocket_routes(app, "conversations")
-
     logger.info("Conversations application ready!")
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Cleanup on shutdown"""
-    global engine
-    if engine:
-        await engine.shutdown()
-        logger.info("Cleaned up and shut down")
 
 
 # Global exception handler to catch any unhandled exceptions
@@ -166,8 +132,6 @@ async def global_exception_handler(request: Request, exc: Exception):
         )
 
     # For other endpoints, use default FastAPI behavior
-    from fastapi.responses import JSONResponse
-
     if isinstance(exc, HTTPException):
         return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
     # For unexpected exceptions, return 500
@@ -175,12 +139,43 @@ async def global_exception_handler(request: Request, exc: Exception):
     return JSONResponse({"detail": "Internal server error"}, status_code=500)
 
 
+# ============================================================================
+# Health Check Endpoint (for container healthchecks)
+# ============================================================================
+
+
+@app.get("/health", response_class=JSONResponse)
+async def health_check():
+    """Health check endpoint for container orchestration."""
+    health_status = {
+        "status": "healthy",
+        "app": APP_SLUG,
+        "engine_initialized": engine.initialized,
+    }
+
+    # Check MongoDB connection if engine is initialized
+    if engine.initialized:
+        try:
+            db = engine.get_scoped_db(APP_SLUG)
+            # Simple ping to verify connection
+            await db.command("ping")
+            health_status["database"] = "connected"
+        except Exception as e:
+            health_status["status"] = "degraded"
+            health_status["database"] = f"error: {str(e)}"
+    else:
+        health_status["status"] = "starting"
+        health_status["database"] = "not_connected"
+
+    status_code = 200 if health_status["status"] == "healthy" else 503
+    return JSONResponse(health_status, status_code=status_code)
+
+
 def get_db():
     """Get the scoped database."""
-    global engine
-    if not engine:
+    if not engine.initialized:
         raise HTTPException(status_code=503, detail="Engine not initialized")
-    return engine.get_scoped_db("conversations")
+    return engine.get_scoped_db(APP_SLUG)
 
 
 async def get_current_app_user(request: Request):
@@ -188,11 +183,11 @@ async def get_current_app_user(request: Request):
     db = get_db()
 
     # Get app config for auth.users
-    app_config = engine.get_app("conversations") if engine else None
+    app_config = engine.get_app(APP_SLUG)
 
     app_user = await get_app_user(
         request=request,
-        slug_id="conversations",
+        slug_id=APP_SLUG,
         db=db,
         config=app_config,
         allow_demo_fallback=False,
@@ -201,7 +196,7 @@ async def get_current_app_user(request: Request):
     # If no user but session cookie exists, it means the user was deleted
     # Mark this in request state so endpoints can clear the cookie
     if not app_user:
-        cookie_name = "conversations_session_conversations"
+        cookie_name = f"{APP_SLUG}_session_{APP_SLUG}"
         if request.cookies.get(cookie_name):
             request.state.clear_invalid_session = True
 
@@ -251,7 +246,7 @@ async def login(
     db = get_db()
 
     # Get auth config from manifest
-    auth_config = await get_auth_config("conversations", engine)
+    auth_config = await get_auth_config(APP_SLUG, engine)
     token_config = auth_config.get("token_management", {})
 
     # Use login_user utility
@@ -269,19 +264,18 @@ async def login(
 
         # Create app-specific session
         user = result["user"]
-        app_config = engine.get_app("conversations") if engine else None
+        app_config = engine.get_app(APP_SLUG)
         if app_config:
             try:
-                session_token = await create_app_session(
+                await create_app_session(
                     request=request,
-                    slug_id="conversations",
+                    slug_id=APP_SLUG,
                     user_id=str(user["_id"]),
                     config=app_config,
                     response=response,
                 )
             except (ValueError, TypeError) as e:
                 logger.warning(f"Failed to create app session: {e}", exc_info=True)
-            # Type 4: Let other exceptions bubble up to framework handler
 
         return response
     else:
@@ -317,7 +311,7 @@ async def register(
     db = get_db()
 
     # Get auth config from manifest
-    auth_config = await get_auth_config("conversations", engine)
+    auth_config = await get_auth_config(APP_SLUG, engine)
     token_config = auth_config.get("token_management", {})
 
     # Use register_user utility
@@ -338,19 +332,18 @@ async def register(
 
         # Create app-specific session
         user = result["user"]
-        app_config = engine.get_app("conversations") if engine else None
+        app_config = engine.get_app(APP_SLUG)
         if app_config:
             try:
-                session_token = await create_app_session(
+                await create_app_session(
                     request=request,
-                    slug_id="conversations",
+                    slug_id=APP_SLUG,
                     user_id=str(user["_id"]),
                     config=app_config,
                     response=response,
                 )
             except (ValueError, TypeError) as e:
                 logger.warning(f"Failed to create app session: {e}", exc_info=True)
-            # Type 4: Let other exceptions bubble up to framework handler
 
         return response
     else:
@@ -371,7 +364,7 @@ async def logout(request: Request):
     response = await logout_user(request, response)
 
     # Clear app-specific session cookie
-    cookie_name = "conversations_session_conversations"
+    cookie_name = f"{APP_SLUG}_session_{APP_SLUG}"
     response.delete_cookie(key=cookie_name)
 
     return response
@@ -427,7 +420,7 @@ async def conversation_view(request: Request, conversation_id: str):
             {"_id": ObjectId(conversation_id), "user_id": user_id}
         )
     except (ValueError, TypeError):
-        # Type 2: Recoverable - invalid ObjectId format, redirect to conversations
+        # Invalid ObjectId format, redirect to conversations
         conversation = None
 
     if not conversation:
@@ -509,7 +502,6 @@ async def send_message(request: Request, conversation_id: str, message: str = Fo
             {"_id": ObjectId(conversation_id), "user_id": user_id}
         )
     except (ValueError, TypeError):
-        # Type 3: Invalid ObjectId format - raise HTTPException
         raise HTTPException(status_code=404, detail="Conversation not found")
 
     if not conversation:
@@ -533,7 +525,7 @@ async def send_message(request: Request, conversation_id: str, message: str = Fo
     )
 
     # Get Memory service from engine (if available)
-    memory_service = engine.get_memory_service("conversations")
+    memory_service = engine.get_memory_service(APP_SLUG)
 
     # Initialize Azure OpenAI client
     api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-01")
@@ -550,19 +542,14 @@ async def send_message(request: Request, conversation_id: str, message: str = Fo
     client = AzureOpenAI(api_version=api_version, azure_endpoint=endpoint, api_key=key)
 
     # Retrieve relevant memories for context (if memory service is available)
-    # Do this BEFORE generating response so we can use memories as context
     context_memories = []
     memory_search_details = []
     if memory_service:
-        # Type 4: Let memory retrieval errors bubble up to framework handler
-        # Search for relevant memories to add as context
         relevant_memories = memory_service.search(query=message, user_id=user_id, limit=3)
         if relevant_memories:
-            # Extract memory text from results with details
             context_memories = []
             for m in relevant_memories:
                 if isinstance(m, dict):
-                    # mem0 returns dicts with 'memory' field
                     memory_text = m.get("memory") or m.get("data", {}).get("memory", "")
                     if memory_text:
                         context_memories.append(memory_text)
@@ -577,9 +564,6 @@ async def send_message(request: Request, conversation_id: str, message: str = Fo
                 elif isinstance(m, str):
                     context_memories.append(m)
                     memory_search_details.append({"memory": m, "score": None})
-
-    # Memory storage will happen AFTER AI response is generated
-    # (moved below to include assistant response)
 
     # Format messages for LLM service
     messages = []
@@ -603,7 +587,6 @@ async def send_message(request: Request, conversation_id: str, message: str = Fo
     messages.append({"role": "user", "content": message})
 
     # Get AI response using Azure OpenAI client
-    # Type 4: Let API errors bubble up to framework handler
     completion = await asyncio.to_thread(
         client.chat.completions.create, model=deployment_name, messages=messages, max_tokens=1000
     )
@@ -620,10 +603,7 @@ async def send_message(request: Request, conversation_id: str, message: str = Fo
     await db.messages.insert_one(ai_message)
 
     # Store conversation turn in memory (AFTER AI response is generated)
-    # Mem0 needs both user message and assistant response to extract meaningful memories
     if memory_service:
-        # Type 4: Let memory storage errors bubble up to framework handler
-        # Build memory messages with full conversation context including assistant response
         memory_messages = []
 
         # Convert full conversation history to message format
@@ -640,8 +620,6 @@ async def send_message(request: Request, conversation_id: str, message: str = Fo
 
         # Store in memory asynchronously (fire and forget)
         async def store_memory():
-            # Type 4: Let background memory storage errors bubble up
-            # Log the actual message content for debugging
             message_preview = []
             for i, msg in enumerate(memory_messages):
                 role = msg.get("role", "unknown")
@@ -650,62 +628,26 @@ async def send_message(request: Request, conversation_id: str, message: str = Fo
                 message_preview.append(f"{i+1}. {role}: {preview}")
 
             logger.info(
-                f"🔵 STORING MEMORY - user_id={user_id}, conversation_id={conversation_id}, messages={len(memory_messages)}, collection={memory_service.collection_name}",
+                f"🔵 STORING MEMORY - user_id={user_id}, conversation_id={conversation_id}, messages={len(memory_messages)}",
                 extra={
                     "user_id": user_id,
                     "conversation_id": conversation_id,
                     "messages_count": len(memory_messages),
-                    "has_assistant_response": any(
-                        m.get("role") == "assistant" for m in memory_messages
-                    ),
-                    "message_preview": "\n".join(message_preview),
-                    "user_message": message[:200] if message else None,
-                    "assistant_response": ai_response[:200] if ai_response else None,
-                    "collection_name": memory_service.collection_name,
                 },
             )
 
-            logger.info(f"🔵 About to call memory_service.add() for user_id={user_id}")
             result = await asyncio.to_thread(
                 memory_service.add,
                 messages=memory_messages,
-                user_id=str(user_id),  # Ensure it's a string
+                user_id=str(user_id),
                 metadata={"conversation_id": conversation_id, "source": "conversations_app"},
             )
-            logger.info(
-                f"🔵 memory_service.add() completed, result type: {type(result).__name__}, length: {len(result) if isinstance(result, list) else 'N/A'}"
-            )
 
-            logger.info(
-                f"STORAGE RESULT - user_id={user_id}, result_type={type(result).__name__}, result_length={len(result) if isinstance(result, list) else 'N/A'}",
-                extra={
-                    "user_id": user_id,
-                    "result_type": type(result).__name__,
-                    "result_length": len(result) if isinstance(result, list) else 0,
-                    "result_sample": (
-                        result[0]
-                        if result and isinstance(result, list) and len(result) > 0
-                        else None
-                    ),
-                },
-            )
-
-            # Log what Mem0 extracted for visibility
             if result and isinstance(result, list) and len(result) > 0:
                 logger.info(
-                    f"✅ Mem0 extracted {len(result)} memories from conversation for user_id={user_id}",
-                    extra={
-                        "user_id": user_id,
-                        "conversation_id": conversation_id,
-                        "memory_count": len(result),
-                        "messages_count": len(memory_messages),
-                        "memory_ids": [
-                            m.get("id") or m.get("_id") for m in result if isinstance(m, dict)
-                        ],
-                    },
+                    f"✅ Mem0 extracted {len(result)} memories from conversation for user_id={user_id}"
                 )
 
-                # Extract memory text for real-time update
                 memory_texts = []
                 for m in result:
                     if isinstance(m, dict):
@@ -723,32 +665,26 @@ async def send_message(request: Request, conversation_id: str, message: str = Fo
                                 }
                             )
 
-                # Small delay before WebSocket broadcast to ensure memories are fully processed
-                await asyncio.sleep(0.3)  # Reduced delay for faster real-time updates
+                await asyncio.sleep(0.3)
 
-                # Fetch the actual memories from the service to include full data
-                # Type 4: Let WebSocket broadcast errors bubble up
-                # Get fresh memories to include in broadcast
                 fresh_memories = await asyncio.to_thread(
-                    memory_service.get_all, user_id=str(user_id), limit=50  # Get recent memories
+                    memory_service.get_all, user_id=str(user_id), limit=50
                 )
 
-                # Calculate stats for real-time update
                 total_memories = len(fresh_memories) if isinstance(fresh_memories, list) else 0
 
-                # Broadcast memory update event via WebSocket with actual memory data
                 await broadcast_to_app(
-                    "conversations",
+                    APP_SLUG,
                     {
                         "type": "memory_stored",
                         "user_id": user_id,
                         "conversation_id": conversation_id,
                         "memory_count": len(result),
                         "total_memories": total_memories,
-                        "new_memories": memory_texts,  # Newly extracted memories
+                        "new_memories": memory_texts,
                         "all_memories": (
                             fresh_memories[:20] if isinstance(fresh_memories, list) else []
-                        ),  # Recent memories for UI update
+                        ),
                         "stats": {
                             "total_memories": total_memories,
                             "new_count": len(result),
@@ -756,7 +692,7 @@ async def send_message(request: Request, conversation_id: str, message: str = Fo
                             "inference_enabled": True,
                         },
                         "message": f"Mem0 extracted {len(result)} memories from conversation",
-                        "action": "refresh_memories",  # Signal frontend to refresh
+                        "action": "refresh_memories",
                     },
                     user_id=user_id,
                 )
@@ -765,19 +701,11 @@ async def send_message(request: Request, conversation_id: str, message: str = Fo
                 )
             else:
                 logger.warning(
-                    f"⚠️ Mem0 returned 0 memories for user_id={user_id}. This may be normal if the conversation doesn't contain extractable facts.",
-                    extra={
-                        "user_id": user_id,
-                        "conversation_id": conversation_id,
-                        "messages_count": len(memory_messages),
-                        "user_message": message[:100] if message else None,
-                        "assistant_response": ai_response[:100] if ai_response else None,
-                    },
+                    f"⚠️ Mem0 returned 0 memories for user_id={user_id}. This may be normal if the conversation doesn't contain extractable facts."
                 )
 
             return result
 
-        # Schedule in background (fire and forget)
         asyncio.create_task(store_memory())
 
     # Update conversation timestamp
@@ -787,7 +715,6 @@ async def send_message(request: Request, conversation_id: str, message: str = Fo
 
     # Update conversation title if it's still "New Conversation"
     if conversation.get("title") == "New Conversation" and len(message) > 0:
-        # Use first 50 chars of first message as title
         title = message[:50] + ("..." if len(message) > 50 else "")
         await db.conversations.update_one(
             {"_id": ObjectId(conversation_id)}, {"$set": {"title": title}}
@@ -821,15 +748,12 @@ async def send_message(request: Request, conversation_id: str, message: str = Fo
         if context_memories:
             response_data["memory_context"] = {
                 "used_memories": len(context_memories),
-                "memories": context_memories[:3],  # Limit to 3 for display
-                "search_details": memory_search_details[:3],  # Include search scores and metadata
+                "memories": context_memories[:3],
+                "search_details": memory_search_details[:3],
             }
 
-        # Broadcast memory search event via WebSocket
-        if context_memories:
-            # Type 4: Let WebSocket broadcast errors bubble up
             await broadcast_to_app(
-                "conversations",
+                APP_SLUG,
                 {
                     "type": "memory_search",
                     "user_id": user_id,
@@ -861,7 +785,6 @@ async def delete_conversation(request: Request, conversation_id: str):
             {"_id": ObjectId(conversation_id), "user_id": user_id}
         )
     except (ValueError, TypeError):
-        # Type 3: Invalid ObjectId format - raise HTTPException
         raise HTTPException(status_code=404, detail="Conversation not found")
 
     if not conversation:
@@ -886,93 +809,57 @@ async def get_all_memories(request: Request, limit: int = 20):
     app_user = await get_current_app_user(request)
 
     if not app_user:
-        # Clear invalid session cookie if marked
         response = JSONResponse({"error": "Authentication required"}, status_code=401)
         if getattr(request.state, "clear_invalid_session", False):
-            cookie_name = "conversations_session_conversations"
+            cookie_name = f"{APP_SLUG}_session_{APP_SLUG}"
             response.delete_cookie(key=cookie_name)
         return response
 
-    memory_service = engine.get_memory_service("conversations")
+    memory_service = engine.get_memory_service(APP_SLUG)
     if not memory_service:
-        # Return empty response instead of 503 to avoid breaking frontend
-        # Memory service is optional - app can work without it
         return JSONResponse(
             {"success": True, "memories": [], "count": 0, "memory_service_available": False}
         )
 
     user_id = str(app_user["_id"])
 
-    # Type 4: Let memory retrieval errors bubble up to framework handler
-    # Run synchronous get_all in thread pool
     logger.info(
-        f"🔍 FETCHING MEMORIES - user_id={user_id} (type: {type(user_id).__name__}), limit={limit}",
-        extra={
-            "user_id": user_id,
-            "user_id_type": type(user_id).__name__,
-            "user_id_repr": repr(user_id),
-            "limit": limit,
-        },
+        f"🔍 FETCHING MEMORIES - user_id={user_id}, limit={limit}",
+        extra={"user_id": user_id, "limit": limit},
     )
-    memories = await asyncio.to_thread(
-        memory_service.get_all, user_id=str(user_id), limit=limit
-    )  # Ensure string
+    memories = await asyncio.to_thread(memory_service.get_all, user_id=str(user_id), limit=limit)
     logger.info(
-        f"🔍 RETRIEVED MEMORIES - user_id={user_id}, count={len(memories) if isinstance(memories, list) else 0}",
-        extra={
-            "user_id": user_id,
-            "memory_count": len(memories) if isinstance(memories, list) else 0,
-            "sample_memory": (
-                memories[0]
-                if memories and isinstance(memories, list) and len(memories) > 0
-                else None
-            ),
-        },
+        f"🔍 RETRIEVED MEMORIES - user_id={user_id}, count={len(memories) if isinstance(memories, list) else 0}"
     )
 
     # Normalize memory format for frontend
-    # Handle Mem0 v2 API format: memories should already be a list from service layer
     normalized_memories = []
     if isinstance(memories, list):
         for mem in memories:
             if isinstance(mem, dict):
-                # Mem0 v2 format: {"id": "...", "memory": "...", "created_at": "...", "updated_at": "...", "metadata": {...}}
-                # Prioritize "memory" field (v2 format) over nested structures
                 memory_text = (
                     mem.get("memory")
-                    or mem.get("text")  # v2 format - primary
-                    or (  # Alternative text field
+                    or mem.get("text")
+                    or (
                         mem.get("data", {}).get("memory")
                         if isinstance(mem.get("data"), dict)
                         else None
                     )
-                    or str(mem)  # Nested format (legacy)  # Fallback
+                    or str(mem)
                 )
-
-                # Extract ID - v2 format uses "id" field
                 memory_id = mem.get("id") or mem.get("_id") or None
-
-                # Extract metadata - v2 format has direct "metadata" field
                 metadata = mem.get("metadata", {})
                 if not isinstance(metadata, dict):
                     metadata = {}
 
-                if memory_text:  # Only add if we have memory text
+                if memory_text:
                     normalized_memories.append(
                         {"memory": memory_text, "id": memory_id, "metadata": metadata}
                     )
             elif isinstance(mem, str):
-                # Handle string format memories
                 normalized_memories.append({"memory": mem, "id": None, "metadata": {}})
 
-    logger.info(
-        f"Returning {len(normalized_memories)} normalized memories for user {user_id}",
-        extra={
-            "user_id": user_id,
-            "raw_count": len(memories) if isinstance(memories, list) else 0,
-            "normalized_count": len(normalized_memories),
-        },
-    )
+    logger.info(f"Returning {len(normalized_memories)} normalized memories for user {user_id}")
 
     return JSONResponse(
         {"success": True, "memories": normalized_memories, "count": len(normalized_memories)}
@@ -990,17 +877,14 @@ async def search_memories(
     if not app_user:
         raise HTTPException(status_code=401, detail="Authentication required")
 
-    memory_service = engine.get_memory_service("conversations")
+    memory_service = engine.get_memory_service(APP_SLUG)
     if not memory_service:
-        # Return empty results instead of 503 to avoid breaking frontend
-        # Memory service is optional - app can work without it
         return JSONResponse(
             {"success": True, "results": [], "count": 0, "query": query, "metadata_filter": None}
         )
 
     user_id = str(app_user["_id"])
 
-    # Type 4: Let memory search errors bubble up to framework handler
     # Parse metadata filter if provided
     metadata_filter = None
     if metadata:
@@ -1013,7 +897,6 @@ async def search_memories(
                 status_code=400, detail="Invalid metadata format. Expected JSON string."
             )
 
-    # Run synchronous search in thread pool with metadata filter
     results = await asyncio.to_thread(
         memory_service.search, query=query, user_id=user_id, limit=limit, metadata=metadata_filter
     )
@@ -1060,18 +943,14 @@ async def get_memory(request: Request, memory_id: str):
     if not app_user:
         raise HTTPException(status_code=401, detail="Authentication required")
 
-    memory_service = engine.get_memory_service("conversations")
+    memory_service = engine.get_memory_service(APP_SLUG)
     if not memory_service:
-        # Return error response when memory service not available
         return JSONResponse(
             {"success": False, "error": "Memory service not available", "memory": None},
             status_code=503,
         )
 
     user_id = str(app_user["_id"])
-
-    # Type 4: Let memory retrieval errors bubble up to framework handler
-    # Run synchronous get in thread pool
     memory = await asyncio.to_thread(memory_service.get, memory_id=memory_id, user_id=user_id)
 
     # Normalize memory format
@@ -1103,9 +982,8 @@ async def update_memory(request: Request, memory_id: str):
     if not app_user:
         raise HTTPException(status_code=401, detail="Authentication required")
 
-    memory_service = engine.get_memory_service("conversations")
+    memory_service = engine.get_memory_service(APP_SLUG)
     if not memory_service:
-        # Return error response when memory service not available
         return JSONResponse(
             {"success": False, "error": "Memory service not available", "memory": None},
             status_code=503,
@@ -1113,8 +991,6 @@ async def update_memory(request: Request, memory_id: str):
 
     user_id = str(app_user["_id"])
 
-    # Type 4: Let memory update errors bubble up to framework handler
-    # Parse request body
     body = await request.json()
     data = body.get("data")
     metadata = body.get("metadata")
@@ -1122,7 +998,6 @@ async def update_memory(request: Request, memory_id: str):
     if not data:
         raise HTTPException(status_code=400, detail="Missing 'data' field in request body")
 
-    # Run synchronous update in thread pool
     updated_memory = await asyncio.to_thread(
         memory_service.update, memory_id=memory_id, data=data, user_id=user_id, metadata=metadata
     )
@@ -1156,9 +1031,8 @@ async def delete_memory(request: Request, memory_id: str):
     if not app_user:
         raise HTTPException(status_code=401, detail="Authentication required")
 
-    memory_service = engine.get_memory_service("conversations")
+    memory_service = engine.get_memory_service(APP_SLUG)
     if not memory_service:
-        # Return error response when memory service not available
         return JSONResponse(
             {
                 "success": False,
@@ -1169,9 +1043,6 @@ async def delete_memory(request: Request, memory_id: str):
         )
 
     user_id = str(app_user["_id"])
-
-    # Type 4: Let memory deletion errors bubble up to framework handler
-    # Run synchronous delete in thread pool
     success = await asyncio.to_thread(memory_service.delete, memory_id=memory_id, user_id=user_id)
 
     return JSONResponse(
@@ -1193,22 +1064,17 @@ async def delete_all_memories(request: Request):
     if not app_user:
         raise HTTPException(status_code=401, detail="Authentication required")
 
-    memory_service = engine.get_memory_service("conversations")
+    memory_service = engine.get_memory_service(APP_SLUG)
     if not memory_service:
-        # Return empty response instead of 503 to avoid breaking frontend
-        # Memory service is optional - app can work without it
         return JSONResponse(
             {"success": True, "memories": [], "count": 0, "memory_service_available": False}
         )
 
     user_id = str(app_user["_id"])
 
-    # Type 4: Let memory deletion errors bubble up to framework handler
-    # Get count before deletion for response
     all_memories = await asyncio.to_thread(memory_service.get_all, user_id=user_id, limit=1000)
     memory_count = len(all_memories) if isinstance(all_memories, list) else 0
 
-    # Run synchronous delete_all in thread pool
     success = await asyncio.to_thread(memory_service.delete_all, user_id=user_id)
 
     return JSONResponse(
@@ -1227,8 +1093,7 @@ async def delete_all_memories(request: Request):
 @app.get("/api/memories/stats", response_class=JSONResponse)
 @require_auth()
 async def get_memory_stats(request: Request):
-    """Get memory statistics for the current user - BULLETPROOF VERSION"""
-    # Default response - always return 200, never raise exceptions
+    """Get memory statistics for the current user"""
     default_stats = {
         "success": True,
         "stats": {
@@ -1242,28 +1107,22 @@ async def get_memory_stats(request: Request):
     }
 
     try:
-        # Check engine is available
-        global engine
-        if not engine:
+        if not engine.initialized:
             logger.warning("Engine not initialized in get_memory_stats")
             return JSONResponse(default_stats, status_code=200)
 
-        # Get app user - wrap in try-except in case get_app_user fails
         try:
             app_user = await get_current_app_user(request)
         except (AttributeError, RuntimeError, ValueError, TypeError, KeyError) as user_error:
-            # Type 2: Recoverable - user lookup failed, return default stats
             logger.warning(f"Failed to get app user in stats: {user_error}")
             return JSONResponse(default_stats, status_code=200)
 
         if not app_user:
             return JSONResponse(default_stats, status_code=200)
 
-        # Get memory service - wrap in try-except
         try:
-            memory_service = engine.get_memory_service("conversations")
+            memory_service = engine.get_memory_service(APP_SLUG)
         except (AttributeError, RuntimeError, ValueError, KeyError) as service_error:
-            # Type 2: Recoverable - service lookup failed, return default stats
             logger.warning(f"Failed to get memory service in stats: {service_error}")
             return JSONResponse(default_stats, status_code=200)
 
@@ -1272,97 +1131,26 @@ async def get_memory_stats(request: Request):
 
         user_id = str(app_user.get("_id", "")) if app_user else ""
         if not user_id:
-            logger.warning(f"get_memory_stats: No user_id available")
+            logger.warning("get_memory_stats: No user_id available")
             return JSONResponse(default_stats, status_code=200)
 
-        logger.info(
-            f"📊 FETCHING STATS - user_id={user_id} (type: {type(user_id).__name__})",
-            extra={
-                "user_id": user_id,
-                "user_id_type": type(user_id).__name__,
-                "user_id_repr": repr(user_id),
-            },
-        )
+        logger.info(f"📊 FETCHING STATS - user_id={user_id}")
 
-        # Try to get memories - wrap in try-except with timeout
         try:
-            logger.debug(f"Fetching memory stats for user {user_id}")
-            # DEBUG: Check what's actually in MongoDB collection
-            try:
-                db = get_db()
-                collection_name = getattr(memory_service, "collection_name", "user_memories")
-                logger.info(
-                    f"🔍 DEBUG: Checking MongoDB collection '{collection_name}' for user_id='{user_id}'"
-                )
-
-                # Query MongoDB directly to see what's stored
-                collection = db[collection_name]
-                direct_query = (
-                    await collection.find({"user_id": user_id}).limit(5).to_list(length=5)
-                )
-                logger.info(
-                    f"🔍 DIRECT MONGODB QUERY: Found {len(direct_query)} documents with user_id='{user_id}'",
-                    extra={
-                        "user_id": user_id,
-                        "collection": collection_name,
-                        "direct_count": len(direct_query),
-                        "sample_doc": direct_query[0] if direct_query else None,
-                    },
-                )
-
-                # Also check for any documents (to see user_id format)
-                any_docs = await collection.find({}).limit(3).to_list(length=3)
-                if any_docs:
-                    logger.info(
-                        f"🔍 SAMPLE DOCS: Found {len(any_docs)} docs, sample user_ids: {[doc.get('user_id') for doc in any_docs]}",
-                        extra={
-                            "collection": collection_name,
-                            "sample_user_ids": [doc.get("user_id") for doc in any_docs],
-                        },
-                    )
-            except (
-                AttributeError,
-                RuntimeError,
-                ConnectionError,
-                ValueError,
-                TypeError,
-            ) as db_error:
-                # Type 2: Recoverable - MongoDB query failed, continue without debug info
-                logger.warning(f"Could not query MongoDB directly: {db_error}")
-
-            # Add timeout to prevent hanging
-            logger.info(f"📊 CALLING get_all - user_id={user_id}, type={type(user_id).__name__}")
             all_memories = await asyncio.wait_for(
-                asyncio.to_thread(
-                    memory_service.get_all, user_id=str(user_id), limit=1000
-                ),  # Ensure string
+                asyncio.to_thread(memory_service.get_all, user_id=str(user_id), limit=1000),
                 timeout=5.0,
-            )
-            logger.info(
-                f"📊 RETRIEVED MEMORIES - user_id={user_id}, count={len(all_memories) if isinstance(all_memories, list) else 0}",
-                extra={
-                    "user_id": user_id,
-                    "memory_count": len(all_memories) if isinstance(all_memories, list) else 0,
-                    "sample_memory": (
-                        all_memories[0]
-                        if all_memories and isinstance(all_memories, list) and len(all_memories) > 0
-                        else None
-                    ),
-                },
             )
         except asyncio.TimeoutError:
             logger.warning(f"Timeout getting memories for stats (user: {user_id})")
             return JSONResponse(default_stats, status_code=200)
         except (AttributeError, RuntimeError, ConnectionError, ValueError, TypeError) as mem_error:
-            # Type 2: Recoverable - memory retrieval failed, return default stats
             logger.warning(f"Failed to get memories for stats: {mem_error}")
             return JSONResponse(default_stats, status_code=200)
 
-        # Safely process memories
         try:
             memory_count = len(all_memories) if isinstance(all_memories, list) else 0
 
-            # Analyze metadata to show breakdown
             metadata_breakdown = {}
             conversation_memories = 0
             for mem in all_memories:
@@ -1375,17 +1163,14 @@ async def get_memory_stats(request: Request):
                             if metadata.get("conversation_id"):
                                 conversation_memories += 1
                 except (KeyError, TypeError, AttributeError):
-                    # Type 2: Recoverable - skip invalid memory entries
                     continue
 
-            # Safely get memory service attributes
             inference_enabled = False
             graph_enabled = False
             try:
                 inference_enabled = getattr(memory_service, "infer", False)
                 graph_enabled = getattr(memory_service, "enable_graph", False)
             except AttributeError:
-                # Type 2: Recoverable - use defaults if attributes don't exist
                 pass
 
             return JSONResponse(
@@ -1403,12 +1188,10 @@ async def get_memory_stats(request: Request):
                 status_code=200,
             )
         except (ValueError, TypeError, AttributeError, KeyError) as process_error:
-            # Type 2: Recoverable - processing failed, return default stats
             logger.warning(f"Failed to process memory stats: {process_error}")
             return JSONResponse(default_stats, status_code=200)
 
     except (AttributeError, RuntimeError, ValueError, TypeError, KeyError) as e:
-        # Type 2: Recoverable - unexpected error, return default stats (bulletproof endpoint)
         logger.error(f"Unexpected error in get_memory_stats: {e}", exc_info=True)
         return JSONResponse(default_stats, status_code=200)
 
@@ -1427,4 +1210,4 @@ def register_websocket_message_handlers():
         # This handler can process incoming client messages if needed
         pass
 
-    register_message_handler("conversations", "realtime", handle_message)
+    register_message_handler(APP_SLUG, "realtime", handle_message)

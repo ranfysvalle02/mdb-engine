@@ -7,8 +7,8 @@ services:
   # Interactive RAG Application
   app:
     build:
-      context: ../..
-      dockerfile: examples/interactive_rag/Dockerfile
+      context: ../../..
+      dockerfile: examples/basic/interactive_rag/Dockerfile
       args:
         APP_USER: appuser
         APP_UID: 1000
@@ -39,7 +39,7 @@ services:
     networks:
       - mdb_engine_network
     healthcheck:
-      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -68,8 +68,6 @@ services:
       MONGODB_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME:-admin}
       MONGODB_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD:-password}
       MONGODB_INITDB_DATABASE: ${MONGO_INITDB_DATABASE:-interactive_rag_db}
-      # Optional: Disable telemetry if desired
-      # DO_NOT_TRACK: 1
     volumes:
       - mongodb_data:/data/db
       - mongodb_config:/data/configdb
@@ -80,7 +78,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 30s  # Atlas Local takes longer to start
+      start_period: 30s
     # Resource limits
     deploy:
       resources:

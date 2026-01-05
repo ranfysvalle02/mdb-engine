@@ -13,20 +13,16 @@ services:
     volumes:
       # Mount policy file so OSO can load it
       - ./main.polar:/policies/main.polar:ro
-      # Don't mount data directory - let OSO use its default location
-      # Data will be lost on container restart, but that's fine for development
     # Command to run the server and watch your policy file for changes
     command: ["--watch-for-changes", "/policies/main.polar"]
     networks:
       - mdb_engine_network
-    # Note: Healthcheck disabled - OSO Dev Server may not have standard health endpoint
-    # The app will handle connection failures gracefully
 
   # OSO Hello World Application
   app:
     build:
-      context: ../..
-      dockerfile: examples/oso_hello_world/Dockerfile
+      context: ../../..
+      dockerfile: examples/basic/oso_hello_world/Dockerfile
       args:
         APP_USER: appuser
         APP_UID: 1000
@@ -41,7 +37,7 @@ services:
       - APP_SLUG=${APP_SLUG:-oso_hello_world}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - PYTHONUNBUFFERED=${PYTHONUNBUFFERED:-1}
-      - FLASK_SECRET_KEY=${FLASK_SECRET_KEY:-oso_hello_world_demo_secret_key_change_in_production}
+      - APP_SECRET_KEY=${APP_SECRET_KEY:-oso_hello_world_demo_secret_key_change_in_production}
       # OSO Cloud Configuration
       # Point SDK to local OSO Dev Server
       - OSO_URL=http://oso-dev:8080
@@ -55,7 +51,7 @@ services:
     networks:
       - mdb_engine_network
     healthcheck:
-      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -79,9 +75,8 @@ services:
     container_name: oso_hello_world_mongodb
     restart: unless-stopped
     ports:
-      - "${MONGO_PORT:-27017}:27017"  # Exposed for MongoDB Compass access
+      - "${MONGO_PORT:-27017}:27017"
     environment:
-      # No authentication - open access for development
       MONGODB_INITDB_DATABASE: ${MONGO_DB_NAME:-oso_hello_world_db}
     volumes:
       - mongodb_data:/data/db
@@ -90,7 +85,6 @@ services:
       - mdb_engine_network
     healthcheck:
       test: echo 'db.runCommand("ping").ok' | mongosh "mongodb://localhost:27017/?directConnection=true" --quiet
-      # No authentication required
       interval: 10s
       timeout: 5s
       retries: 5
@@ -109,7 +103,6 @@ volumes:
     driver: local
   mongodb_config:
     driver: local
-  # OSO data volume removed - using container's default location instead
 
 networks:
   mdb_engine_network:

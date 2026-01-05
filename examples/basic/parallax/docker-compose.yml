@@ -7,8 +7,8 @@ services:
   # Parallax Application
   app:
     build:
-      context: ../..
-      dockerfile: examples/parallax/Dockerfile
+      context: ../../..
+      dockerfile: examples/basic/parallax/Dockerfile
       args:
         APP_USER: appuser
         APP_UID: 1000
@@ -37,7 +37,7 @@ services:
     networks:
       - mdb_engine_network
     healthcheck:
-      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3

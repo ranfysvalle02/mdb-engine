@@ -4,7 +4,7 @@
 # ============================================================================
 
 # Stage 1: Builder - Install dependencies and build the package
-FROM python:3.11-slim as builder
+FROM python:3.11-slim AS builder
 
 WORKDIR /build
 
@@ -27,29 +27,10 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 # Copy source code
 COPY mdb_engine ./mdb_engine
 
-# Verify package structure before installation
-RUN echo "=== Package structure ===" && \
-    ls -la && \
-    echo "=== mdb_engine directory ===" && \
-    ls -la mdb_engine/ && \
-    echo "=== Checking for __init__.py ===" && \
-    test -f mdb_engine/__init__.py && echo "✓ __init__.py found" || echo "✗ __init__.py missing"
-
 # Install mdb_engine with all dependencies
-# Using regular install (not editable) since we're copying venv to runtime stage
-RUN echo "=== Installing mdb-engine ===" && \
-    pip install --no-cache-dir . && \
-    echo "=== Installing web dependencies ===" && \
-        pip install --no-cache-dir uvicorn[standard] jinja2 python-multipart websockets && \
-    echo "=== Installation complete ===" && \
-    pip show mdb-engine
-
-# Verify installation worked in builder stage
-RUN echo "=== Verifying installation in builder ===" && \
-    python -c "import mdb_engine; print(f'✓ mdb_engine {mdb_engine.__version__} imported successfully')" && \
-    python -c "from mdb_engine import MongoDBEngine; print('✓ MongoDBEngine imported successfully')" && \
-    echo "=== Checking installed packages ===" && \
-    pip list | grep -i mdb
+RUN pip install --no-cache-dir . && \
+    pip install --no-cache-dir uvicorn[standard] jinja2 python-multipart websockets python-dotenv && \
+    pip install --no-cache-dir numpy instructor pydantic pydantic-settings tenacity
 
 # Stage 2: Runtime - Minimal production image
 FROM python:3.11-slim
@@ -58,6 +39,11 @@ FROM python:3.11-slim
 ARG APP_USER=appuser
 ARG APP_UID=1000
 ARG APP_GID=1000
+
+# Install curl for healthcheck
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user for security
 RUN groupadd -r -g ${APP_GID} ${APP_USER} && \
@@ -70,11 +56,10 @@ WORKDIR /app
 COPY --from=builder --chown=${APP_USER}:${APP_USER} /opt/venv /opt/venv
 
 # Copy example files with proper ownership
-COPY --chown=${APP_USER}:${APP_USER} examples/vector_hacking/manifest.json ./
-COPY --chown=${APP_USER}:${APP_USER} examples/vector_hacking/main.py ./
-COPY --chown=${APP_USER}:${APP_USER} examples/vector_hacking/web.py ./
-    COPY --chown=${APP_USER}:${APP_USER} examples/vector_hacking/vector_hacking.py ./
-COPY --chown=${APP_USER}:${APP_USER} examples/vector_hacking/templates ./templates
+COPY --chown=${APP_USER}:${APP_USER} examples/basic/vector_hacking/manifest.json ./
+COPY --chown=${APP_USER}:${APP_USER} examples/basic/vector_hacking/web.py ./
+COPY --chown=${APP_USER}:${APP_USER} examples/basic/vector_hacking/vector_hacking.py ./
+COPY --chown=${APP_USER}:${APP_USER} examples/basic/vector_hacking/templates ./templates
 
 # Set environment variables
 ENV PATH="/opt/venv/bin:$PATH" \
@@ -83,29 +68,15 @@ ENV PATH="/opt/venv/bin:$PATH" \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Verify mdb_engine is installed and importable before switching user
-# (run as root so we can debug if needed)
-RUN echo "=== Verifying installation in runtime stage ===" && \
-    echo "Python path: $(which python)" && \
-    echo "Python version: $(python --version)" && \
-    echo "=== Checking if mdb-engine is installed ===" && \
-    pip show mdb-engine || (echo "ERROR: mdb-engine package not found" && echo "=== Installed packages ===" && pip list && exit 1) && \
-    echo "=== Testing import ===" && \
-    python -c "import mdb_engine; print(f'✓ mdb_engine {mdb_engine.__version__} imported successfully')" && \
-    python -c "from mdb_engine import MongoDBEngine; print('✓ MongoDBEngine imported successfully')" && \
-    echo "=== Verification complete ==="
-
-# Install vector hacking dependencies
-RUN echo "=== Installing vector hacking dependencies ===" && \
-    pip install --no-cache-dir numpy instructor pydantic pydantic-settings tenacity && \
-    echo "=== Dependencies installed ==="
+# Expose port
+EXPOSE 8000
 
 # Switch to non-root user
 USER ${APP_USER}
 
-# Health check
+# Health check using HTTP endpoint
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD python -c "import sys; sys.exit(0)" || exit 1
+    CMD curl -f http://localhost:8000/health || exit 1
 
 # Default command - run web server with WebSocket support
 CMD ["uvicorn", "web:app", "--host", "0.0.0.0", "--port", "8000", "--ws", "auto"]

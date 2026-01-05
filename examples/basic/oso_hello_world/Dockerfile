@@ -28,15 +28,20 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 COPY mdb_engine ./mdb_engine
 
 # Install mdb_engine with OSO dependencies
-RUN     echo "=== Installing mdb-engine with OSO support ===" && \
+RUN echo "=== Installing mdb-engine with OSO support ===" && \
     pip install --no-cache-dir .[oso] && \
     echo "=== Installing web dependencies ===" && \
-    pip install --no-cache-dir uvicorn[standard] python-multipart jinja2 && \
+    pip install --no-cache-dir uvicorn[standard] python-multipart jinja2 python-dotenv && \
     echo "=== Installation complete ===" && \
     pip show mdb-engine
 
 # Stage 2: Runtime - Minimal production image
 FROM python:3.11-slim
+
+# Install curl for healthcheck
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
 
 # Set build arguments for flexibility
 ARG APP_USER=appuser
@@ -53,11 +58,11 @@ WORKDIR /app
 # Copy virtual environment from builder with proper ownership
 COPY --from=builder --chown=${APP_USER}:${APP_USER} /opt/venv /opt/venv
 
-# Copy example files with proper ownership
-COPY --chown=${APP_USER}:${APP_USER} examples/oso_hello_world/manifest.json ./
-COPY --chown=${APP_USER}:${APP_USER} examples/oso_hello_world/web.py ./
-COPY --chown=${APP_USER}:${APP_USER} examples/oso_hello_world/main.polar ./
-COPY --chown=${APP_USER}:${APP_USER} examples/oso_hello_world/templates ./templates
+# Copy example files with proper ownership (correct path: examples/basic/oso_hello_world)
+COPY --chown=${APP_USER}:${APP_USER} examples/basic/oso_hello_world/manifest.json ./
+COPY --chown=${APP_USER}:${APP_USER} examples/basic/oso_hello_world/web.py ./
+COPY --chown=${APP_USER}:${APP_USER} examples/basic/oso_hello_world/main.polar ./
+COPY --chown=${APP_USER}:${APP_USER} examples/basic/oso_hello_world/templates ./templates
 
 # Set environment variables
 ENV PATH="/opt/venv/bin:$PATH" \
@@ -67,9 +72,12 @@ ENV PATH="/opt/venv/bin:$PATH" \
 # Switch to non-root user
 USER ${APP_USER}
 
-# Health check
+# Expose port
+EXPOSE 8000
+
+# Health check - actual HTTP check against /health endpoint
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD python -c "import sys; sys.exit(0)" || exit 1
+    CMD curl -f http://localhost:8000/health || exit 1
 
 # Default command - run web server
 CMD ["uvicorn", "web:app", "--host", "0.0.0.0", "--port", "8000"]

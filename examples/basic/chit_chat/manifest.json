@@ -5,7 +5,6 @@
   "description": "Beautiful AI chat application with persistent memory using Mem0. Demonstrates intelligent memory management, semantic search, and context-aware AI responses.",
   "status": "active",
   "developer_id": "developer@example.com",
-  "auth_required": false,
   "auth": {
     "policy": {
       "provider": "casbin",
@@ -81,9 +80,9 @@
   "memory_config": {
     "enabled": true,
     "collection_name": "user_memories",
+    "embedding_model_dims": 1536,
     "enable_graph": true,
-    "infer": true,
-    "async_mode": true
+    "infer": true
   },
   "managed_indexes": {
     "conversations": [

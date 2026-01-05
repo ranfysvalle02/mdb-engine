@@ -1,16 +1,13 @@
 # Requirements for Parallax Example
 # Install MDB_ENGINE first: pip install mdb-engine
-# Or install from source: pip install -e ../..
+# Or install from source: pip install -e ../../..
 
 mdb-engine>=0.1.0
 
-# LangChain dependencies for Parallax multi-agent analysis
-# REQUIRED for Parallax to work
-langchain>=0.1.0
-langchain-community>=0.0.20
-langchain-core>=0.1.0
-pydantic>=2.0.0  # Required for structured output (MarketingView, SalesView, ProductView)
-pydantic-settings>=2.0.0  # Required for LLM service configuration
-httpx>=0.24.0  # Required for async HTTP requests
-requests>=2.31.0  # Required for GitHub GraphQL API
-pyyaml>=6.0  # Required for parsing YAML frontmatter in AGENTS.md/LLMs.md files
+# Core dependencies
+python-dotenv>=1.0.0
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+httpx>=0.24.0
+requests>=2.31.0
+pyyaml>=6.0

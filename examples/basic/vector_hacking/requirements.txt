@@ -1,27 +1,24 @@
 # Requirements for Vector Hacking Example
 # Install MDB_ENGINE first: pip install mdb-engine
-# Or install from source: pip install -e ../..
+# Or install from source: pip install -e ../../..
 
 mdb-engine>=0.1.0
 
-# Web framework
-uvicorn[standard]
-jinja2
-python-multipart
-websockets
-
-# LLM and Embedding dependencies
-# Install with: pip install mdb-engine[llm]
-# Or manually:
-instructor>=0.4.0
+# Core dependencies
+python-dotenv>=1.0.0
 pydantic>=2.0.0
 pydantic-settings>=2.0.0
+
+# Web framework
+uvicorn[standard]>=0.24.0
+jinja2>=3.1.0
+python-multipart>=0.0.6
+websockets>=12.0
+
+# LLM and Embedding dependencies
+instructor>=0.4.0
 tenacity>=8.0.0
 semantic-text-splitter>=0.9.0
 
 # Vector hacking dependencies
-numpy
-
-# Optional: for standalone demo
-ollama
-langchain-ollama
+numpy>=1.24.0

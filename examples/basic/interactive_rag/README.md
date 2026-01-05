@@ -97,7 +97,7 @@ export MONGO_DB_NAME="interactive_rag_db"
 export OPENAI_API_KEY="your-key"
 
 # Run the application
-python web.py
+uvicorn web:app --host 0.0.0.0 --port 5001 --reload
 ```
 
 ## Usage
@@ -193,7 +193,30 @@ curl -X POST http://localhost:5001/preview_search \
 - `POST /search` - Web search (DuckDuckGo)
 - `POST /chunk_preview` - Preview how content will be chunked
 
+### Health & Status
+
+- `GET /health` - Health check endpoint (for container orchestration)
+- `GET /status` - Detailed application status
+- `GET /diagnostics` - Diagnostic information
+
 ## Architecture
+
+This example uses the `engine.create_app()` pattern for automatic lifecycle management:
+
+```python
+engine = MongoDBEngine(mongo_uri=mongo_uri, db_name=db_name)
+app = engine.create_app(
+    slug=APP_SLUG,
+    manifest=Path(__file__).parent / "manifest.json",
+    title="Interactive RAG - MDB_ENGINE Demo",
+)
+```
+
+This pattern automatically handles:
+- Engine initialization and shutdown
+- Manifest loading and validation
+- Auth setup from manifest (CORS, etc.)
+- Index creation
 
 ### Components
 
@@ -245,7 +268,8 @@ Key configuration:
   "embedding_config": {
     "enabled": true,
     "max_tokens_per_chunk": 1000,
-    "tokenizer_model": "gpt-3.5-turbo"
+    "tokenizer_model": "gpt-3.5-turbo",
+    "default_embedding_model": "text-embedding-3-small"
   },
   "managed_indexes": {
     "knowledge_base_sessions": [
@@ -257,7 +281,7 @@ Key configuration:
             {
               "type": "vector",
               "path": "embedding",
-              "numDimensions": 1024,
+              "numDimensions": 1536,
               "similarity": "cosine"
             }
           ]
@@ -352,7 +376,6 @@ Supported chat models:
 
 ## Next Steps
 
-- Add LangChain agent tools for more advanced RAG
 - Implement hybrid search (vector + text)
 - Add document versioning
 - Implement source citations in responses
@@ -364,8 +387,26 @@ Supported chat models:
 - **hello_world** - Basic MDB_ENGINE usage
 - **vector_hacking** - Vector operations and embeddings
 
+## Project Structure
+
+```
+interactive_rag/
+├── docker-compose.yml    # Docker Compose configuration
+├── Dockerfile            # Multi-stage Dockerfile
+├── env.example           # Example environment file
+├── manifest.json         # MDB_ENGINE manifest
+├── README.md             # This file
+├── requirements.txt      # Python dependencies
+├── static/
+│   ├── script.js         # Frontend JavaScript
+│   └── styles.css        # Frontend styles
+├── templates/
+│   └── index.html        # Main HTML template
+└── web.py                # FastAPI application
+```
+
 ## Resources
 
-- [MDB_ENGINE Documentation](../../README.md)
-- [EmbeddingService Documentation](../../mdb_engine/embeddings/README.md)
+- [MDB_ENGINE Documentation](../../../README.md)
+- [EmbeddingService Documentation](../../../mdb_engine/embeddings/README.md)
 - [MongoDB Atlas Vector Search](https://www.mongodb.com/docs/atlas/atlas-vector-search/)

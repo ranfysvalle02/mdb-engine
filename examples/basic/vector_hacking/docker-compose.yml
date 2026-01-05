@@ -1,5 +1,5 @@
 # ============================================================================
-# Enterprise-Grade Docker Compose Configuration
+# Enterprise-Grade Docker Compose Configuration for Vector Hacking
 # Best practices: security, health checks, resource limits, networking
 # ============================================================================
 
@@ -7,8 +7,8 @@ services:
   # Vector Hacking Application
   app:
     build:
-      context: ../..
-      dockerfile: examples/vector_hacking/Dockerfile
+      context: ../../..
+      dockerfile: examples/basic/vector_hacking/Dockerfile
       args:
         APP_USER: appuser
         APP_UID: 1000
@@ -18,12 +18,12 @@ services:
     ports:
       - "${APP_PORT:-8000}:8000"
     environment:
-      - MONGO_URI=${MONGO_URI:-mongodb://admin:password@mongodb:27017/?authSource=admin}
+      - MONGO_URI=${MONGO_URI:-mongodb://admin:password@mongodb:27017/?authSource=admin&directConnection=true}
       - MONGO_DB_NAME=${MONGO_DB_NAME:-vector_hacking_db}
       - APP_SLUG=${APP_SLUG:-vector_hacking}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - PYTHONUNBUFFERED=${PYTHONUNBUFFERED:-1}
-      # Vector hacking API keys (set these in production)
+      # LLM API keys (set these in production)
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       # Azure OpenAI configuration
       - AZURE_OPENAI_ENDPOINT=${AZURE_OPENAI_ENDPOINT:-}
@@ -37,7 +37,7 @@ services:
     networks:
       - mdb_engine_network
     healthcheck:
-      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -66,8 +66,6 @@ services:
       MONGODB_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME:-admin}
       MONGODB_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD:-password}
       MONGODB_INITDB_DATABASE: ${MONGO_INITDB_DATABASE:-vector_hacking_db}
-      # Optional: Disable telemetry if desired
-      # DO_NOT_TRACK: 1
     volumes:
       - mongodb_data:/data/db
       - mongodb_config:/data/configdb
@@ -78,7 +76,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 30s  # Atlas Local takes longer to start
+      start_period: 30s
     # Resource limits
     deploy:
       resources:
@@ -116,7 +114,6 @@ services:
         reservations:
           cpus: '0.1'
           memory: 64M
-    # Security: mongo-express runs as non-root user by default
     profiles:
       - ui  # Only start when explicitly requested: docker-compose --profile ui up
 

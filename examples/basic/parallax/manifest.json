@@ -5,7 +5,6 @@
   "description": "Tool for analyzing tech news from Relevance and Technical perspectives based on watchlist keywords",
   "status": "active",
   "developer_id": "developer@example.com",
-  "auth_required": false,
   "auth": {
     "policy": {
       "required": false,

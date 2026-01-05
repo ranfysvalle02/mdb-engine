@@ -1,29 +1,23 @@
 # Requirements for Interactive RAG Example
 # Install MDB_ENGINE first: pip install mdb-engine
-# Or install from source: pip install -e ../..
+# Or install from source: pip install -e ../../../
 
 mdb-engine>=0.1.0
+python-dotenv>=1.0.0
 
 # Web framework
-uvicorn[standard]
-jinja2
-python-multipart
-websockets
+uvicorn[standard]>=0.24.0
+jinja2>=3.1.0
+python-multipart>=0.0.6
 
 # LLM and Embedding dependencies
-# Install with: pip install mdb-engine[llm]
-# Or manually:
-instructor>=0.4.0
+openai>=1.0.0
 pydantic>=2.0.0
 pydantic-settings>=2.0.0
 tenacity>=8.0.0
 semantic-text-splitter>=0.9.0
 
-
+# RAG dependencies (optional - for document processing and web search)
 ddgs>=0.1.0
 docling>=1.0.0
 requests>=2.31.0
-
-langchain
-langchain-community
-langgraph
