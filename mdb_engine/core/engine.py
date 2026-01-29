@@ -1804,7 +1804,13 @@ class MongoDBEngine:
                     )
                     logger.info(f"Mounted app '{slug}' at path prefix '{path_prefix}'")
 
-                except Exception as e:
+                except (
+                    FileNotFoundError,
+                    json.JSONDecodeError,
+                    ValueError,
+                    KeyError,
+                    RuntimeError,
+                ) as e:
                     logger.error(f"Failed to mount app '{slug}': {e}", exc_info=True)
                     mounted_apps.append(
                         {
