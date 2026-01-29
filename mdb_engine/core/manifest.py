@@ -1748,12 +1748,15 @@ MANIFEST_SCHEMA_V2 = {
                             "slug": {
                                 "type": "string",
                                 "pattern": "^[a-z0-9_-]+$",
-                                "description": "App slug (lowercase alphanumeric, underscores, hyphens)",
+                                "description": (
+                                    "App slug (lowercase alphanumeric, underscores, hyphens)"
+                                ),
                             },
                             "manifest": {
                                 "type": "string",
                                 "description": (
-                                    "Path to manifest.json file (relative to multi_app manifest or absolute)"
+                                    "Path to manifest.json file "
+                                    "(relative to multi_app manifest or absolute)"
                                 ),
                             },
                             "path_prefix": {
@@ -1769,14 +1772,16 @@ MANIFEST_SCHEMA_V2 = {
                                 "type": "string",
                                 "description": (
                                     "Optional: Python function path for startup callback "
-                                    "(e.g., 'module.function_name'). Not yet supported in manifest-based config."
+                                    "(e.g., 'module.function_name'). "
+                                    "Not yet supported in manifest-based config."
                                 ),
                             },
                             "on_shutdown": {
                                 "type": "string",
                                 "description": (
                                     "Optional: Python function path for shutdown callback "
-                                    "(e.g., 'module.function_name'). Not yet supported in manifest-based config."
+                                    "(e.g., 'module.function_name'). "
+                                    "Not yet supported in manifest-based config."
                                 ),
                             },
                         },

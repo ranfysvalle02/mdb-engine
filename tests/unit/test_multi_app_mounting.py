@@ -12,7 +12,6 @@ Tests the create_multi_app() method and related functionality:
 
 import json
 import os
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -172,7 +171,9 @@ class TestCreateMultiAppProgrammatic:
 
         engine = MongoDBEngine(mongo_uri="mongodb://localhost:27017", db_name="test_db")
 
-        with pytest.raises(ValueError, match="Either 'apps' or 'multi_app_manifest' must be provided"):
+        with pytest.raises(
+            ValueError, match="Either 'apps' or 'multi_app_manifest' must be provided"
+        ):
             engine.create_multi_app()
 
     def test_create_multi_app_empty_apps(self):

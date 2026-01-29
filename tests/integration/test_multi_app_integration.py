@@ -6,8 +6,6 @@ Tests the full multi-app mounting flow with real MongoDB connection.
 
 import json
 import os
-from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -60,13 +58,11 @@ class TestMultiAppIntegration:
         }
 
     @pytest.mark.asyncio
-    async def test_multi_app_mounting_integration(
-        self, mongodb_connection_string, temp_manifests
-    ):
+    async def test_multi_app_mounting_integration(self, mongodb_connection_string, temp_manifests):
         """Test full multi-app mounting integration."""
         import os
 
-        from httpx import AsyncClient, ASGITransport
+        from httpx import ASGITransport, AsyncClient
 
         from mdb_engine.core.engine import MongoDBEngine
 
@@ -118,13 +114,11 @@ class TestMultiAppIntegration:
         await engine.shutdown()
 
     @pytest.mark.asyncio
-    async def test_multi_app_shared_auth_integration(
-        self, mongodb_connection_string, tmp_path
-    ):
+    async def test_multi_app_shared_auth_integration(self, mongodb_connection_string, tmp_path):
         """Test multi-app with shared auth integration."""
         import os
 
-        from httpx import AsyncClient, ASGITransport
+        from httpx import ASGITransport, AsyncClient
 
         from mdb_engine.core.engine import MongoDBEngine
 
@@ -206,7 +200,7 @@ class TestMultiAppIntegration:
         """Test multi-app from manifest file integration."""
         import os
 
-        from httpx import AsyncClient, ASGITransport
+        from httpx import ASGITransport, AsyncClient
 
         from mdb_engine.core.engine import MongoDBEngine
 

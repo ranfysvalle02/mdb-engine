@@ -1223,9 +1223,7 @@ class MongoDBEngine:
                         )
                         await engine._initialize_shared_user_pool(app, app_manifest)
                     else:
-                        logger.debug(
-                            f"Sub-app '{slug}' using shared user_pool from parent app"
-                        )
+                        logger.debug(f"Sub-app '{slug}' using shared user_pool from parent app")
                 else:
                     await engine._initialize_shared_user_pool(app, app_manifest)
             else:
@@ -1524,9 +1522,7 @@ class MongoDBEngine:
 
         return app
 
-    def _validate_path_prefixes(
-        self, apps: list[dict[str, Any]]
-    ) -> tuple[bool, list[str]]:
+    def _validate_path_prefixes(self, apps: list[dict[str, Any]]) -> tuple[bool, list[str]]:
         """
         Validate path prefixes for multi-app mounting.
 
@@ -1549,9 +1545,8 @@ class MongoDBEngine:
         for app_config in apps:
             path_prefix = app_config.get("path_prefix", f"/{app_config.get('slug', 'unknown')}")
             if not path_prefix.startswith("/"):
-                errors.append(
-                    f"Path prefix '{path_prefix}' must start with '/' (app: {app_config.get('slug', 'unknown')})"
-                )
+                app_slug = app_config.get("slug", "unknown")
+                errors.append(f"Path prefix '{path_prefix}' must start with '/' (app: {app_slug})")
                 continue
             path_prefixes.append(path_prefix)
 
@@ -1610,7 +1605,11 @@ class MongoDBEngine:
                     "multi_app": {
                         "enabled": true,
                         "apps": [
-                            {"slug": "app1", "manifest": "./app1/manifest.json", "path_prefix": "/app1"}
+                            {
+                                "slug": "app1",
+                                "manifest": "./app1/manifest.json",
+                                "path_prefix": "/app1",
+                            }
                         ]
                     }
                 }
@@ -1630,8 +1629,16 @@ class MongoDBEngine:
             engine = MongoDBEngine(mongo_uri=..., db_name=...)
             app = engine.create_multi_app(
                 apps=[
-                    {"slug": "auth-hub", "manifest": Path("./auth-hub/manifest.json"), "path_prefix": "/auth-hub"},
-                    {"slug": "pwd-zero", "manifest": Path("./pwd-zero/manifest.json"), "path_prefix": "/pwd-zero"}
+                    {
+                        "slug": "auth-hub",
+                        "manifest": Path("./auth-hub/manifest.json"),
+                        "path_prefix": "/auth-hub",
+                    },
+                    {
+                        "slug": "pwd-zero",
+                        "manifest": Path("./pwd-zero/manifest.json"),
+                        "path_prefix": "/pwd-zero",
+                    },
                 ]
             )
 
@@ -1709,7 +1716,9 @@ class MongoDBEngine:
         # Validate path prefixes
         is_valid, errors = self._validate_path_prefixes(apps)
         if not is_valid:
-            raise ValueError(f"Path prefix validation failed:\n" + "\n".join(f"  - {e}" for e in errors))
+            raise ValueError(
+                "Path prefix validation failed:\n" + "\n".join(f"  - {e}" for e in errors)
+            )
 
         # Check if any app uses shared auth
         has_shared_auth = False
@@ -1753,8 +1762,9 @@ class MongoDBEngine:
                             logger.info("Shared user pool initialized for multi-app deployment")
                             break
                     except (FileNotFoundError, json.JSONDecodeError, KeyError) as e:
+                        app_slug = app_config.get("slug", "unknown")
                         logger.warning(
-                            f"Could not initialize shared user pool from app '{app_config.get('slug')}': {e}"
+                            f"Could not initialize shared user pool from app '{app_slug}': {e}"
                         )
 
             # Mount each child app
@@ -1874,7 +1884,12 @@ class MongoDBEngine:
                 if "error" in mounted_app_info:
                     mounted_status[mounted_app_info["slug"]]["error"] = mounted_app_info["error"]
 
-            overall_status = "healthy" if engine_health.status.value == "healthy" and mongo_health.status.value == "healthy" else "unhealthy"
+            overall_status = (
+                "healthy"
+                if engine_health.status.value == "healthy"
+                and mongo_health.status.value == "healthy"
+                else "unhealthy"
+            )
 
             return {
                 "status": overall_status,
