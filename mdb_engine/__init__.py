@@ -81,7 +81,8 @@ from .repositories import Entity, MongoRepository, Repository, UnitOfWork
 # Utilities
 from .utils import clean_mongo_doc, clean_mongo_docs
 
-__version__ = "0.3.0"  # Minor version bump: Multi-app mounting, SSO improvements, and exception handling fixes
+__version__ = "0.3.0"  # Minor version bump: Multi-app mounting, SSO improvements,
+# and exception handling fixes
 
 __all__ = [
     # Core Engine
