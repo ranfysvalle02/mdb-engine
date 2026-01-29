@@ -2,6 +2,8 @@
 
 A complete working example demonstrating Single Sign-On (SSO) architecture where one central auth hub manages user authentication and two SSO-enabled apps validate tokens automatically.
 
+**NEW**: This example now supports **multi-app mounting** - deploy all apps under a single FastAPI instance perfect for Render.com single-service deployments!
+
 ## Architecture Overview
 
 ```mermaid
@@ -39,8 +41,30 @@ graph TB
 
 ### Prerequisites
 
-- Docker and Docker Compose
+- Docker and Docker Compose (for multi-container setup)
 - Python 3.11+ (for local development)
+- MongoDB (local or Atlas)
+
+### Running with Multi-App Mounting (Recommended for Single Deployment) 🆕
+
+For **single-service deployments** (Render.com, Railway, Heroku), use the new multi-app mounting:
+
+```bash
+cd examples/advanced/sso-multi-app/apps
+uvicorn multi_app_main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+**Access all apps on single port:**
+- Auth Hub: http://localhost:8000/auth-hub
+- pwd-zero: http://localhost:8000/pwd-zero
+- FLUX: http://localhost:8000/flux
+- Health: http://localhost:8000/health
+
+**Benefits:**
+- Single FastAPI instance
+- Single port (perfect for Render.com)
+- Shared engine and connection pool
+- SSO works seamlessly
 
 ### Running with Docker Compose
 
@@ -67,6 +91,65 @@ docker-compose up --build
 - **Auth Hub**: http://localhost:8000
 - **pwd-zero**: http://localhost:8001
 - **FLUX**: http://localhost:8002
+
+### Running with Multi-App Mounting (Single FastAPI Instance) 🆕
+
+For **single-deployment scenarios** (e.g., Render.com, Railway), use `create_multi_app()` to mount all apps under a single FastAPI instance:
+
+1. **Using programmatic configuration:**
+
+```python
+# See apps/multi_app_main.py
+from mdb_engine import MongoDBEngine
+from pathlib import Path
+
+engine = MongoDBEngine(mongo_uri=..., db_name=...)
+app = engine.create_multi_app(
+    apps=[
+        {"slug": "auth-hub", "manifest": Path("./apps/auth-hub/manifest.json"), "path_prefix": "/auth-hub"},
+        {"slug": "pwd-zero", "manifest": Path("./apps/sso-app-1/manifest.json"), "path_prefix": "/pwd-zero"},
+        {"slug": "flux", "manifest": Path("./apps/sso-app-2/manifest.json"), "path_prefix": "/flux"}
+    ]
+)
+```
+
+2. **Using manifest-based configuration:**
+
+```python
+# See multi_app_manifest.json
+app = engine.create_multi_app(
+    multi_app_manifest=Path("./multi_app_manifest.json")
+)
+```
+
+3. **Run the multi-app:**
+
+```bash
+cd apps
+uvicorn multi_app_main:app --host 0.0.0.0 --port 8000
+```
+
+4. **Access all apps on single port:**
+
+- **Auth Hub**: http://localhost:8000/auth-hub
+- **pwd-zero**: http://localhost:8000/pwd-zero
+- **FLUX**: http://localhost:8000/flux
+- **Health Check**: http://localhost:8000/health
+
+**Benefits of Multi-App Mounting:**
+- ✅ Single FastAPI instance (perfect for Render.com single service)
+- ✅ Single port (no need for multiple ports)
+- ✅ Shared engine and connection pool (resource efficient)
+- ✅ SSO works seamlessly across mounted apps
+- ✅ Unified health check endpoint
+- ✅ Easy deployment (single service, single URL)
+
+**Perfect For:**
+- Render.com deployments (single service)
+- Railway deployments
+- Heroku deployments
+- Any platform requiring single-service deployment
+- Development environments (simpler setup)
 
 ### Running with Bundled Dockerfile (Single Container)
 
@@ -214,7 +297,9 @@ Each app has a `manifest.json` file that configures:
 
 ## Development
 
-### Running Locally (without Docker)
+### Running with Multi-App Mounting (Recommended) 🆕
+
+**Single FastAPI instance - perfect for Render.com:**
 
 1. **Install dependencies:**
 
@@ -237,7 +322,45 @@ export MDB_ENGINE_JWT_SECRET="your-secret-key"
 docker run -d -p 27017:27017 --name mongodb mongo:7
 ```
 
-4. **Run each app:**
+4. **Run multi-app (single instance):**
+
+```bash
+cd apps
+uvicorn multi_app_main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+**Access all apps:**
+- Auth Hub: http://localhost:8000/auth-hub
+- pwd-zero: http://localhost:8000/pwd-zero
+- FLUX: http://localhost:8000/flux
+- Health: http://localhost:8000/health
+
+### Running Locally (without Docker) - Separate Instances
+
+For development/testing with separate instances:
+
+1. **Install dependencies:**
+
+```bash
+pip install -e ".[casbin]"
+pip install uvicorn fastapi jinja2 python-multipart
+```
+
+2. **Set environment variables:**
+
+```bash
+export MONGODB_URI="mongodb://localhost:27017"
+export MONGODB_DB="oblivio_apps"
+export MDB_ENGINE_JWT_SECRET="your-secret-key"
+```
+
+3. **Start MongoDB:**
+
+```bash
+docker run -d -p 27017:27017 --name mongodb mongo:7
+```
+
+4. **Run each app separately:**
 
 ```bash
 # Terminal 1 - Auth Hub
@@ -293,6 +416,27 @@ python web.py
 | Roles | N/A | Per-app roles |
 | Use Case | Isolated apps | Platform apps |
 
+## Render.com Deployment
+
+For **single-service deployment on Render.com**, use the multi-app mounting approach:
+
+1. **Set build command:**
+   ```bash
+   pip install -e ".[casbin]" && pip install uvicorn fastapi jinja2 python-multipart
+   ```
+
+2. **Set start command:**
+   ```bash
+   cd examples/advanced/sso-multi-app/apps && uvicorn multi_app_main:app --host 0.0.0.0 --port $PORT
+   ```
+
+3. **Set environment variables:**
+   - `MONGODB_URI` - Your MongoDB connection string
+   - `MONGODB_DB` - Database name
+   - `MDB_ENGINE_JWT_SECRET` - JWT secret (same for all apps)
+
+4. **Deploy!** All apps accessible under one URL with path prefixes.
+
 ## Related Examples
 
 - [Multi-App Shared](../multi_app_shared/README.md) - Similar SSO example
@@ -309,8 +453,10 @@ sso-multi-app/
 ├── Dockerfile                   # Multi-container build
 ├── Dockerfile.bundled           # Single-container build
 ├── start-all-apps.py            # Bundled startup script
+├── multi_app_manifest.json      # Multi-app manifest (NEW)
 ├── .env.example                 # Environment template
 └── apps/
+    ├── multi_app_main.py         # Multi-app main file (NEW)
     ├── auth-hub/                # Auth hub (central authentication)
     │   ├── manifest.json
     │   ├── web.py
@@ -324,6 +470,14 @@ sso-multi-app/
         ├── web.py
         └── templates/
 ```
+
+## Deployment Options Comparison
+
+| Approach | Use Case | Ports | Complexity | Best For |
+|----------|----------|-------|------------|----------|
+| **Multi-App Mounting** | Single service deployment | 1 | Low | Render.com, Railway, Heroku |
+| **Bundled Container** | Single container, multiple processes | Multiple | Medium | Docker deployments |
+| **Multi-Container** | Independent scaling | Multiple | High | Production, microservices |
 
 ## License
 

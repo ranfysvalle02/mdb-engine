@@ -1095,13 +1095,14 @@ class MongoDBEngine:
         | None = None,
         on_shutdown: Callable[["FastAPI", "MongoDBEngine", dict[str, Any]], Awaitable[None]]
         | None = None,
+        is_sub_app: bool = False,
         **fastapi_kwargs: Any,
     ) -> "FastAPI":
         """
         Create a FastAPI application with proper lifespan management.
 
         This method creates a FastAPI app that:
-        1. Initializes the engine on startup
+        1. Initializes the engine on startup (unless is_sub_app=True)
         2. Loads and registers the manifest
         3. Auto-detects multi-site mode from manifest
         4. Auto-configures auth based on manifest auth.mode:
@@ -1119,6 +1120,9 @@ class MongoDBEngine:
                        Signature: async def callback(app, engine, manifest) -> None
             on_shutdown: Optional async callback called before engine shutdown.
                         Signature: async def callback(app, engine, manifest) -> None
+            is_sub_app: If True, skip engine initialization and lifespan management.
+                       Used when mounting as a child app in create_multi_app().
+                       Defaults to False for backward compatibility.
             **fastapi_kwargs: Additional arguments passed to FastAPI()
 
         Returns:
@@ -1177,8 +1181,9 @@ class MongoDBEngine:
             """Lifespan context manager for initialization and cleanup."""
             nonlocal app_manifest, is_multi_site
 
-            # Initialize engine
-            await engine.initialize()
+            # Initialize engine (skip if sub-app - parent manages lifecycle)
+            if not is_sub_app:
+                await engine.initialize()
 
             # Load and register manifest
             app_manifest = await engine.load_manifest(manifest_path)
@@ -1207,7 +1212,22 @@ class MongoDBEngine:
                 logger.info(f"Shared auth mode for '{slug}' - SSO enabled")
                 # Initialize shared user pool and set on app.state
                 # Middleware was already added at app creation time (lazy version)
-                await engine._initialize_shared_user_pool(app, app_manifest)
+                # For sub-apps, check if parent already initialized user pool
+                if is_sub_app:
+                    # Check if parent app has user_pool (set by parent's initialization)
+                    # If not, initialize it (shouldn't happen, but handle gracefully)
+                    if not hasattr(app.state, "user_pool") or app.state.user_pool is None:
+                        logger.warning(
+                            f"Sub-app '{slug}' uses shared auth but user_pool not found. "
+                            "Initializing now (parent should have initialized it)."
+                        )
+                        await engine._initialize_shared_user_pool(app, app_manifest)
+                    else:
+                        logger.debug(
+                            f"Sub-app '{slug}' using shared user_pool from parent app"
+                        )
+                else:
+                    await engine._initialize_shared_user_pool(app, app_manifest)
             else:
                 logger.info(f"Per-app auth mode for '{slug}'")
                 # Auto-retrieve app token for "app" mode
@@ -1416,7 +1436,9 @@ class MongoDBEngine:
                 except (ValueError, TypeError, RuntimeError, AttributeError, KeyError) as e:
                     logger.warning(f"on_shutdown callback failed for '{slug}': {e}")
 
-            await engine.shutdown()
+            # Shutdown engine (skip if sub-app - parent manages lifecycle)
+            if not is_sub_app:
+                await engine.shutdown()
 
         # Create FastAPI app
         app = FastAPI(title=app_title, lifespan=lifespan, **fastapi_kwargs)
@@ -1501,6 +1523,375 @@ class MongoDBEngine:
         logger.debug(f"FastAPI app created for '{slug}'")
 
         return app
+
+    def _validate_path_prefixes(
+        self, apps: list[dict[str, Any]]
+    ) -> tuple[bool, list[str]]:
+        """
+        Validate path prefixes for multi-app mounting.
+
+        Checks:
+        - All prefixes start with '/'
+        - No prefix is a prefix of another (e.g., '/app' conflicts with '/app/v2')
+        - No conflicts with reserved paths ('/health', '/docs', '/openapi.json')
+
+        Args:
+            apps: List of app configs with 'path_prefix' keys
+
+        Returns:
+            Tuple of (is_valid, list_of_errors)
+        """
+        errors: list[str] = []
+        reserved_paths = {"/health", "/docs", "/openapi.json", "/redoc"}
+
+        # Extract path prefixes
+        path_prefixes: list[str] = []
+        for app_config in apps:
+            path_prefix = app_config.get("path_prefix", f"/{app_config.get('slug', 'unknown')}")
+            if not path_prefix.startswith("/"):
+                errors.append(
+                    f"Path prefix '{path_prefix}' must start with '/' (app: {app_config.get('slug', 'unknown')})"
+                )
+                continue
+            path_prefixes.append(path_prefix)
+
+        # Check for conflicts with reserved paths
+        for prefix in path_prefixes:
+            if prefix in reserved_paths:
+                errors.append(
+                    f"Path prefix '{prefix}' conflicts with reserved path. "
+                    "Reserved paths: /health, /docs, /openapi.json, /redoc"
+                )
+
+        # Check for prefix conflicts (one prefix being a prefix of another)
+        path_prefixes_sorted = sorted(path_prefixes)
+        for i, prefix1 in enumerate(path_prefixes_sorted):
+            for prefix2 in path_prefixes_sorted[i + 1 :]:
+                if prefix1.startswith(prefix2) or prefix2.startswith(prefix1):
+                    errors.append(
+                        f"Path prefix conflict: '{prefix1}' and '{prefix2}' overlap. "
+                        "One cannot be a prefix of another."
+                    )
+
+        # Check for duplicates
+        if len(path_prefixes) != len(set(path_prefixes)):
+            seen = set()
+            for prefix in path_prefixes:
+                if prefix in seen:
+                    errors.append(f"Duplicate path prefix: '{prefix}'")
+                seen.add(prefix)
+
+        return len(errors) == 0, errors
+
+    def create_multi_app(
+        self,
+        apps: list[dict[str, Any]] | None = None,
+        multi_app_manifest: Path | None = None,
+        title: str = "Multi-App API",
+        root_path: str = "",
+        **fastapi_kwargs: Any,
+    ) -> "FastAPI":
+        """
+        Create a parent FastAPI app that mounts multiple child apps.
+
+        Each child app is mounted at a path prefix (e.g., /auth-hub, /pwd-zero) and
+        maintains its own routes, middleware, and state while sharing the engine instance.
+
+        Args:
+            apps: List of app configurations. Each dict should have:
+                - slug: App slug (required)
+                - manifest: Path to manifest.json (required)
+                - path_prefix: Optional path prefix (defaults to /{slug})
+                - on_startup: Optional startup callback function
+                - on_shutdown: Optional shutdown callback function
+            multi_app_manifest: Path to a multi-app manifest.json that defines all apps.
+                Format:
+                {
+                    "multi_app": {
+                        "enabled": true,
+                        "apps": [
+                            {"slug": "app1", "manifest": "./app1/manifest.json", "path_prefix": "/app1"}
+                        ]
+                    }
+                }
+            title: Title for the parent FastAPI app
+            root_path: Root path prefix for all mounted apps (optional)
+            **fastapi_kwargs: Additional arguments passed to FastAPI()
+
+        Returns:
+            Parent FastAPI application with all child apps mounted
+
+        Raises:
+            ValueError: If configuration is invalid or path prefixes conflict
+            RuntimeError: If engine is not initialized
+
+        Example:
+            # Programmatic approach
+            engine = MongoDBEngine(mongo_uri=..., db_name=...)
+            app = engine.create_multi_app(
+                apps=[
+                    {"slug": "auth-hub", "manifest": Path("./auth-hub/manifest.json"), "path_prefix": "/auth-hub"},
+                    {"slug": "pwd-zero", "manifest": Path("./pwd-zero/manifest.json"), "path_prefix": "/pwd-zero"}
+                ]
+            )
+
+            # Manifest-based approach
+            app = engine.create_multi_app(
+                multi_app_manifest=Path("./multi_app_manifest.json")
+            )
+        """
+        import json
+
+        from fastapi import FastAPI
+
+        engine = self
+
+        # Load configuration from manifest or apps parameter
+        if multi_app_manifest:
+            manifest_path = Path(multi_app_manifest)
+            with open(manifest_path) as f:
+                multi_app_config = json.load(f)
+
+            multi_app_section = multi_app_config.get("multi_app", {})
+            if not multi_app_section.get("enabled", False):
+                raise ValueError(
+                    "multi_app.enabled must be True in multi_app_manifest to use multi-app mode"
+                )
+
+            apps_config = multi_app_section.get("apps", [])
+            if not apps_config:
+                raise ValueError("multi_app.apps must contain at least one app")
+
+            # Resolve manifest paths relative to multi_app_manifest location
+            manifest_dir = manifest_path.parent
+            apps = []
+            for app_config in apps_config:
+                manifest_rel_path = app_config.get("manifest")
+                if not manifest_rel_path:
+                    raise ValueError(f"App '{app_config.get('slug')}' missing 'manifest' field")
+
+                # Resolve relative to multi_app_manifest location
+                manifest_full_path = (manifest_dir / manifest_rel_path).resolve()
+                slug = app_config.get("slug")
+                path_prefix = app_config.get("path_prefix", f"/{slug}")
+
+                apps.append(
+                    {
+                        "slug": slug,
+                        "manifest": manifest_full_path,
+                        "path_prefix": path_prefix,
+                    }
+                )
+
+        elif apps is not None:
+            apps_config = apps
+            # Convert Path objects to Path if they're strings
+            apps = []
+            for app_config in apps_config:
+                manifest = app_config.get("manifest")
+                if isinstance(manifest, str):
+                    manifest = Path(manifest)
+                apps.append(
+                    {
+                        "slug": app_config.get("slug"),
+                        "manifest": manifest,
+                        "path_prefix": app_config.get("path_prefix", f"/{app_config.get('slug')}"),
+                        "on_startup": app_config.get("on_startup"),
+                        "on_shutdown": app_config.get("on_shutdown"),
+                    }
+                )
+        else:
+            raise ValueError("Either 'apps' or 'multi_app_manifest' must be provided")
+
+        if not apps:
+            raise ValueError("At least one app must be configured")
+
+        # Validate path prefixes
+        is_valid, errors = self._validate_path_prefixes(apps)
+        if not is_valid:
+            raise ValueError(f"Path prefix validation failed:\n" + "\n".join(f"  - {e}" for e in errors))
+
+        # Check if any app uses shared auth
+        has_shared_auth = False
+        for app_config in apps:
+            try:
+                manifest_path = app_config["manifest"]
+                with open(manifest_path) as f:
+                    app_manifest_pre = json.load(f)
+                auth_config = app_manifest_pre.get("auth", {})
+                if auth_config.get("mode") == "shared":
+                    has_shared_auth = True
+                    break
+            except (FileNotFoundError, json.JSONDecodeError, KeyError) as e:
+                logger.warning(f"Could not check auth mode for app '{app_config.get('slug')}': {e}")
+
+        # State for parent app
+        mounted_apps: list[dict[str, Any]] = []
+        shared_user_pool_initialized = False
+
+        @asynccontextmanager
+        async def lifespan(app: FastAPI):
+            """Lifespan context manager for parent app."""
+            nonlocal mounted_apps, shared_user_pool_initialized
+
+            # Initialize engine
+            await engine.initialize()
+
+            # Initialize shared user pool once if any app uses shared auth
+            if has_shared_auth:
+                logger.info("Initializing shared user pool for multi-app deployment")
+                # Find first app with shared auth to get manifest for initialization
+                for app_config in apps:
+                    try:
+                        manifest_path = app_config["manifest"]
+                        with open(manifest_path) as f:
+                            app_manifest_pre = json.load(f)
+                        auth_config = app_manifest_pre.get("auth", {})
+                        if auth_config.get("mode") == "shared":
+                            await engine._initialize_shared_user_pool(app, app_manifest_pre)
+                            shared_user_pool_initialized = True
+                            logger.info("Shared user pool initialized for multi-app deployment")
+                            break
+                    except (FileNotFoundError, json.JSONDecodeError, KeyError) as e:
+                        logger.warning(
+                            f"Could not initialize shared user pool from app '{app_config.get('slug')}': {e}"
+                        )
+
+            # Mount each child app
+            for app_config in apps:
+                slug = app_config["slug"]
+                manifest_path = app_config["manifest"]
+                path_prefix = app_config["path_prefix"]
+                on_startup = app_config.get("on_startup")
+                on_shutdown = app_config.get("on_shutdown")
+
+                try:
+                    # Create child app as sub-app (shares engine and lifecycle)
+                    child_app = engine.create_app(
+                        slug=slug,
+                        manifest=manifest_path,
+                        is_sub_app=True,  # Important: marks as sub-app
+                        on_startup=on_startup,
+                        on_shutdown=on_shutdown,
+                    )
+
+                    # Share user_pool with child app if shared auth is enabled
+                    if shared_user_pool_initialized and hasattr(app.state, "user_pool"):
+                        child_app.state.user_pool = app.state.user_pool
+                        # Also share audit_log if available
+                        if hasattr(app.state, "audit_log"):
+                            child_app.state.audit_log = app.state.audit_log
+                        logger.debug(f"Shared user_pool with child app '{slug}'")
+
+                    # Mount child app at path prefix
+                    app.mount(path_prefix, child_app)
+                    mounted_apps.append(
+                        {
+                            "slug": slug,
+                            "path_prefix": path_prefix,
+                            "status": "mounted",
+                        }
+                    )
+                    logger.info(f"Mounted app '{slug}' at path prefix '{path_prefix}'")
+
+                except Exception as e:
+                    logger.error(f"Failed to mount app '{slug}': {e}", exc_info=True)
+                    mounted_apps.append(
+                        {
+                            "slug": slug,
+                            "path_prefix": path_prefix,
+                            "status": "failed",
+                            "error": str(e),
+                        }
+                    )
+                    # Continue with other apps even if one fails
+                    continue
+
+            # Expose engine and mounted apps info on parent app state
+            app.state.engine = engine
+            app.state.mounted_apps = mounted_apps
+            app.state.is_multi_app = True
+
+            yield
+
+            # Shutdown is handled by parent app
+            await engine.shutdown()
+
+        # Create parent FastAPI app
+        parent_app = FastAPI(title=title, lifespan=lifespan, root_path=root_path, **fastapi_kwargs)
+
+        # Add request scope middleware
+        from starlette.middleware.base import BaseHTTPMiddleware
+
+        from ..di import ScopeManager
+
+        class RequestScopeMiddleware(BaseHTTPMiddleware):
+            """Middleware that manages request-scoped DI instances."""
+
+            async def dispatch(self, request, call_next):
+                ScopeManager.begin_request()
+                try:
+                    response = await call_next(request)
+                    return response
+                finally:
+                    ScopeManager.end_request()
+
+        parent_app.add_middleware(RequestScopeMiddleware)
+        logger.debug("RequestScopeMiddleware added for parent app")
+
+        # Add shared CORS middleware if configured
+        # (Individual apps can add their own CORS, but parent-level is useful)
+        try:
+            from fastapi.middleware.cors import CORSMiddleware
+
+            parent_app.add_middleware(
+                CORSMiddleware,
+                allow_origins=["*"],  # Can be configured via manifest later
+                allow_credentials=True,
+                allow_methods=["*"],
+                allow_headers=["*"],
+            )
+            logger.debug("CORS middleware added for parent app")
+        except ImportError:
+            logger.warning("CORS middleware not available")
+
+        # Add unified health check endpoint
+        @parent_app.get("/health")
+        async def health_check():
+            """Unified health check for all mounted apps."""
+            from ..observability import check_engine_health, check_mongodb_health
+
+            # Both are async functions
+            engine_health = await check_engine_health(engine)
+            mongo_health = await check_mongodb_health(engine.mongo_client)
+
+            mounted_status = {}
+            for mounted_app_info in mounted_apps:
+                mounted_status[mounted_app_info["slug"]] = {
+                    "path_prefix": mounted_app_info["path_prefix"],
+                    "status": mounted_app_info["status"],
+                }
+                if "error" in mounted_app_info:
+                    mounted_status[mounted_app_info["slug"]]["error"] = mounted_app_info["error"]
+
+            overall_status = "healthy" if engine_health.status.value == "healthy" and mongo_health.status.value == "healthy" else "unhealthy"
+
+            return {
+                "status": overall_status,
+                "engine": {
+                    "status": engine_health.status.value,
+                    "message": engine_health.message,
+                },
+                "mongodb": {
+                    "status": mongo_health.status.value,
+                    "message": mongo_health.message,
+                },
+                "mounted_apps": mounted_status,
+            }
+
+        logger.info(f"Multi-app parent created with {len(apps)} app(s) configured")
+
+        return parent_app
 
     async def _initialize_shared_user_pool(
         self,

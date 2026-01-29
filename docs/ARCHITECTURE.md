@@ -247,6 +247,115 @@ Application
 3. **Manifest Config**: Cross-app access authorization
 4. **Scoped Wrapper**: Runtime scope validation
 
+## Multi-App Mounting Architecture
+
+MDB-ENGINE supports mounting multiple FastAPI apps under a single parent app, enabling true multi-app convenience for single-deployment scenarios (e.g., Render.com, Railway).
+
+### Architecture Diagram
+
+```
+┌─────────────────────────────────────────────────────────┐
+│              Parent FastAPI App (Port 8000)              │
+│  • Unified health check (/health)                      │
+│  • Shared middleware (CORS, rate limiting)            │
+│  • Shared MongoDBEngine instance                        │
+└──────────────┬──────────────────────────────────────────┘
+               │
+       ┌───────┼───────┐
+       │       │       │
+       ▼       ▼       ▼
+┌──────────┐ ┌──────────┐ ┌──────────┐
+│ Auth Hub │ │ pwd-zero │ │   FLUX   │
+│ /auth-hub│ │/pwd-zero │ │  /flux   │
+└────┬─────┘ └────┬─────┘ └────┬─────┘
+     │            │            │
+     └────────────┼────────────┘
+                  │
+                  ▼
+         ┌─────────────────┐
+         │ MongoDBEngine   │
+         │ (Shared)        │
+         └────────┬────────┘
+                  │
+                  ▼
+         ┌─────────────────┐
+         │ SharedUserPool  │
+         │ (SSO Support)   │
+         └─────────────────┘
+```
+
+### Key Components
+
+**Parent App:**
+- Created via `engine.create_multi_app()`
+- Manages engine lifecycle (initialization/shutdown)
+- Provides unified `/health` endpoint
+- Handles shared middleware (CORS, rate limiting)
+- Mounts child apps at path prefixes
+
+**Child Apps:**
+- Created via `engine.create_app()` with `is_sub_app=True`
+- Share parent's engine instance
+- Share parent's lifespan (no separate initialization)
+- Maintain own routes, middleware, and state
+- Accessible at configured path prefixes
+
+**Shared Resources:**
+- Single MongoDBEngine instance
+- Single MongoDB connection pool
+- SharedUserPool (if any app uses shared auth)
+- Unified health monitoring
+
+### Configuration
+
+**Programmatic:**
+
+```python
+app = engine.create_multi_app(
+    apps=[
+        {"slug": "auth-hub", "manifest": Path("./auth-hub/manifest.json"), "path_prefix": "/auth-hub"},
+        {"slug": "dashboard", "manifest": Path("./dashboard/manifest.json"), "path_prefix": "/dashboard"}
+    ]
+)
+```
+
+**Manifest-Based:**
+
+```json
+{
+  "multi_app": {
+    "enabled": true,
+    "apps": [
+      {"slug": "auth-hub", "manifest": "./auth-hub/manifest.json", "path_prefix": "/auth-hub"}
+    ]
+  }
+}
+```
+
+### Path Prefix Validation
+
+The engine validates path prefixes to ensure:
+- All prefixes start with `/`
+- No prefix conflicts (one cannot be a prefix of another)
+- No conflicts with reserved paths (`/health`, `/docs`, `/openapi.json`)
+- All prefixes are unique
+
+### Shared Auth in Multi-App Context
+
+When using shared auth (`auth.mode: "shared"`):
+- SharedUserPool is initialized once at parent level
+- All child apps using shared auth reference the same user pool
+- SSO works seamlessly across mounted apps
+- Tokens validated consistently across all apps
+
+### Benefits
+
+1. **Single Deployment**: Deploy multiple apps as one service
+2. **Resource Efficiency**: Shared engine and connection pool
+3. **SSO Support**: Shared auth works seamlessly
+4. **Unified Monitoring**: Single health check endpoint
+5. **Easy Configuration**: Declarative via manifest or programmatic
+
 ## Related Documentation
 
 - [App Authentication Guide](APP_AUTHENTICATION.md) - Detailed authentication guide

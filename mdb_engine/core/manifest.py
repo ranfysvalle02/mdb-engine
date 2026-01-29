@@ -1732,6 +1732,94 @@ MANIFEST_SCHEMA_V2 = {
             "additionalProperties": False,
             "description": "Observability configuration (health checks, metrics, logging)",
         },
+        "multi_app": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Enable multi-app mounting mode",
+                },
+                "apps": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "slug": {
+                                "type": "string",
+                                "pattern": "^[a-z0-9_-]+$",
+                                "description": "App slug (lowercase alphanumeric, underscores, hyphens)",
+                            },
+                            "manifest": {
+                                "type": "string",
+                                "description": (
+                                    "Path to manifest.json file (relative to multi_app manifest or absolute)"
+                                ),
+                            },
+                            "path_prefix": {
+                                "type": "string",
+                                "pattern": "^/.*",
+                                "default": "/{slug}",
+                                "description": (
+                                    "Path prefix for mounting (defaults to /{slug}). "
+                                    "Must start with '/' and be unique across all apps."
+                                ),
+                            },
+                            "on_startup": {
+                                "type": "string",
+                                "description": (
+                                    "Optional: Python function path for startup callback "
+                                    "(e.g., 'module.function_name'). Not yet supported in manifest-based config."
+                                ),
+                            },
+                            "on_shutdown": {
+                                "type": "string",
+                                "description": (
+                                    "Optional: Python function path for shutdown callback "
+                                    "(e.g., 'module.function_name'). Not yet supported in manifest-based config."
+                                ),
+                            },
+                        },
+                        "required": ["slug", "manifest"],
+                        "additionalProperties": False,
+                    },
+                    "minItems": 1,
+                    "description": "List of apps to mount in multi-app mode",
+                },
+                "shared_middleware": {
+                    "type": "object",
+                    "properties": {
+                        "cors": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "Enable CORS middleware at parent level (default: true)",
+                        },
+                        "rate_limiting": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": (
+                                "Enable rate limiting middleware at parent level (default: true)"
+                            ),
+                        },
+                        "health_checks": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": (
+                                "Enable unified health check endpoint at /health (default: true)"
+                            ),
+                        },
+                    },
+                    "additionalProperties": False,
+                    "description": "Shared middleware configuration for parent app",
+                },
+            },
+            "additionalProperties": False,
+            "description": (
+                "Multi-app mounting configuration. When enabled, allows mounting "
+                "multiple FastAPI apps under a single parent app with path prefixes. "
+                "Useful for deploying multiple apps (e.g., SSO apps) on a single service."
+            ),
+        },
         "initial_data": {
             "type": "object",
             "patternProperties": {

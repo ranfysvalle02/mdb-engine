@@ -1,0 +1,28 @@
+{
+  "schema_version": "2.0",
+  "multi_app": {
+    "enabled": true,
+    "apps": [
+      {
+        "slug": "auth-hub",
+        "manifest": "./apps/auth-hub/manifest.json",
+        "path_prefix": "/auth-hub"
+      },
+      {
+        "slug": "pwd-zero",
+        "manifest": "./apps/sso-app-1/manifest.json",
+        "path_prefix": "/pwd-zero"
+      },
+      {
+        "slug": "flux",
+        "manifest": "./apps/sso-app-2/manifest.json",
+        "path_prefix": "/flux"
+      }
+    ],
+    "shared_middleware": {
+      "cors": true,
+      "rate_limiting": true,
+      "health_checks": true
+    }
+  }
+}

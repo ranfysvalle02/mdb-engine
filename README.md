@@ -41,58 +41,162 @@ pip install mdb-engine
 
 ---
 
-## 30-Second Quick Start
+## 30-Second Quick Start: Build a Todo List API
 
-**Step 1**: Create your `manifest.json`:
+Let's build a complete CRUD todo list app in 3 steps!
+
+### Step 1: Create `manifest.json`
 
 ```json
 {
   "schema_version": "2.0",
-  "slug": "my_app",
-  "name": "My App",
+  "slug": "todo_app",
+  "name": "Todo List App",
   "managed_indexes": {
-    "tasks": [
+    "todos": [
       {
         "type": "regular",
-        "keys": {"status": 1, "created_at": -1},
-        "name": "status_sort"
+        "keys": {"completed": 1, "created_at": -1},
+        "name": "completed_sort"
       }
     ]
   }
 }
 ```
 
-**Step 2**: Create your FastAPI app:
+### Step 2: Create `app.py` with Full CRUD
 
 ```python
+from datetime import datetime
 from pathlib import Path
-from fastapi import Depends
+from typing import Optional
+
+from bson import ObjectId
+from fastapi import Depends, HTTPException
+from pydantic import BaseModel
+
 from mdb_engine import MongoDBEngine
 from mdb_engine.dependencies import get_scoped_db
 
-# Initialize the engine
+# Initialize engine
 engine = MongoDBEngine(
     mongo_uri="mongodb://localhost:27017",
     db_name="my_database"
 )
 
-# Create app - manifest.json is loaded automatically!
-app = engine.create_app(slug="my_app", manifest=Path("manifest.json"))
+# Create app - manifest.json loaded automatically!
+app = engine.create_app(
+    slug="todo_app",
+    manifest=Path("manifest.json")
+)
 
-# Use request-scoped dependencies - all queries automatically isolated
-@app.post("/tasks")
-async def create_task(task: dict, db=Depends(get_scoped_db)):
-    result = await db.tasks.insert_one(task)
-    return {"id": str(result.inserted_id)}
+# Pydantic models
+class TodoCreate(BaseModel):
+    title: str
+    description: Optional[str] = None
+
+class TodoUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    completed: Optional[bool] = None
+
+# CREATE - Add a new todo
+@app.post("/todos")
+async def create_todo(todo: TodoCreate, db=Depends(get_scoped_db)):
+    doc = {
+        **todo.dict(),
+        "completed": False,
+        "created_at": datetime.utcnow()
+    }
+    result = await db.todos.insert_one(doc)
+    return {"id": str(result.inserted_id), "message": "Todo created"}
+
+# READ - List all todos
+@app.get("/todos")
+async def list_todos(completed: Optional[bool] = None, db=Depends(get_scoped_db)):
+    query = {}
+    if completed is not None:
+        query["completed"] = completed
+    
+    todos = await db.todos.find(query).sort("created_at", -1).to_list(length=100)
+    for todo in todos:
+        todo["_id"] = str(todo["_id"])
+    return {"todos": todos, "count": len(todos)}
+
+# READ - Get single todo
+@app.get("/todos/{todo_id}")
+async def get_todo(todo_id: str, db=Depends(get_scoped_db)):
+    todo = await db.todos.find_one({"_id": ObjectId(todo_id)})
+    if not todo:
+        raise HTTPException(status_code=404, detail="Todo not found")
+    todo["_id"] = str(todo["_id"])
+    return todo
+
+# UPDATE - Update a todo
+@app.put("/todos/{todo_id}")
+async def update_todo(todo_id: str, todo: TodoUpdate, db=Depends(get_scoped_db)):
+    updates = {k: v for k, v in todo.dict(exclude_unset=True).items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    
+    updates["updated_at"] = datetime.utcnow()
+    result = await db.todos.update_one(
+        {"_id": ObjectId(todo_id)},
+        {"$set": updates}
+    )
+    
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Todo not found")
+    return {"message": "Todo updated"}
+
+# DELETE - Delete a todo
+@app.delete("/todos/{todo_id}")
+async def delete_todo(todo_id: str, db=Depends(get_scoped_db)):
+    result = await db.todos.delete_one({"_id": ObjectId(todo_id)})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Todo not found")
+    return {"message": "Todo deleted"}
+```
+
+### Step 3: Run It!
+
+```bash
+# Start MongoDB (if not running)
+mongod
+
+# Install dependencies
+pip install mdb-engine fastapi uvicorn
+
+# Run the app
+uvicorn app:app --reload
+```
+
+**Test your API:**
+```bash
+# Create a todo
+curl -X POST http://localhost:8000/todos \
+  -H "Content-Type: application/json" \
+  -d '{"title": "Buy groceries", "description": "Milk and eggs"}'
+
+# List todos
+curl http://localhost:8000/todos
+
+# Update a todo (replace {id} with actual ID)
+curl -X PUT http://localhost:8000/todos/{id} \
+  -H "Content-Type: application/json" \
+  -d '{"completed": true}'
+
+# Delete a todo
+curl -X DELETE http://localhost:8000/todos/{id}
 ```
 
 **What just happened?**
-- ✅ Engine loaded your `manifest.json`
-- ✅ Indexes created automatically from `managed_indexes`
-- ✅ Database queries automatically scoped to your app
-- ✅ Lifecycle management handled (startup/shutdown)
+- ✅ **Automatic scoping**: All queries filtered by `app_id` — your data is isolated
+- ✅ **Indexes created**: The `completed_sort` index was created automatically
+- ✅ **Lifecycle managed**: Startup/shutdown handled automatically
+- ✅ **Zero boilerplate**: No connection setup, no index scripts, no auth handlers
 
-That's it. Your data is automatically sandboxed, indexes are created, and cleanup is handled.
+**That's it!** You now have a fully functional, production-ready todo API with automatic data sandboxing, index management, and lifecycle handling.
 
 ---
 

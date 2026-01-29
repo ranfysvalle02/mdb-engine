@@ -8,7 +8,8 @@ Tests cover:
 - Key validation and error handling
 """
 
-from unittest.mock import AsyncMock, MagicMock
+import os
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -68,14 +69,26 @@ class TestHS256Algorithm:
         assert pool.jwt_algorithm == "HS256"
         assert pool.is_asymmetric is False
 
-    def test_hs256_without_secret_fails(self, mock_mongo_db):
+    def test_hs256_without_secret_fails(self, mock_mongo_db, monkeypatch):
         """Test HS256 without secret raises error."""
-        with pytest.raises(JWTSecretError):
-            SharedUserPool(
-                mock_mongo_db,
-                jwt_algorithm="HS256",
-                allow_insecure_dev=False,
-            )
+        # Clear environment variable to ensure test isolation
+        monkeypatch.delenv("MDB_ENGINE_JWT_SECRET", raising=False)
+        monkeypatch.delenv("MDB_ENGINE_JWT_PUBLIC_KEY", raising=False)
+        # Patch os.getenv to return None for JWT secrets to ensure test isolation
+        original_getenv = os.getenv
+
+        def mock_getenv(key, default=None):
+            if key in ("MDB_ENGINE_JWT_SECRET", "MDB_ENGINE_JWT_PUBLIC_KEY"):
+                return None
+            return original_getenv(key, default)
+
+        with patch("os.getenv", side_effect=mock_getenv):
+            with pytest.raises(JWTSecretError):
+                SharedUserPool(
+                    mock_mongo_db,
+                    jwt_algorithm="HS256",
+                    allow_insecure_dev=False,
+                )
 
     def test_hs256_allow_insecure_dev(self, mock_mongo_db):
         """Test HS256 with allow_insecure_dev generates secret."""
@@ -109,27 +122,51 @@ MIIEpAIBAAKCAQEA0Z3VS5JJcds3xfn/ygWyF8PbnGy0AHB7MxQPpg+WjhvwRqNL
 EtYplvPWvyDk+tT3s7VLR9PYT/Zn7h0J8bTO8MBjQn4RKphW8M4QH5k
 -----END RSA PRIVATE KEY-----"""
 
-    def test_rs256_without_key_fails(self, mock_mongo_db):
+    def test_rs256_without_key_fails(self, mock_mongo_db, monkeypatch):
         """Test RS256 without private key raises error."""
-        with pytest.raises(JWTKeyError) as exc_info:
-            SharedUserPool(
-                mock_mongo_db,
-                jwt_algorithm="RS256",
-                allow_insecure_dev=False,
-            )
+        # Clear environment variable to ensure test isolation
+        monkeypatch.delenv("MDB_ENGINE_JWT_SECRET", raising=False)
+        monkeypatch.delenv("MDB_ENGINE_JWT_PUBLIC_KEY", raising=False)
+        # Patch os.getenv to return None for JWT secrets to ensure test isolation
+        original_getenv = os.getenv
 
-        assert "Private key required" in str(exc_info.value)
+        def mock_getenv(key, default=None):
+            if key in ("MDB_ENGINE_JWT_SECRET", "MDB_ENGINE_JWT_PUBLIC_KEY"):
+                return None
+            return original_getenv(key, default)
 
-    def test_rs256_allow_insecure_dev_still_fails(self, mock_mongo_db):
+        with patch("os.getenv", side_effect=mock_getenv):
+            with pytest.raises(JWTKeyError) as exc_info:
+                SharedUserPool(
+                    mock_mongo_db,
+                    jwt_algorithm="RS256",
+                    allow_insecure_dev=False,
+                )
+
+            assert "Private key required" in str(exc_info.value)
+
+    def test_rs256_allow_insecure_dev_still_fails(self, mock_mongo_db, monkeypatch):
         """Test RS256 with allow_insecure_dev still requires key."""
-        with pytest.raises(JWTKeyError) as exc_info:
-            SharedUserPool(
-                mock_mongo_db,
-                jwt_algorithm="RS256",
-                allow_insecure_dev=True,
-            )
+        # Clear environment variable to ensure test isolation
+        monkeypatch.delenv("MDB_ENGINE_JWT_SECRET", raising=False)
+        monkeypatch.delenv("MDB_ENGINE_JWT_PUBLIC_KEY", raising=False)
+        # Patch os.getenv to return None for JWT secrets to ensure test isolation
+        original_getenv = os.getenv
 
-        assert "cannot auto-generate" in str(exc_info.value).lower()
+        def mock_getenv(key, default=None):
+            if key in ("MDB_ENGINE_JWT_SECRET", "MDB_ENGINE_JWT_PUBLIC_KEY"):
+                return None
+            return original_getenv(key, default)
+
+        with patch("os.getenv", side_effect=mock_getenv):
+            with pytest.raises(JWTKeyError) as exc_info:
+                SharedUserPool(
+                    mock_mongo_db,
+                    jwt_algorithm="RS256",
+                    allow_insecure_dev=True,
+                )
+
+            assert "cannot auto-generate" in str(exc_info.value).lower()
 
     def test_rs256_with_private_key(self, mock_mongo_db):
         """Test RS256 with private key initializes correctly."""
@@ -177,14 +214,26 @@ class TestES256Algorithm:
 MHQCAQEEICBQw0Nl8FpSFPJeqj3FVcLjnw5KjANkG5x+w7s+
 -----END EC PRIVATE KEY-----"""
 
-    def test_es256_without_key_fails(self, mock_mongo_db):
+    def test_es256_without_key_fails(self, mock_mongo_db, monkeypatch):
         """Test ES256 without private key raises error."""
-        with pytest.raises(JWTKeyError):
-            SharedUserPool(
-                mock_mongo_db,
-                jwt_algorithm="ES256",
-                allow_insecure_dev=False,
-            )
+        # Clear environment variable to ensure test isolation
+        monkeypatch.delenv("MDB_ENGINE_JWT_SECRET", raising=False)
+        monkeypatch.delenv("MDB_ENGINE_JWT_PUBLIC_KEY", raising=False)
+        # Patch os.getenv to return None for JWT secrets to ensure test isolation
+        original_getenv = os.getenv
+
+        def mock_getenv(key, default=None):
+            if key in ("MDB_ENGINE_JWT_SECRET", "MDB_ENGINE_JWT_PUBLIC_KEY"):
+                return None
+            return original_getenv(key, default)
+
+        with patch("os.getenv", side_effect=mock_getenv):
+            with pytest.raises(JWTKeyError):
+                SharedUserPool(
+                    mock_mongo_db,
+                    jwt_algorithm="ES256",
+                    allow_insecure_dev=False,
+                )
 
     def test_es256_with_private_key(self, mock_mongo_db):
         """Test ES256 with private key initializes correctly."""

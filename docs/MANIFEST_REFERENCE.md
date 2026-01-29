@@ -562,6 +562,61 @@ Seed collections with initial data:
 
 ---
 
+## Multi-App Mounting
+
+Mount multiple FastAPI apps under a single parent app for single-deployment scenarios (e.g., Render.com):
+
+```json
+{
+  "schema_version": "2.0",
+  "multi_app": {
+    "enabled": true,
+    "apps": [
+      {
+        "slug": "auth-hub",
+        "manifest": "./apps/auth-hub/manifest.json",
+        "path_prefix": "/auth-hub"
+      },
+      {
+        "slug": "dashboard",
+        "manifest": "./apps/dashboard/manifest.json",
+        "path_prefix": "/dashboard"
+      }
+    ],
+    "shared_middleware": {
+      "cors": true,
+      "rate_limiting": true,
+      "health_checks": true
+    }
+  }
+}
+```
+
+**Usage:**
+
+```python
+from mdb_engine import MongoDBEngine
+from pathlib import Path
+
+engine = MongoDBEngine(mongo_uri=..., db_name=...)
+app = engine.create_multi_app(
+    multi_app_manifest=Path("./multi_app_manifest.json")
+)
+```
+
+**Benefits:**
+- Single FastAPI instance for multiple apps
+- Shared engine and connection pool
+- SSO/shared auth works seamlessly
+- Perfect for single-service deployments (Render.com, Railway, etc.)
+- Unified health check endpoint at `/health`
+
+**Path Prefix Rules:**
+- Must start with `/`
+- Must be unique across all apps
+- Cannot conflict with reserved paths (`/health`, `/docs`, `/openapi.json`)
+- Cannot be a prefix of another (e.g., `/app` conflicts with `/app/v2`)
+
 ## Complete Example
 
 Here's a complete manifest.json demonstrating all major features:
