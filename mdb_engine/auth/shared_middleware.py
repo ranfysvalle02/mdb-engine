@@ -36,6 +36,7 @@ from collections.abc import Callable
 from typing import Any
 
 import jwt
+from pymongo.errors import PyMongoError
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
@@ -245,7 +246,7 @@ class SharedAuthMiddleware(BaseHTTPMiddleware):
                                     f"Failed to auto-assign role '{self._require_role}' to "
                                     f"user {user_email} for app '{self._app_slug}'"
                                 )
-                        except Exception as e:
+                        except (PyMongoError, ValueError, AttributeError) as e:
                             logger.error(
                                 f"Error auto-assigning role to user {user_email}: {e}",
                                 exc_info=True,
@@ -704,7 +705,7 @@ def _create_lazy_middleware_class(
                         f"Failed to auto-assign role '{self._require_role}' to "
                         f"user {user_email} for app '{self._app_slug}'"
                     )
-            except Exception as e:
+            except (PyMongoError, ValueError, AttributeError) as e:
                 logger.error(
                     f"Error auto-assigning role to user {user_email}: {e}",
                     exc_info=True,

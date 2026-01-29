@@ -81,7 +81,7 @@ from .repositories import Entity, MongoRepository, Repository, UnitOfWork
 # Utilities
 from .utils import clean_mongo_doc, clean_mongo_docs
 
-__version__ = "0.2.1"  # Major version bump for new DI system
+__version__ = "0.2.4"  # Patch version bump for exception handling improvements
 
 __all__ = [
     # Core Engine
