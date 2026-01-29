@@ -19,6 +19,8 @@ class TestSharedAuthMiddleware:
         pool.validate_token = AsyncMock()
         pool.get_user_roles_for_app = MagicMock(return_value=[])
         pool.user_has_role = MagicMock(return_value=False)
+        pool.update_user_roles = AsyncMock(return_value=False)
+        pool.get_user_by_email = AsyncMock(return_value=None)
         return pool
 
     @pytest.fixture

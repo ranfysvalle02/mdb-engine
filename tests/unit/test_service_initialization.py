@@ -205,12 +205,15 @@ class TestMemoryServiceInitialization:
     @pytest.mark.asyncio
     async def test_initialize_memory_service_error_handling(self, service_initializer):
         """Test handling Mem0MemoryServiceError."""
+        from mdb_engine.memory.service import Mem0MemoryServiceError
+
         memory_config = {"enabled": True, "collection_name": "memories"}
 
-        # Mem0MemoryServiceError is imported inside the function, so we patch at the import location
+        # Patch Mem0MemoryService to raise an error during initialization
+        # The import happens inside initialize_memory_service, so we patch at the source
         with patch(
-            "mdb_engine.memory.service.Mem0MemoryService",
-            side_effect=Exception("Service error"),
+            "mdb_engine.memory.service.Mem0MemoryService.__init__",
+            side_effect=Mem0MemoryServiceError("Service error"),
         ):
             # Should not raise, just log error
             await service_initializer.initialize_memory_service("test_app", memory_config)
