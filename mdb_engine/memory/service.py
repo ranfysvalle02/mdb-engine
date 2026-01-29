@@ -139,7 +139,14 @@ class Mem0MemoryService:
             else:
                 self.memory = Memory(mem0_config)
             logger.info(f"✅ Mem0 Service active: {self.collection_name}")
-        except (ValueError, TypeError, ConnectionError, OSError, AttributeError, RuntimeError) as e:
+        except (
+            ValueError,
+            TypeError,
+            ConnectionError,
+            OSError,
+            AttributeError,
+            RuntimeError,
+        ) as e:
             raise Mem0MemoryServiceError(f"Failed to init Mem0: {e}") from e
 
     def _build_provider_config(self, component, model_name):
@@ -295,7 +302,15 @@ class Mem0MemoryService:
                     if "data" in result:
                         logger.warning(f"   result['data']: {result['data']}")
             return normalized
-        except (ValueError, TypeError, ConnectionError, OSError, AttributeError, RuntimeError, KeyError) as e:
+        except (
+            ValueError,
+            TypeError,
+            ConnectionError,
+            OSError,
+            AttributeError,
+            RuntimeError,
+            KeyError,
+        ) as e:
             error_msg = str(e)
             # Handle rate limit errors gracefully - try storing without inference
             if (
@@ -318,7 +333,15 @@ class Mem0MemoryService:
                     )
                     logger.info("Successfully stored memory without inference due to rate limit")
                     return self._normalize_result(result)
-                except (ValueError, TypeError, ConnectionError, OSError, AttributeError, RuntimeError, KeyError) as retry_error:
+                except (
+                    ValueError,
+                    TypeError,
+                    ConnectionError,
+                    OSError,
+                    AttributeError,
+                    RuntimeError,
+                    KeyError,
+                ) as retry_error:
                     logger.exception("Failed to store memory even without inference")
                     raise Mem0MemoryServiceError(
                         f"Add failed (rate limited, retry also failed): {retry_error}"
@@ -347,7 +370,15 @@ class Mem0MemoryService:
             call_kwargs.update(kwargs)
 
             return self._normalize_result(self.memory.get_all(**call_kwargs))
-        except (ValueError, TypeError, ConnectionError, OSError, AttributeError, RuntimeError, KeyError):
+        except (
+            ValueError,
+            TypeError,
+            ConnectionError,
+            OSError,
+            AttributeError,
+            RuntimeError,
+            KeyError,
+        ):
             logger.exception("Mem0 get_all failed")
             return []
 
@@ -374,14 +405,30 @@ class Mem0MemoryService:
                     query=query, user_id=str(user_id) if user_id else None, **call_kwargs, **kwargs
                 )
             )
-        except (ValueError, TypeError, ConnectionError, OSError, AttributeError, RuntimeError, KeyError):
+        except (
+            ValueError,
+            TypeError,
+            ConnectionError,
+            OSError,
+            AttributeError,
+            RuntimeError,
+            KeyError,
+        ):
             logger.exception("Mem0 search failed")
             return []
 
     def get(self, memory_id: str, user_id: str | None = None, **kwargs) -> dict[str, Any]:
         try:
             return self.memory.get(memory_id, **kwargs)
-        except (ValueError, TypeError, ConnectionError, OSError, AttributeError, RuntimeError, KeyError):
+        except (
+            ValueError,
+            TypeError,
+            ConnectionError,
+            OSError,
+            AttributeError,
+            RuntimeError,
+            KeyError,
+        ):
             return None
 
     def delete(self, memory_id: str, user_id: str | None = None, **kwargs) -> bool:
