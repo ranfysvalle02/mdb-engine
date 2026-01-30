@@ -2559,7 +2559,7 @@ class MongoDBEngine:
 
         return parent_app
 
-    def get_mounted_apps(self, app: "FastAPI" | None = None) -> list[dict[str, Any]]:
+    def get_mounted_apps(self, app: Optional["FastAPI"] = None) -> list[dict[str, Any]]:
         """
         Get metadata about all mounted apps.
 
