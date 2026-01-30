@@ -452,6 +452,8 @@ app = engine.create_multi_app(
         },
     ],
     title="My Platform",
+    validate=True,  # Validate all manifests before mounting
+    strict=False,   # Continue mounting even if validation fails (set True to fail fast)
 )
 ```
 
@@ -494,8 +496,32 @@ app = engine.create_multi_app(
 app = engine.create_multi_app(
     multi_app_manifest=Path("./multi_app_manifest.json"),
     title="My Platform",
+    validate=True,  # Optional: validate manifests before mounting
 )
 ```
+
+### Method 3: Auto-Discovery
+
+**Pros:**
+- No manual configuration needed
+- Automatically finds all apps with manifest.json
+- Great for development and testing
+
+**Usage:**
+```python
+app = engine.create_multi_app(
+    apps_dir=Path("./apps"),  # Scan this directory recursively
+    path_prefix_template="/app-{index}",  # Optional: auto-generate prefixes
+    # OR use slug: path_prefix_template="/{slug}"
+    validate=True,  # Optional: validate all manifests
+)
+```
+
+The auto-discovery will:
+1. Recursively scan `apps_dir` for all `manifest.json` files
+2. Extract slug from each manifest
+3. Auto-generate path prefixes using the template
+4. Mount all discovered apps automatically
 
 ---
 
@@ -668,7 +694,36 @@ async def test_multi_app_health():
         assert response.status_code == 200
         data = response.json()
         assert "status" in data
+        assert "apps" in data  # Changed from "mounted_apps" to "apps"
+        assert "engine" in data
+        assert "mongodb" in data
+
+@pytest.mark.asyncio
+async def test_route_introspection():
+    """Test route introspection endpoint."""
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.get("/_mdb/routes")
+        assert response.status_code == 200
+        data = response.json()
+        assert "parent_app" in data
         assert "mounted_apps" in data
+
+@pytest.mark.asyncio
+async def test_app_context_helpers():
+    """Test app context helpers in mounted apps."""
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        # Access a route in a mounted app
+        response = await client.get("/auth-hub/")
+        # The route handler can access:
+        # - request.state.app_base_path
+        # - request.state.auth_hub_url
+        # - request.state.app_slug
+        # - request.state.mounted_apps
+        assert response.status_code in [200, 302]
 
 @pytest.mark.asyncio
 async def test_auth_hub_access():
@@ -835,6 +890,43 @@ async def test_auth_hub_access():
 - **SharedUserPool**: Single user pool for SSO
 - **Connection Pool**: Single MongoDB connection pool
 - **App State**: Each child app has access to parent's state
+
+### Built-in App Context Helpers
+
+Each mounted app automatically has access to helpful context via `request.state`:
+
+```python
+@app.get("/my-route")
+async def my_route(request: Request):
+    # App's path prefix (e.g., "/auth-hub")
+    base_path = request.state.app_base_path
+    
+    # Auth hub URL from manifest or env
+    auth_hub_url = request.state.auth_hub_url
+    
+    # Current app's slug
+    app_slug = request.state.app_slug
+    
+    # All mounted apps metadata
+    all_apps = request.state.mounted_apps
+    # Returns: {
+    #   "auth-hub": {"slug": "auth-hub", "path_prefix": "/auth-hub", "status": "mounted"},
+    #   "app1": {"slug": "app1", "path_prefix": "/app1", "status": "mounted"},
+    # }
+    
+    # MongoDBEngine instance
+    engine = request.state.engine
+    
+    # App's manifest.json
+    manifest = request.state.manifest
+```
+
+### Available Endpoints
+
+- **GET /health**: Unified health check for all apps
+- **GET /_mdb/routes**: List all routes from all mounted apps
+- **GET /docs**: Aggregated OpenAPI documentation from all apps
+- **GET /docs/{app_slug}**: Individual app's OpenAPI documentation
 
 ---
 

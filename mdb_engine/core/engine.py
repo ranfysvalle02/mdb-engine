@@ -1529,7 +1529,8 @@ class MongoDBEngine:
         Checks:
         - All prefixes start with '/'
         - No prefix is a prefix of another (e.g., '/app' conflicts with '/app/v2')
-        - No conflicts with reserved paths ('/health', '/docs', '/openapi.json')
+        - No conflicts with reserved paths ('/health', '/docs', '/openapi.json', '/_mdb')
+        - Slug matches manifest slug (if manifest is readable)
 
         Args:
             apps: List of app configs with 'path_prefix' keys
@@ -1537,17 +1538,27 @@ class MongoDBEngine:
         Returns:
             Tuple of (is_valid, list_of_errors)
         """
+
         errors: list[str] = []
-        reserved_paths = {"/health", "/docs", "/openapi.json", "/redoc"}
+        reserved_paths = {"/health", "/docs", "/openapi.json", "/redoc", "/_mdb"}
 
         # Extract path prefixes
         path_prefixes: list[str] = []
         for app_config in apps:
-            path_prefix = app_config.get("path_prefix", f"/{app_config.get('slug', 'unknown')}")
+            slug = app_config.get("slug", "unknown")
+            path_prefix = app_config.get("path_prefix", f"/{slug}")
+
             if not path_prefix.startswith("/"):
-                app_slug = app_config.get("slug", "unknown")
-                errors.append(f"Path prefix '{path_prefix}' must start with '/' (app: {app_slug})")
+                errors.append(f"Path prefix '{path_prefix}' must start with '/' (app: '{slug}')")
                 continue
+
+            # Check for common mistakes
+            if path_prefix.endswith("/") and path_prefix != "/":
+                logger.warning(
+                    f"Path prefix '{path_prefix}' ends with '/'. "
+                    f"Consider removing trailing slash for app '{slug}'"
+                )
+
             path_prefixes.append(path_prefix)
 
         # Check for conflicts with reserved paths
@@ -1555,33 +1566,171 @@ class MongoDBEngine:
             if prefix in reserved_paths:
                 errors.append(
                     f"Path prefix '{prefix}' conflicts with reserved path. "
-                    "Reserved paths: /health, /docs, /openapi.json, /redoc"
+                    "Reserved paths: /health, /docs, /openapi.json, /redoc, /_mdb"
                 )
 
         # Check for prefix conflicts (one prefix being a prefix of another)
         path_prefixes_sorted = sorted(path_prefixes)
         for i, prefix1 in enumerate(path_prefixes_sorted):
             for prefix2 in path_prefixes_sorted[i + 1 :]:
-                if prefix1.startswith(prefix2) or prefix2.startswith(prefix1):
+                # Normalize by ensuring both end with / for comparison
+                p1_norm = prefix1 if prefix1.endswith("/") else prefix1 + "/"
+                p2_norm = prefix2 if prefix2.endswith("/") else prefix2 + "/"
+
+                if p1_norm.startswith(p2_norm) or p2_norm.startswith(p1_norm):
+                    # Find which apps these belong to for better error message
+                    app1_slug = next(
+                        (a.get("slug", "unknown") for a in apps if a.get("path_prefix") == prefix1),
+                        "unknown",
+                    )
+                    app2_slug = next(
+                        (a.get("slug", "unknown") for a in apps if a.get("path_prefix") == prefix2),
+                        "unknown",
+                    )
                     errors.append(
-                        f"Path prefix conflict: '{prefix1}' and '{prefix2}' overlap. "
+                        f"Path prefix conflict: '{prefix1}' (app: '{app1_slug}') and "
+                        f"'{prefix2}' (app: '{app2_slug}') overlap. "
                         "One cannot be a prefix of another."
                     )
 
         # Check for duplicates
         if len(path_prefixes) != len(set(path_prefixes)):
-            seen = set()
-            for prefix in path_prefixes:
+            seen = {}
+            for app_config in apps:
+                prefix = app_config.get("path_prefix")
+                slug = app_config.get("slug", "unknown")
                 if prefix in seen:
-                    errors.append(f"Duplicate path prefix: '{prefix}'")
-                seen.add(prefix)
+                    first_slug = seen[prefix]
+                    errors.append(
+                        f"Duplicate path prefix: '{prefix}' used by both "
+                        f"'{first_slug}' and '{slug}'"
+                    )
+                else:
+                    seen[prefix] = slug
 
         return len(errors) == 0, errors
 
-    def create_multi_app(
+    def _discover_apps_from_directory(
+        self,
+        apps_dir: Path,
+        path_prefix_template: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """
+        Auto-discover apps by scanning directory for manifest.json files.
+
+        Args:
+            apps_dir: Directory to scan for apps
+            path_prefix_template: Template for path prefixes (e.g., "/app-{index}")
+
+        Returns:
+            List of app configurations
+        """
+        import json
+
+        apps_dir = Path(apps_dir)
+        if not apps_dir.exists():
+            raise ValueError(f"Apps directory does not exist: {apps_dir}")
+
+        discovered_apps = []
+        manifest_files = list(apps_dir.rglob("manifest.json"))
+
+        if not manifest_files:
+            raise ValueError(f"No manifest.json files found in {apps_dir}")
+
+        for idx, manifest_path in enumerate(sorted(manifest_files), start=1):
+            try:
+                with open(manifest_path) as f:
+                    manifest_data = json.load(f)
+
+                slug = manifest_data.get("slug")
+                if not slug:
+                    logger.warning(f"Skipping manifest without slug: {manifest_path}")
+                    continue
+
+                # Generate path prefix
+                if path_prefix_template:
+                    path_prefix = path_prefix_template.format(index=idx, slug=slug)
+                else:
+                    path_prefix = f"/{slug}"
+
+                discovered_apps.append(
+                    {
+                        "slug": slug,
+                        "manifest": manifest_path,
+                        "path_prefix": path_prefix,
+                    }
+                )
+                logger.info(
+                    f"Discovered app '{slug}' at {manifest_path} " f"(will mount at {path_prefix})"
+                )
+            except (FileNotFoundError, json.JSONDecodeError, KeyError) as e:
+                logger.warning(f"Failed to read manifest at {manifest_path}: {e}")
+                continue
+
+        if not discovered_apps:
+            raise ValueError(f"No valid apps discovered in {apps_dir}")
+
+        return discovered_apps
+
+    def _validate_manifests(self, apps: list[dict[str, Any]], strict: bool) -> list[str]:
+        """Validate all app manifests."""
+        import json
+
+        logger.info("Validating all manifests before mounting...")
+        validation_errors = []
+        for app_config in apps:
+            slug = app_config.get("slug", "unknown")
+            manifest_path = app_config.get("manifest")
+            try:
+                with open(manifest_path) as f:
+                    manifest_data = json.load(f)
+
+                # Validate manifest
+                from .manifest import validate_manifest
+
+                is_valid, error_msg, error_paths = validate_manifest(manifest_data)
+
+                if not is_valid:
+                    error_detail = f"App '{slug}' at {manifest_path}: {error_msg}"
+                    if error_paths:
+                        error_detail += f" (paths: {', '.join(error_paths)})"
+                    validation_errors.append(error_detail)
+                    if strict:
+                        raise ValueError(
+                            f"Manifest validation failed for app '{slug}': {error_msg}"
+                        ) from None
+
+                # Validate slug matches manifest slug
+                manifest_slug = manifest_data.get("slug")
+                if manifest_slug and manifest_slug != slug:
+                    error_msg = (
+                        f"Slug mismatch: config slug '{slug}' does not match "
+                        f"manifest slug '{manifest_slug}' in {manifest_path}"
+                    )
+                    validation_errors.append(error_msg)
+                    if strict:
+                        raise ValueError(error_msg) from None
+            except FileNotFoundError as e:
+                error_msg = f"Manifest file not found for app '{slug}': {manifest_path}"
+                validation_errors.append(error_msg)
+                if strict:
+                    raise ValueError(error_msg) from e
+            except json.JSONDecodeError as e:
+                error_msg = f"Invalid JSON in manifest for app '{slug}' at {manifest_path}: {e}"
+                validation_errors.append(error_msg)
+                if strict:
+                    raise ValueError(error_msg) from e
+
+        return validation_errors
+
+    def create_multi_app(  # noqa: C901
         self,
         apps: list[dict[str, Any]] | None = None,
         multi_app_manifest: Path | None = None,
+        apps_dir: Path | None = None,
+        path_prefix_template: str | None = None,
+        validate: bool = False,
+        strict: bool = False,
         title: str = "Multi-App API",
         root_path: str = "",
         **fastapi_kwargs: Any,
@@ -1613,6 +1762,15 @@ class MongoDBEngine:
                         ]
                     }
                 }
+            apps_dir: Directory to scan for apps (auto-discovery). If provided and
+                apps is None, will recursively scan for manifest.json files and
+                auto-discover apps. Takes precedence over multi_app_manifest.
+            path_prefix_template: Template for auto-generated path prefixes when using
+                apps_dir. Use {index} for app index and {slug} for app slug.
+                Example: "/app-{index}" or "/{slug}"
+            validate: If True, validate all manifests before mounting (default: False)
+            strict: If True, fail fast on any validation error (default: False).
+                Only used when validate=True.
             title: Title for the parent FastAPI app
             root_path: Root path prefix for all mounted apps (optional)
             **fastapi_kwargs: Additional arguments passed to FastAPI()
@@ -1623,6 +1781,19 @@ class MongoDBEngine:
         Raises:
             ValueError: If configuration is invalid or path prefixes conflict
             RuntimeError: If engine is not initialized
+
+        Features:
+            - Built-in app context helpers: Each mounted app has access to:
+              - request.state.app_base_path: Path prefix (e.g., "/app-1")
+              - request.state.auth_hub_url: Auth hub URL from manifest or env
+              - request.state.app_slug: App slug
+              - request.state.mounted_apps: Dict of all mounted apps with paths
+              - request.state.engine: MongoDBEngine instance
+              - request.state.manifest: App's manifest.json
+            - Unified health check: GET /health aggregates health from all apps
+            - Route introspection: GET /_mdb/routes lists all routes from all apps
+            - OpenAPI aggregation: /docs combines docs from all apps
+            - Per-app docs: /docs/{app_slug} for individual app documentation
 
         Example:
             # Programmatic approach
@@ -1646,12 +1817,35 @@ class MongoDBEngine:
             app = engine.create_multi_app(
                 multi_app_manifest=Path("./multi_app_manifest.json")
             )
+
+            # Auto-discovery approach
+            app = engine.create_multi_app(
+                apps_dir=Path("./apps"),
+                path_prefix_template="/app-{index}",
+                validate=True,
+            )
+
+            # Access app context in routes
+            @app.get("/my-route")
+            async def my_route(request: Request):
+                base_path = request.state.app_base_path  # "/app-1"
+                auth_url = request.state.auth_hub_url    # "/auth-hub"
+                slug = request.state.app_slug            # "my-app"
+                all_apps = request.state.mounted_apps     # Dict of all apps
         """
         import json
 
         from fastapi import FastAPI
 
         engine = self
+
+        # Auto-discovery: if apps_dir is provided and apps is None, discover apps
+        if apps_dir and apps is None:
+            logger.info(f"Auto-discovering apps from directory: {apps_dir}")
+            apps = self._discover_apps_from_directory(
+                apps_dir=apps_dir,
+                path_prefix_template=path_prefix_template,
+            )
 
         # Load configuration from manifest or apps parameter
         if multi_app_manifest:
@@ -1708,12 +1902,26 @@ class MongoDBEngine:
                     }
                 )
         else:
-            raise ValueError("Either 'apps' or 'multi_app_manifest' must be provided")
+            raise ValueError("Either 'apps', 'multi_app_manifest', or 'apps_dir' must be provided")
 
         if not apps:
             raise ValueError("At least one app must be configured")
 
-        # Validate path prefixes
+        # Validate manifests if requested
+        if validate:
+            validation_errors = self._validate_manifests(apps, strict)
+            if validation_errors:
+                logger.warning(
+                    "Manifest validation found issues:\n"
+                    + "\n".join(f"  - {e}" for e in validation_errors)
+                )
+                if strict:
+                    raise ValueError(
+                        "Manifest validation failed (strict mode):\n"
+                        + "\n".join(f"  - {e}" for e in validation_errors)
+                    )
+
+        # Validate path prefixes (enhanced)
         is_valid, errors = self._validate_path_prefixes(apps)
         if not is_valid:
             raise ValueError(
@@ -1776,6 +1984,44 @@ class MongoDBEngine:
                 on_shutdown = app_config.get("on_shutdown")
 
                 try:
+                    # Load manifest for context helpers
+                    try:
+                        with open(manifest_path) as f:
+                            app_manifest_data = json.load(f)
+                    except (FileNotFoundError, json.JSONDecodeError) as e:
+                        raise ValueError(
+                            f"Failed to load manifest for app '{slug}' at {manifest_path}: {e}"
+                        ) from e
+
+                    # Validate startup/shutdown hooks if provided
+                    if on_startup is not None and not callable(on_startup):
+                        raise ValueError(
+                            f"on_startup hook for app '{slug}' must be callable, "
+                            f"got {type(on_startup).__name__}"
+                        )
+                    if on_shutdown is not None and not callable(on_shutdown):
+                        raise ValueError(
+                            f"on_shutdown hook for app '{slug}' must be callable, "
+                            f"got {type(on_shutdown).__name__}"
+                        )
+
+                    # Log app configuration
+                    auth_config = app_manifest_data.get("auth", {})
+                    auth_mode = auth_config.get("mode", "app")
+                    public_routes = auth_config.get("public_routes", [])
+                    logger.info(
+                        f"Mounting app '{slug}' at '{path_prefix}': "
+                        f"auth_mode={auth_mode}, "
+                        f"public_routes={len(public_routes)} routes"
+                    )
+                    if public_routes:
+                        logger.debug(f"  Public routes for '{slug}': {public_routes}")
+                    else:
+                        logger.warning(
+                            f"  App '{slug}' has no public routes configured. "
+                            "All routes will require authentication."
+                        )
+
                     # Create child app as sub-app (shares engine and lifecycle)
                     child_app = engine.create_app(
                         slug=slug,
@@ -1793,6 +2039,93 @@ class MongoDBEngine:
                             child_app.state.audit_log = app.state.audit_log
                         logger.debug(f"Shared user_pool with child app '{slug}'")
 
+                    # Add middleware for app context helpers
+                    from starlette.middleware.base import BaseHTTPMiddleware
+                    from starlette.requests import Request
+
+                    # Get auth_hub_url from manifest or env
+                    auth_hub_url = None
+                    if auth_config.get("mode") == "shared":
+                        auth_hub_url = auth_config.get("auth_hub_url")
+                    if not auth_hub_url:
+                        auth_hub_url = os.getenv("AUTH_HUB_URL", "/auth-hub")
+
+                    # Store parent app reference and current app info for middleware
+                    child_app.state.parent_app = app
+                    child_app.state.app_slug = slug
+                    child_app.state.app_base_path = path_prefix
+                    child_app.state.app_auth_hub_url = auth_hub_url
+                    child_app.state.app_manifest = app_manifest_data
+
+                    # Create middleware factory to properly capture loop variables
+                    def create_app_context_middleware(
+                        app_slug: str,
+                        app_path_prefix: str,
+                        app_auth_hub_url_val: str,
+                        app_manifest_data_val: dict[str, Any],
+                    ) -> type[BaseHTTPMiddleware]:
+                        """Create middleware class with captured variables."""
+
+                        class _AppContextMiddleware(BaseHTTPMiddleware):
+                            """Middleware that sets app context helpers on request.state."""
+
+                            async def dispatch(self, request: Request, call_next):
+                                # Get parent app from child app state
+                                parent_app = getattr(request.app.state, "parent_app", None)
+
+                                # Set app context helpers
+                                request.state.app_base_path = getattr(
+                                    request.app.state,
+                                    "app_base_path",
+                                    app_path_prefix,
+                                )
+                                request.state.auth_hub_url = getattr(
+                                    request.app.state,
+                                    "app_auth_hub_url",
+                                    app_auth_hub_url_val,
+                                )
+                                request.state.app_slug = getattr(
+                                    request.app.state, "app_slug", app_slug
+                                )
+                                request.state.engine = engine
+                                request.state.manifest = getattr(
+                                    request.app.state,
+                                    "app_manifest",
+                                    app_manifest_data_val,
+                                )
+
+                                # Get mounted apps from parent app state
+                                if parent_app and hasattr(parent_app.state, "mounted_apps"):
+                                    mounted_apps_list = parent_app.state.mounted_apps
+                                    request.state.mounted_apps = {
+                                        ma["slug"]: {
+                                            "slug": ma["slug"],
+                                            "path_prefix": ma.get("path_prefix"),
+                                            "status": ma.get("status", "unknown"),
+                                        }
+                                        for ma in mounted_apps_list
+                                    }
+                                else:
+                                    # Fallback: create minimal dict with current app
+                                    request.state.mounted_apps = {
+                                        app_slug: {
+                                            "slug": app_slug,
+                                            "path_prefix": app_path_prefix,
+                                            "status": "mounted",
+                                        }
+                                    }
+
+                                response = await call_next(request)
+                                return response
+
+                        return _AppContextMiddleware
+
+                    middleware_class = create_app_context_middleware(
+                        slug, path_prefix, auth_hub_url, app_manifest_data
+                    )
+                    child_app.add_middleware(middleware_class)
+                    logger.debug(f"Added AppContextMiddleware to child app '{slug}'")
+
                     # Mount child app at path prefix
                     app.mount(path_prefix, child_app)
                     mounted_apps.append(
@@ -1800,33 +2133,100 @@ class MongoDBEngine:
                             "slug": slug,
                             "path_prefix": path_prefix,
                             "status": "mounted",
+                            "manifest": app_manifest_data,
                         }
                     )
                     logger.info(f"Mounted app '{slug}' at path prefix '{path_prefix}'")
 
-                except (
-                    FileNotFoundError,
-                    json.JSONDecodeError,
-                    ValueError,
-                    KeyError,
-                    RuntimeError,
-                ) as e:
-                    logger.error(f"Failed to mount app '{slug}': {e}", exc_info=True)
+                except FileNotFoundError as e:
+                    error_msg = (
+                        f"Failed to mount app '{slug}' at {path_prefix}: "
+                        f"manifest.json not found at {manifest_path}"
+                    )
+                    logger.error(error_msg, exc_info=True)
                     mounted_apps.append(
                         {
                             "slug": slug,
                             "path_prefix": path_prefix,
                             "status": "failed",
-                            "error": str(e),
+                            "error": error_msg,
+                            "manifest_path": str(manifest_path),
                         }
                     )
-                    # Continue with other apps even if one fails
+                    if strict:
+                        raise ValueError(error_msg) from e
+                    continue
+                except json.JSONDecodeError as e:
+                    error_msg = (
+                        f"Failed to mount app '{slug}' at {path_prefix}: "
+                        f"Invalid JSON in manifest.json at {manifest_path}: {e}"
+                    )
+                    logger.error(error_msg, exc_info=True)
+                    mounted_apps.append(
+                        {
+                            "slug": slug,
+                            "path_prefix": path_prefix,
+                            "status": "failed",
+                            "error": error_msg,
+                            "manifest_path": str(manifest_path),
+                        }
+                    )
+                    if strict:
+                        raise ValueError(error_msg) from e
+                    continue
+                except ValueError as e:
+                    error_msg = f"Failed to mount app '{slug}' at {path_prefix}: {e}"
+                    logger.error(error_msg, exc_info=True)
+                    mounted_apps.append(
+                        {
+                            "slug": slug,
+                            "path_prefix": path_prefix,
+                            "status": "failed",
+                            "error": error_msg,
+                            "manifest_path": str(manifest_path),
+                        }
+                    )
+                    if strict:
+                        raise ValueError(error_msg) from e
+                    continue
+                except (KeyError, RuntimeError) as e:
+                    error_msg = f"Failed to mount app '{slug}' at {path_prefix}: {e}"
+                    logger.error(error_msg, exc_info=True)
+                    mounted_apps.append(
+                        {
+                            "slug": slug,
+                            "path_prefix": path_prefix,
+                            "status": "failed",
+                            "error": error_msg,
+                            "manifest_path": str(manifest_path),
+                        }
+                    )
+                    if strict:
+                        raise RuntimeError(error_msg) from e
+                    continue
+                except (OSError, PermissionError, ImportError, AttributeError, TypeError) as e:
+                    error_msg = f"Unexpected error mounting app '{slug}' at {path_prefix}: {e}"
+                    logger.error(error_msg, exc_info=True)
+                    mounted_apps.append(
+                        {
+                            "slug": slug,
+                            "path_prefix": path_prefix,
+                            "status": "failed",
+                            "error": error_msg,
+                            "manifest_path": str(manifest_path),
+                        }
+                    )
+                    if strict:
+                        raise RuntimeError(error_msg) from e
                     continue
 
             # Expose engine and mounted apps info on parent app state
             app.state.engine = engine
             app.state.mounted_apps = mounted_apps
             app.state.is_multi_app = True
+
+            # Store app reference in engine for get_mounted_apps()
+            engine._multi_app_instance = app
 
             yield
 
@@ -1875,44 +2275,322 @@ class MongoDBEngine:
         @parent_app.get("/health")
         async def health_check():
             """Unified health check for all mounted apps."""
+            import time
+
             from ..observability import check_engine_health, check_mongodb_health
 
             # Both are async functions
+            start_time = time.time()
             engine_health = await check_engine_health(engine)
             mongo_health = await check_mongodb_health(engine.mongo_client)
+            engine_response_time = int((time.time() - start_time) * 1000)
 
+            # Check each mounted app's status
             mounted_status = {}
             for mounted_app_info in mounted_apps:
-                mounted_status[mounted_app_info["slug"]] = {
-                    "path_prefix": mounted_app_info["path_prefix"],
-                    "status": mounted_app_info["status"],
-                }
-                if "error" in mounted_app_info:
-                    mounted_status[mounted_app_info["slug"]]["error"] = mounted_app_info["error"]
+                app_slug = mounted_app_info["slug"]
+                path_prefix = mounted_app_info["path_prefix"]
+                status = mounted_app_info["status"]
 
-            overall_status = (
-                "healthy"
-                if engine_health.status.value == "healthy"
+                app_status = {
+                    "path_prefix": path_prefix,
+                    "status": status,
+                }
+
+                if "error" in mounted_app_info:
+                    app_status["error"] = mounted_app_info["error"]
+                    app_status["status"] = "unhealthy"
+                elif status == "mounted":
+                    # App is mounted successfully
+                    app_status["status"] = "healthy"
+                    # Try to get response time by checking if app has routes
+                    try:
+                        # Find the mounted app and check its route count
+                        for route in parent_app.routes:
+                            if hasattr(route, "path") and route.path == path_prefix:
+                                if hasattr(route, "app"):
+                                    mounted_app = route.app
+                                    route_count = len(mounted_app.routes)
+                                    app_status["route_count"] = route_count
+                                break
+                    except (AttributeError, TypeError, KeyError):
+                        pass
+
+                mounted_status[app_slug] = app_status
+
+            # Determine overall status
+            all_healthy = (
+                engine_health.status.value == "healthy"
                 and mongo_health.status.value == "healthy"
-                else "unhealthy"
+                and all(
+                    app_info.get("status") in ("healthy", "mounted")
+                    for app_info in mounted_status.values()
+                )
             )
+
+            overall_status = "healthy" if all_healthy else "unhealthy"
 
             return {
                 "status": overall_status,
                 "engine": {
                     "status": engine_health.status.value,
                     "message": engine_health.message,
+                    "response_time_ms": engine_response_time,
                 },
                 "mongodb": {
                     "status": mongo_health.status.value,
                     "message": mongo_health.message,
                 },
-                "mounted_apps": mounted_status,
+                "apps": mounted_status,
             }
+
+        # Add route introspection endpoint
+        @parent_app.get("/_mdb/routes")
+        async def list_routes():
+            """List all routes from all mounted apps."""
+            routes_info = {
+                "parent_app": {
+                    "routes": [],
+                },
+                "mounted_apps": {},
+            }
+
+            # Get parent app routes
+            for route in parent_app.routes:
+                route_info = {
+                    "path": getattr(route, "path", str(route)),
+                    "methods": list(getattr(route, "methods", set())),
+                    "name": getattr(route, "name", None),
+                }
+                routes_info["parent_app"]["routes"].append(route_info)
+
+            # Get routes from mounted apps
+            for mounted_app_info in mounted_apps:
+                app_slug = mounted_app_info["slug"]
+                path_prefix = mounted_app_info["path_prefix"]
+                status = mounted_app_info["status"]
+
+                if status != "mounted":
+                    routes_info["mounted_apps"][app_slug] = {
+                        "path_prefix": path_prefix,
+                        "status": status,
+                        "routes": [],
+                        "error": mounted_app_info.get("error"),
+                    }
+                    continue
+
+                # Find the mounted app
+                app_routes = []
+                for route in parent_app.routes:
+                    # Check if this route belongs to the mounted app
+                    # Mounted apps appear as Mount routes
+                    if hasattr(route, "path") and route.path == path_prefix:
+                        # This is the mount point
+                        if hasattr(route, "app"):
+                            # Get routes from the mounted app
+                            mounted_app = route.app
+                            for child_route in mounted_app.routes:
+                                route_path = getattr(child_route, "path", str(child_route))
+                                # Prepend path prefix
+                                full_path = (
+                                    f"{path_prefix}{route_path}"
+                                    if route_path != "/"
+                                    else path_prefix
+                                )
+
+                                route_info = {
+                                    "path": full_path,
+                                    "relative_path": route_path,
+                                    "methods": list(getattr(child_route, "methods", set())),
+                                    "name": getattr(child_route, "name", None),
+                                }
+                                app_routes.append(route_info)
+
+                routes_info["mounted_apps"][app_slug] = {
+                    "path_prefix": path_prefix,
+                    "status": status,
+                    "routes": app_routes,
+                    "route_count": len(app_routes),
+                }
+
+            return routes_info
+
+        # Aggregate OpenAPI docs from all mounted apps
+        def custom_openapi():
+            """Generate aggregated OpenAPI schema from all mounted apps."""
+            from fastapi.openapi.utils import get_openapi
+
+            if parent_app.openapi_schema:
+                return parent_app.openapi_schema
+
+            # Get base schema from parent app
+            openapi_schema = get_openapi(
+                title=title,
+                version=fastapi_kwargs.get("version", "1.0.0"),
+                description=fastapi_kwargs.get("description", ""),
+                routes=parent_app.routes,
+            )
+
+            # Aggregate schemas from mounted apps
+            for mounted_app_info in mounted_apps:
+                if mounted_app_info.get("status") != "mounted":
+                    continue
+
+                app_slug = mounted_app_info["slug"]
+                path_prefix = mounted_app_info["path_prefix"]
+
+                # Find the mounted app
+                for route in parent_app.routes:
+                    if hasattr(route, "path") and route.path == path_prefix:
+                        if hasattr(route, "app"):
+                            mounted_app = route.app
+                            try:
+                                # Get OpenAPI schema from mounted app
+                                child_schema = get_openapi(
+                                    title=getattr(mounted_app, "title", app_slug),
+                                    version=getattr(mounted_app, "version", "1.0.0"),
+                                    description=getattr(mounted_app, "description", ""),
+                                    routes=mounted_app.routes,
+                                )
+
+                                # Merge paths with prefix
+                                if "paths" in child_schema:
+                                    for path, methods in child_schema["paths"].items():
+                                        # Prepend path prefix
+                                        prefixed_path = (
+                                            f"{path_prefix}{path}" if path != "/" else path_prefix
+                                        )
+                                        openapi_schema["paths"][prefixed_path] = methods
+
+                                # Merge components/schemas
+                                if "components" in child_schema:
+                                    if "components" not in openapi_schema:
+                                        openapi_schema["components"] = {}
+                                    if "schemas" in child_schema["components"]:
+                                        if "schemas" not in openapi_schema["components"]:
+                                            openapi_schema["components"]["schemas"] = {}
+                                        openapi_schema["components"]["schemas"].update(
+                                            child_schema["components"]["schemas"]
+                                        )
+
+                                logger.debug(f"Aggregated OpenAPI schema from app '{app_slug}'")
+                            except (AttributeError, TypeError, KeyError, ValueError) as e:
+                                logger.warning(
+                                    f"Failed to aggregate OpenAPI schema from app '{app_slug}': {e}"
+                                )
+                        break
+
+            parent_app.openapi_schema = openapi_schema
+            return openapi_schema
+
+        parent_app.openapi = custom_openapi
+
+        # Add per-app docs endpoint
+        @parent_app.get("/docs/{app_slug}")
+        async def app_docs(app_slug: str):
+            """Get OpenAPI docs for a specific app."""
+            from fastapi.openapi.docs import get_swagger_ui_html
+
+            # Find the app
+            mounted_app = None
+            path_prefix = None
+            for mounted_app_info in mounted_apps:
+                if mounted_app_info["slug"] == app_slug:
+                    path_prefix = mounted_app_info["path_prefix"]
+                    # Find the mounted app
+                    for route in parent_app.routes:
+                        if hasattr(route, "path") and route.path == path_prefix:
+                            if hasattr(route, "app"):
+                                mounted_app = route.app
+                                break
+                    break
+
+            if not mounted_app:
+                from fastapi import HTTPException
+
+                raise HTTPException(404, f"App '{app_slug}' not found or not mounted")
+
+            # Generate OpenAPI JSON for this app
+            from fastapi.openapi.utils import get_openapi
+
+            openapi_schema = get_openapi(
+                title=getattr(mounted_app, "title", app_slug),
+                version=getattr(mounted_app, "version", "1.0.0"),
+                description=getattr(mounted_app, "description", ""),
+                routes=mounted_app.routes,
+            )
+
+            # Modify paths to include prefix
+            if "paths" in openapi_schema:
+                new_paths = {}
+                for path, methods in openapi_schema["paths"].items():
+                    prefixed_path = f"{path_prefix}{path}" if path != "/" else path_prefix
+                    new_paths[prefixed_path] = methods
+                openapi_schema["paths"] = new_paths
+
+            # Return Swagger UI HTML
+            openapi_url = f"/_mdb/openapi/{app_slug}.json"
+
+            # Store schema temporarily for the JSON endpoint
+            if not hasattr(parent_app.state, "app_openapi_schemas"):
+                parent_app.state.app_openapi_schemas = {}
+            parent_app.state.app_openapi_schemas[app_slug] = openapi_schema
+
+            return get_swagger_ui_html(
+                openapi_url=openapi_url,
+                title=f"{app_slug} - API Documentation",
+            )
+
+        @parent_app.get("/_mdb/openapi/{app_slug}.json")
+        async def app_openapi_json(app_slug: str):
+            """Get OpenAPI JSON for a specific app."""
+            from fastapi import HTTPException
+
+            if not hasattr(parent_app.state, "app_openapi_schemas"):
+                raise HTTPException(404, f"OpenAPI schema for '{app_slug}' not found")
+
+            schema = parent_app.state.app_openapi_schemas.get(app_slug)
+            if not schema:
+                raise HTTPException(404, f"OpenAPI schema for '{app_slug}' not found")
+
+            return schema
 
         logger.info(f"Multi-app parent created with {len(apps)} app(s) configured")
 
         return parent_app
+
+    def get_mounted_apps(self, app: "FastAPI" | None = None) -> list[dict[str, Any]]:
+        """
+        Get metadata about all mounted apps.
+
+        Args:
+            app: FastAPI app instance (optional, will use engine's tracked app if available)
+
+        Returns:
+            List of dicts with app metadata:
+            - slug: App slug
+            - path_prefix: Path prefix where app is mounted
+            - status: Mount status ("mounted", "failed", etc.)
+            - manifest: App manifest (if available)
+            - error: Error message (if status is "failed")
+
+        Example:
+            mounted_apps = engine.get_mounted_apps(app)
+            for app_info in mounted_apps:
+                print(f"App {app_info['slug']} at {app_info['path_prefix']}")
+        """
+        if app is None:
+            # Try to get from engine state if available
+            if hasattr(self, "_multi_app_instance"):
+                app = self._multi_app_instance
+            else:
+                raise ValueError(
+                    "App instance required. Pass app parameter or use "
+                    "app.state.mounted_apps directly."
+                )
+
+        mounted_apps = getattr(app.state, "mounted_apps", [])
+        return mounted_apps
 
     async def _initialize_shared_user_pool(
         self,

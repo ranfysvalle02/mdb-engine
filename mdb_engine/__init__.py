@@ -81,7 +81,7 @@ from .repositories import Entity, MongoRepository, Repository, UnitOfWork
 # Utilities
 from .utils import clean_mongo_doc, clean_mongo_docs
 
-__version__ = "0.3.1"  # Patch version bump: Fix public route matching for mounted apps
+__version__ = "0.4.0"  # Minor version bump: Major multi-app improvements (12 new features)
 
 __all__ = [
     # Core Engine

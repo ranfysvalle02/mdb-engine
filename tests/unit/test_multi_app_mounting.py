@@ -12,6 +12,7 @@ Tests the create_multi_app() method and related functionality:
 
 import json
 import os
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -491,3 +492,474 @@ class TestSubAppMode:
             async with app.router.lifespan_context(app):
                 # Initialize should not be called again (is_sub_app=True skips it)
                 assert mock_conn.initialize.call_count == init_call_count_before
+
+
+class TestAutoDiscovery:
+    """Test auto-discovery feature."""
+
+    @pytest.fixture
+    def temp_apps_dir(self, tmp_path):
+        """Create temporary apps directory structure."""
+        apps_dir = tmp_path / "apps"
+        apps_dir.mkdir()
+
+        # Create app1
+        app1_dir = apps_dir / "app1"
+        app1_dir.mkdir()
+        manifest1 = {
+            "schema_version": "2.0",
+            "slug": "app1",
+            "name": "App 1",
+            "auth": {"mode": "app"},
+        }
+        (app1_dir / "manifest.json").write_text(json.dumps(manifest1))
+
+        # Create app2
+        app2_dir = apps_dir / "app2"
+        app2_dir.mkdir()
+        manifest2 = {
+            "schema_version": "2.0",
+            "slug": "app2",
+            "name": "App 2",
+            "auth": {"mode": "app"},
+        }
+        (app2_dir / "manifest.json").write_text(json.dumps(manifest2))
+
+        # Create nested app3
+        nested_dir = apps_dir / "nested" / "app3"
+        nested_dir.mkdir(parents=True)
+        manifest3 = {
+            "schema_version": "2.0",
+            "slug": "app3",
+            "name": "App 3",
+            "auth": {"mode": "app"},
+        }
+        (nested_dir / "manifest.json").write_text(json.dumps(manifest3))
+
+        return apps_dir
+
+    def test_auto_discover_apps(self, temp_apps_dir):
+        """Test auto-discovery of apps from directory."""
+        from mdb_engine.core.engine import MongoDBEngine
+
+        engine = MongoDBEngine(mongo_uri="mongodb://localhost:27017", db_name="test_db")
+
+        apps = engine._discover_apps_from_directory(temp_apps_dir)
+
+        assert len(apps) == 3
+        slugs = [app["slug"] for app in apps]
+        assert "app1" in slugs
+        assert "app2" in slugs
+        assert "app3" in slugs
+
+    def test_auto_discover_with_template(self, temp_apps_dir):
+        """Test auto-discovery with path prefix template."""
+        from mdb_engine.core.engine import MongoDBEngine
+
+        engine = MongoDBEngine(mongo_uri="mongodb://localhost:27017", db_name="test_db")
+
+        apps = engine._discover_apps_from_directory(
+            temp_apps_dir, path_prefix_template="/app-{index}"
+        )
+
+        assert len(apps) == 3
+        # Check that prefixes are generated
+        prefixes = [app["path_prefix"] for app in apps]
+        assert "/app-1" in prefixes
+        assert "/app-2" in prefixes
+        assert "/app-3" in prefixes
+
+    def test_auto_discover_nonexistent_dir(self):
+        """Test auto-discovery fails with nonexistent directory."""
+        from mdb_engine.core.engine import MongoDBEngine
+
+        engine = MongoDBEngine(mongo_uri="mongodb://localhost:27017", db_name="test_db")
+
+        with pytest.raises(ValueError, match="does not exist"):
+            engine._discover_apps_from_directory(Path("/nonexistent/dir"))
+
+    def test_create_multi_app_with_auto_discovery(self, temp_apps_dir):
+        """Test create_multi_app with auto-discovery."""
+        from fastapi import FastAPI
+
+        from mdb_engine.core.engine import MongoDBEngine
+
+        engine = MongoDBEngine(mongo_uri="mongodb://localhost:27017", db_name="test_db")
+
+        app = engine.create_multi_app(
+            apps_dir=temp_apps_dir,
+            path_prefix_template="/app-{index}",
+        )
+
+        assert app is not None
+        assert isinstance(app, FastAPI)
+
+
+class TestValidationMode:
+    """Test validation mode feature."""
+
+    @pytest.fixture
+    def temp_manifests(self, tmp_path):
+        """Create temporary manifest files."""
+        manifests_dir = tmp_path / "manifests"
+        manifests_dir.mkdir()
+
+        # Valid manifest
+        valid_manifest = {
+            "schema_version": "2.0",
+            "slug": "valid-app",
+            "name": "Valid App",
+            "auth": {"mode": "app"},
+        }
+        valid_path = manifests_dir / "valid-app" / "manifest.json"
+        valid_path.parent.mkdir()
+        valid_path.write_text(json.dumps(valid_manifest))
+
+        # Invalid manifest (missing required fields)
+        invalid_manifest = {
+            "schema_version": "2.0",
+            # Missing slug
+            "name": "Invalid App",
+        }
+        invalid_path = manifests_dir / "invalid-app" / "manifest.json"
+        invalid_path.parent.mkdir()
+        invalid_path.write_text(json.dumps(invalid_manifest))
+
+        return {
+            "valid": valid_path,
+            "invalid": invalid_path,
+        }
+
+    def test_validation_mode_non_strict(self, temp_manifests):
+        """Test validation mode with strict=False (warns but continues)."""
+        from mdb_engine.core.engine import MongoDBEngine
+
+        engine = MongoDBEngine(mongo_uri="mongodb://localhost:27017", db_name="test_db")
+
+        # Should not raise, but log warnings
+        app = engine.create_multi_app(
+            apps=[
+                {
+                    "slug": "valid-app",
+                    "manifest": temp_manifests["valid"],
+                    "path_prefix": "/valid",
+                }
+            ],
+            validate=True,
+            strict=False,
+        )
+
+        assert app is not None
+
+    def test_validation_mode_strict(self, temp_manifests):
+        """Test validation mode with strict=True (fails fast)."""
+        from mdb_engine.core.engine import MongoDBEngine
+
+        engine = MongoDBEngine(mongo_uri="mongodb://localhost:27017", db_name="test_db")
+
+        with pytest.raises(ValueError, match="validation failed"):
+            engine.create_multi_app(
+                apps=[
+                    {
+                        "slug": "invalid-app",
+                        "manifest": temp_manifests["invalid"],
+                        "path_prefix": "/invalid",
+                    }
+                ],
+                validate=True,
+                strict=True,
+            )
+
+
+class TestAppContextHelpers:
+    """Test built-in app context helpers."""
+
+    @pytest.fixture
+    def temp_manifest(self, tmp_path):
+        """Create temporary manifest file."""
+        manifest = {
+            "schema_version": "2.0",
+            "slug": "test-app",
+            "name": "Test App",
+            "auth": {
+                "mode": "shared",
+                "auth_hub_url": "/auth-hub",
+                "roles": ["viewer"],
+            },
+        }
+        manifest_path = tmp_path / "manifest.json"
+        manifest_path.write_text(json.dumps(manifest))
+        return manifest_path
+
+    @pytest.mark.asyncio
+    async def test_app_context_middleware(self, mock_mongo_database, temp_manifest):
+        """Test that app context helpers are set in request.state."""
+        from fastapi import Request
+
+        from mdb_engine.core.engine import MongoDBEngine
+
+        engine = MongoDBEngine(mongo_uri="mongodb://localhost:27017", db_name="test_db")
+
+        with patch.object(engine, "_connection_manager") as mock_conn:
+            mock_conn.mongo_db = mock_mongo_database
+            mock_conn.mongo_client = MagicMock()
+            mock_conn.initialized = True
+            mock_conn.initialize = AsyncMock()
+            mock_conn.shutdown = AsyncMock()
+
+            app = engine.create_multi_app(
+                apps=[
+                    {
+                        "slug": "test-app",
+                        "manifest": temp_manifest,
+                        "path_prefix": "/test-app",
+                    }
+                ]
+            )
+
+            async with app.router.lifespan_context(app):
+                # Create a test route to check state
+                @app.get("/test-app/check-state")
+                async def check_state(request: Request):
+                    return {
+                        "app_base_path": getattr(request.state, "app_base_path", None),
+                        "auth_hub_url": getattr(request.state, "auth_hub_url", None),
+                        "app_slug": getattr(request.state, "app_slug", None),
+                        "has_mounted_apps": hasattr(request.state, "mounted_apps"),
+                        "has_engine": hasattr(request.state, "engine"),
+                        "has_manifest": hasattr(request.state, "manifest"),
+                    }
+
+                client = TestClient(app)
+                response = client.get("/test-app/check-state")
+
+                assert response.status_code == 200
+                data = response.json()
+                assert data["app_base_path"] == "/test-app"
+                assert data["auth_hub_url"] == "/auth-hub"
+                assert data["app_slug"] == "test-app"
+                assert data["has_mounted_apps"] is True
+                assert data["has_engine"] is True
+                assert data["has_manifest"] is True
+
+
+class TestRouteIntrospection:
+    """Test route introspection endpoint."""
+
+    @pytest.fixture
+    def temp_manifests(self, tmp_path):
+        """Create temporary manifest files."""
+        manifests_dir = tmp_path / "manifests"
+        manifests_dir.mkdir()
+
+        manifest1 = {
+            "schema_version": "2.0",
+            "slug": "app1",
+            "name": "App 1",
+            "auth": {"mode": "app"},
+        }
+        manifest1_path = manifests_dir / "app1" / "manifest.json"
+        manifest1_path.parent.mkdir()
+        manifest1_path.write_text(json.dumps(manifest1))
+
+        return {"app1": manifest1_path}
+
+    @pytest.mark.asyncio
+    async def test_route_introspection_endpoint(self, mock_mongo_database, temp_manifests):
+        """Test route introspection endpoint."""
+        from mdb_engine.core.engine import MongoDBEngine
+
+        engine = MongoDBEngine(mongo_uri="mongodb://localhost:27017", db_name="test_db")
+
+        with patch.object(engine, "_connection_manager") as mock_conn:
+            mock_conn.mongo_db = mock_mongo_database
+            mock_conn.mongo_client = MagicMock()
+            mock_conn.initialized = True
+            mock_conn.initialize = AsyncMock()
+            mock_conn.shutdown = AsyncMock()
+
+            app = engine.create_multi_app(
+                apps=[
+                    {
+                        "slug": "app1",
+                        "manifest": temp_manifests["app1"],
+                        "path_prefix": "/app1",
+                    }
+                ]
+            )
+
+            async with app.router.lifespan_context(app):
+                client = TestClient(app)
+                response = client.get("/_mdb/routes")
+
+                assert response.status_code == 200
+                data = response.json()
+                assert "parent_app" in data
+                assert "mounted_apps" in data
+                assert "app1" in data["mounted_apps"]
+
+
+class TestGetMountedApps:
+    """Test get_mounted_apps() method."""
+
+    @pytest.fixture
+    def temp_manifests(self, tmp_path):
+        """Create temporary manifest files."""
+        manifests_dir = tmp_path / "manifests"
+        manifests_dir.mkdir()
+
+        manifest1 = {
+            "schema_version": "2.0",
+            "slug": "app1",
+            "name": "App 1",
+            "auth": {"mode": "app"},
+        }
+        manifest1_path = manifests_dir / "app1" / "manifest.json"
+        manifest1_path.parent.mkdir()
+        manifest1_path.write_text(json.dumps(manifest1))
+
+        return {"app1": manifest1_path}
+
+    @pytest.mark.asyncio
+    async def test_get_mounted_apps(self, mock_mongo_database, temp_manifests):
+        """Test get_mounted_apps() method."""
+        from mdb_engine.core.engine import MongoDBEngine
+
+        engine = MongoDBEngine(mongo_uri="mongodb://localhost:27017", db_name="test_db")
+
+        with patch.object(engine, "_connection_manager") as mock_conn:
+            mock_conn.mongo_db = mock_mongo_database
+            mock_conn.mongo_client = MagicMock()
+            mock_conn.initialized = True
+            mock_conn.initialize = AsyncMock()
+            mock_conn.shutdown = AsyncMock()
+
+            app = engine.create_multi_app(
+                apps=[
+                    {
+                        "slug": "app1",
+                        "manifest": temp_manifests["app1"],
+                        "path_prefix": "/app1",
+                    }
+                ]
+            )
+
+            async with app.router.lifespan_context(app):
+                mounted_apps = engine.get_mounted_apps(app)
+
+                assert len(mounted_apps) == 1
+                assert mounted_apps[0]["slug"] == "app1"
+                assert mounted_apps[0]["path_prefix"] == "/app1"
+                assert mounted_apps[0]["status"] == "mounted"
+
+
+class TestEnhancedHealthCheck:
+    """Test enhanced health check endpoint."""
+
+    @pytest.fixture
+    def temp_manifests(self, tmp_path):
+        """Create temporary manifest files."""
+        manifests_dir = tmp_path / "manifests"
+        manifests_dir.mkdir()
+
+        manifest1 = {
+            "schema_version": "2.0",
+            "slug": "app1",
+            "name": "App 1",
+            "auth": {"mode": "app"},
+        }
+        manifest1_path = manifests_dir / "app1" / "manifest.json"
+        manifest1_path.parent.mkdir()
+        manifest1_path.write_text(json.dumps(manifest1))
+
+        return {"app1": manifest1_path}
+
+    @pytest.mark.asyncio
+    async def test_enhanced_health_check(self, mock_mongo_database, temp_manifests):
+        """Test enhanced health check with apps status."""
+        from mdb_engine.core.engine import MongoDBEngine
+
+        engine = MongoDBEngine(mongo_uri="mongodb://localhost:27017", db_name="test_db")
+
+        with patch.object(engine, "_connection_manager") as mock_conn:
+            mock_conn.mongo_db = mock_mongo_database
+            mock_conn.mongo_client = MagicMock()
+            mock_conn.initialized = True
+            mock_conn.initialize = AsyncMock()
+            mock_conn.shutdown = AsyncMock()
+
+            app = engine.create_multi_app(
+                apps=[
+                    {
+                        "slug": "app1",
+                        "manifest": temp_manifests["app1"],
+                        "path_prefix": "/app1",
+                    }
+                ]
+            )
+
+            async with app.router.lifespan_context(app):
+                client = TestClient(app)
+                response = client.get("/health")
+
+                assert response.status_code == 200
+                data = response.json()
+                assert "status" in data
+                assert "engine" in data
+                assert "mongodb" in data
+                assert "apps" in data  # Changed from "mounted_apps"
+                assert "app1" in data["apps"]
+                assert "response_time_ms" in data["engine"]
+
+
+class TestStartupShutdownHooks:
+    """Test startup/shutdown hooks validation."""
+
+    @pytest.fixture
+    def temp_manifest(self, tmp_path):
+        """Create temporary manifest file."""
+        manifest = {
+            "schema_version": "2.0",
+            "slug": "test-app",
+            "name": "Test App",
+            "auth": {"mode": "app"},
+        }
+        manifest_path = tmp_path / "manifest.json"
+        manifest_path.write_text(json.dumps(manifest))
+        return manifest_path
+
+    def test_invalid_startup_hook(self, temp_manifest):
+        """Test that invalid startup hook raises error."""
+        from mdb_engine.core.engine import MongoDBEngine
+
+        engine = MongoDBEngine(mongo_uri="mongodb://localhost:27017", db_name="test_db")
+
+        with pytest.raises(ValueError, match="must be callable"):
+            engine.create_multi_app(
+                apps=[
+                    {
+                        "slug": "test-app",
+                        "manifest": temp_manifest,
+                        "path_prefix": "/test-app",
+                        "on_startup": "not a callable",  # Invalid
+                    }
+                ]
+            )
+
+    def test_invalid_shutdown_hook(self, temp_manifest):
+        """Test that invalid shutdown hook raises error."""
+        from mdb_engine.core.engine import MongoDBEngine
+
+        engine = MongoDBEngine(mongo_uri="mongodb://localhost:27017", db_name="test_db")
+
+        with pytest.raises(ValueError, match="must be callable"):
+            engine.create_multi_app(
+                apps=[
+                    {
+                        "slug": "test-app",
+                        "manifest": temp_manifest,
+                        "path_prefix": "/test-app",
+                        "on_shutdown": 123,  # Invalid
+                    }
+                ]
+            )
