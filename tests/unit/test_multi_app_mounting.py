@@ -173,7 +173,8 @@ class TestCreateMultiAppProgrammatic:
         engine = MongoDBEngine(mongo_uri="mongodb://localhost:27017", db_name="test_db")
 
         with pytest.raises(
-            ValueError, match="Either 'apps' or 'multi_app_manifest' must be provided"
+            ValueError,
+            match="Either 'apps', 'multi_app_manifest', or 'apps_dir' must be provided",
         ):
             engine.create_multi_app()
 
@@ -438,7 +439,7 @@ class TestMultiAppHealthCheck:
                 assert "status" in data
                 assert "engine" in data
                 assert "mongodb" in data
-                assert "mounted_apps" in data
+                assert "apps" in data  # Changed from "mounted_apps" to "apps"
 
 
 class TestSubAppMode:
@@ -718,8 +719,16 @@ class TestAppContextHelpers:
             )
 
             async with app.router.lifespan_context(app):
-                # Create a test route to check state
-                @app.get("/test-app/check-state")
+                # Find the mounted child app and add route to it
+                child_app = None
+                for route in app.routes:
+                    if hasattr(route, "path") and route.path == "/test-app":
+                        if hasattr(route, "app"):
+                            child_app = route.app
+                            break
+
+                # Create a test route in the child app to check state
+                @child_app.get("/check-state")
                 async def check_state(request: Request):
                     return {
                         "app_base_path": getattr(request.state, "app_base_path", None),

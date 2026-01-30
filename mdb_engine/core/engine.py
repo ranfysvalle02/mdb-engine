@@ -1942,6 +1942,23 @@ class MongoDBEngine:
             except (FileNotFoundError, json.JSONDecodeError, KeyError) as e:
                 logger.warning(f"Could not check auth mode for app '{app_config.get('slug')}': {e}")
 
+        # Validate hooks before creating lifespan (fail fast)
+        for app_config in apps:
+            slug = app_config.get("slug", "unknown")
+            on_startup = app_config.get("on_startup")
+            on_shutdown = app_config.get("on_shutdown")
+
+            if on_startup is not None and not callable(on_startup):
+                raise ValueError(
+                    f"on_startup hook for app '{slug}' must be callable, "
+                    f"got {type(on_startup).__name__}"
+                )
+            if on_shutdown is not None and not callable(on_shutdown):
+                raise ValueError(
+                    f"on_shutdown hook for app '{slug}' must be callable, "
+                    f"got {type(on_shutdown).__name__}"
+                )
+
         # State for parent app
         mounted_apps: list[dict[str, Any]] = []
         shared_user_pool_initialized = False
@@ -1992,18 +2009,6 @@ class MongoDBEngine:
                         raise ValueError(
                             f"Failed to load manifest for app '{slug}' at {manifest_path}: {e}"
                         ) from e
-
-                    # Validate startup/shutdown hooks if provided
-                    if on_startup is not None and not callable(on_startup):
-                        raise ValueError(
-                            f"on_startup hook for app '{slug}' must be callable, "
-                            f"got {type(on_startup).__name__}"
-                        )
-                    if on_shutdown is not None and not callable(on_shutdown):
-                        raise ValueError(
-                            f"on_shutdown hook for app '{slug}' must be callable, "
-                            f"got {type(on_shutdown).__name__}"
-                        )
 
                     # Log app configuration
                     auth_config = app_manifest_data.get("auth", {})

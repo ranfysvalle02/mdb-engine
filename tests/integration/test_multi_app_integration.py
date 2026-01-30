@@ -101,14 +101,14 @@ class TestMultiAppIntegration:
                 assert response.status_code == 200
                 health_data = response.json()
                 assert "status" in health_data
-                assert "mounted_apps" in health_data
-                assert len(health_data["mounted_apps"]) == 2
+                assert "apps" in health_data  # Changed from "mounted_apps" to "apps"
+                assert len(health_data["apps"]) == 2
 
                 # Verify mounted apps are registered
-                assert "app1" in health_data["mounted_apps"]
-                assert "app2" in health_data["mounted_apps"]
-                assert health_data["mounted_apps"]["app1"]["status"] == "mounted"
-                assert health_data["mounted_apps"]["app2"]["status"] == "mounted"
+                assert "app1" in health_data["apps"]
+                assert "app2" in health_data["apps"]
+                assert health_data["apps"]["app1"]["status"] == "healthy"
+                assert health_data["apps"]["app2"]["status"] == "healthy"
 
         # Cleanup
         await engine.shutdown()
@@ -245,7 +245,8 @@ class TestMultiAppIntegration:
                 assert response.status_code == 200
 
                 health_data = response.json()
-                assert len(health_data["mounted_apps"]) == 2
+                assert "apps" in health_data  # Changed from "mounted_apps" to "apps"
+                assert len(health_data["apps"]) == 2
 
         # Cleanup
         await engine.shutdown()
