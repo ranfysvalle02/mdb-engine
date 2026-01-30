@@ -113,6 +113,7 @@ class TestSharedAuthMiddleware:
         """Test public routes bypass auth but still populate user if token present."""
         request = MagicMock()
         request.url.path = "/health"
+        request.scope = {}  # Empty scope - will fall back to url.path
         request.cookies = {}  # No token
         request.headers = {}
         request.state = MagicMock()
@@ -131,6 +132,7 @@ class TestSharedAuthMiddleware:
         """Test request without token when no role is required."""
         request = MagicMock()
         request.url.path = "/protected"
+        request.scope = {}  # Empty scope - will fall back to url.path
         request.cookies = {}
         request.headers = {}
         request.state = MagicMock()
@@ -148,6 +150,7 @@ class TestSharedAuthMiddleware:
         """Test request without token when role is required."""
         request = MagicMock()
         request.url.path = "/protected"
+        request.scope = {}  # Empty scope - will fall back to url.path
         request.cookies = {}
         request.headers = {}
         request.state = MagicMock()
@@ -167,6 +170,7 @@ class TestSharedAuthMiddleware:
 
         request = MagicMock()
         request.url.path = "/protected"
+        request.scope = {}  # Empty scope - will fall back to url.path
         request.cookies = {"mdb_auth_token": "valid-token"}
         request.headers = {}
         request.state = MagicMock()
@@ -186,6 +190,7 @@ class TestSharedAuthMiddleware:
         """Test request with invalid token."""
         request = MagicMock()
         request.url.path = "/protected"
+        request.scope = {}  # Empty scope - will fall back to url.path
         request.cookies = {"mdb_auth_token": "invalid-token"}
         request.headers = {}
         request.state = MagicMock()
@@ -207,6 +212,7 @@ class TestSharedAuthMiddleware:
 
         request = MagicMock()
         request.url.path = "/protected"
+        request.scope = {}  # Empty scope - will fall back to url.path
         request.cookies = {"mdb_auth_token": "valid-token"}
         request.headers = {}
         request.state = MagicMock()
@@ -353,6 +359,7 @@ class TestLazySharedAuthMiddleware:
         # Create request without user_pool on app.state
         request = MagicMock()
         request.url.path = "/protected"
+        request.scope = {}  # Empty scope - will fall back to url.path
         request.cookies = {}
         request.headers = {}
         request.state = MagicMock()
@@ -393,6 +400,7 @@ class TestLazySharedAuthMiddleware:
         # Create request with user_pool on app.state
         request = MagicMock()
         request.url.path = "/protected"
+        request.scope = {}  # Empty scope - will fall back to url.path
         request.cookies = {"mdb_auth_token": "valid-token"}
         request.headers = {}
         request.state = MagicMock()
@@ -429,6 +437,7 @@ class TestLazySharedAuthMiddleware:
         # Create request to public route without token
         request = MagicMock()
         request.url.path = "/health"
+        request.scope = {}  # Empty scope - will fall back to url.path
         request.cookies = {}  # No token
         request.headers = {}
         request.state = MagicMock()
