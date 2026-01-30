@@ -119,6 +119,7 @@ class SharedUserPool:
         jwt_algorithm: str = DEFAULT_JWT_ALGORITHM,
         token_expiry_hours: int = DEFAULT_TOKEN_EXPIRY_HOURS,
         allow_insecure_dev: bool = False,
+        blacklist_fail_closed: bool = True,
     ):
         """
         Initialize the shared user pool.
@@ -138,6 +139,9 @@ class SharedUserPool:
             token_expiry_hours: Token expiry in hours (default: 24)
             allow_insecure_dev: Allow insecure auto-generated secret for local
                                development only. NEVER use in production!
+            blacklist_fail_closed: If True (default), reject tokens when blacklist check
+                                  fails (secure). If False, allow tokens when check fails
+                                  (availability). SECURITY: Default is True for security.
 
         Raises:
             JWTSecretError: If no JWT secret is provided and allow_insecure_dev=False
@@ -146,6 +150,7 @@ class SharedUserPool:
         self._db = mongo_db
         self._collection = mongo_db[SHARED_USERS_COLLECTION]
         self._blacklist_collection = mongo_db[TOKEN_BLACKLIST_COLLECTION]
+        self._blacklist_fail_closed = blacklist_fail_closed
 
         # Validate algorithm
         if jwt_algorithm not in SUPPORTED_ALGORITHMS:
@@ -453,8 +458,19 @@ class SharedUserPool:
             return False
         except PyMongoError as e:
             logger.exception(f"Error checking token blacklist: {e}")
-            # Fail open for availability (can be changed to fail closed for security)
-            return False
+            # Fail closed for security by default (reject token if we can't verify)
+            if self._blacklist_fail_closed:
+                logger.warning(
+                    "Token blacklist check failed - rejecting token for security "
+                    "(blacklist_fail_closed=True)"
+                )
+                return True  # Token IS revoked (reject access)
+            # Fail open only if explicitly configured (availability over security)
+            logger.warning(
+                "Token blacklist check failed - allowing token for availability "
+                "(blacklist_fail_closed=False). SECURITY RISK: Revoked tokens may be accepted."
+            )
+            return False  # Token NOT revoked (allow access)
 
     async def revoke_token(
         self,

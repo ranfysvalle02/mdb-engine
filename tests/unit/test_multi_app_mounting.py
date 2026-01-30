@@ -827,7 +827,20 @@ class TestGetMountedApps:
         manifest1_path.parent.mkdir()
         manifest1_path.write_text(json.dumps(manifest1))
 
-        return {"app1": manifest1_path}
+        manifest2 = {
+            "schema_version": "2.0",
+            "slug": "app2",
+            "name": "App 2",
+            "auth": {"mode": "app"},
+        }
+        manifest2_path = manifests_dir / "app2" / "manifest.json"
+        manifest2_path.parent.mkdir()
+        manifest2_path.write_text(json.dumps(manifest2))
+
+        return {
+            "app1": manifest1_path,
+            "app2": manifest2_path,
+        }
 
     @pytest.mark.asyncio
     async def test_get_mounted_apps(self, mock_mongo_database, temp_manifests):
@@ -853,6 +866,15 @@ class TestGetMountedApps:
                 ]
             )
 
+            # Test that get_mounted_apps() works immediately after create_multi_app()
+            # (before lifespan runs)
+            mounted_apps = engine.get_mounted_apps(app)
+            assert len(mounted_apps) == 1
+            assert mounted_apps[0]["slug"] == "app1"
+            assert mounted_apps[0]["path_prefix"] == "/app1"
+            assert mounted_apps[0]["status"] == "pending"  # Status is "pending" before lifespan
+
+            # After lifespan runs, status should be updated to "mounted"
             async with app.router.lifespan_context(app):
                 mounted_apps = engine.get_mounted_apps(app)
 
@@ -860,6 +882,45 @@ class TestGetMountedApps:
                 assert mounted_apps[0]["slug"] == "app1"
                 assert mounted_apps[0]["path_prefix"] == "/app1"
                 assert mounted_apps[0]["status"] == "mounted"
+
+    def test_get_mounted_apps_before_lifespan(self, mock_mongo_database, temp_manifests):
+        """Test get_mounted_apps() works immediately after create_multi_app() without lifespan."""
+        from mdb_engine.core.engine import MongoDBEngine
+
+        engine = MongoDBEngine(mongo_uri="mongodb://localhost:27017", db_name="test_db")
+
+        with patch.object(engine, "_connection_manager") as mock_conn:
+            mock_conn.mongo_db = mock_mongo_database
+            mock_conn.mongo_client = MagicMock()
+            mock_conn.initialized = True
+            mock_conn.initialize = AsyncMock()
+            mock_conn.shutdown = AsyncMock()
+
+            app = engine.create_multi_app(
+                apps=[
+                    {
+                        "slug": "app1",
+                        "manifest": temp_manifests["app1"],
+                        "path_prefix": "/app1",
+                    },
+                    {
+                        "slug": "app2",
+                        "manifest": temp_manifests["app2"],
+                        "path_prefix": "/app2",
+                    },
+                ]
+            )
+
+            # Should work without starting lifespan
+            mounted_apps = engine.get_mounted_apps(app)
+            assert len(mounted_apps) == 2
+            assert mounted_apps[0]["slug"] == "app1"
+            assert mounted_apps[0]["path_prefix"] == "/app1"
+            assert mounted_apps[0]["status"] == "pending"
+            assert "manifest_path" in mounted_apps[0]
+            assert mounted_apps[1]["slug"] == "app2"
+            assert mounted_apps[1]["path_prefix"] == "/app2"
+            assert mounted_apps[1]["status"] == "pending"
 
 
 class TestEnhancedHealthCheck:

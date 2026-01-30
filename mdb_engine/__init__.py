@@ -81,7 +81,10 @@ from .repositories import Entity, MongoRepository, Repository, UnitOfWork
 # Utilities
 from .utils import clean_mongo_doc, clean_mongo_docs
 
-__version__ = "0.4.1"  # Patch version: Bug fixes for path prefix handling and test improvements
+__version__ = (
+    "0.4.2"  # Security release: Fixed auto-role assignment, token blacklist
+    # fail-closed, race conditions, session binding, and path traversal
+)
 
 __all__ = [
     # Core Engine

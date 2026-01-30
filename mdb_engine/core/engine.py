@@ -155,6 +155,12 @@ class MongoDBEngine:
         # Store app token cache for auto-retrieval
         self._app_token_cache: dict[str, str] = {}
 
+        # Async lock for thread-safe shared user pool initialization
+        import asyncio
+
+        self._shared_user_pool_lock = asyncio.Lock()
+        self._shared_user_pool_initializing = False
+
     async def initialize(self) -> None:
         """
         Initialize the MongoDB Engine.
@@ -1960,8 +1966,25 @@ class MongoDBEngine:
                 )
 
         # State for parent app
-        mounted_apps: list[dict[str, Any]] = []
+        # Build initial mounted_apps metadata synchronously so get_mounted_apps() works
+        # immediately after create_multi_app() returns (before lifespan runs)
+        mounted_apps: list[dict[str, Any]] = [
+            {
+                "slug": app_config["slug"],
+                "path_prefix": app_config["path_prefix"],
+                "status": "pending",  # Will be updated in lifespan to "mounted" or "failed"
+                "manifest_path": str(app_config["manifest"]),
+            }
+            for app_config in apps
+        ]
         shared_user_pool_initialized = False
+
+        def _find_mounted_app_entry(slug: str) -> dict[str, Any] | None:
+            """Find mounted app entry by slug."""
+            for entry in mounted_apps:
+                if entry.get("slug") == slug:
+                    return entry
+            return None
 
         @asynccontextmanager
         async def lifespan(app: FastAPI):
@@ -2133,14 +2156,25 @@ class MongoDBEngine:
 
                     # Mount child app at path prefix
                     app.mount(path_prefix, child_app)
-                    mounted_apps.append(
-                        {
-                            "slug": slug,
-                            "path_prefix": path_prefix,
-                            "status": "mounted",
-                            "manifest": app_manifest_data,
-                        }
-                    )
+                    # Update existing entry instead of appending
+                    entry = _find_mounted_app_entry(slug)
+                    if entry:
+                        entry.update(
+                            {
+                                "status": "mounted",
+                                "manifest": app_manifest_data,
+                            }
+                        )
+                    else:
+                        # Fallback: append if entry not found (shouldn't happen)
+                        mounted_apps.append(
+                            {
+                                "slug": slug,
+                                "path_prefix": path_prefix,
+                                "status": "mounted",
+                                "manifest": app_manifest_data,
+                            }
+                        )
                     logger.info(f"Mounted app '{slug}' at path prefix '{path_prefix}'")
 
                 except FileNotFoundError as e:
@@ -2149,15 +2183,26 @@ class MongoDBEngine:
                         f"manifest.json not found at {manifest_path}"
                     )
                     logger.error(error_msg, exc_info=True)
-                    mounted_apps.append(
-                        {
-                            "slug": slug,
-                            "path_prefix": path_prefix,
-                            "status": "failed",
-                            "error": error_msg,
-                            "manifest_path": str(manifest_path),
-                        }
-                    )
+                    # Update existing entry instead of appending
+                    entry = _find_mounted_app_entry(slug)
+                    if entry:
+                        entry.update(
+                            {
+                                "status": "failed",
+                                "error": error_msg,
+                            }
+                        )
+                    else:
+                        # Fallback: append if entry not found (shouldn't happen)
+                        mounted_apps.append(
+                            {
+                                "slug": slug,
+                                "path_prefix": path_prefix,
+                                "status": "failed",
+                                "error": error_msg,
+                                "manifest_path": str(manifest_path),
+                            }
+                        )
                     if strict:
                         raise ValueError(error_msg) from e
                     continue
@@ -2167,71 +2212,111 @@ class MongoDBEngine:
                         f"Invalid JSON in manifest.json at {manifest_path}: {e}"
                     )
                     logger.error(error_msg, exc_info=True)
-                    mounted_apps.append(
-                        {
-                            "slug": slug,
-                            "path_prefix": path_prefix,
-                            "status": "failed",
-                            "error": error_msg,
-                            "manifest_path": str(manifest_path),
-                        }
-                    )
+                    # Update existing entry instead of appending
+                    entry = _find_mounted_app_entry(slug)
+                    if entry:
+                        entry.update(
+                            {
+                                "status": "failed",
+                                "error": error_msg,
+                            }
+                        )
+                    else:
+                        # Fallback: append if entry not found (shouldn't happen)
+                        mounted_apps.append(
+                            {
+                                "slug": slug,
+                                "path_prefix": path_prefix,
+                                "status": "failed",
+                                "error": error_msg,
+                                "manifest_path": str(manifest_path),
+                            }
+                        )
                     if strict:
                         raise ValueError(error_msg) from e
                     continue
                 except ValueError as e:
                     error_msg = f"Failed to mount app '{slug}' at {path_prefix}: {e}"
                     logger.error(error_msg, exc_info=True)
-                    mounted_apps.append(
-                        {
-                            "slug": slug,
-                            "path_prefix": path_prefix,
-                            "status": "failed",
-                            "error": error_msg,
-                            "manifest_path": str(manifest_path),
-                        }
-                    )
+                    # Update existing entry instead of appending
+                    entry = _find_mounted_app_entry(slug)
+                    if entry:
+                        entry.update(
+                            {
+                                "status": "failed",
+                                "error": error_msg,
+                            }
+                        )
+                    else:
+                        # Fallback: append if entry not found (shouldn't happen)
+                        mounted_apps.append(
+                            {
+                                "slug": slug,
+                                "path_prefix": path_prefix,
+                                "status": "failed",
+                                "error": error_msg,
+                                "manifest_path": str(manifest_path),
+                            }
+                        )
                     if strict:
                         raise ValueError(error_msg) from e
                     continue
                 except (KeyError, RuntimeError) as e:
                     error_msg = f"Failed to mount app '{slug}' at {path_prefix}: {e}"
                     logger.error(error_msg, exc_info=True)
-                    mounted_apps.append(
-                        {
-                            "slug": slug,
-                            "path_prefix": path_prefix,
-                            "status": "failed",
-                            "error": error_msg,
-                            "manifest_path": str(manifest_path),
-                        }
-                    )
+                    # Update existing entry instead of appending
+                    entry = _find_mounted_app_entry(slug)
+                    if entry:
+                        entry.update(
+                            {
+                                "status": "failed",
+                                "error": error_msg,
+                            }
+                        )
+                    else:
+                        # Fallback: append if entry not found (shouldn't happen)
+                        mounted_apps.append(
+                            {
+                                "slug": slug,
+                                "path_prefix": path_prefix,
+                                "status": "failed",
+                                "error": error_msg,
+                                "manifest_path": str(manifest_path),
+                            }
+                        )
                     if strict:
                         raise RuntimeError(error_msg) from e
                     continue
                 except (OSError, PermissionError, ImportError, AttributeError, TypeError) as e:
                     error_msg = f"Unexpected error mounting app '{slug}' at {path_prefix}: {e}"
                     logger.error(error_msg, exc_info=True)
-                    mounted_apps.append(
-                        {
-                            "slug": slug,
-                            "path_prefix": path_prefix,
-                            "status": "failed",
-                            "error": error_msg,
-                            "manifest_path": str(manifest_path),
-                        }
-                    )
+                    # Update existing entry instead of appending
+                    entry = _find_mounted_app_entry(slug)
+                    if entry:
+                        entry.update(
+                            {
+                                "status": "failed",
+                                "error": error_msg,
+                            }
+                        )
+                    else:
+                        # Fallback: append if entry not found (shouldn't happen)
+                        mounted_apps.append(
+                            {
+                                "slug": slug,
+                                "path_prefix": path_prefix,
+                                "status": "failed",
+                                "error": error_msg,
+                                "manifest_path": str(manifest_path),
+                            }
+                        )
                     if strict:
                         raise RuntimeError(error_msg) from e
                     continue
 
-            # Expose engine and mounted apps info on parent app state
-            app.state.engine = engine
+            # Update app.state.mounted_apps with final status (entries already updated in place)
+            # This ensures the state reflects the final mounted_apps list
             app.state.mounted_apps = mounted_apps
-            app.state.is_multi_app = True
-
-            # Store app reference in engine for get_mounted_apps()
-            engine._multi_app_instance = app
 
             yield
 
@@ -2240,6 +2325,14 @@ class MongoDBEngine:
 
         # Create parent FastAPI app
         parent_app = FastAPI(title=title, lifespan=lifespan, root_path=root_path, **fastapi_kwargs)
+
+        # Set mounted_apps immediately so get_mounted_apps() works before lifespan runs
+        parent_app.state.mounted_apps = mounted_apps
+        parent_app.state.is_multi_app = True
+        parent_app.state.engine = engine
+
+        # Store app reference in engine for get_mounted_apps()
+        engine._multi_app_instance = parent_app
 
         # Add request scope middleware
         from starlette.middleware.base import BaseHTTPMiddleware
@@ -2629,17 +2722,41 @@ class MongoDBEngine:
             or os.getenv("DEBUG", "").lower() in ("true", "1", "yes")
         )
 
-        # Create or get shared user pool
-        if not hasattr(self, "_shared_user_pool") or self._shared_user_pool is None:
-            self._shared_user_pool = SharedUserPool(
-                self._connection_manager.mongo_db,
-                allow_insecure_dev=is_dev,
-            )
-            await self._shared_user_pool.ensure_indexes()
-            logger.info("SharedUserPool initialized")
+        # Thread-safe initialization with async lock to prevent race conditions
+        async with self._shared_user_pool_lock:
+            # Check if another coroutine is initializing
+            if self._shared_user_pool_initializing:
+                # Wait for other initialization to complete
+                while self._shared_user_pool_initializing:
+                    import asyncio
 
-        # Expose user pool on app.state for middleware to access
-        app.state.user_pool = self._shared_user_pool
+                    await asyncio.sleep(0.01)  # Small delay to avoid busy-waiting
+                # After waiting, check if pool was initialized
+                if hasattr(self, "_shared_user_pool") and self._shared_user_pool is not None:
+                    app.state.user_pool = self._shared_user_pool
+                    return
+
+            # Check if already initialized (double-check pattern)
+            if hasattr(self, "_shared_user_pool") and self._shared_user_pool is not None:
+                app.state.user_pool = self._shared_user_pool
+                return
+
+            # Mark as initializing
+            self._shared_user_pool_initializing = True
+            try:
+                # Create shared user pool
+                self._shared_user_pool = SharedUserPool(
+                    self._connection_manager.mongo_db,
+                    allow_insecure_dev=is_dev,
+                )
+                await self._shared_user_pool.ensure_indexes()
+                logger.info("SharedUserPool initialized")
+
+                # Expose user pool on app.state for middleware to access
+                app.state.user_pool = self._shared_user_pool
+            finally:
+                # Always clear the initializing flag
+                self._shared_user_pool_initializing = False
 
         # Seed demo users to SharedUserPool if configured in manifest
         if manifest:

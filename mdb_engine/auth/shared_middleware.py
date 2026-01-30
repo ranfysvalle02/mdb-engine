@@ -92,7 +92,10 @@ def _get_request_path(request: Request) -> str:
 
     This ensures public routes in manifests (which are relative paths like "/")
     match correctly when apps are mounted at prefixes like "/auth-hub".
+
+    SECURITY: Normalizes and validates paths to prevent path traversal attacks.
     """
+
     # Check if this is a mounted app with a path prefix
     app_base_path = getattr(request.state, "app_base_path", None)
     # Ensure app_base_path is a string (not a MagicMock in tests)
@@ -102,19 +105,76 @@ def _get_request_path(request: Request) -> str:
         if url_path and url_path.startswith(app_base_path):
             # Strip the path prefix to get relative path
             relative_path = url_path[len(app_base_path) :]
+            # Normalize and sanitize path to prevent traversal attacks
+            relative_path = _normalize_path(relative_path)
             # Ensure path starts with / (handle case where prefix is entire path)
             return relative_path if relative_path else "/"
 
     # Fall back to scope["path"] for mounted apps (if available)
     # This handles cases where Starlette/FastAPI sets it correctly
     if "path" in request.scope:
-        return request.scope["path"]
+        return _normalize_path(request.scope["path"])
 
     # Default to url.path for non-mounted apps
     # Ensure we return a string
     if hasattr(request.url, "path"):
-        return str(request.url.path)
+        return _normalize_path(str(request.url.path))
     return "/"
+
+
+def _normalize_path(path: str) -> str:
+    """
+    Normalize and sanitize a path to prevent path traversal attacks.
+
+    Args:
+        path: Raw path string
+
+    Returns:
+        Normalized path starting with /
+    """
+    from pathlib import PurePath
+    from urllib.parse import unquote
+
+    if not path:
+        return "/"
+
+    # Preserve trailing slash (except for root)
+    has_trailing_slash = path.endswith("/") and path != "/"
+
+    # Decode URL encoding
+    try:
+        decoded = unquote(path)
+    except (ValueError, UnicodeDecodeError):
+        # If decoding fails, use original path
+        decoded = path
+
+    # Normalize path separators and resolve relative components
+    try:
+        # Use PurePath to normalize without accessing filesystem
+        normalized = PurePath(decoded).as_posix()
+    except (ValueError, TypeError):
+        # If normalization fails, use decoded path
+        normalized = decoded
+
+    # Reject path traversal attempts
+    if ".." in normalized or normalized.startswith("/") and normalized != "/":
+        # Check if it's a legitimate absolute path (starts with /)
+        if normalized.startswith("/") and ".." not in normalized:
+            # Valid absolute path
+            pass
+        else:
+            logger.warning(f"Path traversal attempt detected: {path} -> {normalized}")
+            return "/"  # Return root path for safety
+
+    # Ensure path starts with /
+    if not normalized.startswith("/"):
+        normalized = "/" + normalized
+
+    # Restore trailing slash if it was present (except for root)
+    if has_trailing_slash and normalized != "/" and not normalized.endswith("/"):
+        normalized = normalized + "/"
+
+    return normalized
 
 
 class SharedAuthMiddleware(BaseHTTPMiddleware):
@@ -142,6 +202,7 @@ class SharedAuthMiddleware(BaseHTTPMiddleware):
         public_routes: list[str] | None = None,
         role_hierarchy: dict[str, list[str]] | None = None,
         session_binding: dict[str, Any] | None = None,
+        auto_assign_default_role: bool = False,
         cookie_name: str = AUTH_COOKIE_NAME,
         header_name: str = AUTH_HEADER_NAME,
         header_prefix: str = AUTH_HEADER_PREFIX,
@@ -161,6 +222,10 @@ class SharedAuthMiddleware(BaseHTTPMiddleware):
                 - bind_ip: Strict - reject if IP changes
                 - bind_fingerprint: Soft - log warning if fingerprint changes
                 - allow_ip_change_with_reauth: Allow IP change on re-authentication
+            auto_assign_default_role: If True, automatically assign require_role to users
+                                     with no roles for this app (default: False).
+                                     SECURITY: Only enable if explicitly needed - requires
+                                     default_role in manifest to match require_role.
             cookie_name: Name of auth cookie (default: mdb_auth_token)
             header_name: Name of auth header (default: Authorization)
             header_prefix: Prefix for header value (default: "Bearer ")
@@ -172,6 +237,7 @@ class SharedAuthMiddleware(BaseHTTPMiddleware):
         self._public_routes = public_routes or []
         self._role_hierarchy = role_hierarchy
         self._session_binding = session_binding or {}
+        self._auto_assign_default_role = auto_assign_default_role
         self._cookie_name = cookie_name
         self._header_name = header_name
         self._header_prefix = header_prefix
@@ -249,11 +315,10 @@ class SharedAuthMiddleware(BaseHTTPMiddleware):
             )
 
             if not has_required_role:
-                # Auto-assign required role if user has no roles for this app
-                # This is a fallback for SSO scenarios where users might be authenticated
-                # but not yet assigned roles. Only do this if they have NO roles (not if
-                # they have other roles but not the required one - prevents privilege escalation).
-                if not user_roles:
+                # Auto-assign required role ONLY if explicitly enabled and user has no roles
+                # SECURITY: This is opt-in to prevent privilege escalation. Only enable if
+                # explicitly needed and default_role matches require_role in manifest.
+                if not user_roles and self._auto_assign_default_role:
                     user_email = user.get("email")
                     if user_email:
                         try:
@@ -269,7 +334,8 @@ class SharedAuthMiddleware(BaseHTTPMiddleware):
                                     request.state.user_roles = [self._require_role]
                                     logger.info(
                                         f"Auto-assigned role '{self._require_role}' to user "
-                                        f"{user_email} for app '{self._app_slug}'"
+                                        f"{user_email} for app '{self._app_slug}' "
+                                        f"(auto_assign_default_role enabled)"
                                     )
                                 else:
                                     logger.warning(
@@ -327,17 +393,29 @@ class SharedAuthMiddleware(BaseHTTPMiddleware):
                         logger.warning(f"Session IP mismatch: token={token_ip}, client={client_ip}")
                         return "Session bound to different IP address"
 
-            # Check fingerprint binding (soft check - just warn)
-            if self._session_binding.get("bind_fingerprint", True):
+            # Check fingerprint binding (strict by default for security)
+            bind_fingerprint = self._session_binding.get("bind_fingerprint", True)
+            strict_fingerprint = self._session_binding.get(
+                "strict_fingerprint", True
+            )  # Default: strict
+            if bind_fingerprint:
                 token_fp = payload.get("fp")
                 if token_fp:
                     client_fp = _compute_fingerprint(request)
                     if client_fp != token_fp:
-                        logger.warning(
-                            f"Session fingerprint mismatch for user {payload.get('email')}"
-                        )
-                        # Soft check - don't reject, just log
-                        # Could be legitimate (browser update, different device)
+                        if strict_fingerprint:
+                            logger.warning(
+                                f"Session fingerprint mismatch for user {payload.get('email')} - "
+                                f"rejecting request (strict_fingerprint=True)"
+                            )
+                            return "Session bound to different device/fingerprint"
+                        else:
+                            logger.warning(
+                                f"Session fingerprint mismatch for user {payload.get('email')} - "
+                                f"allowing (strict_fingerprint=False)"
+                            )
+                            # Soft check - don't reject, just log
+                            # Could be legitimate (browser update, different device)
 
             return None
 
@@ -421,6 +499,17 @@ def create_shared_auth_middleware(
     """
     require_role = manifest_auth.get("require_role")
     public_routes = manifest_auth.get("public_routes", [])
+    auto_assign_default_role = manifest_auth.get("auto_assign_default_role", False)
+    default_role = manifest_auth.get("default_role")
+
+    # Security: Only allow auto-assignment if default_role matches require_role
+    if auto_assign_default_role and require_role and default_role != require_role:
+        logger.warning(
+            f"Security: auto_assign_default_role enabled but default_role '{default_role}' "
+            f"does not match require_role '{require_role}' for app '{app_slug}'. "
+            f"Auto-assignment disabled for security."
+        )
+        auto_assign_default_role = False
 
     # Build role hierarchy from manifest if available
     role_hierarchy = None
@@ -443,6 +532,7 @@ def create_shared_auth_middleware(
                 require_role=require_role,
                 public_routes=public_routes,
                 role_hierarchy=role_hierarchy,
+                auto_assign_default_role=auto_assign_default_role,
             )
 
     return ConfiguredSharedAuthMiddleware
@@ -503,12 +593,13 @@ def _extract_token_helper(
     return None
 
 
-def _create_lazy_middleware_class(
+def _create_lazy_middleware_class(  # noqa: C901
     app_slug: str,
     require_role: str | None,
     public_routes: list[str],
     role_hierarchy: dict[str, list[str]] | None,
     session_binding: dict[str, Any],
+    auto_assign_default_role: bool = False,
 ) -> type:
     """Create the LazySharedAuthMiddleware class with configuration."""
 
@@ -527,6 +618,7 @@ def _create_lazy_middleware_class(
             self._public_routes = public_routes
             self._role_hierarchy = role_hierarchy
             self._session_binding = session_binding
+            self._auto_assign_default_role = auto_assign_default_role
             self._cookie_name = AUTH_COOKIE_NAME
             self._header_name = AUTH_HEADER_NAME
             self._header_prefix = AUTH_HEADER_PREFIX
@@ -681,8 +773,9 @@ def _create_lazy_middleware_class(
             if has_required_role:
                 return None
 
-            # Auto-assign required role if user has no roles for this app
-            if not user_roles:
+            # Auto-assign required role ONLY if explicitly enabled and user has no roles
+            # SECURITY: This is opt-in to prevent privilege escalation
+            if not user_roles and self._auto_assign_default_role:
                 await self._try_auto_assign_role(user, user_pool, request)
 
             # Check again after potential auto-assignment
@@ -707,10 +800,8 @@ def _create_lazy_middleware_class(
             """
             Attempt to auto-assign required role to user.
 
-            This is a fallback for SSO scenarios where users might be authenticated
-            but not yet assigned roles. Only do this if they have NO roles (not if
-            they have other roles but not the required one - prevents privilege
-            escalation).
+            SECURITY: Only called if auto_assign_default_role is enabled and user has
+            no roles. This prevents privilege escalation.
             """
             user_email = user.get("email")
             if not user_email:
@@ -729,7 +820,8 @@ def _create_lazy_middleware_class(
                         request.state.user_roles = [self._require_role]
                         logger.info(
                             f"Auto-assigned role '{self._require_role}' to user "
-                            f"{user_email} for app '{self._app_slug}'"
+                            f"{user_email} for app '{self._app_slug}' "
+                            f"(auto_assign_default_role enabled)"
                         )
                     else:
                         logger.warning(
@@ -769,8 +861,10 @@ def _create_lazy_middleware_class(
                 if ip_error:
                     return ip_error
 
-                # Check fingerprint binding (soft check - just warn)
-                self._check_fingerprint_binding(request, payload)
+                # Check fingerprint binding (strict by default)
+                fingerprint_error = await self._check_fingerprint_binding(request, payload)
+                if fingerprint_error:
+                    return fingerprint_error
 
                 return None
 
@@ -794,19 +888,38 @@ def _create_lazy_middleware_class(
 
             return None
 
-        def _check_fingerprint_binding(self, request: Request, payload: dict) -> None:
-            """Check fingerprint binding from token payload (soft check - just warn)."""
+        async def _check_fingerprint_binding(self, request: Request, payload: dict) -> str | None:
+            """
+            Check fingerprint binding from token payload.
+
+            Returns error message if validation fails, None if OK.
+            """
             if not self._session_binding.get("bind_fingerprint", True):
-                return
+                return None
 
             token_fp = payload.get("fp")
             if not token_fp:
-                return
+                return None
 
+            strict_fingerprint = self._session_binding.get(
+                "strict_fingerprint", True
+            )  # Default: strict
             client_fp = _compute_fingerprint(request)
             if client_fp != token_fp:
-                logger.warning(f"Session fingerprint mismatch for user {payload.get('email')}")
-                # Soft check - don't reject, just log
+                if strict_fingerprint:
+                    logger.warning(
+                        f"Session fingerprint mismatch for user {payload.get('email')} - "
+                        f"rejecting request (strict_fingerprint=True)"
+                    )
+                    return "Session bound to different device/fingerprint"
+                else:
+                    logger.warning(
+                        f"Session fingerprint mismatch for user {payload.get('email')} - "
+                        f"allowing (strict_fingerprint=False)"
+                    )
+                    # Soft check - don't reject, just log
+                    return None
+            return None
 
     return LazySharedAuthMiddleware
 
@@ -839,9 +952,26 @@ def create_shared_auth_middleware_lazy(
     """
     require_role = manifest_auth.get("require_role")
     public_routes = manifest_auth.get("public_routes", [])
+    auto_assign_default_role = manifest_auth.get("auto_assign_default_role", False)
+    default_role = manifest_auth.get("default_role")
+
+    # Security: Only allow auto-assignment if default_role matches require_role
+    if auto_assign_default_role and require_role and default_role != require_role:
+        logger.warning(
+            f"Security: auto_assign_default_role enabled but default_role '{default_role}' "
+            f"does not match require_role '{require_role}' for app '{app_slug}'. "
+            f"Auto-assignment disabled for security."
+        )
+        auto_assign_default_role = False
+
     role_hierarchy = _build_role_hierarchy(manifest_auth)
     session_binding = manifest_auth.get("session_binding", {})
 
     return _create_lazy_middleware_class(
-        app_slug, require_role, public_routes, role_hierarchy, session_binding
+        app_slug,
+        require_role,
+        public_routes,
+        role_hierarchy,
+        session_binding,
+        auto_assign_default_role,
     )
