@@ -82,6 +82,22 @@ def _compute_fingerprint(request: Request) -> str:
     return hashlib.sha256(fingerprint_string.encode()).hexdigest()
 
 
+def _get_request_path(request: Request) -> str:
+    """
+    Get the request path relative to the mount point.
+
+    For mounted apps (via create_multi_app), use request.scope["path"] which
+    contains the path relative to the mount point. For non-mounted apps,
+    fall back to request.url.path.
+
+    This ensures public routes in manifests (which are relative paths like "/")
+    match correctly when apps are mounted at prefixes like "/auth-hub".
+    """
+    # Use scope["path"] which is relative to mount point for mounted apps
+    # Fall back to url.path for non-mounted apps
+    return request.scope.get("path", request.url.path)
+
+
 class SharedAuthMiddleware(BaseHTTPMiddleware):
     """
     Middleware for shared authentication across multi-app deployments.
@@ -169,7 +185,7 @@ class SharedAuthMiddleware(BaseHTTPMiddleware):
             # However, for Lazy middleware, we want to skip if not initialized yet
             return await call_next(request)
 
-        is_public = self._is_public_route(request.url.path)
+        is_public = self._is_public_route(_get_request_path(request))
 
         # Extract token from cookie or header
         token = self._extract_token(request)
@@ -522,7 +538,7 @@ def _create_lazy_middleware_class(
                 )
                 return await call_next(request)
 
-            is_public = _is_public_route_helper(request.url.path, self._public_routes)
+            is_public = _is_public_route_helper(_get_request_path(request), self._public_routes)
             token = _extract_token_helper(
                 request, self._cookie_name, self._header_name, self._header_prefix
             )
