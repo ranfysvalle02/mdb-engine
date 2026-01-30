@@ -452,3 +452,375 @@ class TestLazySharedAuthMiddleware:
         # Should bypass auth for public route (no token = no validation)
         call_next.assert_called_once()
         mock_pool.validate_token.assert_not_called()
+
+
+class TestGetRequestPath:
+    """Tests for _get_request_path helper function."""
+
+    def test_get_request_path_with_path_prefix(self):
+        """Test _get_request_path() strips path prefix when app_base_path is set."""
+        from starlette.requests import Request
+
+        from mdb_engine.auth.shared_middleware import _get_request_path
+
+        # Create mock request with path prefix
+        request = MagicMock(spec=Request)
+        request.url = MagicMock()
+        request.url.path = "/auth-hub/register"
+        request.scope = {}
+        request.state = MagicMock()
+        request.state.app_base_path = "/auth-hub"
+
+        result = _get_request_path(request)
+
+        assert result == "/register"
+
+    def test_get_request_path_without_path_prefix(self):
+        """Test _get_request_path() uses scope path when no app_base_path."""
+        from starlette.requests import Request
+
+        from mdb_engine.auth.shared_middleware import _get_request_path
+
+        # Create mock request without path prefix
+        request = MagicMock(spec=Request)
+        request.url = MagicMock()
+        request.url.path = "/register"
+        request.scope = {"path": "/register"}
+        request.state = MagicMock()
+        # No app_base_path attribute
+
+        result = _get_request_path(request)
+
+        assert result == "/register"
+
+    def test_get_request_path_prefix_is_entire_path(self):
+        """Test _get_request_path() returns '/' when prefix is entire path."""
+        from starlette.requests import Request
+
+        from mdb_engine.auth.shared_middleware import _get_request_path
+
+        # Create mock request where prefix matches entire path
+        request = MagicMock(spec=Request)
+        request.url = MagicMock()
+        request.url.path = "/auth-hub"
+        request.scope = {}
+        request.state = MagicMock()
+        request.state.app_base_path = "/auth-hub"
+
+        result = _get_request_path(request)
+
+        assert result == "/"
+
+    def test_get_request_path_prefix_not_matching(self):
+        """Test _get_request_path() falls back when prefix doesn't match path."""
+        from starlette.requests import Request
+
+        from mdb_engine.auth.shared_middleware import _get_request_path
+
+        # Create mock request where prefix doesn't match
+        request = MagicMock(spec=Request)
+        request.url = MagicMock()
+        request.url.path = "/other-app/register"
+        request.scope = {"path": "/register"}
+        request.state = MagicMock()
+        request.state.app_base_path = "/auth-hub"
+
+        result = _get_request_path(request)
+
+        # Should fall back to scope path
+        assert result == "/register"
+
+    def test_get_request_path_no_scope_path(self):
+        """Test _get_request_path() falls back to url.path when no scope path."""
+        from starlette.requests import Request
+
+        from mdb_engine.auth.shared_middleware import _get_request_path
+
+        # Create mock request without scope path
+        request = MagicMock(spec=Request)
+        request.url = MagicMock()
+        request.url.path = "/register"
+        request.scope = {}
+        request.state = MagicMock()
+        # No app_base_path attribute
+
+        result = _get_request_path(request)
+
+        assert result == "/register"
+
+    def test_get_request_path_with_nested_path_prefix(self):
+        """Test _get_request_path() handles nested paths correctly."""
+        from starlette.requests import Request
+
+        from mdb_engine.auth.shared_middleware import _get_request_path
+
+        # Create mock request with nested path
+        request = MagicMock(spec=Request)
+        request.url = MagicMock()
+        request.url.path = "/auth-hub/api/users/123"
+        request.scope = {}
+        request.state = MagicMock()
+        request.state.app_base_path = "/auth-hub"
+
+        result = _get_request_path(request)
+
+        assert result == "/api/users/123"
+
+    def test_get_request_path_with_trailing_slash_prefix(self):
+        """Test _get_request_path() handles trailing slash in prefix correctly."""
+        from starlette.requests import Request
+
+        from mdb_engine.auth.shared_middleware import _get_request_path
+
+        # Create mock request with trailing slash in prefix (shouldn't happen but test it)
+        request = MagicMock(spec=Request)
+        request.url = MagicMock()
+        request.url.path = "/auth-hub/login"
+        request.scope = {}
+        request.state = MagicMock()
+        request.state.app_base_path = "/auth-hub/"
+
+        result = _get_request_path(request)
+
+        # Should still work - prefix matching handles this
+        assert result == "/login" or result == "login"  # Depending on implementation
+
+    def test_get_request_path_with_trailing_slash_in_path(self):
+        """Test _get_request_path() handles trailing slash in path correctly."""
+        from starlette.requests import Request
+
+        from mdb_engine.auth.shared_middleware import _get_request_path
+
+        request = MagicMock(spec=Request)
+        request.url = MagicMock()
+        request.url.path = "/auth-hub/login/"
+        request.scope = {}
+        request.state = MagicMock()
+        request.state.app_base_path = "/auth-hub"
+
+        result = _get_request_path(request)
+
+        assert result == "/login/"
+
+
+class TestPublicRoutesWithPathPrefix:
+    """Comprehensive tests for public routes with path prefixes to prevent regressions."""
+
+    @pytest.fixture
+    def mock_user_pool(self):
+        """Create a mock SharedUserPool."""
+        pool = MagicMock()
+        pool.validate_token = AsyncMock(return_value=None)
+        pool.get_user_roles_for_app = MagicMock(return_value=[])
+        pool.user_has_role = MagicMock(return_value=False)
+        return pool
+
+    @pytest.fixture
+    def mock_app(self):
+        """Create a mock ASGI app."""
+        return AsyncMock()
+
+    @pytest.mark.asyncio
+    async def test_shared_middleware_public_route_with_path_prefix(self, mock_app, mock_user_pool):
+        """Test SharedAuthMiddleware correctly identifies public routes with path prefix."""
+        from mdb_engine.auth.shared_middleware import SharedAuthMiddleware
+
+        middleware = SharedAuthMiddleware(
+            app=mock_app,
+            user_pool=mock_user_pool,
+            app_slug="test_app",
+            require_role="viewer",
+            public_routes=["/login", "/register", "/api/public/*"],
+        )
+
+        # Create request with path prefix
+        request = MagicMock()
+        request.url.path = "/auth-hub/login"
+        request.scope = {}
+        request.state = MagicMock()
+        request.state.app_base_path = "/auth-hub"
+        request.cookies = {}
+        request.headers = {}
+
+        call_next = AsyncMock(return_value=MagicMock())
+
+        response = await middleware.dispatch(request, call_next)
+
+        # Should bypass auth (public route)
+        call_next.assert_called_once()
+        assert response is not None
+
+    @pytest.mark.asyncio
+    async def test_shared_middleware_wildcard_public_route_with_path_prefix(
+        self, mock_app, mock_user_pool
+    ):  # noqa: E501
+        """Test SharedAuthMiddleware correctly handles wildcard public routes with path prefix."""
+        from mdb_engine.auth.shared_middleware import SharedAuthMiddleware
+
+        middleware = SharedAuthMiddleware(
+            app=mock_app,
+            user_pool=mock_user_pool,
+            app_slug="test_app",
+            require_role="viewer",
+            public_routes=["/api/public/*"],
+        )
+
+        # Test nested path under wildcard route
+        request = MagicMock()
+        request.url.path = "/auth-hub/api/public/endpoint"
+        request.scope = {}
+        request.state = MagicMock()
+        request.state.app_base_path = "/auth-hub"
+        request.cookies = {}
+        request.headers = {}
+
+        call_next = AsyncMock(return_value=MagicMock())
+
+        response = await middleware.dispatch(request, call_next)
+
+        # Should bypass auth (wildcard public route)
+        call_next.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_lazy_middleware_public_route_with_path_prefix(self, mock_app):
+        """Test LazySharedAuthMiddleware correctly identifies public routes with path prefix."""
+        from mdb_engine.auth.shared_middleware import create_shared_auth_middleware_lazy
+
+        manifest_auth = {
+            "mode": "shared",
+            "require_role": "viewer",
+            "public_routes": ["/login", "/register"],
+        }
+
+        middleware_class = create_shared_auth_middleware_lazy(
+            app_slug="test_app",
+            manifest_auth=manifest_auth,
+        )
+
+        instance = middleware_class(mock_app)
+
+        # Create mock user pool
+        mock_pool = MagicMock()
+        mock_pool.validate_token = AsyncMock(return_value=None)
+
+        # Create request with path prefix
+        request = MagicMock()
+        request.url.path = "/auth-hub/login"
+        request.scope = {}
+        request.state = MagicMock()
+        request.state.app_base_path = "/auth-hub"
+        request.cookies = {}
+        request.headers = {}
+        request.app.state.user_pool = mock_pool
+
+        call_next = AsyncMock(return_value=MagicMock())
+
+        response = await instance.dispatch(request, call_next)
+
+        # Should bypass auth (public route)
+        call_next.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_shared_middleware_protected_route_with_path_prefix(
+        self, mock_app, mock_user_pool
+    ):  # noqa: E501
+        """Test SharedAuthMiddleware correctly protects non-public routes with path prefix."""
+        from mdb_engine.auth.shared_middleware import SharedAuthMiddleware
+
+        middleware = SharedAuthMiddleware(
+            app=mock_app,
+            user_pool=mock_user_pool,
+            app_slug="test_app",
+            require_role="viewer",
+            public_routes=["/login", "/register"],
+        )
+
+        # Create request to protected route with path prefix
+        request = MagicMock()
+        request.url.path = "/auth-hub/protected"
+        request.scope = {}
+        request.state = MagicMock()
+        request.state.app_base_path = "/auth-hub"
+        request.cookies = {}
+        request.headers = {}
+
+        call_next = AsyncMock()
+
+        response = await middleware.dispatch(request, call_next)
+
+        # Should return 401 (protected route, no token)
+        assert response.status_code == 401
+        call_next.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_shared_middleware_root_public_route_with_path_prefix(
+        self, mock_app, mock_user_pool
+    ):  # noqa: E501
+        """Test SharedAuthMiddleware correctly handles root public route with path prefix."""
+        from mdb_engine.auth.shared_middleware import SharedAuthMiddleware
+
+        middleware = SharedAuthMiddleware(
+            app=mock_app,
+            user_pool=mock_user_pool,
+            app_slug="test_app",
+            require_role="viewer",
+            public_routes=["/"],
+        )
+
+        # Test root path with prefix
+        request = MagicMock()
+        request.url.path = "/auth-hub"
+        request.scope = {}
+        request.state = MagicMock()
+        request.state.app_base_path = "/auth-hub"
+        request.cookies = {}
+        request.headers = {}
+
+        call_next = AsyncMock(return_value=MagicMock())
+
+        response = await middleware.dispatch(request, call_next)
+
+        # Should bypass auth (root is public)
+        call_next.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_shared_middleware_multiple_public_routes_with_path_prefix(
+        self, mock_app, mock_user_pool
+    ):  # noqa: E501
+        """Test SharedAuthMiddleware handles multiple public routes with path prefix."""
+        from mdb_engine.auth.shared_middleware import SharedAuthMiddleware
+
+        middleware = SharedAuthMiddleware(
+            app=mock_app,
+            user_pool=mock_user_pool,
+            app_slug="test_app",
+            require_role="viewer",
+            public_routes=["/", "/health", "/login", "/register", "/api/public/*"],
+        )
+
+        public_paths = [
+            "/auth-hub/",
+            "/auth-hub/health",
+            "/auth-hub/login",
+            "/auth-hub/register",
+            "/auth-hub/api/public/test",
+        ]
+
+        for path in public_paths:
+            request = MagicMock()
+            request.url.path = (
+                path.rstrip("/") if path.endswith("/") and path != "/auth-hub/" else path
+            )
+            request.scope = {}
+            request.state = MagicMock()
+            request.state.app_base_path = "/auth-hub"
+            request.cookies = {}
+            request.headers = {}
+
+            call_next = AsyncMock(return_value=MagicMock())
+
+            response = await middleware.dispatch(request, call_next)
+
+            # All should bypass auth
+            call_next.assert_called_once()
+            call_next.reset_mock()

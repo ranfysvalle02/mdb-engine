@@ -250,3 +250,573 @@ class TestMultiAppIntegration:
 
         # Cleanup
         await engine.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_public_routes_with_path_prefix(self, mongodb_connection_string, tmp_path):
+        """Test that public routes work correctly when apps are mounted with path prefixes."""
+        import os
+
+        from httpx import ASGITransport, AsyncClient
+
+        from mdb_engine.core.engine import MongoDBEngine
+
+        manifests_dir = tmp_path / "manifests"
+        manifests_dir.mkdir()
+
+        # Create test app manifest with public routes
+        test_app_manifest = {
+            "schema_version": "2.0",
+            "slug": "test-app",
+            "name": "Test App",
+            "auth": {
+                "mode": "shared",
+                "roles": ["viewer", "admin"],
+                "require_role": "viewer",
+                "public_routes": ["/", "/login", "/register", "/health"],
+            },
+        }
+        test_app_path = manifests_dir / "test-app" / "manifest.json"
+        test_app_path.parent.mkdir()
+        test_app_path.write_text(json.dumps(test_app_manifest))
+
+        # Use unique database name per test
+        db_name = f"test_public_routes_prefix_{os.getpid()}"
+        engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name=db_name)
+
+        # Create multi-app with test app mounted at path prefix
+        app = engine.create_multi_app(
+            apps=[
+                {
+                    "slug": "test-app",
+                    "manifest": test_app_path,
+                    "path_prefix": "/test-app",
+                },
+            ]
+        )
+
+        # Add test routes to the mounted app
+        # We need to access the mounted app and add routes to it
+        async with app.router.lifespan_context(app):
+            # Find the mounted app
+            mounted_app = None
+            for route in app.routes:
+                if hasattr(route, "app") and hasattr(route.app, "state"):
+                    if getattr(route.app.state, "app_slug", None) == "test-app":
+                        mounted_app = route.app
+                        break
+
+            assert mounted_app is not None, "Mounted app not found"
+
+            # Add test routes to the mounted app
+            @mounted_app.get("/")
+            async def root():
+                return {"message": "root"}
+
+            @mounted_app.get("/login")
+            async def login():
+                return {"message": "login"}
+
+            @mounted_app.get("/register")
+            async def register():
+                return {"message": "register"}
+
+            @mounted_app.get("/health")
+            async def health():
+                return {"status": "ok"}
+
+            @mounted_app.get("/protected")
+            async def protected():
+                return {"message": "protected"}
+
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                # Test public routes with path prefix - should return 200 (not 401)
+                response = await client.get("/test-app/")
+                assert (
+                    response.status_code == 200
+                ), f"Root route failed: {response.status_code} - {response.text}"
+
+                response = await client.get("/test-app/login")
+                assert (
+                    response.status_code == 200
+                ), f"Login route failed: {response.status_code} - {response.text}"
+                assert response.json() == {"message": "login"}
+
+                response = await client.get("/test-app/register")
+                assert (
+                    response.status_code == 200
+                ), f"Register route failed: {response.status_code} - {response.text}"
+                assert response.json() == {"message": "register"}
+
+                response = await client.get("/test-app/health")
+                assert (
+                    response.status_code == 200
+                ), f"Health route failed: {response.status_code} - {response.text}"
+                assert response.json() == {"status": "ok"}
+
+                # Test protected route - should return 401 (no auth token)
+                response = await client.get("/test-app/protected")
+                assert (
+                    response.status_code == 401
+                ), f"Protected route should require auth: {response.status_code}"
+
+        # Cleanup
+        await engine.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_public_routes_multiple_mounted_apps(self, mongodb_connection_string, tmp_path):
+        """Test public routes work correctly with multiple apps mounted at different prefixes."""
+        import os
+
+        from httpx import ASGITransport, AsyncClient
+
+        from mdb_engine.core.engine import MongoDBEngine
+
+        manifests_dir = tmp_path / "manifests"
+        manifests_dir.mkdir()
+
+        # Create first app manifest
+        app1_manifest = {
+            "schema_version": "2.0",
+            "slug": "app1",
+            "name": "App 1",
+            "auth": {
+                "mode": "shared",
+                "roles": ["viewer"],
+                "require_role": "viewer",
+                "public_routes": ["/login", "/register"],
+            },
+        }
+        app1_path = manifests_dir / "app1" / "manifest.json"
+        app1_path.parent.mkdir()
+        app1_path.write_text(json.dumps(app1_manifest))
+
+        # Create second app manifest with different public routes
+        app2_manifest = {
+            "schema_version": "2.0",
+            "slug": "app2",
+            "name": "App 2",
+            "auth": {
+                "mode": "shared",
+                "roles": ["viewer"],
+                "require_role": "viewer",
+                "public_routes": ["/", "/health", "/api/public/*"],
+            },
+        }
+        app2_path = manifests_dir / "app2" / "manifest.json"
+        app2_path.parent.mkdir()
+        app2_path.write_text(json.dumps(app2_manifest))
+
+        # Use unique database name per test
+        db_name = f"test_multi_apps_prefix_{os.getpid()}"
+        engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name=db_name)
+
+        # Create multi-app with both apps
+        app = engine.create_multi_app(
+            apps=[
+                {
+                    "slug": "app1",
+                    "manifest": app1_path,
+                    "path_prefix": "/app1",
+                },
+                {
+                    "slug": "app2",
+                    "manifest": app2_path,
+                    "path_prefix": "/app2",
+                },
+            ]
+        )
+
+        async with app.router.lifespan_context(app):
+            # Find mounted apps
+            app1_mounted = None
+            app2_mounted = None
+            for route in app.routes:
+                if hasattr(route, "app") and hasattr(route.app, "state"):
+                    slug = getattr(route.app.state, "app_slug", None)
+                    if slug == "app1":
+                        app1_mounted = route.app
+                    elif slug == "app2":
+                        app2_mounted = route.app
+
+            assert app1_mounted is not None, "App1 not found"
+            assert app2_mounted is not None, "App2 not found"
+
+            # Add routes to app1
+            @app1_mounted.get("/login")
+            async def app1_login():
+                return {"app": "app1", "route": "login"}
+
+            @app1_mounted.get("/register")
+            async def app1_register():
+                return {"app": "app1", "route": "register"}
+
+            @app1_mounted.get("/protected")
+            async def app1_protected():
+                return {"app": "app1", "route": "protected"}
+
+            # Add routes to app2
+            @app2_mounted.get("/")
+            async def app2_root():
+                return {"app": "app2", "route": "root"}
+
+            @app2_mounted.get("/health")
+            async def app2_health():
+                return {"app": "app2", "route": "health"}
+
+            @app2_mounted.get("/api/public/test")
+            async def app2_public():
+                return {"app": "app2", "route": "public"}
+
+            @app2_mounted.get("/protected")
+            async def app2_protected():
+                return {"app": "app2", "route": "protected"}
+
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                # Test app1 public routes
+                response = await client.get("/app1/login")
+                assert response.status_code == 200, f"App1 login failed: {response.status_code}"
+                assert response.json()["app"] == "app1"
+
+                response = await client.get("/app1/register")
+                assert response.status_code == 200, f"App1 register failed: {response.status_code}"
+                assert response.json()["app"] == "app1"
+
+                # Test app1 protected route
+                response = await client.get("/app1/protected")
+                assert (
+                    response.status_code == 401
+                ), f"App1 protected should require auth: {response.status_code}"
+
+                # Test app2 public routes
+                response = await client.get("/app2/")
+                assert response.status_code == 200, f"App2 root failed: {response.status_code}"
+                assert response.json()["app"] == "app2"
+
+                response = await client.get("/app2/health")
+                assert response.status_code == 200, f"App2 health failed: {response.status_code}"
+                assert response.json()["app"] == "app2"
+
+                response = await client.get("/app2/api/public/test")
+                assert (
+                    response.status_code == 200
+                ), f"App2 public API failed: {response.status_code}"
+                assert response.json()["app"] == "app2"
+
+                # Test app2 protected route
+                response = await client.get("/app2/protected")
+                assert (
+                    response.status_code == 401
+                ), f"App2 protected should require auth: {response.status_code}"
+
+        # Cleanup
+        await engine.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_public_routes_wildcard_with_path_prefix(
+        self, mongodb_connection_string, tmp_path
+    ):  # noqa: E501
+        """Test wildcard public routes work correctly with path prefixes."""
+        import os
+
+        from httpx import ASGITransport, AsyncClient
+
+        from mdb_engine.core.engine import MongoDBEngine
+
+        manifests_dir = tmp_path / "manifests"
+        manifests_dir.mkdir()
+
+        # Create app manifest with wildcard public routes
+        app_manifest = {
+            "schema_version": "2.0",
+            "slug": "wildcard-app",
+            "name": "Wildcard App",
+            "auth": {
+                "mode": "shared",
+                "roles": ["viewer"],
+                "require_role": "viewer",
+                "public_routes": ["/api/public/*", "/static/*"],
+            },
+        }
+        app_path = manifests_dir / "wildcard-app" / "manifest.json"
+        app_path.parent.mkdir()
+        app_path.write_text(json.dumps(app_manifest))
+
+        # Use unique database name per test
+        db_name = f"test_wildcard_prefix_{os.getpid()}"
+        engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name=db_name)
+
+        # Create multi-app
+        app = engine.create_multi_app(
+            apps=[
+                {
+                    "slug": "wildcard-app",
+                    "manifest": app_path,
+                    "path_prefix": "/wildcard-app",
+                },
+            ]
+        )
+
+        async with app.router.lifespan_context(app):
+            # Find mounted app
+            mounted_app = None
+            for route in app.routes:
+                if hasattr(route, "app") and hasattr(route.app, "state"):
+                    if getattr(route.app.state, "app_slug", None) == "wildcard-app":
+                        mounted_app = route.app
+                        break
+
+            assert mounted_app is not None, "Mounted app not found"
+
+            # Add routes
+            @mounted_app.get("/api/public/endpoint1")
+            async def public1():
+                return {"route": "public1"}
+
+            @mounted_app.get("/api/public/nested/deep/endpoint")
+            async def public_nested():
+                return {"route": "public_nested"}
+
+            @mounted_app.get("/static/css/style.css")
+            async def static_css():
+                return {"route": "static_css"}
+
+            @mounted_app.get("/api/private/endpoint")
+            async def private():
+                return {"route": "private"}
+
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                # Test wildcard public routes
+                response = await client.get("/wildcard-app/api/public/endpoint1")
+                assert (
+                    response.status_code == 200
+                ), f"Wildcard public route failed: {response.status_code}"
+
+                response = await client.get("/wildcard-app/api/public/nested/deep/endpoint")
+                assert (
+                    response.status_code == 200
+                ), f"Nested wildcard route failed: {response.status_code}"
+
+                response = await client.get("/wildcard-app/static/css/style.css")
+                assert (
+                    response.status_code == 200
+                ), f"Static wildcard route failed: {response.status_code}"
+
+                # Test non-public route (should require auth)
+                response = await client.get("/wildcard-app/api/private/endpoint")
+                assert (
+                    response.status_code == 401
+                ), f"Private route should require auth: {response.status_code}"
+
+        # Cleanup
+        await engine.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_public_routes_edge_cases(self, mongodb_connection_string, tmp_path):
+        """Test edge cases for public routes with path prefixes."""
+        import os
+
+        from httpx import ASGITransport, AsyncClient
+
+        from mdb_engine.core.engine import MongoDBEngine
+
+        manifests_dir = tmp_path / "manifests"
+        manifests_dir.mkdir()
+
+        # Create app manifest
+        app_manifest = {
+            "schema_version": "2.0",
+            "slug": "edge-app",
+            "name": "Edge Case App",
+            "auth": {
+                "mode": "shared",
+                "roles": ["viewer"],
+                "require_role": "viewer",
+                "public_routes": ["/", "/health"],
+            },
+        }
+        app_path = manifests_dir / "edge-app" / "manifest.json"
+        app_path.parent.mkdir()
+        app_path.write_text(json.dumps(app_manifest))
+
+        # Use unique database name per test
+        db_name = f"test_edge_cases_{os.getpid()}"
+        engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name=db_name)
+
+        # Create multi-app
+        app = engine.create_multi_app(
+            apps=[
+                {
+                    "slug": "edge-app",
+                    "manifest": app_path,
+                    "path_prefix": "/edge-app",
+                },
+            ]
+        )
+
+        async with app.router.lifespan_context(app):
+            # Find mounted app
+            mounted_app = None
+            for route in app.routes:
+                if hasattr(route, "app") and hasattr(route.app, "state"):
+                    if getattr(route.app.state, "app_slug", None) == "edge-app":
+                        mounted_app = route.app
+                        break
+
+            assert mounted_app is not None, "Mounted app not found"
+
+            # Add routes
+            @mounted_app.get("/")
+            async def root():
+                return {"route": "root"}
+
+            @mounted_app.get("/health")
+            async def health():
+                return {"route": "health"}
+
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test", follow_redirects=True
+            ) as client:
+                # Test root path (prefix matches entire path)
+                # Note: Starlette redirects /edge-app to /edge-app/, so we follow redirects
+                response = await client.get("/edge-app")
+                assert response.status_code == 200, f"Root path failed: {response.status_code}"
+
+                # Test root path with trailing slash
+                response = await client.get("/edge-app/")
+                assert (
+                    response.status_code == 200
+                ), f"Root with slash failed: {response.status_code}"
+
+                # Test health route
+                response = await client.get("/edge-app/health")
+                assert response.status_code == 200, f"Health route failed: {response.status_code}"
+
+        # Cleanup
+        await engine.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_regression_public_routes_path_prefix_bug(
+        self, mongodb_connection_string, tmp_path
+    ):  # noqa: E501
+        """
+        REGRESSION TEST: Ensure public routes work with path prefixes.
+
+        This test specifically addresses the bug where public routes defined in manifests
+        (like ["/", "/login", "/register"]) failed when apps were mounted with path prefixes
+        (like "/auth-hub") because the middleware was checking the full path instead of
+        stripping the prefix first.
+
+        Bug scenario:
+        - App mounted at /auth-hub
+        - Manifest has public_routes: ["/", "/login", "/register"]
+        - Request to /auth-hub/register should match /register in public_routes
+        - Previously returned 401, should now return 200
+        """
+        import os
+
+        from httpx import ASGITransport, AsyncClient
+
+        from mdb_engine.core.engine import MongoDBEngine
+
+        manifests_dir = tmp_path / "manifests"
+        manifests_dir.mkdir()
+
+        # Create manifest exactly as described in bug report
+        auth_hub_manifest = {
+            "schema_version": "2.0",
+            "slug": "auth-hub",
+            "name": "Auth Hub",
+            "auth": {
+                "mode": "shared",
+                "roles": ["viewer", "admin"],
+                "require_role": "base_user",
+                "public_routes": ["/", "/login", "/register"],
+            },
+        }
+        auth_hub_path = manifests_dir / "auth-hub" / "manifest.json"
+        auth_hub_path.parent.mkdir()
+        auth_hub_path.write_text(json.dumps(auth_hub_manifest))
+
+        # Use unique database name per test
+        db_name = f"test_regression_bug_{os.getpid()}"
+        engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name=db_name)
+
+        # Create multi-app exactly as in bug report
+        app = engine.create_multi_app(
+            apps=[
+                {
+                    "slug": "auth-hub",
+                    "manifest": auth_hub_path,
+                    "path_prefix": "/auth-hub",
+                }
+            ]
+        )
+
+        async with app.router.lifespan_context(app):
+            # Find mounted app
+            mounted_app = None
+            for route in app.routes:
+                if hasattr(route, "app") and hasattr(route.app, "state"):
+                    if getattr(route.app.state, "app_slug", None) == "auth-hub":
+                        mounted_app = route.app
+                        break
+
+            assert mounted_app is not None, "Mounted app not found"
+
+            # Add routes matching the bug scenario
+            @mounted_app.get("/")
+            async def root():
+                return {"message": "root"}
+
+            @mounted_app.get("/login")
+            async def login():
+                return {"message": "login"}
+
+            @mounted_app.get("/register")
+            async def register():
+                return {"message": "register"}
+
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test", follow_redirects=True
+            ) as client:
+                # CRITICAL: These requests should return 200, NOT 401
+                # This is the exact bug scenario - full path /auth-hub/register
+                # should match relative path /register in public_routes
+
+                response = await client.get("/auth-hub/register")
+                assert response.status_code == 200, (
+                    f"REGRESSION: /auth-hub/register returned "
+                    f"{response.status_code} instead of 200. "
+                    f"Response: {response.text}. "
+                    f"This indicates the path prefix is not being stripped correctly."
+                )
+                assert response.json() == {"message": "register"}
+
+                response = await client.get("/auth-hub/login")
+                assert response.status_code == 200, (
+                    f"REGRESSION: /auth-hub/login returned {response.status_code} instead of 200. "
+                    f"This indicates the path prefix is not being stripped correctly."
+                )
+                assert response.json() == {"message": "login"}
+
+                response = await client.get("/auth-hub/")
+                assert response.status_code == 200, (
+                    f"REGRESSION: /auth-hub/ returned {response.status_code} instead of 200. "
+                    f"This indicates the path prefix is not being stripped correctly."
+                )
+
+                # Note: Starlette redirects /auth-hub to /auth-hub/, so we follow redirects
+                response = await client.get("/auth-hub")
+                assert response.status_code == 200, (
+                    f"REGRESSION: /auth-hub returned {response.status_code} instead of 200. "
+                    f"This indicates the root path handling is broken."
+                )
+
+        # Cleanup
+        await engine.shutdown()

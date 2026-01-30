@@ -86,16 +86,35 @@ def _get_request_path(request: Request) -> str:
     """
     Get the request path relative to the mount point.
 
-    For mounted apps (via create_multi_app), use request.scope["path"] which
-    contains the path relative to the mount point. For non-mounted apps,
-    fall back to request.url.path.
+    For mounted apps (via create_multi_app), strips the path prefix from
+    request.url.path using request.state.app_base_path. For non-mounted apps,
+    uses request.scope["path"] if available, otherwise falls back to request.url.path.
 
     This ensures public routes in manifests (which are relative paths like "/")
     match correctly when apps are mounted at prefixes like "/auth-hub".
     """
-    # Use scope["path"] which is relative to mount point for mounted apps
-    # Fall back to url.path for non-mounted apps
-    return request.scope.get("path", request.url.path)
+    # Check if this is a mounted app with a path prefix
+    app_base_path = getattr(request.state, "app_base_path", None)
+    # Ensure app_base_path is a string (not a MagicMock in tests)
+    if app_base_path and isinstance(app_base_path, str):
+        # Ensure request.url.path is a string before calling startswith
+        url_path = str(request.url.path) if hasattr(request.url, "path") else None
+        if url_path and url_path.startswith(app_base_path):
+            # Strip the path prefix to get relative path
+            relative_path = url_path[len(app_base_path) :]
+            # Ensure path starts with / (handle case where prefix is entire path)
+            return relative_path if relative_path else "/"
+
+    # Fall back to scope["path"] for mounted apps (if available)
+    # This handles cases where Starlette/FastAPI sets it correctly
+    if "path" in request.scope:
+        return request.scope["path"]
+
+    # Default to url.path for non-mounted apps
+    # Ensure we return a string
+    if hasattr(request.url, "path"):
+        return str(request.url.path)
+    return "/"
 
 
 class SharedAuthMiddleware(BaseHTTPMiddleware):
