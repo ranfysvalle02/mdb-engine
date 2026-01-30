@@ -1729,6 +1729,199 @@ class MongoDBEngine:
 
         return validation_errors
 
+    def _import_app_routes(self, child_app: "FastAPI", manifest_path: Path, slug: str) -> None:
+        """
+        Automatically discover and import route modules for a child app.
+
+        This method looks for route modules (web.py, routes.py) in the same directory
+        as the manifest and imports them so that route decorators are executed and
+        routes are registered on the child app.
+
+        Args:
+            child_app: The FastAPI child app to register routes on
+            manifest_path: Path to the manifest.json file
+            slug: App slug for logging
+
+        The method tries multiple strategies:
+        1. Look for 'web.py' in the manifest directory
+        2. Look for 'routes.py' in the manifest directory
+        3. Check manifest for explicit 'routes_module' field (future support)
+
+        When importing, the method ensures that route decorators in the imported module
+        reference the child_app by temporarily injecting it into the module namespace.
+        """
+        import importlib.util
+        import sys
+
+        manifest_dir = manifest_path.parent
+
+        # Try to find route modules in order of preference
+        route_module_paths = [
+            manifest_dir / "web.py",
+            manifest_dir / "routes.py",
+        ]
+
+        # Also check for routes_module in manifest (future support)
+        try:
+            import json
+
+            with open(manifest_path) as f:
+                manifest_data = json.load(f)
+            routes_module = manifest_data.get("routes_module")
+            if routes_module:
+                # Support both relative (to manifest dir) and absolute paths
+                if routes_module.startswith("/"):
+                    route_module_paths.insert(0, Path(routes_module))
+                else:
+                    route_module_paths.insert(0, manifest_dir / routes_module)
+        except (FileNotFoundError, json.JSONDecodeError, KeyError):
+            pass
+
+        imported = False
+        module_name = None
+        route_module = None
+        manifest_dir_str = None
+        path_inserted = False
+
+        for route_module_path in route_module_paths:
+            if not route_module_path.exists():
+                continue
+
+            # Create a unique module name to avoid conflicts
+            module_name = f"mdb_engine_imported_routes_{slug}_{id(child_app)}"
+
+            try:
+                # Validate file is actually a Python file
+                if not route_module_path.suffix == ".py":
+                    logger.debug(f"Skipping non-Python file '{route_module_path}' for app '{slug}'")
+                    continue
+
+                # Load the module spec
+                spec = importlib.util.spec_from_file_location(module_name, route_module_path)
+                if spec is None or spec.loader is None:
+                    logger.warning(
+                        f"Could not create spec for route module '{route_module_path}' "
+                        f"for app '{slug}'"
+                    )
+                    continue
+
+                route_module = importlib.util.module_from_spec(spec)
+
+                # CRITICAL: Inject child_app into module namespace BEFORE loading
+                # This ensures that @app.get(), @app.post(), etc. decorators in the
+                # imported module will reference our child_app instead of creating a new one
+                route_module.app = child_app
+                route_module.engine = self  # Also provide engine reference for dependencies
+
+                # Add to sys.modules temporarily to handle relative imports
+                # Use a try-finally to ensure cleanup even on exceptions
+                sys.modules[module_name] = route_module
+
+                # Store route count before import
+                routes_before = len(child_app.routes)
+
+                # Add manifest directory to Python path temporarily for relative imports
+                # This allows route modules to import sibling modules
+                manifest_dir_str = str(manifest_dir.resolve())
+                path_inserted = manifest_dir_str not in sys.path
+                if path_inserted:
+                    sys.path.insert(0, manifest_dir_str)
+
+                try:
+                    # Execute the module (runs route decorators with injected app)
+                    spec.loader.exec_module(route_module)
+                except SyntaxError as e:
+                    logger.warning(
+                        f"Syntax error in route module '{route_module_path}' "
+                        f"for app '{slug}': {e}. Skipping this module."
+                    )
+                    continue
+                except ImportError as e:
+                    # ImportError might be due to missing dependencies - log but don't fail
+                    logger.debug(
+                        f"Import error in route module '{route_module_path}' "
+                        f"for app '{slug}': {e}. "
+                        "This may be OK if dependencies are optional."
+                    )
+                    # Check if it's a critical import (like FastAPI) vs optional dependency
+                    error_str = str(e).lower()
+                    if "fastapi" in error_str or "starlette" in error_str:
+                        logger.warning(
+                            f"Route module '{route_module_path}' for app '{slug}' "
+                            "requires FastAPI/Starlette but they're not available. "
+                            "Routes will not be registered."
+                        )
+                    continue
+                finally:
+                    # Remove from path only if we added it
+                    if path_inserted and manifest_dir_str and manifest_dir_str in sys.path:
+                        try:
+                            sys.path.remove(manifest_dir_str)
+                        except ValueError:
+                            # Path might have been removed already - ignore
+                            pass
+
+                # Check if module overwrote app (shouldn't happen in well-structured modules)
+                module_app = getattr(route_module, "app", None)
+                if module_app is not None and module_app is not child_app:
+                    import warnings
+
+                    warning_msg = (
+                        f"Route module '{route_module_path.name}' for app '{slug}' "
+                        "created its own app instance. Routes defined before app creation "
+                        "are registered, but routes defined after may not be. "
+                        "Consider restructuring the module to use the injected 'app' variable."
+                    )
+                    logger.warning(warning_msg)
+                    warnings.warn(warning_msg, UserWarning, stacklevel=2)
+
+                routes_after = len(child_app.routes)
+                routes_added = routes_after - routes_before
+
+                if routes_added > 0:
+                    logger.info(
+                        f"✅ Auto-imported routes from '{route_module_path.name}' "
+                        f"for app '{slug}'. Added {routes_added} route(s) "
+                        f"(total: {routes_after})"
+                    )
+                else:
+                    logger.debug(
+                        f"Route module '{route_module_path.name}' for app '{slug}' "
+                        "was imported but no new routes were registered. "
+                        "This may be expected if routes are registered conditionally."
+                    )
+
+                imported = True
+                break
+
+            except (ValueError, TypeError, AttributeError, RuntimeError, OSError) as e:
+                logger.warning(
+                    f"Unexpected error importing route module '{route_module_path}' "
+                    f"for app '{slug}': {e}",
+                    exc_info=True,
+                )
+                continue
+            finally:
+                # Clean up temporary module from sys.modules
+                if module_name and module_name in sys.modules:
+                    try:
+                        del sys.modules[module_name]
+                    except KeyError:
+                        # Already removed - ignore
+                        pass
+                # Ensure path is cleaned up even if exception occurred
+                if path_inserted and manifest_dir_str and manifest_dir_str in sys.path:
+                    try:
+                        sys.path.remove(manifest_dir_str)
+                    except ValueError:
+                        pass
+
+        if not imported:
+            logger.debug(
+                f"No route modules found for app '{slug}' in {manifest_dir}. "
+                "Routes may be defined elsewhere or app may not have HTTP routes."
+            )
+
     def create_multi_app(  # noqa: C901
         self,
         apps: list[dict[str, Any]] | None = None,
@@ -2058,6 +2251,26 @@ class MongoDBEngine:
                         on_startup=on_startup,
                         on_shutdown=on_shutdown,
                     )
+
+                    # Automatically import routes from app module
+                    # This discovers and imports route modules (web.py, routes.py, etc.)
+                    # so that route decorators are executed and routes are registered
+                    try:
+                        self._import_app_routes(child_app, manifest_path, slug)
+                    except (
+                        ValueError,
+                        TypeError,
+                        AttributeError,
+                        RuntimeError,
+                        ImportError,
+                        SyntaxError,
+                        OSError,
+                    ) as e:
+                        logger.warning(
+                            f"Failed to auto-import routes for app '{slug}': {e}. "
+                            "Routes may need to be imported manually.",
+                            exc_info=True,
+                        )
 
                     # Share user_pool with child app if shared auth is enabled
                     if shared_user_pool_initialized and hasattr(app.state, "user_pool"):

@@ -82,8 +82,8 @@ from .repositories import Entity, MongoRepository, Repository, UnitOfWork
 from .utils import clean_mongo_doc, clean_mongo_docs
 
 __version__ = (
-    "0.4.2"  # Security release: Fixed auto-role assignment, token blacklist
-    # fail-closed, race conditions, session binding, and path traversal
+    "0.4.3"  # Feature: Automatic route import for multi-app deployments
+    # Routes from web.py/routes.py are now automatically imported when using create_multi_app()
 )
 
 __all__ = [
