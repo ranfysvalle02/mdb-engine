@@ -406,7 +406,9 @@ Enhanced token management with refresh tokens, sessions, and security:
 
 ## WebSockets
 
-Define real-time WebSocket endpoints:
+Define real-time WebSocket endpoints with secure subprotocol authentication.
+
+**Security Note**: MDB-Engine uses **subprotocol tunneling** for WebSocket authentication. Clients must pass JWT tokens via the `Sec-WebSocket-Protocol` header: `new WebSocket(url, [token])`. This method bypasses CSRF issues and avoids URL logging risks.
 
 ```json
 {
@@ -415,14 +417,17 @@ Define real-time WebSocket endpoints:
       "path": "/ws",
       "description": "Real-time updates",
       "auth": {
-        "required": false,
-        "allow_anonymous": true
+        "required": true,
+        "allow_anonymous": false
       },
       "ping_interval": 30
     },
     "events": {
       "path": "/events",
-      "description": "Event stream"
+      "description": "Event stream",
+      "auth": {
+        "required": true
+      }
     }
   }
 }
@@ -435,6 +440,29 @@ Define real-time WebSocket endpoints:
 | `auth.required` | `boolean` | - | Whether auth is required (default: `true`) |
 | `auth.allow_anonymous` | `boolean` | - | Allow anonymous connections (default: `false`) |
 | `ping_interval` | `integer` | - | Ping interval in seconds (5-300, default: `30`) |
+
+### Authentication
+
+When `auth.required` is `true` (default), clients must authenticate using **subprotocol tunneling**:
+
+**Client Implementation:**
+```javascript
+// Get JWT token from your auth system
+const token = getAuthToken();
+
+// Pass token as subprotocol (second parameter)
+const ws = new WebSocket('wss://api.example.com/app1/ws', [token]);
+```
+
+**Security Benefits:**
+- ✅ Bypasses CSRF protection issues (no cookies needed)
+- ✅ Avoids URL logging risks (token not in query params)
+- ✅ Browser-native support (standard WebSocket API)
+- ✅ Server validates token **before** accepting connection
+
+**See Also:**
+- [WebSocket Security Guide](../guides/WEBSOCKET_SECURITY_MULTI_APP_SSO.md) - Comprehensive security documentation
+- [WebSocket + SSO Multi-App Guide](../guides/WEBSOCKET_SSO_MULTI_APP.md) - Multi-app setup guide
 
 ---
 

@@ -10,6 +10,15 @@ When deploying multiple SSO apps with WebSocket support, you need to ensure:
 2. ✅ **CORS config** is properly merged from child apps to parent app
 3. ✅ **WebSocket routes** are registered on parent app with full path prefixes
 4. ✅ **Origin validation** works correctly for WebSocket upgrade requests
+5. ✅ **Subprotocol authentication** - JWT tokens passed via `Sec-WebSocket-Protocol` header
+
+**Security Note**: MDB-Engine uses **subprotocol tunneling** for WebSocket authentication. This method:
+- Bypasses CSRF protection issues (no cookies needed)
+- Avoids URL logging risks (token not in query params)
+- Uses browser-native WebSocket API
+- Provides secure token transmission
+
+See [WebSocket Security Guide](./WEBSOCKET_SECURITY_MULTI_APP_SSO.md) for comprehensive security details.
 
 ## Architecture
 
@@ -215,18 +224,18 @@ WebSocket routes are **automatically registered** on the parent app with full pa
 
 ### JavaScript/TypeScript
 
+**IMPORTANT**: MDB-Engine uses **subprotocol tunneling** for WebSocket authentication. Pass your JWT token as a subprotocol to avoid CSRF issues and URL logging risks.
+
 ```typescript
-// Connect to WebSocket with proper origin
+// Connect to WebSocket with subprotocol authentication
 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 const wsUrl = `${protocol}//${window.location.host}/app1/ws`;
 
-// Include auth token in query params or headers
-const token = getCookie('mdb_auth_token'); // Get from cookie
-const ws = new WebSocket(`${wsUrl}?token=${token}`);
+// Get JWT token (from your auth system)
+const token = getAuthToken(); // Your JWT token
 
-// Or use Authorization header (if supported by your setup)
-// Note: WebSocket API doesn't support custom headers directly
-// Use query params or cookie-based auth instead
+// Pass token as subprotocol (second parameter to WebSocket constructor)
+const ws = new WebSocket(wsUrl, [token]);
 
 ws.onopen = () => {
   console.log('WebSocket connected');
@@ -247,6 +256,12 @@ ws.onclose = () => {
 };
 ```
 
+**Why Subprotocol Tunneling?**
+- ✅ Bypasses CSRF protection issues (no cookies needed)
+- ✅ Avoids URL logging risks (token not in query params)
+- ✅ Browser-native support (standard WebSocket API)
+- ✅ Secure token transmission via `Sec-WebSocket-Protocol` header
+
 ### React Hook Example
 
 ```typescript
@@ -259,13 +274,13 @@ function useWebSocket(appSlug: string, endpoint: string = 'ws') {
 
   useEffect(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const token = document.cookie
-      .split('; ')
-      .find(row => row.startsWith('mdb_auth_token='))
-      ?.split('=')[1];
+    const wsUrl = `${protocol}//${window.location.host}/${appSlug}/${endpoint}`;
     
-    const wsUrl = `${protocol}//${window.location.host}/${appSlug}/${endpoint}?token=${token}`;
-    const ws = new WebSocket(wsUrl);
+    // Get JWT token from your auth system
+    const token = getAuthToken(); // Implement this based on your auth setup
+    
+    // Pass token as subprotocol
+    const ws = new WebSocket(wsUrl, [token]);
 
     ws.onopen = () => {
       setConnected(true);
@@ -322,60 +337,52 @@ function MyComponent() {
 
 ## Authentication Flow
 
-### WebSocket Authentication Options
+### WebSocket Authentication: Subprotocol Tunneling
 
-1. **Query Parameter** (Recommended for WebSocket):
-   ```javascript
-   const ws = new WebSocket(`wss://example.com/app1/ws?token=${token}`);
-   ```
+MDB-Engine uses **subprotocol tunneling** to securely pass JWT tokens via the `Sec-WebSocket-Protocol` header. This method:
 
-2. **Cookie-Based** (Automatic if using SSO):
-   ```javascript
-   // Cookie is automatically sent with WebSocket upgrade request
-   const ws = new WebSocket('wss://example.com/app1/ws');
-   ```
+- ✅ **Bypasses CSRF issues** - No cookies needed, avoiding CSRF middleware conflicts
+- ✅ **Avoids URL logging** - Token not in query params (security best practice)
+- ✅ **Browser-native** - Uses standard WebSocket API
+- ✅ **Secure** - Token transmitted via standard WebSocket protocol negotiation
 
-3. **After Connection** (Send auth message):
-   ```javascript
-   ws.onopen = () => {
-     ws.send(JSON.stringify({ type: 'auth', token: token }));
-   };
-   ```
+**Client Implementation:**
 
-### Backend Authentication Handler
+```javascript
+// Get your JWT token from your auth system
+const token = getAuthToken(); // e.g., from localStorage, sessionStorage, or auth context
 
-```python
-from mdb_engine.routing.websockets import register_message_handler
+// Connect with token as subprotocol
+const ws = new WebSocket('wss://example.com/app1/ws', [token]);
 
-# Register auth handler
-@register_message_handler("app1", "realtime", "auth")
-async def handle_auth(websocket, message: dict):
-    """Handle authentication message."""
-    token = message.get("token")
-    if not token:
-        await websocket.send_json({
-            "type": "error",
-            "message": "Token required"
-        })
-        return
-    
-    # Validate token using shared user pool
-    from mdb_engine import get_shared_user_pool
-    # Note: You'll need to access the request/app context
-    # This is a simplified example
-    user = await validate_token(token)
-    
-    if user:
-        await websocket.send_json({
-            "type": "auth_success",
-            "user": user["email"]
-        })
-    else:
-        await websocket.send_json({
-            "type": "auth_failed",
-            "message": "Invalid token"
-        })
+ws.onopen = () => {
+  console.log('WebSocket connected and authenticated');
+};
+
+ws.onerror = (error) => {
+  console.error('WebSocket error:', error);
+  // Check server logs for authentication failure details
+};
 ```
+
+**How It Works:**
+
+1. Client sends WebSocket upgrade request with `Sec-WebSocket-Protocol: <token>` header
+2. Server extracts token from subprotocol header **before** accepting connection
+3. Server validates JWT token
+4. If valid, server accepts connection with the same subprotocol
+5. If invalid, connection is rejected (no accept() called)
+
+**Backend Authentication:**
+
+Authentication happens automatically in MDB-Engine. The `authenticate_websocket()` function:
+
+- Extracts token from `sec-websocket-protocol` header
+- Validates JWT token using shared secret
+- Returns user information if valid
+- Rejects connection if invalid (before accept())
+
+No additional backend code needed - it's handled automatically!
 
 ## CORS Configuration Best Practices
 
@@ -461,19 +468,44 @@ See the full working example in:
 - `examples/advanced/sso-multi-app/`
 - `examples/advanced/sso-multi-app/apps/sso-app-3/manifest.json` (has WebSocket config)
 
+## Security Best Practices
+
+### Subprotocol Authentication
+
+**✅ DO:**
+- Pass JWT token as subprotocol: `new WebSocket(url, [token])`
+- Validate token on server before accepting connection
+- Use HTTPS/WSS in production
+- Implement token refresh for long-lived connections
+
+**❌ DON'T:**
+- Put tokens in URL query params (logging risk)
+- Rely on cookies for WebSocket auth (CSRF issues)
+- Accept connections before validating tokens
+- Use wildcard CORS origins in production
+
+### Token Management
+
+- Store tokens securely (httpOnly cookies for HTTP, secure storage for WebSocket)
+- Implement token refresh before expiration
+- Handle token expiration gracefully (reconnect with new token)
+- Never log or expose tokens in client-side code
+
 ## Key Takeaways
 
 1. ✅ **CSRF middleware is automatically added** to parent app when child apps use shared auth
 2. ✅ **CORS configs are automatically merged** from all child apps to parent app
 3. ✅ **WebSocket routes are registered** on parent app with full path prefixes
 4. ✅ **Origin validation** uses parent app's merged CORS config
-5. ✅ **Always include CORS config** in each child app's manifest
-6. ✅ **Use specific origins in production**, not wildcards
-7. ✅ **WebSocket URLs must include path prefix**: `/app1/ws`, not `/ws`
+5. ✅ **Subprotocol authentication** - Use `new WebSocket(url, [token])` for secure auth
+6. ✅ **Always include CORS config** in each child app's manifest
+7. ✅ **Use specific origins in production**, not wildcards
+8. ✅ **WebSocket URLs must include path prefix**: `/app1/ws`, not `/ws`
 
 ---
 
 **Related Documentation:**
+- [WebSocket Security Guide](./WEBSOCKET_SECURITY_MULTI_APP_SSO.md) - **Comprehensive security guide**
 - [WebSocket Troubleshooting Guide](./WEBSOCKET_TROUBLESHOOTING.md) - **Start here if you're having connection issues!**
 - [SSO Multi-App Setup Guide](./SSO_MULTI_APP_SETUP.md)
 - [WebSocket Routing README](../../mdb_engine/routing/README.md)

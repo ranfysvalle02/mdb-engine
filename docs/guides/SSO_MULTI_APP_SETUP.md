@@ -930,11 +930,70 @@ async def my_route(request: Request):
 
 ---
 
+## WebSocket Security
+
+### Quick Setup
+
+MDB-Engine uses **subprotocol tunneling** for secure WebSocket authentication in multi-app SSO setups.
+
+#### 1. Configure WebSocket in Manifest
+
+```json
+{
+  "websockets": {
+    "realtime": {
+      "path": "/ws",
+      "auth": {
+        "required": true
+      },
+      "ping_interval": 30
+    }
+  },
+  "cors": {
+    "enabled": true,
+    "allow_origins": [
+      "https://yourdomain.com",
+      "http://localhost:3000"
+    ],
+    "allow_credentials": true
+  }
+}
+```
+
+#### 2. Client Connection
+
+```javascript
+// Get JWT token from your auth system
+const token = getAuthToken();
+
+// Connect with subprotocol authentication
+const ws = new WebSocket('wss://api.example.com/app1/ws', [token]);
+
+ws.onopen = () => {
+  console.log('WebSocket connected securely');
+};
+```
+
+#### 3. Security Benefits
+
+- ✅ **Bypasses CSRF issues** - No cookies needed for WebSocket auth
+- ✅ **Avoids URL logging** - Token not in query params
+- ✅ **Browser-native** - Standard WebSocket API
+- ✅ **Secure** - Server validates token before accepting connection
+
+**For comprehensive security documentation, see:**
+- [WebSocket Security Guide](./WEBSOCKET_SECURITY_MULTI_APP_SSO.md) - Complete security guide
+- [WebSocket + SSO Multi-App Guide](./WEBSOCKET_SSO_MULTI_APP.md) - Detailed setup guide
+- [WebSocket Troubleshooting](./WEBSOCKET_TROUBLESHOOTING.md) - Common issues and fixes
+
+---
+
 ## Next Steps
 
 - **Add More Apps:** Mount additional apps by adding to the `apps` list
 - **Custom Middleware:** Add custom middleware at parent or child level
 - **Advanced Routing:** Use FastAPI's routing features for complex paths
+- **WebSocket Support:** Add real-time WebSocket endpoints with secure authentication
 - **Monitoring:** Add Prometheus metrics or logging
 - **Scaling:** Consider splitting apps if you need independent scaling
 

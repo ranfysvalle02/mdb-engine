@@ -311,10 +311,15 @@ async def authenticate_websocket(
     websocket: Any, app_slug: str, require_auth: bool = True
 ) -> tuple[str | None, str | None]:
     """
-    Authenticate a WebSocket connection.
+    Authenticate a WebSocket connection via Sec-WebSocket-Protocol header.
+
+    Uses subprotocol tunneling to pass JWT tokens securely:
+    - Client: new WebSocket(url, [token])
+    - Server: Extracts token from sec-websocket-protocol header
+    - Bypasses CSRF issues and avoids URL logging risks
 
     Args:
-        websocket: FastAPI WebSocket instance
+        websocket: FastAPI WebSocket instance (can access headers before accept)
         app_slug: App slug for context
         require_auth: Whether authentication is required
 
@@ -335,59 +340,57 @@ async def authenticate_websocket(
         return None, None
 
     try:
-        # Try to get token from query params or cookies
         token = None
-        query_token = None
-        cookie_token = None
+        selected_subprotocol = None
 
-        # Check query parameters
-        # FastAPI WebSocket query params are accessed via websocket.query_params
-        if hasattr(websocket, "query_params"):
-            if websocket.query_params:
-                query_token = websocket.query_params.get("token")
-                logger.info(
-                    f"WebSocket query_params for app '{app_slug}': {dict(websocket.query_params)}"
-                )
-                if query_token:
-                    token = query_token
-                    logger.info(
-                        f"WebSocket token found in query params for app "
-                        f"'{app_slug}' (length: {len(query_token)})"
-                    )
-            else:
-                logger.info(f"WebSocket query_params is empty for app '{app_slug}'")
-        else:
-            logger.warning(f"WebSocket has no query_params attribute for app '{app_slug}'")
+        # Sec-WebSocket-Protocol (Subprotocol Tunneling)
+        # Browsers allow: new WebSocket(url, ["token", "THE_JWT_STRING"])
+        # This bypasses CSRF issues and avoids URL logging risks
+        try:
+            protocol_header = None
+            # Try multiple ways to access headers (FastAPI WebSocket compatibility)
+            if hasattr(websocket, "headers") and websocket.headers is not None:
+                # FastAPI WebSocket.headers is case-insensitive dict-like
+                protocol_header = websocket.headers.get("sec-websocket-protocol")
 
-        # If no token in query, try to get from cookies (if available)
-        # Check both ws_token (non-httponly, for JS access) and token (httponly)
-        if not token:
-            if hasattr(websocket, "cookies"):
-                cookie_token = websocket.cookies.get("ws_token") or websocket.cookies.get("token")
-                if cookie_token:
-                    token = cookie_token
-                    logger.debug(f"WebSocket token found in cookies for app '{app_slug}'")
-            else:
-                logger.debug(f"WebSocket has no cookies attribute for app '{app_slug}'")
+            # Fallback: access via scope (ASGI standard) if headers not available
+            if not protocol_header and hasattr(websocket, "scope") and "headers" in websocket.scope:
+                headers_dict = dict(websocket.scope["headers"])
+                # Headers are bytes in ASGI, need to decode
+                protocol_header_bytes = headers_dict.get(b"sec-websocket-protocol")
+                if protocol_header_bytes:
+                    protocol_header = protocol_header_bytes.decode("utf-8")
 
-        logger.info(
-            f"WebSocket auth check for app '{app_slug}': "
-            f"query_token={bool(query_token)}, "
-            f"cookie_token={bool(cookie_token)}, "
-            f"final_token={bool(token)}, require_auth={require_auth}"
-        )
+            if protocol_header:
+                # Header format: "protocol1, protocol2, ..." or just "token"
+                protocols = [p.strip() for p in protocol_header.split(",")]
+                logger.debug(f"WebSocket subprotocols for app '{app_slug}': {protocols}")
+
+                # Look for a JWT-like token in the protocols
+                # JWTs are typically long (>20 chars) and don't contain spaces
+                for protocol in protocols:
+                    if len(protocol) > 20 and " " not in protocol:
+                        token = protocol
+                        selected_subprotocol = protocol
+                        logger.info(
+                            f"WebSocket token found in subprotocol for app '{app_slug}' "
+                            f"(length: {len(protocol)})"
+                        )
+                        break
+        except (AttributeError, TypeError, KeyError, UnicodeDecodeError) as e:
+            logger.debug(f"Could not access WebSocket headers for subprotocol check: {e}")
 
         if not token:
             logger.warning(
-                f"No token found for WebSocket connection to app '{app_slug}' "
-                f"(require_auth={require_auth})"
+                f"No token found in subprotocol header for WebSocket connection to app "
+                f"'{app_slug}' (require_auth={require_auth}). "
+                f"Use: new WebSocket(url, [token]) to pass JWT token as subprotocol."
             )
             if require_auth:
-                # Don't close before accepting - return error info instead
-                # The caller will handle closing after accept
                 return None, None  # Signal auth failure
             return None, None
 
+        # Decode and validate token
         import jwt
 
         from ..auth.dependencies import SECRET_KEY
@@ -397,6 +400,13 @@ async def authenticate_websocket(
             payload = decode_jwt_token(token, str(SECRET_KEY))
             user_id = payload.get("sub") or payload.get("user_id")
             user_email = payload.get("email")
+
+            # Store selected subprotocol on websocket scope for accept() to use
+            if selected_subprotocol:
+                # Store in scope so _accept_websocket_connection can access it
+                if hasattr(websocket, "scope"):
+                    websocket.scope["_selected_subprotocol"] = selected_subprotocol
+                logger.debug(f"Stored subprotocol '{selected_subprotocol}' for WebSocket accept")
 
             logger.info(f"WebSocket authenticated successfully for app '{app_slug}': {user_email}")
             return user_id, user_email
@@ -409,7 +419,6 @@ async def authenticate_websocket(
     except (ValueError, TypeError, AttributeError, KeyError, RuntimeError) as e:
         logger.error(f"WebSocket authentication failed for app '{app_slug}': {e}", exc_info=True)
         if require_auth:
-            # Don't close before accepting - return error info instead
             return None, None  # Signal auth failure
         return None, None
 
@@ -470,11 +479,32 @@ def get_message_handler(
 
 
 async def _accept_websocket_connection(websocket: Any, app_slug: str) -> None:
-    """Accept WebSocket connection with error handling."""
+    """
+    Accept WebSocket connection with subprotocol support.
+
+    If authentication found a token in the Sec-WebSocket-Protocol header,
+    we must accept with that specific subprotocol or the browser will reject
+    the connection.
+    """
     try:
-        await websocket.accept()
+        # Check if auth stored a selected subprotocol
+        selected_subprotocol = None
+        if hasattr(websocket, "scope"):
+            selected_subprotocol = websocket.scope.get("_selected_subprotocol")
+
+        if selected_subprotocol:
+            # Accept with the specific subprotocol the client requested
+            await websocket.accept(subprotocol=selected_subprotocol)
+            logger.info(
+                f"✅ WebSocket accepted for app '{app_slug}' "
+                f"with subprotocol '{selected_subprotocol}'"
+            )
+        else:
+            # Standard accept without subprotocol
+            await websocket.accept()
+            logger.info(f"✅ WebSocket accepted for app '{app_slug}'")
+
         print(f"✅ [WEBSOCKET ACCEPTED] App: '{app_slug}'")
-        logger.info(f"✅ WebSocket accepted for app '{app_slug}'")
     except (RuntimeError, ConnectionError, OSError) as accept_error:
         print(f"❌ [WEBSOCKET ACCEPT FAILED] App: '{app_slug}', Error: {accept_error}")
         logger.error(
@@ -654,13 +684,23 @@ def create_websocket_endpoint(
                 f"(require_auth={require_auth}, query_params={query_str})"
             )
 
-            # Accept connection FIRST (required before we can do anything)
-            await _accept_websocket_connection(websocket, app_slug)
+            # CRITICAL: Authenticate BEFORE accepting connection
+            # This prevents CSRF middleware from rejecting established connections
+            # We can access headers/query_params before accept() is called
+            user_id, user_email = await authenticate_websocket(websocket, app_slug, require_auth)
 
-            # Authenticate connection (after accept, so we can close properly if needed)
-            user_id, user_email = await _authenticate_websocket_connection(
-                websocket, app_slug, require_auth
-            )
+            # Handle authentication failure
+            if require_auth and not user_id:
+                logger.warning(
+                    f"WebSocket authentication failed for app '{app_slug}' - rejecting connection"
+                )
+                # Reject without accepting - FastAPI will send 403 if accept() not called
+                # We can't call websocket.close() before accept(), so we just return
+                # The connection will be rejected by the server
+                return
+
+            # Accept connection (with subprotocol if token was in protocol header)
+            await _accept_websocket_connection(websocket, app_slug)
 
             # Connect with metadata (websocket already accepted)
             connection = await manager.connect(websocket, user_id=user_id, user_email=user_email)

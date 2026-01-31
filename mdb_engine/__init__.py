@@ -82,11 +82,12 @@ from .repositories import Entity, MongoRepository, Repository, UnitOfWork
 from .utils import clean_mongo_doc, clean_mongo_docs
 
 __version__ = (
-    "0.4.12"  # Fix CSRF middleware rejecting WebSocket connections
-    # - Skip CSRF middleware on child apps in multi-app setups (parent handles it)
-    # - Merge child app public routes into parent CSRF exempt list
-    # - WebSocket connections now work correctly in multi-app SSO setups
-    # - Security maintained: parent app CSRF middleware protects all routes
+    "0.4.13"  # WebSocket subprotocol authentication (header tunneling)
+    # - Authenticate WebSocket connections via Sec-WebSocket-Protocol header ONLY
+    # - Bypasses CSRF issues by tunneling JWT tokens through subprotocols
+    # - Authenticate BEFORE accepting connection (prevents CSRF middleware conflicts)
+    # - Forward-facing: Only subprotocol authentication (no query params/cookies)
+    # - Browser-compatible: new WebSocket(url, [token]) works natively
 )
 
 __all__ = [

@@ -252,119 +252,180 @@ const wsUrl = `${protocol}//${window.location.host}/app-3/ws`;
 
 ## Authentication Failures
 
-### Cookie-Based Authentication (SSO)
+### Subprotocol Authentication (MDB-Engine Standard)
 
-#### Problem: Cookies Not Sent
+MDB-Engine uses **subprotocol tunneling** for WebSocket authentication. The JWT token is passed via the `Sec-WebSocket-Protocol` header.
+
+#### Problem: No Token in Subprotocol
 
 **Symptoms:**
-- WebSocket connects but authentication fails
-- Server logs show "Authentication required" or "Invalid token"
+- WebSocket connection rejected immediately
+- Server logs show: "No token found in subprotocol header"
+- Connection closes with code 1008 (Policy Violation)
 
 **Solutions:**
 
-1. **Verify Cookie Domain:**
+1. **Verify Token is Passed as Subprotocol:**
    ```javascript
-   // Check cookie domain matches your backend
-   console.log("Cookies:", document.cookie);
-   // Should include: mdb_auth_token=...
+   // ✅ CORRECT: Pass token as subprotocol
+   const token = getAuthToken(); // Your JWT token
+   const ws = new WebSocket('ws://localhost:8000/app-3/ws', [token]);
+   
+   // ❌ WRONG: Don't use query params
+   const ws = new WebSocket(`ws://localhost:8000/app-3/ws?token=${token}`);
+   
+   // ❌ WRONG: Don't rely on cookies
+   const ws = new WebSocket('ws://localhost:8000/app-3/ws');
    ```
 
-2. **Check Cookie Attributes:**
-   ```python
-   # Backend should set cookies with:
-   response.set_cookie(
-       key="mdb_auth_token",
-       value=token,
-       httponly=True,      # ✅ Security
-       secure=False,        # False for localhost, True for HTTPS
-       samesite="lax",      # ✅ Allows cross-site cookies
-       domain=None,         # ✅ Sends to same domain
-   )
+2. **Check Token Availability:**
+   ```javascript
+   // Before connecting, verify token exists
+   const token = getAuthToken();
+   if (!token) {
+     console.error('No token available - authenticate first');
+     // Redirect to login or refresh token
+     return;
+   }
+   
+   const ws = new WebSocket(url, [token]);
    ```
 
-3. **Verify CORS Credentials:**
-   ```json
-   {
-     "cors": {
-       "allow_credentials": true  // REQUIRED for cookies
-     }
+3. **Verify Subprotocol is Set:**
+   ```javascript
+   // After connection, verify subprotocol was accepted
+   ws.onopen = () => {
+     console.log('Connected, subprotocol:', ws.protocol);
+     // Should match your token (or be empty if server doesn't echo it)
+   };
+   ```
+
+#### Problem: Invalid Token
+
+**Symptoms:**
+- Connection rejected immediately
+- Server logs show: "JWT decode error" or "Invalid token"
+- Connection closes with code 1008
+
+**Solutions:**
+
+1. **Verify Token Format:**
+   ```javascript
+   // Check token is a valid JWT
+   const token = getAuthToken();
+   const parts = token.split('.');
+   if (parts.length !== 3) {
+     console.error('Invalid JWT format');
+     // Get new token
    }
    ```
+
+2. **Check Token Expiration:**
+   ```javascript
+   // Decode JWT payload (client-side check)
+   const payload = JSON.parse(atob(token.split('.')[1]));
+   const expiresAt = payload.exp * 1000; // Convert to milliseconds
+   const now = Date.now();
+   
+   if (now >= expiresAt) {
+     console.warn('Token expired, refreshing...');
+     await refreshToken();
+   }
+   ```
+
+3. **Verify JWT Secret Matches:**
+   - Ensure backend and frontend use same JWT secret
+   - Check environment variables are set correctly
+   - Verify token was issued by same auth system
 
 #### Problem: Token Expired
 
 **Symptoms:**
 - Initial connection works, then disconnects
-- Server logs show "Token expired" or "Invalid token"
+- Server logs show "Signature has expired"
+- Connection closes unexpectedly
 
 **Solutions:**
 
 1. **Refresh Token Before Connecting:**
    ```javascript
    async function connectWebSocket() {
-     // Refresh token first
-     const response = await fetch('/auth/refresh', {
-       credentials: 'include'  // Send cookies
-     });
+     // Check token expiration
+     const token = getAuthToken();
+     const payload = JSON.parse(atob(token.split('.')[1]));
+     const expiresAt = payload.exp * 1000;
+     const now = Date.now();
      
-     if (response.ok) {
-       // Now connect WebSocket
-       const ws = new WebSocket('ws://localhost:8000/app-3/ws');
-       // Cookies will be sent automatically
+     // Refresh if expiring soon (within 5 minutes)
+     if (expiresAt - now < 5 * 60 * 1000) {
+       await refreshToken();
      }
+     
+     // Connect with fresh token
+     const freshToken = getAuthToken();
+     const ws = new WebSocket('ws://localhost:8000/app-3/ws', [freshToken]);
+     return ws;
    }
    ```
 
 2. **Handle Reconnection with Token Refresh:**
    ```javascript
    ws.onclose = async (event) => {
-     if (event.code === 1006) {
-       // Refresh token and reconnect
+     if (event.code === 1008) {
+       // Authentication failure - refresh token and reconnect
+       console.log('Auth failed, refreshing token...');
        await refreshToken();
        setTimeout(() => connectWebSocket(), 2000);
      }
    };
    ```
 
-### Query Parameter Authentication
+3. **Implement Token Refresh on Expiration:**
+   ```javascript
+   // Monitor token expiration and refresh proactively
+   setInterval(async () => {
+     const token = getAuthToken();
+     const payload = JSON.parse(atob(token.split('.')[1]));
+     const expiresAt = payload.exp * 1000;
+     const now = Date.now();
+     
+     if (expiresAt - now < 10 * 60 * 1000) { // 10 minutes before expiry
+       await refreshToken();
+       // Reconnect WebSocket with new token if connected
+       if (ws && ws.readyState === WebSocket.OPEN) {
+         ws.close(); // Will trigger reconnection logic
+       }
+     }
+   }, 60000); // Check every minute
+   ```
 
-#### Alternative: Pass Token in URL
+#### Problem: Subprotocol Not Accepted
 
-```javascript
-// Get token from cookie
-const token = document.cookie
-  .split('; ')
-  .find(row => row.startsWith('mdb_auth_token='))
-  ?.split('=')[1];
+**Symptoms:**
+- Connection established but immediately closed
+- Browser console shows protocol mismatch error
+- Server logs show token validation succeeded but connection closed
 
-// Include in WebSocket URL
-const wsUrl = `ws://localhost:8000/app-3/ws?token=${encodeURIComponent(token)}`;
-const ws = new WebSocket(wsUrl);
-```
+**Solutions:**
 
-**Backend Handler:**
+1. **Verify Server Accepts Subprotocol:**
+   - Server should accept connection with the same subprotocol token
+   - Check server logs for "WebSocket accepted with subprotocol"
+   - Ensure `_accept_websocket_connection()` uses stored subprotocol
 
-```python
-# In your WebSocket handler
-@websocket_endpoint("/ws")
-async def websocket_handler(websocket: WebSocket):
-    # Get token from query params
-    token = websocket.query_params.get("token")
-    
-    if not token:
-        await websocket.close(code=1008, reason="Token required")
-        return
-    
-    # Validate token
-    user = await validate_token(token)
-    if not user:
-        await websocket.close(code=1008, reason="Invalid token")
-        return
-    
-    # Connection authenticated
-    await websocket.accept()
-    # ... handle messages
-```
+2. **Check Browser Compatibility:**
+   ```javascript
+   // Verify WebSocket API supports subprotocols
+   if (!WebSocket.prototype.CONNECTING) {
+     console.warn('WebSocket API may not fully support subprotocols');
+   }
+   
+   // Test connection
+   const ws = new WebSocket(url, [token]);
+   ws.onopen = () => {
+     console.log('Subprotocol:', ws.protocol); // Should show token or be empty
+   };
+   ```
 
 ---
 
@@ -420,10 +481,21 @@ async def websocket_handler(websocket: WebSocket):
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   ```
 
-- [ ] **Cookies are available:**
+- [ ] **Token is available and valid:**
   ```javascript
-  console.log("Cookies:", document.cookie);
-  // Should include auth token
+  const token = getAuthToken();
+  if (!token) {
+    console.error('No token available - authenticate first');
+  }
+  // Check token expiration
+  const payload = JSON.parse(atob(token.split('.')[1]));
+  console.log('Token expires:', new Date(payload.exp * 1000));
+  ```
+
+- [ ] **Token passed as subprotocol:**
+  ```javascript
+  const ws = new WebSocket(url, [token]); // ✅ Correct
+  // NOT: new WebSocket(`${url}?token=${token}`) ❌
   ```
 
 - [ ] **Origin matches allowed origins:**
@@ -473,12 +545,21 @@ class SSOWebSocketClient {
     const host = window.location.host;
     const wsUrl = `${protocol}//${host}/${this.config.appSlug}/${this.config.endpoint}`;
 
+    // Get JWT token for subprotocol authentication
+    const token = getAuthToken(); // Implement this based on your auth system
+    if (!token) {
+      console.error('❌ No token available - cannot connect WebSocket');
+      this.config.onError(new Error('No authentication token'));
+      return;
+    }
+
     console.log(`🔌 Connecting to WebSocket: ${wsUrl}`);
     console.log(`   Current origin: ${window.location.origin}`);
-    console.log(`   Cookies available: ${document.cookie ? 'Yes' : 'No'}`);
+    console.log(`   Token available: ${token ? 'Yes' : 'No'}`);
 
     try {
-      this.ws = new WebSocket(wsUrl);
+      // Pass token as subprotocol (second parameter)
+      this.ws = new WebSocket(wsUrl, [token]);
 
       this.ws.onopen = () => {
         console.log('✅ WebSocket connected');
@@ -608,10 +689,19 @@ export function useSSOWebSocket(options: UseWebSocketOptions) {
     const host = window.location.host;
     const wsUrl = `${protocol}//${host}/${appSlug}/${endpoint}`;
 
+    // Get JWT token for subprotocol authentication
+    const token = getAuthToken(); // Implement this based on your auth system
+    if (!token) {
+      console.error('❌ No token available - cannot connect WebSocket');
+      setError(new Error('No authentication token') as any);
+      return;
+    }
+
     console.log(`🔌 Connecting to WebSocket: ${wsUrl}`);
 
     try {
-      const ws = new WebSocket(wsUrl);
+      // Pass token as subprotocol (second parameter)
+      const ws = new WebSocket(wsUrl, [token]);
       wsRef.current = ws;
 
       ws.onopen = () => {
@@ -851,7 +941,7 @@ ws.onclose = (e) => console.log('🔌 Closed:', e.code, e.reason);
 4. **Check:**
    - **Request Headers:**
      - `Origin: http://localhost:3000` ✅
-     - `Cookie: mdb_auth_token=...` ✅
+     - `Sec-WebSocket-Protocol: <your-jwt-token>` ✅
      - `Upgrade: websocket` ✅
      - `Connection: Upgrade` ✅
    
@@ -883,27 +973,42 @@ ws.onclose = (e) => console.log('🔌 Closed:', e.code, e.reason);
 }
 ```
 
-### Fix 2: Verify WebSocket URL
+### Fix 2: Verify WebSocket URL and Subprotocol
 
 ```javascript
-// ✅ CORRECT
+// ✅ CORRECT: Include path prefix and pass token as subprotocol
+const token = getAuthToken();
 const wsUrl = `ws://localhost:8000/app-3/ws`;
+const ws = new WebSocket(wsUrl, [token]);
 
 // ❌ WRONG (missing path prefix)
 const wsUrl = `ws://localhost:8000/ws`;
+
+// ❌ WRONG (using query params - deprecated)
+const ws = new WebSocket(`${wsUrl}?token=${token}`);
 ```
 
-### Fix 3: Check Cookie Settings
+### Fix 3: Verify Token is Valid
 
-```python
-# Backend cookie settings
-response.set_cookie(
-    key="mdb_auth_token",
-    value=token,
-    httponly=True,
-    secure=False,  # False for localhost, True for HTTPS
-    samesite="lax",  # Allows cross-site cookies
-)
+```javascript
+// Check token before connecting
+const token = getAuthToken();
+if (!token) {
+  console.error('No token - authenticate first');
+  // Redirect to login or refresh token
+  return;
+}
+
+// Check token expiration
+const payload = JSON.parse(atob(token.split('.')[1]));
+const expiresAt = payload.exp * 1000;
+if (Date.now() >= expiresAt) {
+  console.warn('Token expired - refreshing...');
+  await refreshToken();
+}
+
+// Connect with valid token
+const ws = new WebSocket(url, [getAuthToken()]);
 ```
 
 ### Fix 4: Restart Server After Config Changes
@@ -934,6 +1039,7 @@ uvicorn main:app --reload
 ---
 
 **Related Documentation:**
+- [WebSocket Security Guide](./WEBSOCKET_SECURITY_MULTI_APP_SSO.md) - **Comprehensive security guide**
 - [WebSocket + SSO Multi-App Guide](./WEBSOCKET_SSO_MULTI_APP.md)
 - [SSO Multi-App Setup Guide](./SSO_MULTI_APP_SETUP.md)
 - [SSO Multi-App Cheat Sheet](../api/SSO_MULTI_APP_CHEATSHEET.md)
