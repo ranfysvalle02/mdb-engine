@@ -12,12 +12,14 @@ When deploying multiple SSO apps with WebSocket support, you need to ensure:
 4. ✅ **Origin validation** works correctly for WebSocket upgrade requests
 5. ✅ **Cookie-based authentication** - JWT tokens stored in httpOnly cookies
 
-**Security Note**: MDB-Engine uses **httpOnly cookies** for WebSocket authentication. This method:
-- Provides XSS protection (tokens not accessible to JavaScript)
-- CSRF protection via Origin validation + SameSite cookies
-- Avoids URL logging risks (token not in query params)
-- Uses browser-native WebSocket API (cookies sent automatically)
-- Provides secure token transmission
+**Security Note**: MDB-Engine uses **secure-by-default WebSocket authentication** with encrypted session keys:
+- **Session keys** generated on login, encrypted via envelope encryption, stored in private collection
+- **CSRF protection** enforced by default (`csrf_required: true`) using encrypted session keys
+- **Origin validation** always required for WebSocket connections
+- **Fallback support** for cookie-based authentication (backward compatibility)
+- **Parent app manages security** - validates once, passes authenticated context to child apps
+- **XSS protection** - session keys not accessible to JavaScript (sent via query param or header)
+- **Defense-in-depth** - multiple security layers (Origin + encrypted session keys + SameSite cookies)
 
 See [WebSocket Security Guide](./WEBSOCKET_SECURITY_MULTI_APP_SSO.md) for comprehensive security details.
 
@@ -53,8 +55,10 @@ Before diving into details, ensure you have:
 - [ ] **Backend**: CORS configured with `allow_credentials: true`
 - [ ] **Backend**: WebSocket endpoint defined in manifest
 - [ ] **Backend**: CSRF middleware enabled (automatic for shared auth)
+- [ ] **Backend**: WebSocket session manager initialized (automatic if encryption service available)
 - [ ] **Frontend**: User authenticated before connecting WebSocket
-- [ ] **Frontend**: WebSocket URL includes full path prefix (e.g., `/app1/ws`)
+- [ ] **Frontend**: WebSocket session key obtained from `/auth/websocket-session` endpoint
+- [ ] **Frontend**: WebSocket URL includes full path prefix and session key (e.g., `/app1/ws?session_key=...`)
 
 ## Manifest Configuration
 
@@ -115,7 +119,8 @@ Before diving into details, ensure you have:
       "description": "Real-time updates",
       "auth": {
         "required": true,
-        "allow_anonymous": false
+        "allow_anonymous": false,
+        "csrf_required": true  // Default: Secure-by-default using encrypted session keys
       },
       "ping_interval": 30
     }
@@ -287,37 +292,85 @@ WebSocket routes are **automatically registered** on the parent app with full pa
 
 ## Frontend Setup
 
-### Step 1: Ensure User Is Authenticated
+### Step 1: Authenticate and Get WebSocket Session Key
 
-**CRITICAL**: User must be logged in before connecting WebSocket. The httpOnly cookie is set during login:
+**SECURE-BY-DEFAULT**: MDB-Engine generates encrypted WebSocket session keys on login. Use these for WebSocket connections:
 
 ```typescript
-// Login first - this sets the httpOnly cookie
-async function login(email: string, password: string) {
-  const response = await fetch('/auth-hub/login', {
+// After successful login, get WebSocket session key
+async function loginAndGetSessionKey(email: string, password: string) {
+  // 1. Login (sets httpOnly cookies)
+  const loginResponse = await fetch('/auth-hub/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    credentials: 'include', // IMPORTANT: sends cookies
-    body: JSON.stringify({ email, password })
+    credentials: 'include',
+    body: JSON.stringify({ email, password }),
   });
   
-  if (response.ok) {
-    // Cookie is now set - can connect WebSocket
-    return await response.json();
+  const loginData = await loginResponse.json();
+  
+  // 2. Get WebSocket session key (if not included in login response)
+  let sessionKey = loginData.websocket_session_key;
+  
+  if (!sessionKey) {
+    const sessionResponse = await fetch('/auth/websocket-session', {
+      method: 'GET',
+      credentials: 'include',
+    });
+    
+    if (sessionResponse.ok) {
+      const sessionData = await sessionResponse.json();
+      sessionKey = sessionData.session_key;
+    }
   }
-  throw new Error('Login failed');
+  
+  return { loginData, sessionKey };
 }
-
-// After login, cookie is available for WebSocket
-await login('user@example.com', 'password');
 ```
 
-### Step 2: Connect WebSocket
+### Step 2: Connect WebSocket with Session Key
 
-**IMPORTANT**: MDB-Engine uses **httpOnly cookies** for WebSocket authentication. The browser automatically sends cookies on WebSocket upgrade requests - no token needed in JavaScript!
+**SECURE-BY-DEFAULT**: Use session key for WebSocket connections (CSRF protection enforced):
 
 ```typescript
-// Connect to WebSocket - browser automatically sends httpOnly cookies
+// Connect WebSocket with session key
+async function connectWebSocket(sessionKey: string) {
+  const wsUrl = `wss://api.example.com/app1/ws?session_key=${sessionKey}`;
+  
+  const ws = new WebSocket(wsUrl);
+  
+  ws.onopen = () => {
+    console.log('WebSocket connected securely');
+  };
+  
+  ws.onerror = (error) => {
+    console.error('WebSocket error:', error);
+  };
+  
+  return ws;
+}
+```
+
+**Alternative**: Session key can also be sent via header (if your WebSocket library supports it):
+
+```typescript
+// Some WebSocket libraries support custom headers
+const ws = new WebSocket('wss://api.example.com/app1/ws', {
+  headers: {
+    'X-WebSocket-Session-Key': sessionKey,
+  },
+});
+```
+
+### Step 3: Fallback to Cookie-Based Authentication (Backward Compatibility)
+
+If session key is not available, WebSocket authentication falls back to cookie-based auth:
+
+```typescript
+// Fallback: Cookie-based authentication (backward compatibility)
+// Ensure user is logged in before connecting WebSocket
+const ws = new WebSocket('ws://localhost:8000/app1/ws');
+// Browser automatically sends httpOnly cookies
 // CRITICAL: Include full path prefix (e.g., /app1/ws, not /ws)
 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 const wsUrl = `${protocol}//${window.location.host}/app1/ws`;
@@ -592,51 +645,74 @@ for route in app.routes:
 **Symptoms:**
 - WebSocket connects then immediately closes
 - Error code 1008 (Policy Violation)
-- Server logs show "No mdb_auth_token cookie found" or "No token cookie found"
+- Server logs show "WebSocket session key missing" or "No mdb_auth_token cookie found"
 
 **Causes & Solutions:**
 
-1. **Cookie Not Set During Login**
+1. **Session Key Not Generated**
    ```python
-   # ✅ CORRECT: Use set_auth_cookies() helper
-   from mdb_engine.auth.cookie_utils import set_auth_cookies
-   
-   response = JSONResponse({"success": True})
-   set_auth_cookies(response, access_token, refresh_token, request=request)
+   # ✅ CORRECT: Session key is generated automatically on login
+   # Check login response includes websocket_session_key
+   login_result = await login_user(request, email, password, db, config)
+   if login_result.get("success"):
+       session_key = login_result.get("websocket_session_key")
    ```
 
-2. **Cookie Path Issue (Multi-App)**
-   ```python
-   # ✅ CORRECT: path="/" is set automatically by set_auth_cookies()
-   # Verify in browser DevTools → Application → Cookies
-   # Cookie should show: Path: /
-   ```
-
-3. **Token Expired**
+2. **Session Key Not Included in WebSocket URL**
    ```typescript
-   // Refresh token before connecting
-   async function refreshToken() {
-     const response = await fetch('/auth-hub/refresh', {
-       method: 'POST',
+   // ✅ CORRECT: Include session key in WebSocket URL
+   const sessionKey = await getWebSocketSessionKey();
+   const ws = new WebSocket(`ws://localhost:8000/app1/ws?session_key=${sessionKey}`);
+   
+   // ❌ WRONG: Missing session key
+   // const ws = new WebSocket('ws://localhost:8000/app1/ws');
+   ```
+
+3. **Session Key Expired**
+   ```typescript
+   // Get a new session key if expired
+   async function refreshSessionKey() {
+     const response = await fetch('/auth/websocket-session', {
+       method: 'GET',
        credentials: 'include'
      });
-     return response.ok;
+     if (response.ok) {
+       const data = await response.json();
+       return data.session_key;
+     }
+     return null;
    }
    
-   // Connect after refresh
-   await refreshToken();
+   // Connect with fresh session key
+   const sessionKey = await refreshSessionKey();
+   const ws = new WebSocket(`ws://localhost:8000/app1/ws?session_key=${sessionKey}`);
+   ```
+
+4. **Fallback: Cookie-Based Authentication**
+   ```typescript
+   // If session key not available, falls back to cookie-based auth
+   // Ensure httpOnly cookie is set during login
    const ws = new WebSocket('ws://localhost:8000/app1/ws');
+   // Cookie sent automatically by browser
    ```
 
 **Debug Steps:**
 ```javascript
+// Check session key endpoint
+async function checkSessionKey() {
+  const response = await fetch('/auth/websocket-session', {
+    method: 'GET',
+    credentials: 'include'
+  });
+  console.log('Session key response:', await response.json());
+}
+
 // Check cookies in browser console
 console.log('Cookies:', document.cookie);
 
 // Check in DevTools → Application → Cookies
 // Should see:
-// - token: <jwt-token> (httpOnly: true, Path: /)
-// - csrf_token: <csrf-token> (httpOnly: false, Path: /)
+// - mdb_auth_token: <jwt-token> (httpOnly: true, Path: /)
 ```
 
 ### Issue 3: WebSocket Route Not Found (404)

@@ -9,7 +9,7 @@ Tests cover:
 - WebSocket Origin validation (CSWSH protection)
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import FastAPI
@@ -26,6 +26,7 @@ from mdb_engine.auth.csrf import (
     validate_csrf_token,
 )
 from mdb_engine.auth.shared_middleware import AUTH_COOKIE_NAME
+from mdb_engine.auth.websocket_sessions import WebSocketSessionManager
 
 
 class TestTokenGeneration:
@@ -98,6 +99,209 @@ class TestTokenValidation:
             # Simulate time passing
             mock_time.time.return_value = time.time() + 10000
             assert validate_csrf_token(token, secret=secret, max_age=1) is False
+
+
+class TestWebSocketSessionKeyValidation:
+    """Tests for WebSocket session key validation in CSRF middleware."""
+
+    @pytest.fixture
+    def app_with_session_manager(self):
+        """Create FastAPI app with WebSocket session manager."""
+        import base64
+        import os
+
+        from mdb_engine.auth.websocket_sessions import WebSocketSessionManager
+        from mdb_engine.core.encryption import EnvelopeEncryptionService
+
+        app = FastAPI()
+
+        # Set up encryption service
+        if "MDB_ENGINE_MASTER_KEY" not in os.environ:
+            test_master_key = base64.b64encode(b"x" * 32).decode()
+            os.environ["MDB_ENGINE_MASTER_KEY"] = test_master_key
+
+        encryption_service = EnvelopeEncryptionService()
+
+        # Mock MongoDB database
+        mock_db = MagicMock()
+        mock_collection = MagicMock()
+        mock_db.__getitem__ = MagicMock(return_value=mock_collection)
+
+        session_manager = WebSocketSessionManager(mock_db, encryption_service)
+        app.state.websocket_session_manager = session_manager
+        app.state.cors_config = {"allow_origins": ["https://example.com"]}
+        app.state.websocket_configs = {
+            "test_app": {
+                "realtime": {
+                    "path": "/ws",
+                    "auth": {"required": True, "csrf_required": True},
+                }
+            }
+        }
+
+        app.add_middleware(CSRFMiddleware)
+
+        return app, session_manager, mock_collection
+
+    @pytest.mark.asyncio
+    async def test_websocket_with_valid_session_key_accepted(self, app_with_session_manager):
+        """Test that WebSocket upgrade with valid session key is accepted."""
+        app, session_manager, mock_collection = app_with_session_manager
+
+        # Create a valid session
+        session_key = WebSocketSessionManager.generate_session_key()
+        from datetime import datetime, timedelta
+
+        expires_at = datetime.utcnow() + timedelta(hours=24)
+
+        # Mock session validation
+        async def mock_find_one(query):
+            if query.get("_id") == session_key:
+                # Return valid session
+                encrypted_key, encrypted_dek = session_manager._encryption_service.encrypt_secret(
+                    session_key
+                )
+                import base64
+
+                return {
+                    "_id": session_key,
+                    "user_id": "user123",
+                    "user_email": "test@example.com",
+                    "encrypted_key": base64.b64encode(encrypted_key).decode(),
+                    "encrypted_dek": base64.b64encode(encrypted_dek).decode(),
+                    "expires_at": expires_at,
+                }
+            return None
+
+        mock_collection.find_one = AsyncMock(side_effect=mock_find_one)
+
+        # Create mock WebSocket upgrade request
+        from unittest.mock import MagicMock
+
+        request = MagicMock(spec=Request)
+        request.app = app
+        request.url.path = "/test_app/ws"
+        request.method = "GET"
+        # Create a proper headers mock that supports .get() method
+        headers_dict = {
+            "upgrade": "websocket",
+            "connection": "upgrade",
+            "origin": "https://example.com",
+        }
+        headers_mock = MagicMock()
+        headers_mock.get = lambda key, default=None: headers_dict.get(key.lower(), default)
+        headers_mock.__getitem__ = lambda key: headers_dict[key.lower()]
+        headers_mock.__contains__ = lambda key: key.lower() in headers_dict
+        request.headers = headers_mock
+        request.cookies = {AUTH_COOKIE_NAME: "valid_token"}
+        request.query_params = MagicMock()
+        request.query_params.get = MagicMock(return_value=session_key)
+
+        # Mock call_next
+        async def mock_call_next(req):
+            from fastapi.responses import JSONResponse
+
+            return JSONResponse({"status": "ok"})
+
+        middleware = CSRFMiddleware(app)
+
+        # Process request
+        response = await middleware.dispatch(request, mock_call_next)
+
+        # Should be accepted (not 403)
+        assert response.status_code != 403
+
+    @pytest.mark.asyncio
+    async def test_websocket_with_invalid_session_key_rejected(self, app_with_session_manager):
+        """Test that WebSocket upgrade with invalid session key is rejected."""
+        app, session_manager, mock_collection = app_with_session_manager
+
+        invalid_session_key = "invalid_key_12345"
+
+        # Mock session validation returning None
+        mock_collection.find_one = AsyncMock(return_value=None)
+
+        # Create mock WebSocket upgrade request
+        from unittest.mock import MagicMock
+
+        request = MagicMock(spec=Request)
+        request.app = app
+        request.url.path = "/test_app/ws"
+        request.method = "GET"
+        # Create a proper headers mock that supports .get() method
+        headers_dict = {
+            "upgrade": "websocket",
+            "connection": "upgrade",
+            "origin": "https://example.com",
+        }
+        headers_mock = MagicMock()
+        headers_mock.get = lambda key, default=None: headers_dict.get(key.lower(), default)
+        headers_mock.__getitem__ = lambda key: headers_dict[key.lower()]
+        headers_mock.__contains__ = lambda key: key.lower() in headers_dict
+        request.headers = headers_mock
+        request.cookies = {AUTH_COOKIE_NAME: "valid_token"}
+        request.query_params = MagicMock()
+        request.query_params.get = MagicMock(return_value=invalid_session_key)
+
+        # Mock call_next
+        async def mock_call_next(req):
+            from fastapi.responses import JSONResponse
+
+            return JSONResponse({"status": "ok"})
+
+        middleware = CSRFMiddleware(app)
+
+        # Process request
+        response = await middleware.dispatch(request, mock_call_next)
+
+        # Should be rejected (403)
+        assert response.status_code == 403
+
+    def test_websocket_csrf_required_defaults_to_true(self):
+        """Test that csrf_required defaults to True (security by default)."""
+        app = FastAPI()
+        app.state.websocket_configs = {
+            "test_app": {
+                "realtime": {
+                    "path": "/ws",
+                    "auth": {"required": True},  # csrf_required not specified
+                }
+            }
+        }
+
+        middleware = CSRFMiddleware(app)
+
+        # Create mock request
+        request = MagicMock(spec=Request)
+        request.app = app
+        request.url.path = "/test_app/ws"
+
+        # Check csrf_required (should default to True)
+        csrf_required = middleware._websocket_requires_csrf(request, "/test_app/ws")
+        assert csrf_required is True
+
+    def test_websocket_csrf_required_can_be_disabled(self):
+        """Test that csrf_required can be disabled per endpoint."""
+        app = FastAPI()
+        app.state.websocket_configs = {
+            "test_app": {
+                "realtime": {
+                    "path": "/ws",
+                    "auth": {"required": True, "csrf_required": False},
+                }
+            }
+        }
+
+        middleware = CSRFMiddleware(app)
+
+        # Create mock request
+        request = MagicMock(spec=Request)
+        request.app = app
+        request.url.path = "/test_app/ws"
+
+        # Check csrf_required (should be False)
+        csrf_required = middleware._websocket_requires_csrf(request, "/test_app/ws")
+        assert csrf_required is False
 
 
 class TestCSRFMiddleware:
@@ -285,9 +489,13 @@ class TestWebSocketOriginValidation:
         """Test that WebSocket upgrade requests are detected."""
         middleware = CSRFMiddleware(MagicMock())
         request = MagicMock(spec=Request)
-        request.headers.get = lambda key, default="": {"upgrade": "websocket"}.get(
-            key.lower(), default
-        )
+        headers_dict = {
+            "upgrade": "websocket",
+            "connection": "upgrade",
+        }
+        headers_mock = MagicMock()
+        headers_mock.get = lambda key, default="": headers_dict.get(key.lower(), default)
+        request.headers = headers_mock
 
         assert middleware._is_websocket_upgrade(request) is True
 
@@ -306,11 +514,21 @@ class TestWebSocketOriginValidation:
         client = TestClient(app, raise_server_exceptions=False)
 
         app.state.cors_config = {"allow_origins": ["https://example.com"]}
+        # Configure WebSocket route to disable CSRF requirement for this test
+        app.state.websocket_configs = {
+            "test_app": {
+                "realtime": {
+                    "path": "/",
+                    "auth": {"required": False, "csrf_required": False},  # No auth, no CSRF
+                }
+            }
+        }
 
         response = client.get(
             "/",
             headers={
                 "upgrade": "websocket",
+                "connection": "upgrade",
                 "origin": "https://example.com",
             },
         )
@@ -321,11 +539,21 @@ class TestWebSocketOriginValidation:
         client = TestClient(app, raise_server_exceptions=False)
 
         app.state.cors_config = {"allow_origins": ["https://example.com"]}
+        # Configure WebSocket route
+        app.state.websocket_configs = {
+            "test_app": {
+                "realtime": {
+                    "path": "/",
+                    "auth": {"required": False, "csrf_required": False},
+                }
+            }
+        }
 
         response = client.get(
             "/",
             headers={
                 "upgrade": "websocket",
+                "connection": "upgrade",
                 "origin": "https://evil.com",
             },
         )
@@ -337,11 +565,21 @@ class TestWebSocketOriginValidation:
         client = TestClient(app, raise_server_exceptions=False)
 
         app.state.cors_config = {"allow_origins": ["https://example.com"]}
+        # Configure WebSocket route
+        app.state.websocket_configs = {
+            "test_app": {
+                "realtime": {
+                    "path": "/",
+                    "auth": {"required": False, "csrf_required": False},
+                }
+            }
+        }
 
         response = client.get(
             "/",
             headers={
                 "upgrade": "websocket",
+                "connection": "upgrade",
             },
         )
         assert response.status_code == 403
@@ -352,12 +590,22 @@ class TestWebSocketOriginValidation:
         client = TestClient(app, raise_server_exceptions=False)
 
         app.state.cors_config = {"allow_origins": ["*"]}
+        # Configure WebSocket route
+        app.state.websocket_configs = {
+            "test_app": {
+                "realtime": {
+                    "path": "/",
+                    "auth": {"required": False, "csrf_required": False},
+                }
+            }
+        }
 
         with patch("mdb_engine.auth.csrf.logger") as mock_logger:
             response = client.get(
                 "/",
                 headers={
                     "upgrade": "websocket",
+                    "connection": "upgrade",
                     "origin": "https://any-origin.com",
                 },
             )
@@ -370,11 +618,21 @@ class TestWebSocketOriginValidation:
         client = TestClient(app, raise_server_exceptions=False)
 
         app.state.cors_config = {"allow_origins": ["https://app1.com", "https://app2.com"]}
+        # Configure WebSocket route
+        app.state.websocket_configs = {
+            "test_app": {
+                "realtime": {
+                    "path": "/",
+                    "auth": {"required": False, "csrf_required": False},
+                }
+            }
+        }
 
         response = client.get(
             "/",
             headers={
                 "upgrade": "websocket",
+                "connection": "upgrade",
                 "origin": "https://app1.com",
             },
         )
@@ -384,6 +642,7 @@ class TestWebSocketOriginValidation:
             "/",
             headers={
                 "upgrade": "websocket",
+                "connection": "upgrade",
                 "origin": "https://app2.com",
             },
         )
@@ -393,6 +652,7 @@ class TestWebSocketOriginValidation:
             "/",
             headers={
                 "upgrade": "websocket",
+                "connection": "upgrade",
                 "origin": "https://app3.com",
             },
         )
@@ -555,6 +815,15 @@ class TestWebSocketOriginValidation:
             "enabled": True,
             "allow_origins": ["https://example.com"],
         }
+        # Configure WebSocket route at /test/ws
+        app.state.websocket_configs = {
+            "test_app": {
+                "realtime": {
+                    "path": "/test/ws",
+                    "auth": {"required": False, "csrf_required": False},
+                }
+            }
+        }
 
         # Capture warning logs
         log_capture = []
@@ -569,6 +838,7 @@ class TestWebSocketOriginValidation:
             "/test/ws",
             headers={
                 "upgrade": "websocket",
+                "connection": "upgrade",
                 "origin": "https://evil.com",
             },
         )
@@ -637,6 +907,21 @@ class TestWebSocketCSRFValidation:
         def get_root():
             return {"message": "ok"}
 
+        # Configure WebSocket to use cookie-based CSRF (not session keys)
+        # This allows tests to verify cookie-based CSRF behavior
+        # Note: No websocket_session_manager is set, so it will fall back to cookie-based CSRF
+        app.state.websocket_configs = {
+            "test_app": {
+                "realtime": {
+                    "path": "/",
+                    "auth": {
+                        "required": True,
+                        "csrf_required": True,
+                    },  # CSRF required, will use cookie-based fallback
+                }
+            }
+        }
+
         app.add_middleware(CSRFMiddleware)
 
         return app
@@ -652,6 +937,7 @@ class TestWebSocketCSRFValidation:
             "/",
             headers={
                 "upgrade": "websocket",
+                "connection": "upgrade",
                 "origin": "https://example.com",
             },
             cookies={"mdb_auth_token": "auth-token"},  # Auth cookie present, no CSRF cookie
@@ -700,6 +986,7 @@ class TestWebSocketCSRFValidation:
             "/",
             headers={
                 "upgrade": "websocket",
+                "connection": "upgrade",
                 "origin": "https://example.com",
                 CSRF_HEADER_NAME: csrf_token,  # Optional header, but validated if present
             },
@@ -715,6 +1002,7 @@ class TestWebSocketCSRFValidation:
             "/",
             headers={
                 "upgrade": "websocket",
+                "connection": "upgrade",
                 "origin": "https://example.com",
                 CSRF_HEADER_NAME: "different-token",  # Mismatched header
             },
@@ -741,6 +1029,7 @@ class TestWebSocketCSRFValidation:
             "/",
             headers={
                 "upgrade": "websocket",
+                "connection": "upgrade",
                 "origin": "https://example.com",
                 CSRF_HEADER_NAME: "different-token",
             },
@@ -780,6 +1069,7 @@ class TestWebSocketCSRFValidation:
             "/",
             headers={
                 "upgrade": "websocket",
+                "connection": "upgrade",
                 "origin": "https://evil.com",  # Invalid origin
             },
             cookies={AUTH_COOKIE_NAME: "auth-token"},

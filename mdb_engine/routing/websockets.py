@@ -365,12 +365,11 @@ async def authenticate_websocket(
     require_auth: bool = True,
 ) -> tuple[str | None, str | None]:
     """
-    Authenticate a WebSocket connection via httpOnly cookies.
+    Authenticate a WebSocket connection via session key or httpOnly cookies.
 
-    Uses cookie-based authentication with CSRF protection:
-    - Token stored in httpOnly cookie (not accessible to JavaScript)
-    - CSRF token validated via double-submit cookie pattern
-    - Origin validation provides additional protection
+    Authentication methods (in order of preference):
+    1. Session key (query param or header) - secure-by-default, uses envelope encryption
+    2. Cookie-based authentication - backward compatibility fallback
 
     Args:
         websocket: FastAPI WebSocket instance (can access headers before accept)
@@ -394,8 +393,51 @@ async def authenticate_websocket(
         return None, None
 
     try:
-        # Extract token from httpOnly cookie
-        # Use same cookie name as SharedAuthMiddleware for consistency
+        # Try to get WebSocket session manager from app
+        websocket_session_manager = None
+        try:
+            app = getattr(websocket, "app", None)
+            if app:
+                websocket_session_manager = getattr(app.state, "websocket_session_manager", None)
+        except (AttributeError, TypeError):
+            pass
+
+        # Method 1: Try session key authentication (secure-by-default)
+        session_key = None
+        try:
+            # Check query params first
+            if hasattr(websocket, "query_params"):
+                session_key = websocket.query_params.get("session_key")
+
+            # Check headers if not in query params
+            if not session_key and hasattr(websocket, "headers"):
+                session_key = websocket.headers.get("X-WebSocket-Session-Key")
+        except (AttributeError, TypeError, KeyError):
+            pass
+
+        if session_key and websocket_session_manager:
+            try:
+                # Validate session key
+                session_data = await websocket_session_manager.validate_session(session_key)
+                if session_data:
+                    user_id = session_data.get("user_id")
+                    user_email = session_data.get("user_email")
+
+                    logger.info(
+                        f"WebSocket authenticated successfully for app '{app_slug}': {user_email} "
+                        f"(method: session_key)"
+                    )
+                    return user_id, user_email
+                else:
+                    logger.warning(
+                        f"WebSocket session key validation failed for app '{app_slug}'. "
+                        f"Session key: {session_key[:16]}..."
+                    )
+            except (ValueError, TypeError, AttributeError, KeyError, RuntimeError) as e:
+                logger.warning(f"WebSocket session key validation error for app '{app_slug}': {e}")
+                # Fall through to cookie-based auth
+
+        # Method 2: Fall back to cookie-based authentication (backward compatibility)
         from ..auth.shared_middleware import AUTH_COOKIE_NAME
 
         cookies = _get_cookies_from_websocket(websocket)
@@ -403,17 +445,19 @@ async def authenticate_websocket(
 
         if not token:
             logger.error(
-                f"❌ No token cookie found for WebSocket connection to app '{app_slug}' "
+                f"❌ No authentication found for WebSocket connection to app '{app_slug}' "
                 f"(require_auth={require_auth}). "
+                f"Session key: {bool(session_key)}, Cookie: {bool(token)}, "
                 f"Available cookies: {list(cookies.keys()) if cookies else 'none'}. "
-                f"Ensure httpOnly cookie is set during authentication."
+                f"Ensure session key or httpOnly cookie is set during authentication."
             )
             if require_auth:
                 return None, None  # Signal auth failure
             return None, None
 
         logger.info(
-            f"WebSocket token found in cookie for app '{app_slug}' " "(cookie-based authentication)"
+            f"WebSocket token found in cookie for app '{app_slug}' "
+            "(cookie-based authentication, fallback)"
         )
 
         # Decode and validate token

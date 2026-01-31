@@ -514,16 +514,41 @@ async def login_user(
                 ip_address=device_info.get("ip_address"),
             )
 
+        # Generate WebSocket session key if WebSocket session manager available
+        websocket_session_key = None
+        try:
+            # Try to get WebSocket session manager from app state
+            app = getattr(request, "app", None)
+            if app:
+                websocket_session_manager = getattr(app.state, "websocket_session_manager", None)
+                if websocket_session_manager:
+                    # Get app slug from request state if available
+                    app_slug = getattr(request.state, "app_slug", None)
+                    websocket_session_key = await websocket_session_manager.create_session(
+                        user_id=str(user["_id"]),
+                        user_email=user["email"],
+                        app_slug=app_slug,
+                    )
+                    logger.debug(
+                        f"Generated WebSocket session key for user '{user['email']}' "
+                        f"(app: {app_slug})"
+                    )
+        except (ValueError, TypeError, AttributeError, RuntimeError) as e:
+            # Log but don't fail login if WebSocket session generation fails
+            logger.warning(f"Failed to generate WebSocket session key during login: {e}")
+
         # Create response
+        response_data = {
+            "success": True,
+            "user": {"email": user["email"], "user_id": str(user["_id"])},
+        }
+        if websocket_session_key:
+            response_data["websocket_session_key"] = websocket_session_key
+
         if redirect_url:
             response = RedirectResponse(url=redirect_url, status_code=302)
         else:
-            response = JSONResponse(
-                {
-                    "success": True,
-                    "user": {"email": user["email"], "user_id": str(user["_id"])},
-                }
-            )
+            response = JSONResponse(response_data)
 
         # Set cookies
         set_auth_cookies(

@@ -934,7 +934,7 @@ async def my_route(request: Request):
 
 ### Quick Setup
 
-MDB-Engine uses **httpOnly cookies** for secure WebSocket authentication in multi-app SSO setups.
+MDB-Engine uses **secure-by-default WebSocket authentication** with encrypted session keys in multi-app SSO setups.
 
 #### 1. Configure WebSocket in Manifest
 
@@ -944,7 +944,8 @@ MDB-Engine uses **httpOnly cookies** for secure WebSocket authentication in mult
     "realtime": {
       "path": "/ws",
       "auth": {
-        "required": true
+        "required": true,
+        "csrf_required": true  // Default: secure-by-default with encrypted session keys
       },
       "ping_interval": 30
     }
@@ -963,9 +964,19 @@ MDB-Engine uses **httpOnly cookies** for secure WebSocket authentication in mult
 #### 2. Client Connection
 
 ```javascript
-// No token needed - browser automatically sends httpOnly cookies
-// Ensure user is authenticated and cookie is set before connecting
-const ws = new WebSocket('wss://api.example.com/app1/ws');
+// Step 1: Get WebSocket session key after login
+async function getWebSocketSessionKey() {
+  const response = await fetch('/auth/websocket-session', {
+    method: 'GET',
+    credentials: 'include',
+  });
+  const data = await response.json();
+  return data.session_key;
+}
+
+// Step 2: Connect WebSocket with session key
+const sessionKey = await getWebSocketSessionKey();
+const ws = new WebSocket(`wss://api.example.com/app1/ws?session_key=${sessionKey}`);
 
 ws.onopen = () => {
   console.log('WebSocket connected securely');
@@ -974,11 +985,12 @@ ws.onopen = () => {
 
 #### 3. Security Benefits
 
-- ✅ **XSS Protection** - Tokens not accessible to JavaScript
-- ✅ **CSRF Protection** - Origin validation + SameSite cookies
-- ✅ **Avoids URL logging** - Token not in query params
-- ✅ **Browser-native** - Standard WebSocket API
-- ✅ **Secure** - Server validates token before accepting connection
+- ✅ **XSS Protection** - Session keys not accessible to JavaScript
+- ✅ **CSRF Protection** - Encrypted session keys + Origin validation + SameSite cookies
+- ✅ **Defense-in-Depth** - Multiple security layers
+- ✅ **Encrypted Storage** - Session keys encrypted via envelope encryption
+- ✅ **Secure-by-Default** - CSRF required by default
+- ✅ **Backward Compatible** - Falls back to cookie-based auth if needed
 
 **For comprehensive security documentation, see:**
 - [WebSocket Security Guide](./WEBSOCKET_SECURITY_MULTI_APP_SSO.md) - Complete security guide

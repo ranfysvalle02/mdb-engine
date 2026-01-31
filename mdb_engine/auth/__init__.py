@@ -125,6 +125,12 @@ from .utils import (
     validate_password_strength_async,
 )
 
+# WebSocket sessions
+from .websocket_sessions import (
+    WebSocketSessionManager,
+    create_websocket_session_endpoint,
+)
+
 __all__ = [
     # Base classes
     "BaseAuthorizationProvider",
@@ -232,4 +238,7 @@ __all__ = [
     "generate_csrf_token",
     "validate_csrf_token",
     "get_csrf_token",
+    # WebSocket sessions
+    "WebSocketSessionManager",
+    "create_websocket_session_endpoint",
 ]

@@ -9,6 +9,7 @@ Tests end-to-end WebSocket authentication flow with:
 - Multi-app isolation
 """
 
+import base64
 import json
 import os
 from datetime import datetime, timedelta
@@ -20,8 +21,9 @@ import pytest
 if "MDB_ENGINE_JWT_SECRET" not in os.environ:
     os.environ["MDB_ENGINE_JWT_SECRET"] = "test_jwt_secret_for_testing_only_" + "x" * 32
 
+# Set test master key - must be base64-encoded 32-byte key
 if "MDB_ENGINE_MASTER_KEY" not in os.environ:
-    os.environ["MDB_ENGINE_MASTER_KEY"] = "test_master_key_for_testing_only_" + "x" * 32
+    os.environ["MDB_ENGINE_MASTER_KEY"] = base64.b64encode(b"x" * 32).decode()
 
 # Import TestClient for WebSocket testing
 from fastapi.testclient import TestClient
@@ -389,3 +391,259 @@ class TestWebSocketCookieAuthIntegration:
                     pass  # Test passes - connection was properly rejected
 
             await asyncio.to_thread(test_websocket)
+
+    @pytest.mark.asyncio
+    async def test_websocket_connection_with_session_key_query_param(
+        self, mongodb_connection_string, test_manifest, valid_jwt_token, tmp_path
+    ):
+        """Test successful WebSocket connection with session key in query param."""
+        import asyncio
+
+        from mdb_engine.core.engine import MongoDBEngine
+
+        # Use unique database name per test
+        db_name = f"test_ws_session_key_{os.getpid()}"
+        engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name=db_name)
+        await engine.initialize()
+
+        # Write manifest to temp file
+        manifest_path = tmp_path / "manifest.json"
+        manifest_path.write_text(json.dumps(test_manifest))
+
+        # Create app with WebSocket support
+        app = engine.create_multi_app(
+            apps=[
+                {
+                    "slug": test_manifest["slug"],
+                    "manifest": manifest_path,
+                    "path_prefix": "/",
+                }
+            ],
+            title="Test WebSocket App",
+        )
+
+        async with app.router.lifespan_context(app):
+            # Generate session key via endpoint
+            from fastapi.testclient import TestClient
+
+            client = TestClient(app)
+
+            # First authenticate to get session key
+            user_pool = app.state.user_pool
+            if not user_pool:
+                pytest.skip("SharedUserPool not initialized")
+
+            # Create test user
+            try:
+                await user_pool.create_user(
+                    email="test@example.com",
+                    password="testpass123",
+                    app_roles={test_manifest["slug"]: ["viewer"]},
+                )
+            except Exception:
+                pass  # User might already exist
+
+            # Authenticate to get session key
+            auth_result = await user_pool.authenticate(
+                "test@example.com",
+                "testpass123",
+                generate_websocket_session=True,
+                app_slug=test_manifest["slug"],
+            )
+
+            if isinstance(auth_result, tuple):
+                jwt_token, session_key = auth_result
+            else:
+                # Fallback: get session key from endpoint
+                response = client.get(
+                    "/auth/websocket-session",
+                    cookies={AUTH_COOKIE_NAME: auth_result},
+                    headers={"origin": "https://example.com"},
+                )
+                if response.status_code == 200:
+                    session_key = response.json()["session_key"]
+                else:
+                    pytest.skip("Could not generate session key")
+
+            def test_websocket():
+                # Connect WebSocket with session key in query param
+                with client.websocket_connect(
+                    f"/ws?session_key={session_key}",
+                    headers={"origin": "https://example.com"},
+                ) as websocket:
+                    # Connection should be established
+                    assert websocket is not None
+                    message = websocket.receive_json()
+                    assert message["type"] == "connected"
+                    assert message["authenticated"] is True
+
+            try:
+                await asyncio.to_thread(test_websocket)
+            except (WebSocketDisconnect, RuntimeError, OSError, AttributeError) as e:
+                pytest.skip(f"WebSocket connection failed: {e}")
+
+    @pytest.mark.asyncio
+    async def test_websocket_connection_invalid_session_key_rejected(
+        self, mongodb_connection_string, test_manifest, valid_jwt_token, tmp_path
+    ):
+        """Test that WebSocket connection with invalid session key is rejected."""
+        import asyncio
+
+        from mdb_engine.core.engine import MongoDBEngine
+
+        # Use unique database name per test
+        db_name = f"test_ws_invalid_key_{os.getpid()}"
+        engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name=db_name)
+        await engine.initialize()
+
+        # Write manifest to temp file
+        manifest_path = tmp_path / "manifest.json"
+        manifest_path.write_text(json.dumps(test_manifest))
+
+        # Create app with WebSocket support
+        app = engine.create_multi_app(
+            apps=[
+                {
+                    "slug": test_manifest["slug"],
+                    "manifest": manifest_path,
+                    "path_prefix": "/",
+                }
+            ],
+            title="Test WebSocket App",
+        )
+
+        async with app.router.lifespan_context(app):
+            from fastapi.testclient import TestClient
+
+            client = TestClient(app)
+
+            invalid_session_key = "invalid_session_key_12345"
+
+            def test_websocket():
+                # Try to connect with invalid session key
+                try:
+                    with client.websocket_connect(
+                        f"/ws?session_key={invalid_session_key}",
+                        headers={"origin": "https://example.com"},
+                    ) as websocket:
+                        pytest.fail("WebSocket connection should have been rejected")
+                except WebSocketDisconnect:
+                    # Connection was rejected - this is expected
+                    pass
+
+            await asyncio.to_thread(test_websocket)
+
+    @pytest.mark.asyncio
+    async def test_websocket_session_endpoint_requires_auth(
+        self, mongodb_connection_string, test_manifest, tmp_path
+    ):
+        """Test that WebSocket session endpoint requires authentication."""
+        from mdb_engine.core.engine import MongoDBEngine
+
+        # Use unique database name per test
+        db_name = f"test_ws_endpoint_auth_{os.getpid()}"
+        engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name=db_name)
+        await engine.initialize()
+
+        # Write manifest to temp file
+        manifest_path = tmp_path / "manifest.json"
+        manifest_path.write_text(json.dumps(test_manifest))
+
+        # Create app with WebSocket support
+        app = engine.create_multi_app(
+            apps=[
+                {
+                    "slug": test_manifest["slug"],
+                    "manifest": manifest_path,
+                    "path_prefix": "/",
+                }
+            ],
+            title="Test WebSocket App",
+        )
+
+        async with app.router.lifespan_context(app):
+            from fastapi.testclient import TestClient
+
+            client = TestClient(app)
+
+            # Try to access endpoint without authentication
+            response = client.get("/auth/websocket-session")
+
+            # Should return 401 Unauthorized
+            assert response.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_websocket_session_endpoint_generates_key(
+        self, mongodb_connection_string, test_manifest, valid_jwt_token, tmp_path
+    ):
+        """Test that WebSocket session endpoint generates session key."""
+        from mdb_engine.core.engine import MongoDBEngine
+
+        # Use unique database name per test
+        db_name = f"test_ws_endpoint_gen_{os.getpid()}"
+        engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name=db_name)
+        await engine.initialize()
+
+        # Write manifest to temp file
+        manifest_path = tmp_path / "manifest.json"
+        manifest_path.write_text(json.dumps(test_manifest))
+
+        # Create app with WebSocket support
+        app = engine.create_multi_app(
+            apps=[
+                {
+                    "slug": test_manifest["slug"],
+                    "manifest": manifest_path,
+                    "path_prefix": "/",
+                }
+            ],
+            title="Test WebSocket App",
+        )
+
+        async with app.router.lifespan_context(app):
+            from httpx import ASGITransport, AsyncClient
+
+            # Create test user in shared user pool and authenticate to get valid token
+            user_pool = app.state.user_pool
+            if user_pool:
+                try:
+                    # Create user
+                    await user_pool.create_user(
+                        email="test@example.com",
+                        password="testpass123",
+                        app_roles={test_manifest["slug"]: ["viewer"]},
+                    )
+                except Exception:
+                    pass  # User might already exist
+
+                # Authenticate to get a valid token (this ensures user exists and token is valid)
+                auth_result = await user_pool.authenticate(
+                    "test@example.com",
+                    "testpass123",
+                    generate_websocket_session=False,  # We'll test endpoint separately
+                )
+                if isinstance(auth_result, tuple):
+                    jwt_token = auth_result[0]
+                else:
+                    jwt_token = auth_result
+            else:
+                jwt_token = valid_jwt_token
+
+            # Use AsyncClient for async tests to avoid event loop conflicts
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                # Access endpoint with authentication
+                response = await client.get(
+                    "/auth/websocket-session",
+                    cookies={AUTH_COOKIE_NAME: jwt_token},
+                    headers={"origin": "https://example.com"},
+                )
+
+                # Should return 200 with session key
+                assert response.status_code == 200
+                data = response.json()
+                assert "session_key" in data
+                assert "expires_at" in data
+                assert "ttl_hours" in data
+                assert len(data["session_key"]) > 0

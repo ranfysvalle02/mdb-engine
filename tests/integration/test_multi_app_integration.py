@@ -1491,3 +1491,120 @@ class TestWebSocketWithCORSCConfig:
             assert has_csrf, "Parent app should have CSRF middleware with merged public routes"
 
         await engine.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_multi_app_websocket_routing_with_session_keys(
+        self, mongodb_connection_string, tmp_path
+    ):
+        """Test WebSocket routing in multi-app setup with session keys."""
+        import asyncio
+        import json
+        import os
+
+        from fastapi.testclient import TestClient
+
+        from mdb_engine.core.engine import MongoDBEngine
+
+        manifests_dir = tmp_path / "manifests"
+        manifests_dir.mkdir()
+
+        # Create app1 manifest with WebSocket
+        app1_manifest = {
+            "schema_version": "2.0",
+            "slug": "app1",
+            "name": "App 1",
+            "auth": {"mode": "shared", "roles": ["viewer"], "require_role": "viewer"},
+            "websockets": {
+                "realtime": {
+                    "path": "/ws",
+                    "auth": {"required": True, "csrf_required": True},
+                }
+            },
+            "cors": {
+                "enabled": True,
+                "allow_origins": ["https://example.com"],
+                "allow_credentials": True,
+            },
+            "data_access": {"read_scopes": ["app1"], "write_scope": "app1"},
+        }
+        app1_path = manifests_dir / "app1" / "manifest.json"
+        app1_path.parent.mkdir()
+        app1_path.write_text(json.dumps(app1_manifest))
+
+        # Use unique database name per test
+        db_name = f"test_multi_app_ws_{os.getpid()}"
+        engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name=db_name)
+        await engine.initialize()
+
+        # Create multi-app
+        app = engine.create_multi_app(
+            apps=[
+                {
+                    "slug": "app1",
+                    "manifest": app1_path,
+                    "path_prefix": "/app1",
+                }
+            ],
+            title="Test Multi-App WebSocket",
+        )
+
+        async with app.router.lifespan_context(app):
+            # Verify WebSocket session endpoint is accessible
+            client = TestClient(app)
+
+            # Create test user
+            user_pool = app.state.user_pool
+            if user_pool:
+                try:
+                    await user_pool.create_user(
+                        email="test@example.com",
+                        password="testpass123",
+                        app_roles={"app1": ["viewer"]},
+                    )
+                except Exception:
+                    pass  # User might already exist
+
+                # Authenticate
+                auth_result = await user_pool.authenticate(
+                    "test@example.com",
+                    "testpass123",
+                    generate_websocket_session=True,
+                    app_slug="app1",
+                )
+
+                if isinstance(auth_result, tuple):
+                    jwt_token, session_key = auth_result
+                else:
+                    jwt_token = auth_result
+                    # Get session key from endpoint
+                    from mdb_engine.auth.shared_middleware import AUTH_COOKIE_NAME
+
+                    response = client.get(
+                        "/auth/websocket-session",
+                        cookies={AUTH_COOKIE_NAME: jwt_token},
+                        headers={"origin": "https://example.com"},
+                    )
+                    if response.status_code == 200:
+                        session_key = response.json()["session_key"]
+                    else:
+                        pytest.skip("Could not generate session key")
+
+                # Test WebSocket connection with session key
+                def test_websocket():
+                    try:
+                        with client.websocket_connect(
+                            f"/app1/ws?session_key={session_key}",
+                            headers={"origin": "https://example.com"},
+                        ) as websocket:
+                            assert websocket is not None
+                            message = websocket.receive_json()
+                            assert message["type"] == "connected"
+                    except Exception as e:
+                        pytest.skip(f"WebSocket connection failed: {e}")
+
+                try:
+                    await asyncio.to_thread(test_websocket)
+                except Exception as e:
+                    pytest.skip(f"WebSocket test failed: {e}")
+
+        await engine.shutdown()

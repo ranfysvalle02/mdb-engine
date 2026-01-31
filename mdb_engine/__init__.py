@@ -82,15 +82,19 @@ from .repositories import Entity, MongoRepository, Repository, UnitOfWork
 from .utils import clean_mongo_doc, clean_mongo_docs
 
 __version__ = (
-    "0.5.0"  # Major WebSocket security overhaul - cookie-based authentication
-    # - BREAKING CHANGE: Removed subprotocol tunneling support
-    # - NEW: Exclusive httpOnly cookie-based WebSocket authentication
-    # - Comprehensive security guide (WEBSOCKET_SECURITY_MULTI_APP_SSO.md)
-    # - Updated all documentation to reflect cookie-based authentication
-    # - Enhanced CSRF protection for WebSocket upgrades
-    # - Added integration tests for cookie-based WebSocket authentication
-    # - Complete test coverage for WebSocket security scenarios
-    # - Multi-app SSO compatibility with path="/" cookies
+    "0.6.0"  # Secure-by-default WebSocket authentication with encrypted session keys
+    # - NEW: WebSocket session key generation and management
+    # - NEW: Envelope encryption for WebSocket session keys
+    # - NEW: Secure-by-default CSRF protection (csrf_required: true)
+    # - NEW: WebSocketSessionManager with private collection storage
+    # - NEW: Session key endpoint (/auth/websocket-session)
+    # - NEW: Session key integration in login flow
+    # - ENHANCED: WebSocket authentication with session key support
+    # - ENHANCED: CSRF middleware session key validation
+    # - ENHANCED: Multi-app WebSocket routing with session keys
+    # - BACKWARD COMPATIBLE: Cookie-based authentication fallback
+    # - UPDATED: All documentation for secure-by-default approach
+    # - COMPREHENSIVE: Unit and integration tests for session keys
 )
 
 __all__ = [

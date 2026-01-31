@@ -243,6 +243,7 @@ class WebSocketAuthDict(TypedDict, total=False):
 
     required: bool
     allow_anonymous: bool
+    csrf_required: bool  # Whether CSRF cookie is required (default: False)
 
 
 class WebSocketEndpointDict(TypedDict, total=False):

@@ -408,7 +408,9 @@ Enhanced token management with refresh tokens, sessions, and security:
 
 Define real-time WebSocket endpoints with secure cookie-based authentication.
 
-**Security Note**: MDB-Engine uses **httpOnly cookies** for WebSocket authentication. Tokens are stored in httpOnly cookies set during login, and the browser automatically sends them on WebSocket upgrade requests. This provides XSS protection and CSRF protection via Origin validation and SameSite cookies.
+**Security Note**: MDB-Engine uses **secure-by-default WebSocket authentication** with encrypted session keys. Session keys are generated on login, encrypted via envelope encryption, and stored in the `_mdb_engine_websocket_sessions` private collection.
+
+**CSRF Protection**: By default, WebSocket connections require CSRF validation (`csrf_required: true`) using encrypted session keys. This provides defense-in-depth security. The CSRF requirement can be disabled per-endpoint via `auth.csrf_required: false` to use Origin validation + SameSite cookies only.
 
 ```json
 {
@@ -439,6 +441,7 @@ Define real-time WebSocket endpoints with secure cookie-based authentication.
 | `description` | `string` | - | Description of the endpoint |
 | `auth.required` | `boolean` | - | Whether auth is required (default: `true`) |
 | `auth.allow_anonymous` | `boolean` | - | Allow anonymous connections (default: `false`) |
+| `auth.csrf_required` | `boolean` | - | Require CSRF cookie (default: `false`). When `false`, CSRF protection relies on Origin validation + SameSite cookies, which is sufficient for WebSocket security. Set to `true` for extra strict security requirements. |
 | `ping_interval` | `integer` | - | Ping interval in seconds (5-300, default: `30`) |
 
 ### Authentication
@@ -454,10 +457,11 @@ const ws = new WebSocket('wss://api.example.com/app1/ws');
 
 **Security Benefits:**
 - ✅ XSS protection (tokens not accessible to JavaScript)
-- ✅ CSRF protection (double-submit cookie pattern)
+- ✅ CSRF protection (Origin validation + SameSite cookies by default, optional CSRF cookie)
 - ✅ Avoids URL logging risks (token not in query params)
 - ✅ Browser-native support (standard WebSocket API)
 - ✅ Server validates token **before** accepting connection
+- ✅ Elegant multi-app support (parent app manages security, configurable per-endpoint)
 
 **See Also:**
 - [WebSocket Security Guide](../guides/WEBSOCKET_SECURITY_MULTI_APP_SSO.md) - Comprehensive security documentation

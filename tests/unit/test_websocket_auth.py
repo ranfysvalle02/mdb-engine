@@ -19,13 +19,14 @@ Test Coverage:
 """
 
 from datetime import datetime, timedelta
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import jwt
 import pytest
 
 from mdb_engine.auth.dependencies import SECRET_KEY
 from mdb_engine.auth.shared_middleware import AUTH_COOKIE_NAME
+from mdb_engine.auth.websocket_sessions import WebSocketSessionManager
 from mdb_engine.routing.websockets import _get_cookies_from_websocket, authenticate_websocket
 
 
@@ -312,3 +313,185 @@ class TestWebSocketAuthenticationErrors:
         # Should fail because wrong cookie name
         assert user_id is None
         assert user_email is None
+
+
+class TestWebSocketSessionKeyAuthentication:
+    """Tests for WebSocket authentication via session keys."""
+
+    @pytest.fixture
+    def mock_session_manager(self):
+        """Create a mock WebSocket session manager."""
+        import base64
+        import os
+        from unittest.mock import MagicMock
+
+        from mdb_engine.core.encryption import EnvelopeEncryptionService
+
+        # Set up encryption service
+        if "MDB_ENGINE_MASTER_KEY" not in os.environ:
+            os.environ["MDB_ENGINE_MASTER_KEY"] = base64.b64encode(
+                b"test_master_key_for_testing_only_" + b"x" * 32
+            ).decode()
+
+        encryption_service = EnvelopeEncryptionService()
+
+        # Mock MongoDB
+        mock_db = MagicMock()
+        mock_collection = MagicMock()
+        mock_db.__getitem__ = MagicMock(return_value=mock_collection)
+
+        session_manager = WebSocketSessionManager(mock_db, encryption_service)
+        return session_manager, mock_collection
+
+    @pytest.mark.asyncio
+    async def test_authenticate_via_session_key_success(self, mock_websocket, mock_session_manager):
+        """Test successful authentication via session key."""
+        session_manager, mock_collection = mock_session_manager
+
+        # Generate a session key
+        session_key = WebSocketSessionManager.generate_session_key()
+
+        # Create a valid session
+        from datetime import datetime, timedelta
+
+        expires_at = datetime.utcnow() + timedelta(hours=24)
+        encrypted_key, encrypted_dek = session_manager._encryption_service.encrypt_secret(
+            session_key
+        )
+
+        # Mock session validation
+        async def mock_validate(session_key_param, user_id=None):
+            if session_key_param == session_key:
+                return {
+                    "user_id": "user123",
+                    "user_email": "test@example.com",
+                    "app_slug": "test_app",
+                    "created_at": datetime.utcnow(),
+                    "expires_at": expires_at,
+                }
+            return None
+
+        session_manager.validate_session = AsyncMock(side_effect=mock_validate)
+
+        # Set up mock websocket with session key
+        mock_websocket.app = MagicMock()
+        mock_websocket.app.state = MagicMock()
+        mock_websocket.app.state.websocket_session_manager = session_manager
+        mock_websocket.query_params = MagicMock()
+        mock_websocket.query_params.get = MagicMock(return_value=session_key)
+        mock_websocket.headers = MagicMock()
+        mock_websocket.headers.get = MagicMock(return_value=None)
+        mock_websocket.cookies = {}
+
+        # Authenticate
+        user_id, user_email = await authenticate_websocket(
+            mock_websocket, "test_app", require_auth=True
+        )
+
+        assert user_id == "user123"
+        assert user_email == "test@example.com"
+
+    @pytest.mark.asyncio
+    async def test_authenticate_via_session_key_header(self, mock_websocket, mock_session_manager):
+        """Test successful authentication via session key in header."""
+        session_manager, mock_collection = mock_session_manager
+
+        # Generate a session key
+        session_key = WebSocketSessionManager.generate_session_key()
+
+        # Create a valid session
+        from datetime import datetime, timedelta
+
+        expires_at = datetime.utcnow() + timedelta(hours=24)
+
+        # Mock session validation
+        async def mock_validate(session_key_param, user_id=None):
+            if session_key_param == session_key:
+                return {
+                    "user_id": "user123",
+                    "user_email": "test@example.com",
+                    "app_slug": "test_app",
+                    "created_at": datetime.utcnow(),
+                    "expires_at": expires_at,
+                }
+            return None
+
+        session_manager.validate_session = AsyncMock(side_effect=mock_validate)
+
+        # Set up mock websocket with session key in header
+        mock_websocket.app = MagicMock()
+        mock_websocket.app.state = MagicMock()
+        mock_websocket.app.state.websocket_session_manager = session_manager
+        mock_websocket.query_params = MagicMock()
+        mock_websocket.query_params.get = MagicMock(return_value=None)
+        mock_websocket.headers = MagicMock()
+        mock_websocket.headers.get = MagicMock(
+            side_effect=lambda key: session_key if key == "X-WebSocket-Session-Key" else None
+        )
+        mock_websocket.cookies = {}
+
+        # Authenticate
+        user_id, user_email = await authenticate_websocket(
+            mock_websocket, "test_app", require_auth=True
+        )
+
+        assert user_id == "user123"
+        assert user_email == "test@example.com"
+
+    @pytest.mark.asyncio
+    async def test_authenticate_via_session_key_invalid(self, mock_websocket, mock_session_manager):
+        """Test authentication fails with invalid session key."""
+        session_manager, mock_collection = mock_session_manager
+
+        invalid_session_key = "invalid_key_12345"
+
+        # Mock session validation returning None
+        async def mock_validate(session_key_param, user_id=None):
+            return None
+
+        session_manager.validate_session = AsyncMock(side_effect=mock_validate)
+
+        # Set up mock websocket with invalid session key
+        mock_websocket.app = MagicMock()
+        mock_websocket.app.state = MagicMock()
+        mock_websocket.app.state.websocket_session_manager = session_manager
+        mock_websocket.query_params = MagicMock()
+        mock_websocket.query_params.get = MagicMock(return_value=invalid_session_key)
+        mock_websocket.headers = MagicMock()
+        mock_websocket.headers.get = MagicMock(return_value=None)
+        mock_websocket.cookies = {}
+
+        # Authenticate (should fall back to cookie, but no cookie present)
+        user_id, user_email = await authenticate_websocket(
+            mock_websocket, "test_app", require_auth=True
+        )
+
+        # Should fail (no valid session key or cookie)
+        assert user_id is None
+        assert user_email is None
+
+    @pytest.mark.asyncio
+    async def test_authenticate_falls_back_to_cookie(
+        self, mock_websocket, valid_jwt_token, mock_session_manager
+    ):
+        """Test that authentication falls back to cookie if session key not present."""
+        session_manager, mock_collection = mock_session_manager
+
+        # Set up mock websocket without session key but with cookie
+        mock_websocket.app = MagicMock()
+        mock_websocket.app.state = MagicMock()
+        mock_websocket.app.state.websocket_session_manager = session_manager
+        mock_websocket.query_params = MagicMock()
+        mock_websocket.query_params.get = MagicMock(return_value=None)
+        mock_websocket.headers = MagicMock()
+        mock_websocket.headers.get = MagicMock(return_value=None)
+        mock_websocket.cookies = {AUTH_COOKIE_NAME: valid_jwt_token}
+
+        # Authenticate (should use cookie fallback)
+        user_id, user_email = await authenticate_websocket(
+            mock_websocket, "test_app", require_auth=True
+        )
+
+        # Should succeed via cookie
+        assert user_id == "user123"
+        assert user_email == "test@example.com"

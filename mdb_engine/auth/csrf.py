@@ -102,14 +102,16 @@ def validate_csrf_token(
         try:
             parts = token.split(":")
             if len(parts) != 3:
+                logger.debug("CSRF token has wrong format (expected 3 parts)")
                 return False
 
             raw_token, timestamp_str, signature = parts
             timestamp = int(timestamp_str)
 
             # Check age
-            if time.time() - timestamp > max_age:
-                logger.debug("CSRF token expired")
+            age = time.time() - timestamp
+            if age > max_age:
+                logger.debug(f"CSRF token expired (age: {age:.0f}s, max: {max_age}s)")
                 return False
 
             # Verify signature
@@ -119,7 +121,10 @@ def validate_csrf_token(
             ]
 
             if not hmac.compare_digest(signature, expected_sig):
-                logger.warning("CSRF token signature mismatch")
+                logger.warning(
+                    f"CSRF token signature mismatch. "
+                    f"Token format: signed, Has secret: {bool(secret)}"
+                )
                 return False
 
             return True
@@ -128,7 +133,10 @@ def validate_csrf_token(
             return False
 
     # Simple token validation (just check it exists and has reasonable length)
-    return len(token) >= CSRF_TOKEN_LENGTH
+    is_valid = len(token) >= CSRF_TOKEN_LENGTH
+    if not is_valid:
+        logger.debug(f"CSRF token too short (length: {len(token)}, required: {CSRF_TOKEN_LENGTH})")
+    return is_valid
 
 
 class CSRFMiddleware(BaseHTTPMiddleware):
@@ -197,10 +205,116 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                 return True
         return False
 
+    def _websocket_requires_csrf(self, request: Request, path: str) -> bool:
+        """
+        Check if WebSocket endpoint requires CSRF validation.
+
+        Defaults to True (security by default). Can be disabled per-endpoint via manifest.json:
+        websockets.{endpoint}.auth.csrf_required = false
+
+        Args:
+            request: FastAPI request
+            path: WebSocket path (e.g., "/app-3/ws")
+
+        Returns:
+            True if CSRF validation is required, False otherwise
+        """
+        # Check parent app state for WebSocket configs
+        websocket_configs = getattr(request.app.state, "websocket_configs", None)
+        if not websocket_configs:
+            # No WebSocket configs found - use default (CSRF required for security by default)
+            return True
+
+        # Normalize path for matching
+        normalized_path = path.rstrip("/")
+
+        # Try to find matching app config
+        # WebSocket paths are registered as /app-slug/endpoint-path
+        # e.g., /app-3/ws where app_slug="app-3" and endpoint_path="/ws"
+        for app_slug, config in websocket_configs.items():
+            # Check each endpoint in this app's config
+            for endpoint_name, endpoint_config in config.items():
+                endpoint_path = endpoint_config.get("path", "")
+                # Normalize endpoint path
+                normalized_endpoint = endpoint_path.rstrip("/")
+
+                # Match patterns:
+                # 1. Full path match: /app-slug/endpoint-path
+                # 2. Endpoint-only match: /endpoint-path (if path starts with endpoint)
+                expected_full_path = f"/{app_slug}{normalized_endpoint}"
+                if (
+                    normalized_path == expected_full_path
+                    or normalized_path.endswith(normalized_endpoint)
+                    or normalized_path == normalized_endpoint
+                ):
+                    auth_config = endpoint_config.get("auth", {})
+                    if isinstance(auth_config, dict):
+                        # Return csrf_required setting (defaults to True - security by default)
+                        csrf_required = auth_config.get("csrf_required", True)
+                        logger.debug(
+                            f"WebSocket {path} csrf_required={csrf_required} "
+                            f"(from app={app_slug}, endpoint={endpoint_name})"
+                        )
+                        return csrf_required
+
+        # No matching config found - use default (CSRF required for security by default)
+        logger.debug(f"No WebSocket config match for {path}, using default csrf_required=true")
+        return True
+
     def _is_websocket_upgrade(self, request: Request) -> bool:
         """Check if request is a WebSocket upgrade request."""
         upgrade_header = request.headers.get("upgrade", "").lower()
-        return upgrade_header == "websocket"
+        connection_header = request.headers.get("connection", "").lower()
+
+        # Primary check: WebSocket upgrade requires both Upgrade: websocket
+        # and Connection: Upgrade headers
+        has_upgrade_header = upgrade_header == "websocket"
+        has_connection_upgrade = "upgrade" in connection_header or "websocket" in connection_header
+
+        # Secondary check: If upgrade header is present but connection is
+        # overridden (e.g., by TestClient), check if path matches a known
+        # WebSocket route pattern
+        path_matches_websocket_route = False
+        if has_upgrade_header and not has_connection_upgrade:
+            # Check if path matches any configured WebSocket route
+            websocket_configs = getattr(request.app.state, "websocket_configs", None)
+            if websocket_configs:
+                path = request.url.path.rstrip("/") or "/"
+                for app_slug, config in websocket_configs.items():
+                    for _endpoint_name, endpoint_config in config.items():
+                        endpoint_path = endpoint_config.get("path", "").rstrip("/") or "/"
+                        # Try various path matching patterns
+                        expected_full_path = (
+                            f"/{app_slug}{endpoint_path}"
+                            if endpoint_path != "/"
+                            else f"/{app_slug}"
+                        )
+                        # Match patterns:
+                        # 1. Exact match with app prefix: /app-slug/endpoint-path
+                        # 2. Endpoint-only match: /endpoint-path (if path ends with endpoint)
+                        # 3. Root match: / matches / or /app-slug
+                        if (
+                            path == expected_full_path
+                            or path.endswith(endpoint_path)
+                            or path == endpoint_path
+                            or (path == "/" and endpoint_path == "/")
+                            or (path == f"/{app_slug}" and endpoint_path == "/")
+                        ):
+                            path_matches_websocket_route = True
+                            break
+                    if path_matches_websocket_route:
+                        break
+
+        is_websocket = has_upgrade_header and (
+            has_connection_upgrade or path_matches_websocket_route
+        )
+        if is_websocket:
+            logger.debug(
+                f"WebSocket upgrade detected: path={request.url.path}, "
+                f"upgrade={upgrade_header}, connection={connection_header}, "
+                f"path_match={path_matches_websocket_route}"
+            )
+        return is_websocket
 
     def _get_allowed_origins(self, request: Request) -> list[str]:
         """
@@ -298,9 +412,22 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         path = request.url.path
         method = request.method
 
+        # Debug: Log all requests to see what's happening
+        upgrade_header = request.headers.get("upgrade", "").lower()
+        connection_header = request.headers.get("connection", "").lower()
+        if upgrade_header or "websocket" in path.lower():
+            logger.info(
+                f"🔍 CSRF middleware: {method} {path}, "
+                f"upgrade={upgrade_header}, connection={connection_header}"
+            )
+
         # CRITICAL: Handle WebSocket upgrade requests BEFORE other CSRF checks
         # WebSocket upgrades use cookie-based authentication and require CSRF validation
         if self._is_websocket_upgrade(request):
+            logger.info(
+                f"🔌 CSRF middleware processing WebSocket upgrade: {path}, "
+                f"origin: {request.headers.get('origin')}"
+            )
             # Always validate origin for WebSocket connections (CSWSH protection)
             if not self._validate_websocket_origin(request):
                 logger.warning(
@@ -320,49 +447,155 @@ class CSRFMiddleware(BaseHTTPMiddleware):
 
             auth_token_cookie = request.cookies.get(AUTH_COOKIE_NAME)
             if auth_token_cookie:
-                # For WebSocket upgrades, CSRF protection relies on:
-                # 1. Origin validation (already done above) - primary defense
-                # 2. SameSite cookies - prevents cross-site cookie sending
-                # 3. CSRF cookie presence - ensures session is established
+                # SECURITY BY DEFAULT: WebSocket CSRF protection uses encrypted session keys
+                # stored in private collection via envelope encryption.
                 #
-                # Note: JavaScript WebSocket API cannot set custom headers,
-                # so we cannot use double-submit cookie pattern (cookie + header).
-                # Instead, we rely on Origin validation + SameSite cookies for CSRF protection.
-                csrf_cookie_token = request.cookies.get(self.cookie_name)
-                if not csrf_cookie_token:
-                    logger.warning(f"WebSocket upgrade missing CSRF cookie for {path}")
-                    return JSONResponse(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        content={"detail": "CSRF token missing for WebSocket authentication"},
+                # Security Model:
+                # 1. Origin validation (already done above) - primary defense
+                # 2. Encrypted session key validation - CSRF protection via database
+                # 3. SameSite cookies - prevents cross-site cookie sending
+                #
+                # Session keys are:
+                # - Generated on authentication
+                # - Encrypted using envelope encryption (same as app secrets)
+                # - Stored in _mdb_engine_websocket_sessions private collection
+                # - Validated during WebSocket upgrade
+
+                # Check if this WebSocket endpoint requires CSRF validation
+                csrf_required = self._websocket_requires_csrf(request, path)
+
+                if csrf_required:
+                    # Try to get WebSocket session manager from app state
+                    websocket_session_manager = getattr(
+                        request.app.state, "websocket_session_manager", None
                     )
 
-                # Validate CSRF token signature if secret is used
-                if self.secret and not validate_csrf_token(
-                    csrf_cookie_token, self.secret, self.token_ttl
-                ):
-                    logger.warning(f"WebSocket CSRF token validation failed for {path}")
-                    return JSONResponse(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        content={
-                            "detail": "CSRF token expired or invalid for WebSocket connection"
-                        },
-                    )
+                    if websocket_session_manager:
+                        # Use encrypted session key validation (secure-by-default)
+                        session_key = request.query_params.get(
+                            "session_key"
+                        ) or request.headers.get("X-WebSocket-Session-Key")
 
-                # Optional: If CSRF header is provided, validate it matches cookie
-                # (Some clients may send it, but it's not required for WebSocket upgrades)
-                header_token = request.headers.get(self.header_name)
-                if header_token:
-                    # If header is provided, validate it matches cookie (double-submit pattern)
-                    if not hmac.compare_digest(csrf_cookie_token, header_token):
-                        logger.warning(f"WebSocket CSRF token mismatch for {path}")
-                        return JSONResponse(
-                            status_code=status.HTTP_403_FORBIDDEN,
-                            content={"detail": "CSRF token invalid for WebSocket connection"},
-                        )
+                        if not session_key:
+                            logger.error(
+                                f"❌ WebSocket upgrade missing session key for {path}. "
+                                f"Auth cookie present: {bool(auth_token_cookie)}. "
+                                f"Tip: Generate session key via /auth/websocket-session endpoint."
+                            )
+                            return JSONResponse(
+                                status_code=status.HTTP_403_FORBIDDEN,
+                                content={
+                                    "detail": (
+                                        "WebSocket session key missing. "
+                                        "Generate session key via /auth/websocket-session endpoint."
+                                    )
+                                },
+                            )
+
+                        # Validate session key against encrypted storage
+                        try:
+                            session_data = await websocket_session_manager.validate_session(
+                                session_key
+                            )
+                            if not session_data:
+                                logger.error(
+                                    f"❌ WebSocket session key validation failed for {path}. "
+                                    f"Session key: {session_key[:16]}..."
+                                )
+                                return JSONResponse(
+                                    status_code=status.HTTP_403_FORBIDDEN,
+                                    content={
+                                        "detail": (
+                                            "WebSocket session key expired or invalid. "
+                                            "Generate a new session key."
+                                        )
+                                    },
+                                )
+
+                            # Store session data in request state for WebSocket handler
+                            request.state.websocket_session = session_data
+                            logger.debug(
+                                f"✅ WebSocket session key validated for {path} "
+                                f"(user: {session_data.get('user_id')})"
+                            )
+                        except (
+                            ValueError,
+                            TypeError,
+                            AttributeError,
+                            RuntimeError,
+                        ):
+                            logger.exception("Error validating WebSocket session key")
+                            return JSONResponse(
+                                status_code=status.HTTP_403_FORBIDDEN,
+                                content={"detail": "WebSocket session validation error"},
+                            )
+                    else:
+                        # Fallback to cookie-based CSRF (backward compatibility)
+                        csrf_cookie_token = request.cookies.get(self.cookie_name)
+                        if not csrf_cookie_token:
+                            logger.error(
+                                f"❌ WebSocket upgrade missing CSRF cookie for {path}. "
+                                f"Auth cookie present: {bool(auth_token_cookie)}, "
+                                f"CSRF cookie name: {self.cookie_name}, "
+                                f"Available cookies: {list(request.cookies.keys())}. "
+                                f"Tip: Make a GET request first to receive CSRF cookie."
+                            )
+                            return JSONResponse(
+                                status_code=status.HTTP_403_FORBIDDEN,
+                                content={
+                                    "detail": (
+                                        "CSRF token missing for WebSocket authentication. "
+                                        "Make a GET request first to receive the CSRF cookie."
+                                    )
+                                },
+                            )
+
+                        # Validate CSRF token signature if secret is used
+                        if self.secret and not validate_csrf_token(
+                            csrf_cookie_token, self.secret, self.token_ttl
+                        ):
+                            logger.error(f"❌ WebSocket CSRF token validation failed for {path}.")
+                            return JSONResponse(
+                                status_code=status.HTTP_403_FORBIDDEN,
+                                content={
+                                    "detail": (
+                                        "CSRF token expired or invalid for WebSocket connection"
+                                    )
+                                },
+                            )
+
+                        # If CSRF header is provided, validate it matches the cookie
+                        # (Header is optional for WebSocket, but if present, must match cookie)
+                        csrf_header_token = request.headers.get(self.header_name)
+                        if csrf_header_token:
+                            if not hmac.compare_digest(csrf_cookie_token, csrf_header_token):
+                                logger.error(
+                                    f"❌ WebSocket CSRF header mismatch for {path}. "
+                                    f"Cookie token and header token do not match."
+                                )
+                                return JSONResponse(
+                                    status_code=status.HTTP_403_FORBIDDEN,
+                                    content={
+                                        "detail": (
+                                            "CSRF token mismatch: header token does not "
+                                            "match cookie token"
+                                        )
+                                    },
+                                )
+                            logger.debug(
+                                f"✅ CSRF header validated and matches cookie for WebSocket {path}"
+                            )
+
+                        logger.debug(f"✅ CSRF cookie validation passed for WebSocket {path}")
+                else:
+                    logger.debug(
+                        f"✅ WebSocket CSRF validation skipped for {path} "
+                        f"(csrf_required=false, Origin validation sufficient)"
+                    )
 
                 logger.debug(
                     f"WebSocket upgrade CSRF validation passed for {path} "
-                    f"(Origin validated, CSRF cookie present)"
+                    f"(Origin validated, CSRF validated)"
                 )
 
             # Origin validated (and CSRF validated if authenticated)

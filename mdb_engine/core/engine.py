@@ -148,6 +148,7 @@ class MongoDBEngine:
         self._service_initializer: ServiceInitializer | None = None
         self._encryption_service: EnvelopeEncryptionService | None = None
         self._app_secrets_manager: AppSecretsManager | None = None
+        self._websocket_session_manager: Any | None = None  # WebSocketSessionManager
 
         # Store app read_scopes mapping for validation
         self._app_read_scopes: dict[str, list[str]] = {}
@@ -198,6 +199,13 @@ class MongoDBEngine:
         # Initialize app secrets manager (only if encryption service available)
         if self._encryption_service:
             self._app_secrets_manager = AppSecretsManager(
+                mongo_db=self._connection_manager.mongo_db,
+                encryption_service=self._encryption_service,
+            )
+            # Initialize WebSocket session manager for secure-by-default WebSocket auth
+            from ..auth.websocket_sessions import WebSocketSessionManager
+
+            self._websocket_session_manager = WebSocketSessionManager(
                 mongo_db=self._connection_manager.mongo_db,
                 encryption_service=self._encryption_service,
             )
@@ -2283,6 +2291,11 @@ class MongoDBEngine:
                 logger.debug(f"No WebSocket configuration found for app '{slug}'")
                 return
 
+            # Store WebSocket config in parent app state for CSRF middleware to access
+            if not hasattr(parent_app.state, "websocket_configs"):
+                parent_app.state.websocket_configs = {}
+            parent_app.state.websocket_configs[slug] = websockets_config
+
             try:
                 from fastapi import APIRouter
 
@@ -2488,6 +2501,13 @@ class MongoDBEngine:
                         if hasattr(app.state, "audit_log"):
                             child_app.state.audit_log = app.state.audit_log
                         logger.debug(f"Shared user_pool with child app '{slug}'")
+
+                    # Share WebSocket session manager with child app
+                    if hasattr(app.state, "websocket_session_manager"):
+                        child_app.state.websocket_session_manager = (
+                            app.state.websocket_session_manager
+                        )
+                        logger.debug(f"Shared WebSocket session manager with child app '{slug}'")
 
                     # Add middleware for app context helpers
                     from starlette.middleware.base import BaseHTTPMiddleware
@@ -2836,12 +2856,31 @@ class MongoDBEngine:
             # Create CSRF middleware with default config (will use parent app's CORS config)
             # Exempt routes that don't need CSRF (health checks, public routes from child apps)
             # all_public_routes includes base routes + child app public routes with path prefixes
+            # Add WebSocket session endpoint to public routes (it handles its own auth)
+            public_routes_with_session_endpoint = list(all_public_routes) + [
+                "/auth/websocket-session"
+            ]
             parent_csrf_config = {
                 "csrf_protection": True,
-                "public_routes": all_public_routes,
+                "public_routes": public_routes_with_session_endpoint,
             }
             csrf_middleware = create_csrf_middleware(parent_csrf_config)
             parent_app.add_middleware(csrf_middleware)
+
+            # Store WebSocket session manager in app state for CSRF middleware and endpoints
+            if self._websocket_session_manager:
+                parent_app.state.websocket_session_manager = self._websocket_session_manager
+                logger.info("WebSocket session manager stored in parent app state")
+
+                # Register WebSocket session endpoint on parent app
+                from ..auth.websocket_sessions import create_websocket_session_endpoint
+
+                session_endpoint = create_websocket_session_endpoint(
+                    self._websocket_session_manager
+                )
+                parent_app.get("/auth/websocket-session")(session_endpoint)
+                logger.info("WebSocket session endpoint registered at /auth/websocket-session")
+
             logger.info("CSRFMiddleware added to parent app for WebSocket origin validation")
 
         # Add shared CORS middleware if configured
@@ -3320,6 +3359,7 @@ class MongoDBEngine:
                 self._shared_user_pool = SharedUserPool(
                     self._connection_manager.mongo_db,
                     allow_insecure_dev=is_dev,
+                    websocket_session_manager=self._websocket_session_manager,
                 )
                 await self._shared_user_pool.ensure_indexes()
                 logger.info("SharedUserPool initialized")

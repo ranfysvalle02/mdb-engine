@@ -120,6 +120,7 @@ class SharedUserPool:
         token_expiry_hours: int = DEFAULT_TOKEN_EXPIRY_HOURS,
         allow_insecure_dev: bool = False,
         blacklist_fail_closed: bool = True,
+        websocket_session_manager: Any | None = None,
     ):
         """
         Initialize the shared user pool.
@@ -174,6 +175,7 @@ class SharedUserPool:
 
         self._token_expiry_hours = token_expiry_hours
         self._blacklist_indexes_created = False
+        self._websocket_session_manager = websocket_session_manager
 
         logger.info(f"SharedUserPool initialized (algorithm={jwt_algorithm})")
 
@@ -340,7 +342,9 @@ class SharedUserPool:
         ip_address: str | None = None,
         fingerprint: str | None = None,
         session_binding: dict[str, Any] | None = None,
-    ) -> str | None:
+        generate_websocket_session: bool = True,
+        app_slug: str | None = None,
+    ) -> str | tuple[str, str] | None:
         """
         Authenticate user and return JWT token.
 
@@ -352,9 +356,14 @@ class SharedUserPool:
             session_binding: Session binding config from manifest:
                 - bind_ip: Include IP in token claims
                 - bind_fingerprint: Include fingerprint in token claims
+            generate_websocket_session: If True and WebSocket session manager available,
+                                       also generate WebSocket session key (default: True)
+            app_slug: Optional app slug for WebSocket session scoping
 
         Returns:
-            JWT token if authentication succeeds, None otherwise
+            JWT token if authentication succeeds, None otherwise.
+            If generate_websocket_session=True and session manager available,
+            returns tuple (jwt_token, websocket_session_key), otherwise just jwt_token.
         """
         user = await self._collection.find_one(
             {
@@ -392,7 +401,28 @@ class SharedUserPool:
         # Generate JWT token with session binding claims
         token = self._generate_token(user, extra_claims=extra_claims or None)
 
+        # Generate WebSocket session key if requested and manager available
+        websocket_session_key = None
+        if generate_websocket_session and self._websocket_session_manager:
+            try:
+                user_id = str(user["_id"])
+                websocket_session_key = await self._websocket_session_manager.create_session(
+                    user_id=user_id,
+                    user_email=email,
+                    app_slug=app_slug,
+                )
+                logger.debug(
+                    f"Generated WebSocket session key for user '{email}' " f"(app: {app_slug})"
+                )
+            except (ValueError, TypeError, AttributeError, RuntimeError) as e:
+                # Log but don't fail authentication if WebSocket session generation fails
+                logger.warning(f"Failed to generate WebSocket session key: {e}")
+
         logger.info(f"User '{email}' authenticated successfully")
+
+        # Return tuple if WebSocket session key was generated, otherwise just token
+        if websocket_session_key:
+            return (token, websocket_session_key)
         return token
 
     async def validate_token(self, token: str) -> dict[str, Any] | None:

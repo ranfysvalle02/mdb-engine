@@ -12,6 +12,8 @@ Complete troubleshooting guide for WebSocket connections in multi-app SSO deploy
 | Connects then closes | 1008 | No auth cookie | Ensure user is logged in first |
 | Connects then closes | 1008 | Expired token | Refresh token before connecting |
 | Connects then closes | 1008 | Missing CSRF cookie | Make GET request first to get CSRF cookie |
+| Connects then closes | 1008 | Missing session key | Get session key from `/auth/websocket-session` endpoint |
+| Connects then closes | 1008 | Invalid/expired session key | Generate new session key |
 | Route not found | 404 | WebSocket not in manifest | Add `websockets` section to manifest |
 
 ## Table of Contents
@@ -44,9 +46,10 @@ Before troubleshooting, verify these basics:
 ### Frontend ✅
 - [ ] User is logged in before connecting WebSocket
 - [ ] Login request uses `credentials: 'include'`
-- [ ] WebSocket URL includes full path prefix (`/app1/ws`)
-- [ ] No token passed manually (browser sends cookie automatically)
+- [ ] WebSocket session key obtained from `/auth/websocket-session` endpoint
+- [ ] WebSocket URL includes full path prefix and session key (`/app1/ws?session_key=...`)
 - [ ] Error handling for 403 and 1008 errors
+- [ ] Session key refreshed if expired
 
 ---
 
@@ -285,9 +288,152 @@ const wsUrl = `${protocol}//${window.location.host}/app-3/ws`;
 
 ## Authentication Failures
 
-### Cookie-Based Authentication (MDB-Engine Standard)
+### Session Key Authentication (Secure-by-Default)
 
-MDB-Engine uses **httpOnly cookies** for WebSocket authentication. Tokens are stored in httpOnly cookies set during login, and the browser automatically sends them on WebSocket upgrade requests.
+MDB-Engine uses **secure-by-default WebSocket authentication** with encrypted session keys. Session keys are generated on login, encrypted via envelope encryption, and stored in the `_mdb_engine_websocket_sessions` private collection.
+
+#### Problem: Missing Session Key
+
+**Symptoms:**
+- WebSocket connection rejected immediately
+- Server logs show: "WebSocket session key missing" or "No authentication found"
+- Connection closes with code 1008 (Policy Violation)
+
+**Solutions:**
+
+1. **Get Session Key After Login:**
+   ```javascript
+   // ✅ CORRECT: Get session key from endpoint after login
+   async function getWebSocketSessionKey() {
+     const response = await fetch('/auth/websocket-session', {
+       method: 'GET',
+       credentials: 'include',
+     });
+     
+     if (response.ok) {
+       const data = await response.json();
+       return data.session_key;
+     }
+     
+     throw new Error('Failed to get session key');
+   }
+   
+   // Use session key in WebSocket URL
+   const sessionKey = await getWebSocketSessionKey();
+   const ws = new WebSocket(`ws://localhost:8000/app-3/ws?session_key=${sessionKey}`);
+   ```
+
+2. **Check Session Key Endpoint:**
+   ```javascript
+   // Verify endpoint is accessible
+   const response = await fetch('/auth/websocket-session', {
+     method: 'GET',
+     credentials: 'include',
+   });
+   
+   console.log('Status:', response.status);
+   console.log('Data:', await response.json());
+   // Should return 200 with session_key, expires_at, ttl_hours
+   ```
+
+3. **Session Key Included in Login Response:**
+   ```javascript
+   // Some login endpoints may include session key in response
+   const loginResponse = await fetch('/auth-hub/login', {
+     method: 'POST',
+     credentials: 'include',
+     body: JSON.stringify({ email, password }),
+   });
+   
+   const loginData = await loginResponse.json();
+   const sessionKey = loginData.websocket_session_key; // May be included
+   ```
+
+#### Problem: Invalid or Expired Session Key
+
+**Symptoms:**
+- WebSocket connection rejected
+- Server logs show: "WebSocket session key validation failed" or "WebSocket session expired"
+- Connection closes with code 1008
+
+**Solutions:**
+
+1. **Refresh Session Key:**
+   ```javascript
+   // Get a fresh session key
+   async function refreshSessionKey() {
+     const response = await fetch('/auth/websocket-session', {
+       method: 'GET',
+       credentials: 'include',
+     });
+     
+     if (response.ok) {
+       const data = await response.json();
+       return data.session_key;
+     }
+     
+     return null;
+   }
+   
+   // Use fresh session key
+   const sessionKey = await refreshSessionKey();
+   if (sessionKey) {
+     const ws = new WebSocket(`ws://localhost:8000/app-3/ws?session_key=${sessionKey}`);
+   }
+   ```
+
+2. **Check Session Key Expiration:**
+   ```javascript
+   // Session keys expire after 24 hours by default
+   // Check expires_at from session endpoint
+   const response = await fetch('/auth/websocket-session', {
+     method: 'GET',
+     credentials: 'include',
+   });
+   
+   const data = await response.json();
+   const expiresAt = new Date(data.expires_at);
+   const now = new Date();
+   
+   if (expiresAt < now) {
+     console.warn('Session key expired, refreshing...');
+     // Get new session key
+   }
+   ```
+
+#### Problem: Session Key Not Validated
+
+**Symptoms:**
+- WebSocket connection rejected
+- Server logs show: "WebSocket session key validation error"
+- CSRF middleware rejecting connection
+
+**Solutions:**
+
+1. **Verify Session Key Format:**
+   ```javascript
+   // Session keys are base64 URL-safe strings
+   const sessionKey = '...'; // From endpoint
+   console.log('Session key length:', sessionKey.length);
+   // Should be a reasonable length (typically 32+ characters)
+   ```
+
+2. **Check Session Key in URL:**
+   ```javascript
+   // ✅ CORRECT: Session key in query param
+   const ws = new WebSocket(`ws://localhost:8000/app-3/ws?session_key=${sessionKey}`);
+   
+   // ✅ ALTERNATIVE: Session key in header (if library supports)
+   const ws = new WebSocket('ws://localhost:8000/app-3/ws', {
+     headers: {
+       'X-WebSocket-Session-Key': sessionKey,
+     },
+   });
+   ```
+
+### Cookie-Based Authentication (Fallback/Backward Compatibility)
+
+MDB-Engine falls back to **httpOnly cookies** for WebSocket authentication if session key is not available. Tokens are stored in httpOnly cookies set during login, and the browser automatically sends them on WebSocket upgrade requests.
 
 #### Problem: No Token Cookie
 

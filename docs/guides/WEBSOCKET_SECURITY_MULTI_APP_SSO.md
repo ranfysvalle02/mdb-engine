@@ -16,39 +16,47 @@ Comprehensive security guide for WebSocket authentication in multi-app SSO deplo
 
 ## Security Overview
 
-MDB-Engine uses **cookie-based authentication** for WebSocket connections, providing the highest level of security against XSS attacks.
+MDB-Engine uses **secure-by-default WebSocket authentication** with encrypted session keys stored in private collections, providing defense-in-depth security.
 
-### Cookie-Based Authentication
+### Secure-by-Default Session Key Authentication
 
-Cookie-based authentication stores JWT tokens in httpOnly cookies that JavaScript cannot access, providing superior protection against XSS attacks.
+WebSocket authentication uses encrypted session keys generated on login, stored securely in the database using envelope encryption, and validated during WebSocket upgrade.
 
 #### Security Benefits
 
 1. **XSS Protection**
-   - Tokens stored in httpOnly cookies are not accessible to JavaScript
-   - Prevents XSS attacks from stealing authentication tokens
-   - Most secure option for token storage
+   - Session keys not accessible to JavaScript (sent via query param or header)
+   - Prevents XSS attacks from stealing authentication credentials
+   - Most secure option for WebSocket authentication
 
-2. **CSRF Protection**
-   - Uses double-submit cookie pattern for CSRF protection
-   - CSRF token validated on WebSocket upgrade requests
-   - Origin validation provides additional protection
+2. **CSRF Protection (Secure-by-Default)**
+   - **Default**: CSRF required (`csrf_required: true`) using encrypted session keys
+   - **Session keys**: Encrypted via envelope encryption, stored in private collection
+   - **Origin validation**: Always required for WebSocket connections
+   - **SameSite cookies**: Additional CSRF protection layer
+   - Configurable per-endpoint in manifest.json (can disable if needed)
 
-3. **Automatic Cookie Transmission**
-   - Browser automatically sends cookies on WebSocket upgrade requests
-   - No JavaScript code needed to manage tokens
-   - Simpler client-side implementation
+3. **Defense-in-Depth**
+   - Multiple security layers: Origin validation + encrypted session keys + SameSite cookies
+   - Session keys encrypted using same envelope encryption as app secrets
+   - Automatic expiration (24-hour TTL) with cleanup
+   - Parent app manages security validation
 
-4. **Secure Token Transmission**
-   - Tokens never exposed to JavaScript
-   - Server validates **before** accepting connection
-   - Failed authentication = no connection established
+4. **Secure Session Management**
+   - Session keys generated on authentication
+   - Stored encrypted in `_mdb_engine_websocket_sessions` private collection
+   - Validated during WebSocket upgrade
+   - Can be revoked individually or per-user
+
+5. **Backward Compatibility**
+   - Falls back to cookie-based authentication if session key not present
+   - Maintains compatibility with existing implementations
 
 #### Comparison with Alternatives
 
 | Method | XSS Protection | CSRF Safe | URL Logging | Browser Support | Security Rating |
 |--------|---------------|----------|-------------|-----------------|-----------------|
-| **Cookie (httpOnly)** ✅ | **Yes** | Yes (with CSRF token) | No risk | Native | ⭐⭐⭐⭐⭐ |
+| **Cookie (httpOnly)** ✅ | **Yes** | Yes (Origin + SameSite, optional CSRF cookie) | No risk | Native | ⭐⭐⭐⭐⭐ |
 | Query Params ❌ | No | Yes | **High risk** | Native | ⭐⭐ |
 | Cookies (non-httpOnly) ❌ | No | **No** (triggers CSRF) | No risk | Native | ⭐⭐⭐ |
 | Custom Headers ❌ | No | Yes | No risk | **Not supported** | ⭐ |
@@ -165,7 +173,8 @@ graph TB
 
 3. **Cookie-Based Authentication**
    - Token extracted from httpOnly cookie
-   - CSRF token validated via double-submit pattern
+   - CSRF protection via Origin validation + SameSite cookies (default)
+   - Optional CSRF cookie validation if `auth.csrf_required: true`
    - Validated **before** `accept()` is called
    - Failed auth = no connection established
 
@@ -665,16 +674,30 @@ const ws = new WebSocket(wsUrl, [token]);
    - Checks origin against merged CORS config
    - Rejects unauthorized origins
 
-2. **Cookie-Based Authentication**
-   - Token in httpOnly cookie (not accessible to JavaScript)
-   - CSRF cookie presence validated (ensures session exists)
-   - SameSite cookie attribute prevents cross-site cookie sending
-   - Protected by origin validation (primary) + SameSite cookies (secondary)
+2. **Session Key Authentication (Secure-by-Default)**
+   - Session key generated on login, encrypted via envelope encryption
+   - Stored in `_mdb_engine_websocket_sessions` private collection
+   - CSRF protection enforced by default (`csrf_required: true`)
+   - Session key validated during WebSocket upgrade
+   - Origin validation always required (primary defense)
+   - SameSite cookies provide additional CSRF protection
+   - **Secure-by-default**: CSRF required, configurable per-endpoint
 
 #### Configuration
 
+**Secure-by-Default (Recommended)**: CSRF required using encrypted session keys:
+
 ```json
 {
+  "websockets": {
+    "realtime": {
+      "path": "/ws",
+      "auth": {
+        "required": true,
+        "csrf_required": true  // Default: secure-by-default with encrypted session keys
+      }
+    }
+  },
   "cors": {
     "enabled": true,
     "allow_origins": [
@@ -683,6 +706,36 @@ const ws = new WebSocket(wsUrl, [token]);
     "allow_credentials": true
   }
 }
+```
+
+**Relaxed Mode**: Disable CSRF requirement (use Origin + SameSite only):
+
+```json
+{
+  "websockets": {
+    "realtime": {
+      "path": "/ws",
+      "auth": {
+        "required": true,
+        "csrf_required": false  // Relaxed: Origin + SameSite only
+      }
+    }
+  }
+}
+```
+
+**Session Key Generation**: Session keys are automatically generated on login. Access via:
+
+```typescript
+// After login, get session key
+const response = await fetch('/auth/websocket-session', {
+  method: 'GET',
+  credentials: 'include',
+});
+const { session_key } = await response.json();
+
+// Use session key for WebSocket connection
+const ws = new WebSocket(`wss://api.example.com/app1/ws?session_key=${session_key}`);
 ```
 
 ### CORS Configuration

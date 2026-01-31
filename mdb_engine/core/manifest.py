@@ -1338,6 +1338,18 @@ MANIFEST_SCHEMA_V2 = {
                                         "auth is required (default: false)"
                                     ),
                                 },
+                                "csrf_required": {
+                                    "type": "boolean",
+                                    "default": True,
+                                    "description": (
+                                        "Require CSRF validation for WebSocket connections "
+                                        "(default: true - security by default). "
+                                        "When true, uses encrypted session keys stored in "
+                                        "private collection for CSRF protection. "
+                                        "Set to false to use Origin validation + "
+                                        "SameSite cookies only."
+                                    ),
+                                },
                             },
                             "additionalProperties": False,
                             "description": (
