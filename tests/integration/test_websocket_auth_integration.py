@@ -9,6 +9,7 @@ Tests end-to-end WebSocket authentication flow with:
 - Multi-app isolation
 """
 
+import json
 import os
 from datetime import datetime, timedelta
 
@@ -75,7 +76,7 @@ class TestWebSocketCookieAuthIntegration:
 
     @pytest.mark.asyncio
     async def test_websocket_connection_with_valid_cookie(
-        self, mongodb_connection_string, test_manifest, valid_jwt_token
+        self, mongodb_connection_string, test_manifest, valid_jwt_token, tmp_path
     ):
         """Test successful WebSocket connection with valid httpOnly cookie."""
         from httpx import ASGITransport, AsyncClient
@@ -86,14 +87,16 @@ class TestWebSocketCookieAuthIntegration:
         db_name = f"test_ws_auth_{os.getpid()}"
         engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name=db_name)
 
+        # Write manifest to temp file (create_multi_app requires Path, not dict)
+        manifest_path = tmp_path / "manifest.json"
+        manifest_path.write_text(json.dumps(test_manifest))
+
         # Create app with WebSocket support using create_multi_app
-        # (create_app requires a Path, create_multi_app accepts dicts)
-        # Use "/" as path_prefix for root-level app
         app = engine.create_multi_app(
             apps=[
                 {
                     "slug": test_manifest["slug"],
-                    "manifest": test_manifest,
+                    "manifest": manifest_path,
                     "path_prefix": "/",
                 }
             ],
@@ -144,7 +147,7 @@ class TestWebSocketCookieAuthIntegration:
 
     @pytest.mark.asyncio
     async def test_websocket_connection_without_csrf_cookie_rejected(
-        self, mongodb_connection_string, test_manifest, valid_jwt_token
+        self, mongodb_connection_string, test_manifest, valid_jwt_token, tmp_path
     ):
         """Test that WebSocket connection without CSRF cookie is rejected."""
         from httpx import ASGITransport, AsyncClient
@@ -155,13 +158,17 @@ class TestWebSocketCookieAuthIntegration:
         db_name = f"test_ws_csrf_{os.getpid()}"
         engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name=db_name)
 
+        # Write manifest to temp file
+        manifest_path = tmp_path / "manifest.json"
+        manifest_path.write_text(json.dumps(test_manifest))
+
         # Create app with WebSocket support using create_multi_app
         app = engine.create_multi_app(
             apps=[
                 {
                     "slug": test_manifest["slug"],
-                    "manifest": test_manifest,
-                    "path_prefix": "",
+                    "manifest": manifest_path,
+                    "path_prefix": "/",
                 }
             ],
             title="Test WebSocket App",
@@ -186,7 +193,7 @@ class TestWebSocketCookieAuthIntegration:
 
     @pytest.mark.asyncio
     async def test_websocket_connection_with_invalid_origin_rejected(
-        self, mongodb_connection_string, test_manifest, valid_jwt_token
+        self, mongodb_connection_string, test_manifest, valid_jwt_token, tmp_path
     ):
         """Test that WebSocket connection with invalid origin is rejected."""
         from httpx import ASGITransport, AsyncClient
@@ -197,13 +204,17 @@ class TestWebSocketCookieAuthIntegration:
         db_name = f"test_ws_origin_{os.getpid()}"
         engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name=db_name)
 
+        # Write manifest to temp file
+        manifest_path = tmp_path / "manifest.json"
+        manifest_path.write_text(json.dumps(test_manifest))
+
         # Create app with WebSocket support using create_multi_app
         app = engine.create_multi_app(
             apps=[
                 {
                     "slug": test_manifest["slug"],
-                    "manifest": test_manifest,
-                    "path_prefix": "",
+                    "manifest": manifest_path,
+                    "path_prefix": "/",
                 }
             ],
             title="Test WebSocket App",
@@ -243,7 +254,7 @@ class TestWebSocketCookieAuthIntegration:
 
     @pytest.mark.asyncio
     async def test_websocket_connection_without_auth_cookie_allowed(
-        self, mongodb_connection_string, test_manifest
+        self, mongodb_connection_string, test_manifest, tmp_path
     ):
         """Test that WebSocket connection without auth cookie is allowed (if auth not required)."""
         from httpx import ASGITransport, AsyncClient
@@ -257,13 +268,17 @@ class TestWebSocketCookieAuthIntegration:
         db_name = f"test_ws_anon_{os.getpid()}"
         engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name=db_name)
 
+        # Write manifest to temp file
+        manifest_path = tmp_path / "manifest.json"
+        manifest_path.write_text(json.dumps(test_manifest))
+
         # Create app with WebSocket support using create_multi_app
         app = engine.create_multi_app(
             apps=[
                 {
                     "slug": test_manifest["slug"],
-                    "manifest": test_manifest,
-                    "path_prefix": "",
+                    "manifest": manifest_path,
+                    "path_prefix": "/",
                 }
             ],
             title="Test WebSocket App",
@@ -293,7 +308,7 @@ class TestWebSocketCookieAuthIntegration:
 
     @pytest.mark.asyncio
     async def test_websocket_connection_with_expired_token_rejected(
-        self, mongodb_connection_string, test_manifest
+        self, mongodb_connection_string, test_manifest, tmp_path
     ):
         """Test that WebSocket connection with expired token is rejected."""
         from httpx import ASGITransport, AsyncClient
@@ -313,13 +328,17 @@ class TestWebSocketCookieAuthIntegration:
         db_name = f"test_ws_expired_{os.getpid()}"
         engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name=db_name)
 
+        # Write manifest to temp file
+        manifest_path = tmp_path / "manifest.json"
+        manifest_path.write_text(json.dumps(test_manifest))
+
         # Create app with WebSocket support using create_multi_app
         app = engine.create_multi_app(
             apps=[
                 {
                     "slug": test_manifest["slug"],
-                    "manifest": test_manifest,
-                    "path_prefix": "",
+                    "manifest": manifest_path,
+                    "path_prefix": "/",
                 }
             ],
             title="Test WebSocket App",
