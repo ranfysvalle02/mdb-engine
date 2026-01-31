@@ -247,7 +247,8 @@ class CSRFMiddleware(BaseHTTPMiddleware):
 
         logger.warning(
             f"WebSocket upgrade rejected - invalid Origin: {origin} "
-            f"(allowed: {allowed_origins})"
+            f"(allowed: {allowed_origins}, app: {getattr(request.app, 'title', 'unknown')}, "
+            f"has_cors_config: {hasattr(request.app.state, 'cors_config')})"
         )
         return False
 

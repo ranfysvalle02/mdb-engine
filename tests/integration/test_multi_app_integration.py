@@ -832,11 +832,7 @@ class TestMultiAppIntegration:
         """
         import os
 
-        from fastapi import Depends
-        from httpx import ASGITransport, AsyncClient
-
         from mdb_engine.core.engine import MongoDBEngine
-        from mdb_engine.dependencies import get_scoped_db
 
         manifests_dir = tmp_path / "manifests"
         manifests_dir.mkdir()
@@ -897,7 +893,7 @@ class TestMultiAppIntegration:
             )
             assert (
                 mounted_app.state.engine == engine
-            ), "Child app engine should reference the same engine instance."
+            ), "Child app engine should be same instance as parent engine"
             assert hasattr(
                 mounted_app.state, "app_slug"
             ), "REGRESSION: Child app missing app_slug in state."
@@ -906,6 +902,11 @@ class TestMultiAppIntegration:
             ), "Child app slug should be set correctly."
 
             # Add test route that uses get_scoped_db dependency
+            from fastapi import Depends
+            from httpx import ASGITransport, AsyncClient
+
+            from mdb_engine.dependencies import get_scoped_db
+
             @mounted_app.get("/api/test-db")
             async def test_db_route(db=Depends(get_scoped_db)):
                 """
@@ -946,6 +947,83 @@ class TestMultiAppIntegration:
                 assert response_data["message"] == "get_scoped_db dependency resolved successfully"
                 assert response_data["app_slug"] == "test-db-app"
                 assert response_data["has_engine"] is True
+
+        # Cleanup
+        await engine.shutdown()
+
+
+@pytest.mark.integration
+class TestWebSocketWithCORSCConfig:
+    """Integration tests for WebSocket connections with CORS config in multi-app setup."""
+
+    @pytest.mark.asyncio
+    async def test_websocket_connection_with_cors_config(self, mongodb_connection_string, tmp_path):
+        """Test that WebSocket connections work with proper CORS config propagation."""
+        import os
+
+        from mdb_engine.core.engine import MongoDBEngine
+
+        # Create manifest with WebSocket and CORS config
+        manifest = {
+            "schema_version": "2.0",
+            "slug": "ws-test-app",
+            "name": "WebSocket Test App",
+            "auth": {"mode": "shared", "roles": ["viewer"], "require_role": "viewer"},
+            "websockets": {
+                "realtime": {
+                    "path": "/ws",
+                    "auth": {"required": False, "allow_anonymous": True},
+                    "ping_interval": 30,
+                }
+            },
+            "cors": {
+                "enabled": True,
+                "allow_origins": ["*"],
+                "allow_credentials": True,
+                "allow_methods": ["*"],
+                "allow_headers": ["*"],
+            },
+        }
+        manifest_path = tmp_path / "manifest.json"
+        manifest_path.write_text(json.dumps(manifest))
+
+        # Use unique database name per test
+        db_name = f"test_websocket_cors_{os.getpid()}"
+        engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name=db_name)
+
+        # Create multi-app
+        app = engine.create_multi_app(
+            apps=[
+                {
+                    "slug": "ws-test-app",
+                    "manifest": manifest_path,
+                    "path_prefix": "/ws-app",
+                }
+            ],
+            title="WebSocket CORS Test",
+        )
+
+        # Verify parent app has CORS config
+        assert hasattr(app.state, "cors_config"), "Parent app should have CORS config"
+        assert app.state.cors_config["enabled"] is True, "Parent app CORS should be enabled"
+
+        # Start lifespan to mount apps
+        async with app.router.lifespan_context(app):
+            # Verify CORS config was merged from child app
+            cors_config = app.state.cors_config
+            assert "*" in cors_config["allow_origins"], "Parent app should have wildcard origin"
+            assert cors_config["allow_credentials"] is True, "Parent app should allow credentials"
+
+            # Verify WebSocket route exists on parent app
+            ws_routes = [
+                route
+                for route in app.routes
+                if hasattr(route, "path") and "/ws-app/ws" in route.path
+            ]
+            assert len(ws_routes) > 0, "WebSocket route should be registered on parent app"
+
+            # Note: Actual WebSocket connection testing would require a WebSocket client
+            # This test verifies the configuration is correct, which is the main fix
 
         # Cleanup
         await engine.shutdown()

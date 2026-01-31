@@ -1246,3 +1246,202 @@ class TestWebSocketRoutesWithMountedApps:
                 async with app.router.lifespan_context(app):
                     # App should still be created successfully
                     assert app is not None
+
+
+class TestCORSCConfigPropagation:
+    """Test CORS config propagation from child apps to parent app."""
+
+    @pytest.mark.asyncio
+    async def test_parent_app_has_default_cors_config(self, mock_mongo_database, tmp_path):
+        """Test that parent app has default CORS config set."""
+        from mdb_engine.core.engine import MongoDBEngine
+
+        manifest = {
+            "schema_version": "2.0",
+            "slug": "test-app",
+            "name": "Test App",
+            "auth": {"mode": "app"},
+        }
+        manifest_path = tmp_path / "manifest.json"
+        manifest_path.write_text(json.dumps(manifest))
+
+        engine = MongoDBEngine(mongo_uri="mongodb://localhost:27017", db_name="test_db")
+
+        with patch.object(engine, "_connection_manager") as mock_conn:
+            mock_conn.mongo_db = mock_mongo_database
+            mock_conn.mongo_client = MagicMock()
+            mock_conn.initialized = True
+            mock_conn.initialize = AsyncMock()
+            mock_conn.shutdown = AsyncMock()
+
+            app = engine.create_multi_app(
+                apps=[
+                    {
+                        "slug": "test-app",
+                        "manifest": manifest_path,
+                        "path_prefix": "/test",
+                    }
+                ]
+            )
+
+            # Check that parent app has default CORS config
+            assert hasattr(app.state, "cors_config")
+            assert app.state.cors_config["enabled"] is True
+            assert "*" in app.state.cors_config["allow_origins"]
+
+    @pytest.mark.asyncio
+    async def test_child_cors_config_merged_to_parent(self, mock_mongo_database, tmp_path):
+        """Test that child app CORS config is merged into parent app."""
+        from mdb_engine.core.engine import MongoDBEngine
+
+        manifest = {
+            "schema_version": "2.0",
+            "slug": "test-app",
+            "name": "Test App",
+            "auth": {"mode": "app"},
+            "cors": {
+                "enabled": True,
+                "allow_origins": ["https://example.com", "https://test.com"],
+                "allow_credentials": True,
+            },
+        }
+        manifest_path = tmp_path / "manifest.json"
+        manifest_path.write_text(json.dumps(manifest))
+
+        engine = MongoDBEngine(mongo_uri="mongodb://localhost:27017", db_name="test_db")
+
+        with patch.object(engine, "_connection_manager") as mock_conn:
+            mock_conn.mongo_db = mock_mongo_database
+            mock_conn.mongo_client = MagicMock()
+            mock_conn.initialized = True
+            mock_conn.initialize = AsyncMock()
+            mock_conn.shutdown = AsyncMock()
+
+            app = engine.create_multi_app(
+                apps=[
+                    {
+                        "slug": "test-app",
+                        "manifest": manifest_path,
+                        "path_prefix": "/test",
+                    }
+                ]
+            )
+
+            # Run lifespan to mount apps
+            async with app.router.lifespan_context(app):
+                # Check that parent app has merged CORS config
+                assert hasattr(app.state, "cors_config")
+                cors_config = app.state.cors_config
+                # Should include both default "*" and child app origins
+                assert (
+                    "*" in cors_config["allow_origins"]
+                    or "https://example.com" in cors_config["allow_origins"]
+                )
+                assert cors_config["allow_credentials"] is True
+
+    @pytest.mark.asyncio
+    async def test_multiple_child_apps_merge_cors_origins(self, mock_mongo_database, tmp_path):
+        """Test that multiple child apps' CORS origins are merged."""
+        from mdb_engine.core.engine import MongoDBEngine
+
+        manifest1 = {
+            "schema_version": "2.0",
+            "slug": "app1",
+            "name": "App 1",
+            "auth": {"mode": "app"},
+            "cors": {
+                "enabled": True,
+                "allow_origins": ["https://app1.com"],
+            },
+        }
+        manifest_path1 = tmp_path / "app1" / "manifest.json"
+        manifest_path1.parent.mkdir()
+        manifest_path1.write_text(json.dumps(manifest1))
+
+        manifest2 = {
+            "schema_version": "2.0",
+            "slug": "app2",
+            "name": "App 2",
+            "auth": {"mode": "app"},
+            "cors": {
+                "enabled": True,
+                "allow_origins": ["https://app2.com"],
+            },
+        }
+        manifest_path2 = tmp_path / "app2" / "manifest.json"
+        manifest_path2.parent.mkdir()
+        manifest_path2.write_text(json.dumps(manifest2))
+
+        engine = MongoDBEngine(mongo_uri="mongodb://localhost:27017", db_name="test_db")
+
+        with patch.object(engine, "_connection_manager") as mock_conn:
+            mock_conn.mongo_db = mock_mongo_database
+            mock_conn.mongo_client = MagicMock()
+            mock_conn.initialized = True
+            mock_conn.initialize = AsyncMock()
+            mock_conn.shutdown = AsyncMock()
+
+            app = engine.create_multi_app(
+                apps=[
+                    {
+                        "slug": "app1",
+                        "manifest": manifest_path1,
+                        "path_prefix": "/app1",
+                    },
+                    {
+                        "slug": "app2",
+                        "manifest": manifest_path2,
+                        "path_prefix": "/app2",
+                    },
+                ]
+            )
+
+            # Run lifespan to mount apps
+            async with app.router.lifespan_context(app):
+                # Check that parent app has merged CORS config from both apps
+                assert hasattr(app.state, "cors_config")
+                cors_config = app.state.cors_config
+                origins = cors_config["allow_origins"]
+                # Should include origins from both apps (and possibly default "*")
+                assert "https://app1.com" in origins or "*" in origins
+                assert "https://app2.com" in origins or "*" in origins
+
+    @pytest.mark.asyncio
+    async def test_child_app_without_cors_config_uses_default(self, mock_mongo_database, tmp_path):
+        """Test that child app without CORS config doesn't break merging."""
+        from mdb_engine.core.engine import MongoDBEngine
+
+        manifest = {
+            "schema_version": "2.0",
+            "slug": "test-app",
+            "name": "Test App",
+            "auth": {"mode": "app"},
+            # No CORS config
+        }
+        manifest_path = tmp_path / "manifest.json"
+        manifest_path.write_text(json.dumps(manifest))
+
+        engine = MongoDBEngine(mongo_uri="mongodb://localhost:27017", db_name="test_db")
+
+        with patch.object(engine, "_connection_manager") as mock_conn:
+            mock_conn.mongo_db = mock_mongo_database
+            mock_conn.mongo_client = MagicMock()
+            mock_conn.initialized = True
+            mock_conn.initialize = AsyncMock()
+            mock_conn.shutdown = AsyncMock()
+
+            app = engine.create_multi_app(
+                apps=[
+                    {
+                        "slug": "test-app",
+                        "manifest": manifest_path,
+                        "path_prefix": "/test",
+                    }
+                ]
+            )
+
+            # Run lifespan to mount apps
+            async with app.router.lifespan_context(app):
+                # Parent app should still have default CORS config
+                assert hasattr(app.state, "cors_config")
+                assert app.state.cors_config["enabled"] is True

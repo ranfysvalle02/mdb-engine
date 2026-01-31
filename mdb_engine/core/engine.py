@@ -2179,6 +2179,116 @@ class MongoDBEngine:
                     return entry
             return None
 
+        async def _merge_cors_config_to_parent(
+            parent_app: "FastAPI",
+            child_app: "FastAPI",
+            child_manifest: dict[str, Any],
+            slug: str,
+        ) -> None:
+            """Merge CORS config from child app to parent app."""
+            child_cors = None
+            if hasattr(child_app.state, "cors_config"):
+                child_cors = child_app.state.cors_config
+            else:
+                # CORS config might not be set yet (lifespan runs asynchronously)
+                # Get it from manifest directly
+                cors_config_from_manifest = child_manifest.get("cors", {})
+                if cors_config_from_manifest:
+                    from ..auth.config_helpers import (
+                        CORS_DEFAULTS,
+                        merge_config_with_defaults,
+                    )
+
+                    child_cors = merge_config_with_defaults(
+                        cors_config_from_manifest, CORS_DEFAULTS
+                    )
+                    # Also set it on child app state for future reference
+                    child_app.state.cors_config = child_cors
+
+            if child_cors:
+                if hasattr(parent_app.state, "cors_config"):
+                    # Merge child CORS into parent (child takes precedence for its routes)
+                    parent_cors = parent_app.state.cors_config
+                    # Merge allow_origins lists
+                    child_origins = child_cors.get("allow_origins", [])
+                    parent_origins = parent_cors.get("allow_origins", [])
+                    merged_origins = list(set(parent_origins + child_origins))
+                    parent_app.state.cors_config = {
+                        **parent_cors,
+                        **child_cors,
+                        "allow_origins": merged_origins if merged_origins else ["*"],
+                    }
+                else:
+                    # Parent has no CORS config, use child's
+                    parent_app.state.cors_config = child_cors
+                logger.debug(f"✅ Merged CORS config from child app '{slug}' to parent app")
+
+        async def _register_websocket_routes(
+            parent_app: "FastAPI",
+            child_manifest: dict[str, Any],
+            slug: str,
+            path_prefix: str,
+        ) -> None:
+            """Register WebSocket routes on parent app for a child app."""
+            websockets_config = child_manifest.get("websockets")
+            if not websockets_config:
+                return
+
+            try:
+                from fastapi import APIRouter
+
+                from ..routing.websockets import create_websocket_endpoint
+
+                for endpoint_name, endpoint_config in websockets_config.items():
+                    ws_path = endpoint_config.get("path", f"/{endpoint_name}")
+                    # Combine mount prefix with WebSocket path
+                    full_ws_path = f"{path_prefix.rstrip('/')}{ws_path}"
+
+                    # Handle auth configuration
+                    auth_config = endpoint_config.get("auth", {})
+                    if isinstance(auth_config, dict) and "required" in auth_config:
+                        require_auth = auth_config.get("required", True)
+                    elif "require_auth" in endpoint_config:
+                        require_auth = endpoint_config.get("require_auth", True)
+                    else:
+                        # Use app's auth_policy if available
+                        if "auth_policy" in child_manifest:
+                            require_auth = child_manifest["auth_policy"].get("required", True)
+                        else:
+                            require_auth = True
+
+                    ping_interval = endpoint_config.get("ping_interval", 30)
+
+                    # Create WebSocket handler
+                    handler = create_websocket_endpoint(
+                        app_slug=slug,
+                        path=ws_path,
+                        endpoint_name=endpoint_name,
+                        handler=None,
+                        require_auth=require_auth,
+                        ping_interval=ping_interval,
+                    )
+
+                    # Register on parent app with full path
+                    ws_router = APIRouter()
+                    ws_router.websocket(full_ws_path)(handler)
+                    parent_app.include_router(ws_router)
+
+                    logger.info(
+                        f"✅ Registered WebSocket route '{full_ws_path}' "
+                        f"for mounted app '{slug}' (mounted at '{path_prefix}')"
+                    )
+            except ImportError:
+                logger.warning(
+                    f"WebSocket support not available - skipping WebSocket routes "
+                    f"for mounted app '{slug}'"
+                )
+            except (ValueError, TypeError, AttributeError, RuntimeError) as e:
+                logger.error(
+                    f"Failed to register WebSocket routes for mounted app '{slug}': {e}",
+                    exc_info=True,
+                )
+
         @asynccontextmanager
         async def lifespan(app: FastAPI):
             """Lifespan context manager for parent app."""
@@ -2376,71 +2486,11 @@ class MongoDBEngine:
                     # Mount child app at path prefix
                     app.mount(path_prefix, child_app)
 
+                    # CRITICAL FIX: Merge CORS config from child app to parent app
+                    await _merge_cors_config_to_parent(app, child_app, app_manifest_data, slug)
+
                     # CRITICAL FIX: Register WebSocket routes on parent app with full path
-                    # FastAPI's app.mount() doesn't handle WebSocket routes correctly,
-                    # so we need to register them on the parent app with the mount prefix
-                    # Get WebSocket config from manifest directly (app registration happens
-                    # asynchronously in lifespan, so config may not be available yet)
-                    websockets_config = app_manifest_data.get("websockets")
-                    if websockets_config:
-                        try:
-                            from fastapi import APIRouter
-
-                            from ..routing.websockets import create_websocket_endpoint
-
-                            for endpoint_name, endpoint_config in websockets_config.items():
-                                ws_path = endpoint_config.get("path", f"/{endpoint_name}")
-                                # Combine mount prefix with WebSocket path
-                                full_ws_path = f"{path_prefix.rstrip('/')}{ws_path}"
-
-                                # Handle auth configuration
-                                auth_config = endpoint_config.get("auth", {})
-                                if isinstance(auth_config, dict) and "required" in auth_config:
-                                    require_auth = auth_config.get("required", True)
-                                elif "require_auth" in endpoint_config:
-                                    require_auth = endpoint_config.get("require_auth", True)
-                                else:
-                                    # Use app's auth_policy if available
-                                    if "auth_policy" in app_manifest_data:
-                                        require_auth = app_manifest_data["auth_policy"].get(
-                                            "required", True
-                                        )
-                                    else:
-                                        require_auth = True
-
-                                ping_interval = endpoint_config.get("ping_interval", 30)
-
-                                # Create WebSocket handler
-                                # Use original path for handler (mount handled internally)
-                                handler = create_websocket_endpoint(
-                                    app_slug=slug,
-                                    path=ws_path,
-                                    endpoint_name=endpoint_name,
-                                    handler=None,
-                                    require_auth=require_auth,
-                                    ping_interval=ping_interval,
-                                )
-
-                                # Register on parent app with full path
-                                ws_router = APIRouter()
-                                ws_router.websocket(full_ws_path)(handler)
-                                app.include_router(ws_router)
-
-                                logger.info(
-                                    f"✅ Registered WebSocket route '{full_ws_path}' "
-                                    f"for mounted app '{slug}' (mounted at '{path_prefix}')"
-                                )
-                        except ImportError:
-                            logger.warning(
-                                f"WebSocket support not available - skipping WebSocket routes "
-                                f"for mounted app '{slug}'"
-                            )
-                        except (ValueError, TypeError, AttributeError, RuntimeError) as e:
-                            logger.error(
-                                f"Failed to register WebSocket routes for mounted app "
-                                f"'{slug}': {e}",
-                                exc_info=True,
-                            )
+                    await _register_websocket_routes(app, app_manifest_data, slug, path_prefix)
 
                     # Update existing entry instead of appending
                     entry = _find_mounted_app_entry(slug)
@@ -2616,6 +2666,16 @@ class MongoDBEngine:
         parent_app.state.mounted_apps = mounted_apps
         parent_app.state.is_multi_app = True
         parent_app.state.engine = engine
+
+        # Set default CORS config on parent app for WebSocket origin validation
+        # This ensures CSRF middleware can validate WebSocket origins even if child apps
+        # don't configure CORS
+        from ..auth.config_helpers import CORS_DEFAULTS
+
+        parent_app.state.cors_config = CORS_DEFAULTS.copy()
+        parent_app.state.cors_config["enabled"] = True
+        parent_app.state.cors_config["allow_origins"] = ["*"]  # Default to allow all for WebSocket
+        logger.debug("Set default CORS config on parent app for WebSocket origin validation")
 
         # Store app reference in engine for get_mounted_apps()
         engine._multi_app_instance = parent_app
