@@ -443,13 +443,16 @@ class TestWebSocketOriginValidation:
 
         app.state.cors_config = {"allow_origins": ["https://example.com"]}
 
-        response = client.get("/")
-        assert response.status_code == 200
+        # Get CSRF cookie from GET request
+        get_response = client.get("/")
+        assert get_response.status_code == 200
+        csrf_token = get_response.cookies.get(CSRF_COOKIE_NAME)
 
+        # POST with valid CSRF token should succeed
         response = client.post(
             "/submit",
-            headers={CSRF_HEADER_NAME: "token"},
-            cookies={CSRF_COOKIE_NAME: "token"},
+            headers={CSRF_HEADER_NAME: csrf_token},
+            cookies={CSRF_COOKIE_NAME: csrf_token},
         )
         assert response.status_code == 200
 
