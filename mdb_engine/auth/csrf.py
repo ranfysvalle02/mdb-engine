@@ -195,6 +195,62 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                 return True
         return False
 
+    def _is_websocket_upgrade(self, request: Request) -> bool:
+        """Check if request is a WebSocket upgrade request."""
+        upgrade_header = request.headers.get("upgrade", "").lower()
+        return upgrade_header == "websocket"
+
+    def _get_allowed_origins(self, request: Request) -> list[str]:
+        """Get allowed origins from app state (CORS config) or use request host as fallback."""
+        try:
+            cors_config = getattr(request.app.state, "cors_config", None)
+            if cors_config and cors_config.get("allow_origins"):
+                return cors_config["allow_origins"]
+        except (AttributeError, TypeError, KeyError):
+            pass
+
+        try:
+            host = request.url.hostname
+            scheme = request.url.scheme
+            port = request.url.port
+            if port and port not in [80, 443]:
+                origin = f"{scheme}://{host}:{port}"
+            else:
+                origin = f"{scheme}://{host}"
+            return [origin]
+        except (AttributeError, TypeError):
+            return []
+
+    def _validate_websocket_origin(self, request: Request) -> bool:
+        """
+        Validate Origin header for WebSocket upgrade requests.
+
+        Primary defense against Cross-Site WebSocket Hijacking (CSWSH).
+        Returns True if Origin is valid, False otherwise.
+        """
+        origin = request.headers.get("origin")
+        if not origin:
+            logger.warning(f"WebSocket upgrade missing Origin header: {request.url.path}")
+            return False
+
+        allowed_origins = self._get_allowed_origins(request)
+
+        for allowed in allowed_origins:
+            if allowed == "*":
+                logger.warning(
+                    "WebSocket Origin validation using wildcard '*' - "
+                    "not recommended for production"
+                )
+                return True
+            if origin == allowed or origin.rstrip("/") == allowed.rstrip("/"):
+                return True
+
+        logger.warning(
+            f"WebSocket upgrade rejected - invalid Origin: {origin} "
+            f"(allowed: {allowed_origins})"
+        )
+        return False
+
     async def dispatch(
         self,
         request: Request,
@@ -206,7 +262,14 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         path = request.url.path
         method = request.method
 
-        # Skip exempt routes
+        if self._is_websocket_upgrade(request):
+            if not self._validate_websocket_origin(request):
+                return JSONResponse(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    content={"detail": "Invalid origin for WebSocket connection"},
+                )
+            return await call_next(request)
+
         if self._is_exempt(path):
             return await call_next(request)
 
