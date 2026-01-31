@@ -82,7 +82,7 @@ from .repositories import Entity, MongoRepository, Repository, UnitOfWork
 from .utils import clean_mongo_doc, clean_mongo_docs
 
 __version__ = (
-    "0.4.7"  # Fix: WebSocket routes now work correctly with mounted apps
+    "0.4.8"  # Fix: WebSocket routes now work correctly with mounted apps
     # WebSocket routes are registered on parent app with full mount path prefix
 )
 
