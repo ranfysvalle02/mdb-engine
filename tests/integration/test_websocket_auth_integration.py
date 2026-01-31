@@ -88,12 +88,13 @@ class TestWebSocketCookieAuthIntegration:
 
         # Create app with WebSocket support using create_multi_app
         # (create_app requires a Path, create_multi_app accepts dicts)
+        # Use "/" as path_prefix for root-level app
         app = engine.create_multi_app(
             apps=[
                 {
                     "slug": test_manifest["slug"],
                     "manifest": test_manifest,
-                    "path_prefix": "",
+                    "path_prefix": "/",
                 }
             ],
             title="Test WebSocket App",

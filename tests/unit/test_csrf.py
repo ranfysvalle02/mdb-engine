@@ -786,18 +786,27 @@ class TestWebSocketCSRFValidation:
         assert response.status_code == 403
         assert "origin" in response.json()["detail"].lower()
 
-    def test_websocket_csrf_token_expiration_validation(self, app):
+    def test_websocket_csrf_token_expiration_validation(self):
         """Test that expired CSRF tokens are rejected for WebSocket upgrades."""
         import time
 
         from mdb_engine.auth.csrf import DEFAULT_TOKEN_TTL, generate_csrf_token
 
-        client = TestClient(app, raise_server_exceptions=False)
+        # Create app with CSRF middleware configured with secret
+        # (needed for token expiration validation)
+        secret = "test-secret"
+        app = FastAPI()
 
+        @app.get("/")
+        def get_root():
+            return {"message": "ok"}
+
+        app.add_middleware(CSRFMiddleware, secret=secret, token_ttl=DEFAULT_TOKEN_TTL)
         app.state.cors_config = {"allow_origins": ["https://example.com"]}
 
-        # Generate CSRF token
-        secret = "test-secret"
+        client = TestClient(app, raise_server_exceptions=False)
+
+        # Generate CSRF token with the same secret
         csrf_token = generate_csrf_token(secret=secret)
 
         # Simulate time passing beyond token TTL to make it expired
