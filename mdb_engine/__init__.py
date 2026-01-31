@@ -82,13 +82,11 @@ from .repositories import Entity, MongoRepository, Repository, UnitOfWork
 from .utils import clean_mongo_doc, clean_mongo_docs
 
 __version__ = (
-    "0.4.11"  # Automatic WebSocket support improvements
-    # - Improved CORS config merging with proper wildcard handling
-    # - WebSocket route verification after registration
-    # - Startup verification logging for CORS config and WebSocket routes
-    # - Enhanced CSRF middleware error messages with path and CORS status
-    # - Better logging throughout WebSocket registration process
-    # - All WebSocket multi-app SSO features now work automatically
+    "0.4.12"  # Fix CSRF middleware rejecting WebSocket connections
+    # - Skip CSRF middleware on child apps in multi-app setups (parent handles it)
+    # - Merge child app public routes into parent CSRF exempt list
+    # - WebSocket connections now work correctly in multi-app SSO setups
+    # - Security maintained: parent app CSRF middleware protects all routes
 )
 
 __all__ = [

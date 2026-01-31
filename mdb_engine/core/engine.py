@@ -1499,8 +1499,9 @@ class MongoDBEngine:
 
         # Add CSRF middleware (after auth - auto-enabled for shared mode)
         # CSRF protection is enabled by default for shared auth mode
+        # SKIP for sub-apps in multi-app setups - parent app handles CSRF
         csrf_config = auth_config.get("csrf_protection", True if auth_mode == "shared" else False)
-        if csrf_config:
+        if csrf_config and not is_sub_app:  # Don't add CSRF to child apps
             from ..auth.csrf import create_csrf_middleware
 
             csrf_middleware = create_csrf_middleware(
@@ -1508,6 +1509,11 @@ class MongoDBEngine:
             )
             app.add_middleware(csrf_middleware)
             logger.info(f"CSRFMiddleware added for '{slug}'")
+        elif csrf_config and is_sub_app:
+            logger.debug(
+                f"CSRFMiddleware skipped for child app '{slug}' - "
+                f"parent app handles CSRF protection for WebSocket routes"
+            )
 
         # Add security middleware (HSTS, headers)
         security_config = auth_config.get("security", {})
@@ -2127,17 +2133,33 @@ class MongoDBEngine:
                 "Path prefix validation failed:\n" + "\n".join(f"  - {e}" for e in errors)
             )
 
-        # Check if any app uses shared auth
+        # Check if any app uses shared auth and collect public routes for CSRF exemption
         has_shared_auth = False
+        all_public_routes = [
+            "/health",
+            "/docs",
+            "/openapi.json",
+            "/_mdb/routes",
+        ]  # Base exempt routes
         for app_config in apps:
             try:
                 manifest_path = app_config["manifest"]
+                path_prefix = app_config.get("path_prefix", f"/{app_config.get('slug')}")
                 with open(manifest_path) as f:
                     app_manifest_pre = json.load(f)
                 auth_config = app_manifest_pre.get("auth", {})
                 if auth_config.get("mode") == "shared":
                     has_shared_auth = True
-                    break
+                # Collect public routes with path prefix for CSRF exemption
+                child_public_routes = auth_config.get("public_routes", [])
+                for route in child_public_routes:
+                    # Add path prefix to make route absolute on parent app
+                    if route.startswith("/"):
+                        prefixed_route = f"{path_prefix.rstrip('/')}{route}"
+                    else:
+                        prefixed_route = f"{path_prefix.rstrip('/')}/{route}"
+                    if prefixed_route not in all_public_routes:
+                        all_public_routes.append(prefixed_route)
             except (FileNotFoundError, json.JSONDecodeError, KeyError) as e:
                 logger.warning(f"Could not check auth mode for app '{app_config.get('slug')}': {e}")
 
@@ -2812,10 +2834,11 @@ class MongoDBEngine:
             from ..auth.csrf import create_csrf_middleware
 
             # Create CSRF middleware with default config (will use parent app's CORS config)
-            # Exempt routes that don't need CSRF (health checks, etc.)
+            # Exempt routes that don't need CSRF (health checks, public routes from child apps)
+            # all_public_routes includes base routes + child app public routes with path prefixes
             parent_csrf_config = {
                 "csrf_protection": True,
-                "public_routes": ["/health", "/docs", "/openapi.json", "/_mdb/routes"],
+                "public_routes": all_public_routes,
             }
             csrf_middleware = create_csrf_middleware(parent_csrf_config)
             parent_app.add_middleware(csrf_middleware)
