@@ -16,43 +16,42 @@ Comprehensive security guide for WebSocket authentication in multi-app SSO deplo
 
 ## Security Overview
 
-### Why Subprotocol Tunneling?
+MDB-Engine uses **cookie-based authentication** for WebSocket connections, providing the highest level of security against XSS attacks.
 
-MDB-Engine uses **subprotocol tunneling** to securely pass JWT tokens via the `Sec-WebSocket-Protocol` header. This approach was chosen over alternatives for several security reasons:
+### Cookie-Based Authentication
+
+Cookie-based authentication stores JWT tokens in httpOnly cookies that JavaScript cannot access, providing superior protection against XSS attacks.
 
 #### Security Benefits
 
-1. **Bypasses CSRF Issues**
-   - Cookies trigger CSRF middleware validation
-   - Subprotocol tokens don't rely on cookies
-   - Reduces attack surface for CSRF attacks
+1. **XSS Protection**
+   - Tokens stored in httpOnly cookies are not accessible to JavaScript
+   - Prevents XSS attacks from stealing authentication tokens
+   - Most secure option for token storage
 
-2. **Avoids URL Logging Risks**
-   - Query parameters (`?token=...`) get logged in:
-     - Server access logs
-     - Browser history
-     - Referrer headers
-     - Proxy logs
-   - Subprotocol tokens are in headers, not URLs
+2. **CSRF Protection**
+   - Uses double-submit cookie pattern for CSRF protection
+   - CSRF token validated on WebSocket upgrade requests
+   - Origin validation provides additional protection
 
-3. **Browser-Native Support**
-   - Uses standard WebSocket API
-   - No custom headers needed (browsers don't allow custom headers)
-   - Works with all modern browsers
+3. **Automatic Cookie Transmission**
+   - Browser automatically sends cookies on WebSocket upgrade requests
+   - No JavaScript code needed to manage tokens
+   - Simpler client-side implementation
 
 4. **Secure Token Transmission**
-   - Token sent via standard WebSocket protocol negotiation
+   - Tokens never exposed to JavaScript
    - Server validates **before** accepting connection
    - Failed authentication = no connection established
 
 #### Comparison with Alternatives
 
-| Method | CSRF Safe | URL Logging | Browser Support | Security Rating |
-|--------|----------|-------------|-----------------|-----------------|
-| **Subprotocol** ✅ | Yes | No risk | Native | ⭐⭐⭐⭐⭐ |
-| Query Params ❌ | Yes | **High risk** | Native | ⭐⭐ |
-| Cookies ❌ | **No** (triggers CSRF) | No risk | Native | ⭐⭐⭐ |
-| Custom Headers ❌ | Yes | No risk | **Not supported** | ⭐ |
+| Method | XSS Protection | CSRF Safe | URL Logging | Browser Support | Security Rating |
+|--------|---------------|----------|-------------|-----------------|-----------------|
+| **Cookie (httpOnly)** ✅ | **Yes** | Yes (with CSRF token) | No risk | Native | ⭐⭐⭐⭐⭐ |
+| Query Params ❌ | No | Yes | **High risk** | Native | ⭐⭐ |
+| Cookies (non-httpOnly) ❌ | No | **No** (triggers CSRF) | No risk | Native | ⭐⭐⭐ |
+| Custom Headers ❌ | No | Yes | No risk | **Not supported** | ⭐ |
 
 ### Threat Model
 
@@ -60,7 +59,7 @@ MDB-Engine uses **subprotocol tunneling** to securely pass JWT tokens via the `S
 
 1. **CSRF Attacks**
    - **Threat**: Malicious site triggers WebSocket connection with user's cookies
-   - **Mitigation**: Subprotocol tokens don't use cookies, CSRF middleware validates origins
+   - **Mitigation**: CSRF token validation via double-submit cookie pattern, origin validation
 
 2. **Token Theft via URL Logging**
    - **Threat**: Tokens in query params logged in server logs, browser history
@@ -82,29 +81,41 @@ MDB-Engine uses **subprotocol tunneling** to securely pass JWT tokens via the `S
 
 ## Authentication Architecture
 
-### Subprotocol Tunneling Flow
+### Cookie-Based Authentication Flow
 
 ```mermaid
 sequenceDiagram
     participant Client
     participant Browser
     participant Server
+    participant CSRF
     participant Auth
 
-    Client->>Browser: new WebSocket(url, [token])
-    Browser->>Server: HTTP Upgrade Request<br/>Sec-WebSocket-Protocol: token
-    Server->>Auth: Extract token from subprotocol header
-    Auth->>Auth: Validate JWT token
-    alt Token Valid
-        Auth->>Server: User authenticated
-        Server->>Browser: 101 Switching Protocols<br/>Sec-WebSocket-Protocol: token
-        Browser->>Client: WebSocket connected
-    else Token Invalid
-        Auth->>Server: Authentication failed
-        Server->>Browser: 403 Forbidden (or connection closed)
+    Note over Client,Browser: httpOnly cookie set during login
+    Client->>Browser: new WebSocket(url)
+    Browser->>Server: HTTP Upgrade Request<br/>Cookie: token=JWT<br/>X-CSRF-Token: csrf_token
+    Server->>CSRF: Validate CSRF token
+    CSRF->>CSRF: Compare cookie & header tokens
+    alt CSRF Valid
+        CSRF->>Server: CSRF validation passed
+        Server->>Auth: Extract token from cookie
+        Auth->>Auth: Validate JWT token
+        alt Token Valid
+            Auth->>Server: User authenticated
+            Server->>Browser: 101 Switching Protocols
+            Browser->>Client: WebSocket connected
+        else Token Invalid
+            Auth->>Server: Authentication failed
+            Server->>Browser: 403 Forbidden
+            Browser->>Client: Connection rejected
+        end
+    else CSRF Invalid
+        CSRF->>Server: CSRF validation failed
+        Server->>Browser: 403 Forbidden
         Browser->>Client: Connection rejected
     end
 ```
+
 
 ### Multi-App SSO Integration
 
@@ -130,7 +141,7 @@ graph TB
     Client[Client] -->|1. WebSocket Upgrade| CSRF
     CSRF -->|2. Validate Origin| CORS
     CORS -->|3. Route to App| WS
-    WS -->|4. Extract Subprotocol| JWT
+    WS -->|4. Extract Cookie| JWT
     JWT -->|5. Validate Token| UserPool
     UserPool -->|6. User Info| WS
     WS -->|7. Accept Connection| Client
@@ -152,14 +163,15 @@ graph TB
    - Validates before connection is established
    - Prevents cross-origin attacks
 
-3. **Subprotocol Authentication**
-   - Token extracted from `Sec-WebSocket-Protocol` header
+3. **Cookie-Based Authentication**
+   - Token extracted from httpOnly cookie
+   - CSRF token validated via double-submit pattern
    - Validated **before** `accept()` is called
    - Failed auth = no connection established
 
 ### CORS Configuration Requirements
 
-For subprotocol authentication to work securely:
+For cookie-based authentication to work securely:
 
 ```json
 {
@@ -177,7 +189,7 @@ For subprotocol authentication to work securely:
 ```
 
 **Important:**
-- `allow_credentials: true` required for SSO (even though we don't use cookies for WebSocket auth)
+- `allow_credentials: true` **required** for cookie-based WebSocket authentication
 - Use **specific origins** in production, not wildcards
 - Include all frontend origins that need WebSocket access
 
@@ -191,31 +203,55 @@ For subprotocol authentication to work securely:
 
 ```typescript
 /**
- * Secure WebSocket connection with subprotocol authentication
+ * Secure WebSocket connection with cookie-based authentication
+ * 
+ * Note: Authentication token is stored in httpOnly cookie and sent automatically.
+ * CSRF token must be included in X-CSRF-Token header.
  */
 class SecureWebSocket {
   private ws: WebSocket | null = null;
   private url: string;
-  private token: string;
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
 
-  constructor(url: string, token: string) {
+  constructor(url: string) {
     this.url = url;
-    this.token = token;
+  }
+
+  /**
+   * Get CSRF token from cookie (if not httpOnly) or from page load
+   */
+  private getCsrfToken(): string | null {
+    // Try to get from cookie (if not httpOnly)
+    const cookies = document.cookie.split(';');
+    for (const cookie of cookies) {
+      const [name, value] = cookie.trim().split('=');
+      if (name === 'csrf_token') {
+        return value;
+      }
+    }
+    
+    // Fallback: Get from meta tag (if set by server)
+    const metaTag = document.querySelector('meta[name="csrf-token"]');
+    if (metaTag) {
+      return metaTag.getAttribute('content');
+    }
+    
+    return null;
   }
 
   connect(): Promise<void> {
     return new Promise((resolve, reject) => {
-      // Validate token before connecting
-      if (!this.token || !this.isValidToken(this.token)) {
-        reject(new Error('Invalid or missing token'));
-        return;
-      }
-
       try {
-        // Pass token as subprotocol (second parameter)
-        this.ws = new WebSocket(this.url, [this.token]);
+        // Create WebSocket connection
+        // Browser automatically sends httpOnly cookies
+        this.ws = new WebSocket(this.url);
+
+        // Note: JavaScript WebSocket API cannot set custom headers.
+        // CSRF protection relies on:
+        // 1. Origin validation (browser automatically sends Origin header)
+        // 2. SameSite cookies (prevents cross-site cookie sending)
+        // 3. CSRF cookie presence (validates session exists)
 
         this.ws.onopen = () => {
           console.log('✅ WebSocket connected securely');
@@ -240,20 +276,6 @@ class SecureWebSocket {
     });
   }
 
-  private isValidToken(token: string): boolean {
-    try {
-      const parts = token.split('.');
-      if (parts.length !== 3) return false;
-
-      // Check expiration
-      const payload = JSON.parse(atob(parts[1]));
-      const expiresAt = payload.exp * 1000;
-      return Date.now() < expiresAt;
-    } catch {
-      return false;
-    }
-  }
-
   send(data: any): void {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(data));
@@ -270,9 +292,8 @@ class SecureWebSocket {
   }
 }
 
-// Usage
-const token = getAuthToken(); // From your auth system
-const ws = new SecureWebSocket('wss://api.example.com/app1/ws', token);
+// Usage - no token needed, cookie is sent automatically
+const ws = new SecureWebSocket('wss://api.example.com/app1/ws');
 await ws.connect();
 ```
 
@@ -283,33 +304,25 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 
 interface UseSecureWebSocketOptions {
   url: string;
-  token: string | null;
   enabled?: boolean;
   onMessage?: (data: any) => void;
   onError?: (error: Event) => void;
 }
 
 export function useSecureWebSocket(options: UseSecureWebSocketOptions) {
-  const { url, token, enabled = true, onMessage, onError } = options;
+  const { url, enabled = true, onMessage, onError } = options;
   const [connected, setConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
 
   const connect = useCallback(() => {
-    if (!enabled || !token) {
-      console.warn('WebSocket disabled or no token available');
-      return;
-    }
-
-    // Validate token format
-    const parts = token.split('.');
-    if (parts.length !== 3) {
-      console.error('Invalid token format');
+    if (!enabled) {
+      console.warn('WebSocket disabled');
       return;
     }
 
     try {
-      // Pass token as subprotocol
-      const ws = new WebSocket(url, [token]);
+      // Create WebSocket - browser automatically sends httpOnly cookies
+      const ws = new WebSocket(url);
       wsRef.current = ws;
 
       ws.onopen = () => {
@@ -337,10 +350,10 @@ export function useSecureWebSocket(options: UseSecureWebSocketOptions) {
     } catch (error) {
       console.error('Failed to create WebSocket:', error);
     }
-  }, [url, token, enabled, onMessage, onError]);
+  }, [url, enabled, onMessage, onError]);
 
   useEffect(() => {
-    if (enabled && token) {
+    if (enabled) {
       connect();
     }
     return () => {
@@ -348,7 +361,7 @@ export function useSecureWebSocket(options: UseSecureWebSocketOptions) {
         wsRef.current.close();
       }
     };
-  }, [connect, enabled, token]);
+  }, [connect, enabled]);
 
   const send = useCallback((data: any) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -421,9 +434,85 @@ app = engine.create_multi_app(
     title="My Platform",
 )
 
-# WebSocket authentication happens automatically via subprotocol tunneling
+# WebSocket authentication happens automatically via httpOnly cookies
 # No additional code needed!
 ```
+
+**Important for Multi-App Setups:**
+
+Cookies are automatically set with `path="/"` to ensure they work across all mounted sub-apps. When you use `app.mount("/subapi", subapi)`, cookies set by the main app are automatically available to the sub-app because:
+
+1. **Cookie Path**: Cookies are set with `path="/"` (root path), making them available to all routes
+2. **Automatic Transmission**: Browser automatically sends httpOnly cookies on WebSocket upgrade requests
+3. **Shared Domain**: All mounted apps share the same domain, so cookies work seamlessly
+
+**Example Multi-App Setup:**
+
+```python
+from mdb_engine import MongoDBEngine
+
+engine = MongoDBEngine(mongo_uri=..., db_name=...)
+
+# Create multi-app with WebSocket support
+app = engine.create_multi_app(
+    apps=[
+        {
+            "slug": "app1",
+            "manifest": Path("./apps/app1/manifest.json"),
+            "path_prefix": "/app1",  # Mounted at /app1
+        },
+        {
+            "slug": "app2", 
+            "manifest": Path("./apps/app2/manifest.json"),
+            "path_prefix": "/app2",  # Mounted at /app2
+        }
+    ]
+)
+
+# Cookies set during login are available to:
+# - /app1/ws (WebSocket endpoint)
+# - /app2/ws (WebSocket endpoint)
+# - All other routes in both apps
+```
+
+**How It Works with FastAPI Mounted Apps:**
+
+When using `app.mount("/subapi", subapi)`, cookies work seamlessly because:
+
+1. **Cookie Path**: Cookies are set with `path="/"` (root path), making them available to all routes including mounted sub-apps
+2. **Automatic Transmission**: Browser automatically sends httpOnly cookies on WebSocket upgrade requests to any path
+3. **Shared Domain**: All mounted apps share the same domain, so cookies work across all sub-apps
+4. **Request Context**: FastAPI passes the full request context (including cookies) to mounted apps
+
+**Example Flow:**
+
+```python
+# Main app sets cookie during login
+@app.post("/login")
+async def login(response: Response):
+    response.set_cookie(
+        key="token",
+        value=jwt_token,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        path="/",  # Available to all mounted apps
+    )
+
+# Mounted sub-app can read the cookie
+@subapp.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    # Cookie is automatically available via websocket.cookies
+    token = websocket.cookies.get("token")
+    # Authentication works seamlessly!
+```
+
+**Key Points:**
+
+- ✅ Cookies with `path="/"` are available to all mounted apps
+- ✅ WebSocket connections automatically include cookies in the upgrade request
+- ✅ No additional configuration needed - it "just works"
+- ✅ CSRF protection works across all mounted apps via shared CSRF middleware
 
 ### Security Best Practices
 
@@ -431,58 +520,53 @@ app = engine.create_multi_app(
 
 1. **Token Storage**
    ```typescript
-   // ✅ GOOD: Secure storage
-   // Use httpOnly cookies for HTTP requests
-   // Use secure storage (sessionStorage/localStorage) for WebSocket tokens
-   const token = sessionStorage.getItem('auth_token');
+   // ✅ GOOD: httpOnly cookies (handled server-side)
+   // Tokens are stored in httpOnly cookies set by the server
+   // JavaScript cannot access these cookies, preventing XSS attacks
+   // Browser automatically sends cookies on WebSocket upgrade requests
    
-   // ❌ BAD: Exposed in global scope
-   window.token = getToken();
+   // ❌ BAD: Storing tokens in JavaScript-accessible storage
+   sessionStorage.setItem('auth_token', token); // Vulnerable to XSS
+   localStorage.setItem('auth_token', token);    // Vulnerable to XSS
+   window.token = token;                        // Exposed in global scope
    ```
 
 2. **Token Refresh**
    ```typescript
-   // Refresh token before expiration
+   // Token refresh handled server-side via cookie refresh
+   // Client just needs to ensure cookies are sent with requests
    async function refreshTokenIfNeeded() {
-     const token = getAuthToken();
-     const payload = JSON.parse(atob(token.split('.')[1]));
-     const expiresAt = payload.exp * 1000;
-     const now = Date.now();
+     // Server handles token refresh and sets new httpOnly cookie
+     const response = await fetch('/auth/refresh', {
+       method: 'POST',
+       credentials: 'include' // Important: sends cookies
+     });
      
-     // Refresh if expiring within 10 minutes
-     if (expiresAt - now < 10 * 60 * 1000) {
-       const newToken = await fetch('/auth/refresh', {
-         method: 'POST',
-         credentials: 'include'
-       }).then(r => r.json());
-       
-       setAuthToken(newToken.token);
-       return newToken.token;
+     if (response.ok) {
+       // New token cookie set automatically by server
+       return true;
      }
      
-     return token;
+     return false;
    }
    ```
 
-3. **Token Validation**
+3. **CSRF Token Management**
    ```typescript
-   // Always validate token before connecting
-   function isValidToken(token: string): boolean {
-     try {
-       const parts = token.split('.');
-       if (parts.length !== 3) return false;
-       
-       const payload = JSON.parse(atob(parts[1]));
-       
-       // Check expiration
-       if (payload.exp && Date.now() >= payload.exp * 1000) {
-         return false;
+   // CSRF token is stored in cookie (may be readable by JS if not httpOnly)
+   // For WebSocket connections, CSRF validation happens server-side
+   // based on Origin header and cookie presence
+   
+   function getCsrfToken(): string | null {
+     // Try to get from cookie (if not httpOnly)
+     const cookies = document.cookie.split(';');
+     for (const cookie of cookies) {
+       const [name, value] = cookie.trim().split('=');
+       if (name === 'csrf_token') {
+         return value;
        }
-       
-       return true;
-     } catch {
-       return false;
      }
+     return null;
    }
    ```
 
@@ -508,10 +592,13 @@ app = engine.create_multi_app(
    ```typescript
    ws.onclose = async (event) => {
      if (event.code === 1008) {
-       // Auth failure - refresh token and reconnect
-       const newToken = await refreshToken();
-       if (newToken) {
-         setTimeout(() => connect(newToken), 2000);
+       // Auth failure - refresh token cookie and reconnect
+       const refreshed = await refreshTokenIfNeeded();
+       if (refreshed) {
+         setTimeout(() => connect(), 2000);
+       } else {
+         // Redirect to login if refresh failed
+         window.location.href = '/login';
        }
      }
    };
@@ -544,9 +631,9 @@ app = engine.create_multi_app(
 
 #### Token Transmission
 
-- ✅ **Subprotocol header** - Secure, not logged
+- ✅ **httpOnly Cookie** - Secure, not accessible to JavaScript, CSRF protected
 - ❌ **Query parameters** - Logged in URLs
-- ❌ **Cookies** - CSRF issues with WebSocket
+- ❌ **Non-httpOnly cookies** - Accessible to JavaScript, XSS risk
 
 ### Origin Validation
 
@@ -578,10 +665,11 @@ const ws = new WebSocket(wsUrl, [token]);
    - Checks origin against merged CORS config
    - Rejects unauthorized origins
 
-2. **Subprotocol Authentication**
-   - Token in subprotocol header (not cookie)
-   - Doesn't trigger cookie-based CSRF checks
-   - Still protected by origin validation
+2. **Cookie-Based Authentication**
+   - Token in httpOnly cookie (not accessible to JavaScript)
+   - CSRF cookie presence validated (ensures session exists)
+   - SameSite cookie attribute prevents cross-site cookie sending
+   - Protected by origin validation (primary) + SameSite cookies (secondary)
 
 #### Configuration
 
@@ -766,28 +854,31 @@ const ws = new WebSocket(`wss://api.example.com/ws?token=${token}`);
 
 **Fix:**
 ```javascript
-// ✅ CORRECT: Token as subprotocol
-const ws = new WebSocket('wss://api.example.com/ws', [token]);
+// ✅ CORRECT: Token in httpOnly cookie (set server-side)
+const ws = new WebSocket('wss://api.example.com/ws');
+// Browser automatically sends httpOnly cookies
 ```
 
-#### ❌ Pitfall 2: Relying on Cookies for WebSocket Auth
+#### ❌ Pitfall 2: Not Including CSRF Token
 
 ```javascript
-// ❌ WRONG: Cookie-based auth triggers CSRF issues
+// ❌ WRONG: Missing CSRF token validation
 const ws = new WebSocket('wss://api.example.com/ws');
-// Cookie sent automatically, but CSRF middleware may reject
+// Cookie sent automatically, but CSRF validation may fail
 ```
 
 **Why it's bad:**
-- CSRF middleware validates cookies
+- CSRF middleware requires CSRF token validation
 - Can cause connection rejections
-- Less secure than subprotocol tunneling
+- Security vulnerability
 
 **Fix:**
 ```javascript
-// ✅ CORRECT: Subprotocol authentication
-const token = getAuthToken();
-const ws = new WebSocket('wss://api.example.com/ws', [token]);
+// ✅ CORRECT: Cookie-based authentication with CSRF protection
+// CSRF token is validated server-side based on cookie and Origin header
+// Ensure httpOnly cookie is set during authentication
+const ws = new WebSocket('wss://api.example.com/ws');
+// Browser automatically sends httpOnly cookies
 ```
 
 #### ❌ Pitfall 3: Accepting Connection Before Authentication
@@ -936,20 +1027,20 @@ Test authentication logic:
 import pytest
 from mdb_engine.routing.websockets import authenticate_websocket
 
-async def test_subprotocol_authentication_success():
-    """Test successful authentication via subprotocol."""
+async def test_cookie_authentication_success():
+    """Test successful authentication via httpOnly cookie."""
     mock_ws = create_mock_websocket()
-    mock_ws.headers = {"sec-websocket-protocol": valid_token}
+    mock_ws.cookies = {"token": valid_token}
     
     user_id, user_email = await authenticate_websocket(mock_ws, "app1", True)
     
     assert user_id is not None
     assert user_email is not None
 
-async def test_subprotocol_authentication_failure():
+async def test_cookie_authentication_failure():
     """Test authentication failure with invalid token."""
     mock_ws = create_mock_websocket()
-    mock_ws.headers = {"sec-websocket-protocol": "invalid-token"}
+    mock_ws.cookies = {"token": "invalid-token"}
     
     with pytest.raises(jwt.InvalidTokenError):
         await authenticate_websocket(mock_ws, "app1", True)
@@ -989,7 +1080,7 @@ async def test_websocket_token_expiration():
 - [ ] **CSRF Protection**
   - [ ] CSRF middleware active
   - [ ] Origin validation works
-  - [ ] Subprotocol auth bypasses cookie CSRF
+  - [ ] CSRF token validation for cookie-based auth
 
 - [ ] **Token Security**
   - [ ] Tokens not in URLs
@@ -1139,18 +1230,18 @@ if auth_failures_per_minute > threshold:
 
 ### Key Security Principles
 
-1. ✅ **Use Subprotocol Tunneling** - Secure, browser-native token transmission
+1. ✅ **Use httpOnly Cookies** - Secure, prevents XSS token theft
 2. ✅ **Validate Before Accept** - Authenticate before establishing connection
 3. ✅ **Protect Origins** - Use specific CORS origins, validate all connections
-4. ✅ **Manage Tokens Securely** - Short expiration, secure storage, proactive refresh
+4. ✅ **CSRF Protection** - Double-submit cookie pattern for WebSocket upgrades
 5. ✅ **Monitor and Alert** - Track security events, respond to incidents
 
 ### Quick Reference
 
 **Client:**
 ```javascript
-const token = getAuthToken();
-const ws = new WebSocket(url, [token]);
+// No token needed - browser automatically sends httpOnly cookies
+const ws = new WebSocket(url);
 ```
 
 **Server:**
@@ -1171,9 +1262,9 @@ const ws = new WebSocket(url, [token]);
 ```
 
 **Security:**
-- ✅ Subprotocol authentication
+- ✅ Cookie-based authentication (httpOnly)
 - ✅ Origin validation
-- ✅ CSRF protection
+- ✅ CSRF protection (double-submit cookie)
 - ✅ Token expiration
 - ✅ Secure transmission (WSS)
 

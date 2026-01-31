@@ -116,8 +116,14 @@ def set_auth_cookies(
         refresh_token_ttl = 604800  # Default 7 days
 
     # Set access token cookie
+    # CRITICAL: path="/" ensures cookie is available to all mounted sub-apps
+    # Without explicit path, cookies default to request path and won't work with app.mount()
     response.set_cookie(
-        key="token", value=access_token, max_age=access_token_ttl, **cookie_settings
+        key="token",
+        value=access_token,
+        max_age=access_token_ttl,
+        path="/",  # Required for FastAPI mounted apps
+        **cookie_settings,
     )
 
     # Set refresh token cookie if provided
@@ -126,6 +132,7 @@ def set_auth_cookies(
             key="refresh_token",
             value=refresh_token,
             max_age=refresh_token_ttl,
+            path="/",  # Required for FastAPI mounted apps
             **cookie_settings,
         )
 
@@ -148,7 +155,10 @@ def clear_auth_cookies(response, request: Request | None = None):
         secure = os.getenv("G_NOME_ENV") == "production"
 
     # Delete access token cookie
-    response.delete_cookie(key="token", httponly=True, secure=secure, samesite=samesite)
+    # CRITICAL: path="/" ensures cookie deletion works across all mounted sub-apps
+    response.delete_cookie(key="token", httponly=True, secure=secure, samesite=samesite, path="/")
 
     # Delete refresh token cookie
-    response.delete_cookie(key="refresh_token", httponly=True, secure=secure, samesite=samesite)
+    response.delete_cookie(
+        key="refresh_token", httponly=True, secure=secure, samesite=samesite, path="/"
+    )

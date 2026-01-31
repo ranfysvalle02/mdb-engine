@@ -934,7 +934,7 @@ async def my_route(request: Request):
 
 ### Quick Setup
 
-MDB-Engine uses **subprotocol tunneling** for secure WebSocket authentication in multi-app SSO setups.
+MDB-Engine uses **httpOnly cookies** for secure WebSocket authentication in multi-app SSO setups.
 
 #### 1. Configure WebSocket in Manifest
 
@@ -963,11 +963,9 @@ MDB-Engine uses **subprotocol tunneling** for secure WebSocket authentication in
 #### 2. Client Connection
 
 ```javascript
-// Get JWT token from your auth system
-const token = getAuthToken();
-
-// Connect with subprotocol authentication
-const ws = new WebSocket('wss://api.example.com/app1/ws', [token]);
+// No token needed - browser automatically sends httpOnly cookies
+// Ensure user is authenticated and cookie is set before connecting
+const ws = new WebSocket('wss://api.example.com/app1/ws');
 
 ws.onopen = () => {
   console.log('WebSocket connected securely');
@@ -976,7 +974,8 @@ ws.onopen = () => {
 
 #### 3. Security Benefits
 
-- ✅ **Bypasses CSRF issues** - No cookies needed for WebSocket auth
+- ✅ **XSS Protection** - Tokens not accessible to JavaScript
+- ✅ **CSRF Protection** - Origin validation + SameSite cookies
 - ✅ **Avoids URL logging** - Token not in query params
 - ✅ **Browser-native** - Standard WebSocket API
 - ✅ **Secure** - Server validates token before accepting connection

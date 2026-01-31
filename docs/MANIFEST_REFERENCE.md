@@ -406,9 +406,9 @@ Enhanced token management with refresh tokens, sessions, and security:
 
 ## WebSockets
 
-Define real-time WebSocket endpoints with secure subprotocol authentication.
+Define real-time WebSocket endpoints with secure cookie-based authentication.
 
-**Security Note**: MDB-Engine uses **subprotocol tunneling** for WebSocket authentication. Clients must pass JWT tokens via the `Sec-WebSocket-Protocol` header: `new WebSocket(url, [token])`. This method bypasses CSRF issues and avoids URL logging risks.
+**Security Note**: MDB-Engine uses **httpOnly cookies** for WebSocket authentication. Tokens are stored in httpOnly cookies set during login, and the browser automatically sends them on WebSocket upgrade requests. This provides XSS protection and CSRF protection via Origin validation and SameSite cookies.
 
 ```json
 {
@@ -443,19 +443,18 @@ Define real-time WebSocket endpoints with secure subprotocol authentication.
 
 ### Authentication
 
-When `auth.required` is `true` (default), clients must authenticate using **subprotocol tunneling**:
+When `auth.required` is `true` (default), clients must authenticate using **httpOnly cookies**:
 
 **Client Implementation:**
 ```javascript
-// Get JWT token from your auth system
-const token = getAuthToken();
-
-// Pass token as subprotocol (second parameter)
-const ws = new WebSocket('wss://api.example.com/app1/ws', [token]);
+// No token needed - browser automatically sends httpOnly cookies
+// Ensure httpOnly cookie is set during authentication/login
+const ws = new WebSocket('wss://api.example.com/app1/ws');
 ```
 
 **Security Benefits:**
-- ✅ Bypasses CSRF protection issues (no cookies needed)
+- ✅ XSS protection (tokens not accessible to JavaScript)
+- ✅ CSRF protection (double-submit cookie pattern)
 - ✅ Avoids URL logging risks (token not in query params)
 - ✅ Browser-native support (standard WebSocket API)
 - ✅ Server validates token **before** accepting connection

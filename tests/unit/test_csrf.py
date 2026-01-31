@@ -622,3 +622,200 @@ class TestWebSocketOriginValidation:
 
         # Should fall back to request host or return empty list
         assert isinstance(allowed_origins, list)
+
+
+class TestWebSocketCSRFValidation:
+    """Tests for CSRF validation on WebSocket upgrade requests."""
+
+    @pytest.fixture
+    def app(self):
+        """Create FastAPI app with CSRF middleware."""
+        app = FastAPI()
+
+        @app.get("/")
+        def get_root():
+            return {"message": "ok"}
+
+        app.add_middleware(CSRFMiddleware)
+
+        return app
+
+    def test_websocket_with_auth_cookie_requires_csrf_cookie(self, app):
+        """Test that WebSocket upgrade with auth cookie requires CSRF cookie."""
+        client = TestClient(app, raise_server_exceptions=False)
+
+        app.state.cors_config = {"allow_origins": ["https://example.com"]}
+
+        # WebSocket upgrade with auth cookie but no CSRF cookie should fail
+        response = client.get(
+            "/",
+            headers={
+                "upgrade": "websocket",
+                "origin": "https://example.com",
+            },
+            cookies={"token": "auth-token"},  # Auth cookie present, no CSRF cookie
+        )
+        assert response.status_code == 403
+        assert "CSRF" in response.json()["detail"]
+
+    def test_websocket_with_auth_cookie_and_csrf_cookie_accepted(self, app):
+        """Test that WebSocket upgrade with auth cookie and CSRF cookie is accepted."""
+        client = TestClient(app, raise_server_exceptions=False)
+
+        app.state.cors_config = {"allow_origins": ["https://example.com"]}
+
+        # Get CSRF cookie first
+        get_response = client.get("/")
+        csrf_token = get_response.cookies.get(CSRF_COOKIE_NAME)
+
+        # WebSocket upgrade with auth cookie and CSRF cookie should succeed
+        # (CSRF header is optional for WebSocket upgrades since JS can't set headers)
+        response = client.get(
+            "/",
+            headers={
+                "upgrade": "websocket",
+                "origin": "https://example.com",
+                # CSRF header not required - Origin validation + SameSite cookies provide protection
+            },
+            cookies={
+                "token": "auth-token",  # Auth cookie
+                CSRF_COOKIE_NAME: csrf_token,  # CSRF cookie
+            },
+        )
+        assert response.status_code == 200
+
+    def test_websocket_with_csrf_header_optional_but_validated_if_present(self, app):
+        """Test that CSRF header is validated if provided, but not required."""
+        client = TestClient(app, raise_server_exceptions=False)
+
+        app.state.cors_config = {"allow_origins": ["https://example.com"]}
+
+        # Get CSRF cookie first
+        get_response = client.get("/")
+        csrf_token = get_response.cookies.get(CSRF_COOKIE_NAME)
+
+        # WebSocket upgrade with matching CSRF header should succeed
+        response = client.get(
+            "/",
+            headers={
+                "upgrade": "websocket",
+                "origin": "https://example.com",
+                CSRF_HEADER_NAME: csrf_token,  # Optional header, but validated if present
+            },
+            cookies={
+                "token": "auth-token",
+                CSRF_COOKIE_NAME: csrf_token,
+            },
+        )
+        assert response.status_code == 200
+
+        # WebSocket upgrade with mismatched CSRF header should fail
+        response = client.get(
+            "/",
+            headers={
+                "upgrade": "websocket",
+                "origin": "https://example.com",
+                CSRF_HEADER_NAME: "different-token",  # Mismatched header
+            },
+            cookies={
+                "token": "auth-token",
+                CSRF_COOKIE_NAME: csrf_token,
+            },
+        )
+        assert response.status_code == 403
+        assert "CSRF" in response.json()["detail"]
+
+    def test_websocket_with_auth_cookie_and_mismatched_csrf_rejected(self, app):
+        """Test that WebSocket upgrade with mismatched CSRF token is rejected."""
+        client = TestClient(app, raise_server_exceptions=False)
+
+        app.state.cors_config = {"allow_origins": ["https://example.com"]}
+
+        # Get CSRF cookie
+        get_response = client.get("/")
+        csrf_token = get_response.cookies.get(CSRF_COOKIE_NAME)
+
+        # WebSocket upgrade with mismatched CSRF token should fail
+        response = client.get(
+            "/",
+            headers={
+                "upgrade": "websocket",
+                "origin": "https://example.com",
+                CSRF_HEADER_NAME: "different-token",
+            },
+            cookies={
+                "token": "auth-token",
+                CSRF_COOKIE_NAME: csrf_token,
+            },
+        )
+        assert response.status_code == 403
+        assert "CSRF" in response.json()["detail"]
+
+    def test_websocket_without_auth_cookie_no_csrf_required(self, app):
+        """Test that WebSocket upgrade without auth cookie doesn't require CSRF."""
+        client = TestClient(app, raise_server_exceptions=False)
+
+        app.state.cors_config = {"allow_origins": ["https://example.com"]}
+
+        # WebSocket upgrade without auth cookie should only check origin
+        response = client.get(
+            "/",
+            headers={
+                "upgrade": "websocket",
+                "origin": "https://example.com",
+            },
+            # No auth cookie, no CSRF token
+        )
+        assert response.status_code == 200
+
+    def test_websocket_csrf_validation_before_origin_validation(self, app):
+        """Test that CSRF validation happens after origin validation."""
+        client = TestClient(app, raise_server_exceptions=False)
+
+        app.state.cors_config = {"allow_origins": ["https://example.com"]}
+
+        # Invalid origin should be rejected before CSRF check
+        response = client.get(
+            "/",
+            headers={
+                "upgrade": "websocket",
+                "origin": "https://evil.com",  # Invalid origin
+            },
+            cookies={"token": "auth-token"},
+        )
+        assert response.status_code == 403
+        assert "origin" in response.json()["detail"].lower()
+
+    def test_websocket_csrf_token_expiration_validation(self, app):
+        """Test that expired CSRF tokens are rejected for WebSocket upgrades."""
+        import time
+
+        from mdb_engine.auth.csrf import generate_csrf_token
+
+        client = TestClient(app, raise_server_exceptions=False)
+
+        app.state.cors_config = {"allow_origins": ["https://example.com"]}
+
+        # Generate expired CSRF token
+        secret = "test-secret"
+        expired_token = generate_csrf_token(secret=secret)
+
+        # Simulate time passing
+        with patch("mdb_engine.auth.csrf.time") as mock_time:
+            mock_time.time.return_value = time.time() + 10000  # 10 seconds in future
+
+            response = client.get(
+                "/",
+                headers={
+                    "upgrade": "websocket",
+                    "origin": "https://example.com",
+                    CSRF_HEADER_NAME: expired_token,
+                },
+                cookies={
+                    "token": "auth-token",
+                    CSRF_COOKIE_NAME: expired_token,
+                },
+            )
+            # Should fail CSRF validation due to expiration
+            assert response.status_code == 403
+            assert "CSRF" in response.json()["detail"]

@@ -252,52 +252,47 @@ const wsUrl = `${protocol}//${window.location.host}/app-3/ws`;
 
 ## Authentication Failures
 
-### Subprotocol Authentication (MDB-Engine Standard)
+### Cookie-Based Authentication (MDB-Engine Standard)
 
-MDB-Engine uses **subprotocol tunneling** for WebSocket authentication. The JWT token is passed via the `Sec-WebSocket-Protocol` header.
+MDB-Engine uses **httpOnly cookies** for WebSocket authentication. Tokens are stored in httpOnly cookies set during login, and the browser automatically sends them on WebSocket upgrade requests.
 
-#### Problem: No Token in Subprotocol
+#### Problem: No Token Cookie
 
 **Symptoms:**
 - WebSocket connection rejected immediately
-- Server logs show: "No token found in subprotocol header"
+- Server logs show: "No token cookie found"
 - Connection closes with code 1008 (Policy Violation)
 
 **Solutions:**
 
-1. **Verify Token is Passed as Subprotocol:**
+1. **Verify Cookie is Set During Login:**
    ```javascript
-   // ✅ CORRECT: Pass token as subprotocol
-   const token = getAuthToken(); // Your JWT token
-   const ws = new WebSocket('ws://localhost:8000/app-3/ws', [token]);
+   // ✅ CORRECT: Cookie set server-side during authentication
+   // No client-side code needed - browser sends automatically
+   const ws = new WebSocket('ws://localhost:8000/app-3/ws');
    
    // ❌ WRONG: Don't use query params
    const ws = new WebSocket(`ws://localhost:8000/app-3/ws?token=${token}`);
    
-   // ❌ WRONG: Don't rely on cookies
-   const ws = new WebSocket('ws://localhost:8000/app-3/ws');
+   // ❌ WRONG: Don't try to pass token manually
+   const ws = new WebSocket('ws://localhost:8000/app-3/ws', [token]);
    ```
 
-2. **Check Token Availability:**
+2. **Check Cookie in Browser DevTools:**
    ```javascript
-   // Before connecting, verify token exists
-   const token = getAuthToken();
-   if (!token) {
-     console.error('No token available - authenticate first');
-     // Redirect to login or refresh token
-     return;
-   }
-   
-   const ws = new WebSocket(url, [token]);
+   // Check browser DevTools → Application → Cookies
+   // Verify "token" cookie exists with:
+   // - HttpOnly: true
+   // - Secure: true (in production)
+   // - SameSite: Lax
+   // - Path: /
    ```
 
-3. **Verify Subprotocol is Set:**
+3. **Verify Authentication Completed:**
    ```javascript
-   // After connection, verify subprotocol was accepted
-   ws.onopen = () => {
-     console.log('Connected, subprotocol:', ws.protocol);
-     // Should match your token (or be empty if server doesn't echo it)
-   };
+   // Ensure user is logged in before connecting WebSocket
+   // Cookie should be set during login/authentication flow
+   // Check Network tab → Login request → Response Headers → Set-Cookie
    ```
 
 #### Problem: Invalid Token
@@ -309,32 +304,18 @@ MDB-Engine uses **subprotocol tunneling** for WebSocket authentication. The JWT 
 
 **Solutions:**
 
-1. **Verify Token Format:**
-   ```javascript
-   // Check token is a valid JWT
-   const token = getAuthToken();
-   const parts = token.split('.');
-   if (parts.length !== 3) {
-     console.error('Invalid JWT format');
-     // Get new token
-   }
-   ```
+1. **Verify Cookie Contains Valid Token:**
+   - Check browser DevTools → Application → Cookies → "token"
+   - Verify cookie value is a valid JWT (three parts separated by dots)
+   - Ensure cookie wasn't corrupted or modified
 
 2. **Check Token Expiration:**
-   ```javascript
-   // Decode JWT payload (client-side check)
-   const payload = JSON.parse(atob(token.split('.')[1]));
-   const expiresAt = payload.exp * 1000; // Convert to milliseconds
-   const now = Date.now();
-   
-   if (now >= expiresAt) {
-     console.warn('Token expired, refreshing...');
-     await refreshToken();
-   }
-   ```
+   - Server validates token expiration automatically
+   - If expired, refresh token via `/auth/refresh` endpoint
+   - New cookie will be set automatically
 
 3. **Verify JWT Secret Matches:**
-   - Ensure backend and frontend use same JWT secret
+   - Ensure backend uses correct JWT secret
    - Check environment variables are set correctly
    - Verify token was issued by same auth system
 
@@ -350,21 +331,18 @@ MDB-Engine uses **subprotocol tunneling** for WebSocket authentication. The JWT 
 1. **Refresh Token Before Connecting:**
    ```javascript
    async function connectWebSocket() {
-     // Check token expiration
-     const token = getAuthToken();
-     const payload = JSON.parse(atob(token.split('.')[1]));
-     const expiresAt = payload.exp * 1000;
-     const now = Date.now();
+     // Refresh token if needed (server handles cookie refresh)
+     const response = await fetch('/auth/refresh', {
+       method: 'POST',
+       credentials: 'include' // Important: sends cookies
+     });
      
-     // Refresh if expiring soon (within 5 minutes)
-     if (expiresAt - now < 5 * 60 * 1000) {
-       await refreshToken();
+     if (response.ok) {
+       // New token cookie set automatically
+       // Connect WebSocket - browser sends new cookie
+       const ws = new WebSocket('ws://localhost:8000/app-3/ws');
+       return ws;
      }
-     
-     // Connect with fresh token
-     const freshToken = getAuthToken();
-     const ws = new WebSocket('ws://localhost:8000/app-3/ws', [freshToken]);
-     return ws;
    }
    ```
 
@@ -374,58 +352,48 @@ MDB-Engine uses **subprotocol tunneling** for WebSocket authentication. The JWT 
      if (event.code === 1008) {
        // Authentication failure - refresh token and reconnect
        console.log('Auth failed, refreshing token...');
-       await refreshToken();
+       await fetch('/auth/refresh', {
+         method: 'POST',
+         credentials: 'include'
+       });
        setTimeout(() => connectWebSocket(), 2000);
      }
    };
    ```
 
-3. **Implement Token Refresh on Expiration:**
+3. **Implement Proactive Token Refresh:**
    ```javascript
-   // Monitor token expiration and refresh proactively
+   // Monitor and refresh token proactively
    setInterval(async () => {
-     const token = getAuthToken();
-     const payload = JSON.parse(atob(token.split('.')[1]));
-     const expiresAt = payload.exp * 1000;
-     const now = Date.now();
-     
-     if (expiresAt - now < 10 * 60 * 1000) { // 10 minutes before expiry
-       await refreshToken();
-       // Reconnect WebSocket with new token if connected
-       if (ws && ws.readyState === WebSocket.OPEN) {
-         ws.close(); // Will trigger reconnection logic
-       }
+     const response = await fetch('/auth/refresh', {
+       method: 'POST',
+       credentials: 'include'
+     });
+     if (response.ok) {
+       // New cookie set automatically
+       // WebSocket will use new cookie on next connection
      }
-   }, 60000); // Check every minute
+   }, 10 * 60 * 1000); // Refresh every 10 minutes
    ```
 
-#### Problem: Subprotocol Not Accepted
+#### Problem: CSRF Cookie Missing
 
 **Symptoms:**
-- Connection established but immediately closed
-- Browser console shows protocol mismatch error
-- Server logs show token validation succeeded but connection closed
+- Connection rejected with 403 Forbidden
+- Server logs show: "CSRF token missing for WebSocket authentication"
+- Connection closes immediately
 
 **Solutions:**
 
-1. **Verify Server Accepts Subprotocol:**
-   - Server should accept connection with the same subprotocol token
-   - Check server logs for "WebSocket accepted with subprotocol"
-   - Ensure `_accept_websocket_connection()` uses stored subprotocol
+1. **Ensure CSRF Cookie is Set:**
+   - CSRF cookie is set automatically on first GET request
+   - Make a GET request to any endpoint before connecting WebSocket
+   - Check browser DevTools → Cookies → "csrf_token" exists
 
-2. **Check Browser Compatibility:**
-   ```javascript
-   // Verify WebSocket API supports subprotocols
-   if (!WebSocket.prototype.CONNECTING) {
-     console.warn('WebSocket API may not fully support subprotocols');
-   }
-   
-   // Test connection
-   const ws = new WebSocket(url, [token]);
-   ws.onopen = () => {
-     console.log('Subprotocol:', ws.protocol); // Should show token or be empty
-   };
-   ```
+2. **Verify Cookie Path:**
+   - CSRF cookie should have `path="/"`
+   - Ensures cookie is available to all mounted apps
+   - Check cookie attributes in browser DevTools
 
 ---
 
@@ -492,10 +460,12 @@ MDB-Engine uses **subprotocol tunneling** for WebSocket authentication. The JWT 
   console.log('Token expires:', new Date(payload.exp * 1000));
   ```
 
-- [ ] **Token passed as subprotocol:**
+- [ ] **Cookie is set and sent automatically:**
   ```javascript
-  const ws = new WebSocket(url, [token]); // ✅ Correct
+  // ✅ Correct: Browser automatically sends httpOnly cookies
+  const ws = new WebSocket(url);
   // NOT: new WebSocket(`${url}?token=${token}`) ❌
+  // NOT: new WebSocket(url, [token]) ❌
   ```
 
 - [ ] **Origin matches allowed origins:**
@@ -545,21 +515,14 @@ class SSOWebSocketClient {
     const host = window.location.host;
     const wsUrl = `${protocol}//${host}/${this.config.appSlug}/${this.config.endpoint}`;
 
-    // Get JWT token for subprotocol authentication
-    const token = getAuthToken(); // Implement this based on your auth system
-    if (!token) {
-      console.error('❌ No token available - cannot connect WebSocket');
-      this.config.onError(new Error('No authentication token'));
-      return;
-    }
-
+    // No token needed - browser automatically sends httpOnly cookies
+    // Ensure user is authenticated and cookie is set before connecting
     console.log(`🔌 Connecting to WebSocket: ${wsUrl}`);
     console.log(`   Current origin: ${window.location.origin}`);
-    console.log(`   Token available: ${token ? 'Yes' : 'No'}`);
 
     try {
-      // Pass token as subprotocol (second parameter)
-      this.ws = new WebSocket(wsUrl, [token]);
+      // Browser automatically sends httpOnly cookies
+      this.ws = new WebSocket(wsUrl);
 
       this.ws.onopen = () => {
         console.log('✅ WebSocket connected');
@@ -689,19 +652,13 @@ export function useSSOWebSocket(options: UseWebSocketOptions) {
     const host = window.location.host;
     const wsUrl = `${protocol}//${host}/${appSlug}/${endpoint}`;
 
-    // Get JWT token for subprotocol authentication
-    const token = getAuthToken(); // Implement this based on your auth system
-    if (!token) {
-      console.error('❌ No token available - cannot connect WebSocket');
-      setError(new Error('No authentication token') as any);
-      return;
-    }
-
+    // No token needed - browser automatically sends httpOnly cookies
+    // Ensure user is authenticated and cookie is set before connecting
     console.log(`🔌 Connecting to WebSocket: ${wsUrl}`);
 
     try {
-      // Pass token as subprotocol (second parameter)
-      const ws = new WebSocket(wsUrl, [token]);
+      // Browser automatically sends httpOnly cookies
+      const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
       ws.onopen = () => {
@@ -941,7 +898,7 @@ ws.onclose = (e) => console.log('🔌 Closed:', e.code, e.reason);
 4. **Check:**
    - **Request Headers:**
      - `Origin: http://localhost:3000` ✅
-     - `Sec-WebSocket-Protocol: <your-jwt-token>` ✅
+     - `Cookie: token=<jwt-token>; csrf_token=<csrf-token>` ✅
      - `Upgrade: websocket` ✅
      - `Connection: Upgrade` ✅
    
@@ -973,13 +930,12 @@ ws.onclose = (e) => console.log('🔌 Closed:', e.code, e.reason);
 }
 ```
 
-### Fix 2: Verify WebSocket URL and Subprotocol
+### Fix 2: Verify WebSocket URL and Cookie
 
 ```javascript
-// ✅ CORRECT: Include path prefix and pass token as subprotocol
-const token = getAuthToken();
+// ✅ CORRECT: Include path prefix, browser sends cookies automatically
 const wsUrl = `ws://localhost:8000/app-3/ws`;
-const ws = new WebSocket(wsUrl, [token]);
+const ws = new WebSocket(wsUrl);
 
 // ❌ WRONG (missing path prefix)
 const wsUrl = `ws://localhost:8000/ws`;

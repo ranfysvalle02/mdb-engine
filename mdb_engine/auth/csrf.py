@@ -299,9 +299,9 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         method = request.method
 
         # CRITICAL: Handle WebSocket upgrade requests BEFORE other CSRF checks
-        # WebSocket upgrades don't use CSRF tokens, but need origin validation
+        # WebSocket upgrades use cookie-based authentication and require CSRF validation
         if self._is_websocket_upgrade(request):
-            # Validate origin for WebSocket connections (CSWSH protection)
+            # Always validate origin for WebSocket connections (CSWSH protection)
             if not self._validate_websocket_origin(request):
                 logger.warning(
                     f"WebSocket origin validation failed for {path}: "
@@ -312,8 +312,58 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                     status_code=status.HTTP_403_FORBIDDEN,
                     content={"detail": "Invalid origin for WebSocket connection"},
                 )
-            # Origin validated - allow WebSocket upgrade to proceed
-            # No CSRF token check needed for WebSocket upgrades
+
+            # Cookie-based authentication requires CSRF protection
+            # Check if authentication token cookie is present
+            auth_token_cookie = request.cookies.get("token")
+            if auth_token_cookie:
+                # For WebSocket upgrades, CSRF protection relies on:
+                # 1. Origin validation (already done above) - primary defense
+                # 2. SameSite cookies - prevents cross-site cookie sending
+                # 3. CSRF cookie presence - ensures session is established
+                #
+                # Note: JavaScript WebSocket API cannot set custom headers,
+                # so we cannot use double-submit cookie pattern (cookie + header).
+                # Instead, we rely on Origin validation + SameSite cookies for CSRF protection.
+                csrf_cookie_token = request.cookies.get(self.cookie_name)
+                if not csrf_cookie_token:
+                    logger.warning(f"WebSocket upgrade missing CSRF cookie for {path}")
+                    return JSONResponse(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        content={"detail": "CSRF token missing for WebSocket authentication"},
+                    )
+
+                # Validate CSRF token signature if secret is used
+                if self.secret and not validate_csrf_token(
+                    csrf_cookie_token, self.secret, self.token_ttl
+                ):
+                    logger.warning(f"WebSocket CSRF token validation failed for {path}")
+                    return JSONResponse(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        content={
+                            "detail": "CSRF token expired or invalid for WebSocket connection"
+                        },
+                    )
+
+                # Optional: If CSRF header is provided, validate it matches cookie
+                # (Some clients may send it, but it's not required for WebSocket upgrades)
+                header_token = request.headers.get(self.header_name)
+                if header_token:
+                    # If header is provided, validate it matches cookie (double-submit pattern)
+                    if not hmac.compare_digest(csrf_cookie_token, header_token):
+                        logger.warning(f"WebSocket CSRF token mismatch for {path}")
+                        return JSONResponse(
+                            status_code=status.HTTP_403_FORBIDDEN,
+                            content={"detail": "CSRF token invalid for WebSocket connection"},
+                        )
+
+                logger.debug(
+                    f"WebSocket upgrade CSRF validation passed for {path} "
+                    f"(Origin validated, CSRF cookie present)"
+                )
+
+            # Origin validated (and CSRF validated if authenticated)
+            # Allow WebSocket upgrade to proceed
             return await call_next(request)
 
         if self._is_exempt(path):

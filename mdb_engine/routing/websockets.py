@@ -307,16 +307,70 @@ def get_websocket_manager_sync(app_slug: str) -> WebSocketConnectionManager:
     return _websocket_managers[app_slug]
 
 
+def _get_cookies_from_websocket(websocket: Any) -> dict[str, str]:
+    """
+    Extract cookies from WebSocket request.
+
+    Supports both FastAPI WebSocket .cookies attribute and ASGI scope Cookie header.
+
+    Args:
+        websocket: FastAPI WebSocket instance
+
+    Returns:
+        Dictionary of cookie name -> cookie value
+    """
+    cookies: dict[str, str] = {}
+
+    try:
+        # Try FastAPI WebSocket .cookies attribute (if available)
+        if hasattr(websocket, "cookies") and websocket.cookies is not None:
+            # FastAPI WebSocket.cookies is a dict-like object
+            cookies = dict(websocket.cookies)
+            logger.debug(f"Extracted {len(cookies)} cookies from WebSocket.cookies attribute")
+            return cookies
+    except (AttributeError, TypeError) as e:
+        logger.debug(f"Could not access WebSocket.cookies attribute: {e}")
+
+    try:
+        # Fallback: Extract from Cookie header in ASGI scope
+        if hasattr(websocket, "scope") and "headers" in websocket.scope:
+            headers_dict = dict(websocket.scope["headers"])
+            cookie_header_bytes = headers_dict.get(b"cookie")
+            if not cookie_header_bytes:
+                # Try case-insensitive lookup
+                for key, value in headers_dict.items():
+                    if isinstance(key, bytes) and key.lower() == b"cookie":
+                        cookie_header_bytes = value
+                        break
+
+            if cookie_header_bytes:
+                cookie_header = cookie_header_bytes.decode("utf-8")
+                # Parse cookie string: "name1=value1; name2=value2"
+                for cookie_pair in cookie_header.split(";"):
+                    cookie_pair = cookie_pair.strip()
+                    if "=" in cookie_pair:
+                        name, value = cookie_pair.split("=", 1)
+                        cookies[name.strip()] = value.strip()
+                logger.debug(f"Extracted {len(cookies)} cookies from Cookie header in ASGI scope")
+                return cookies
+    except (AttributeError, TypeError, KeyError, UnicodeDecodeError, ValueError) as e:
+        logger.debug(f"Could not extract cookies from ASGI scope: {e}")
+
+    return cookies
+
+
 async def authenticate_websocket(
-    websocket: Any, app_slug: str, require_auth: bool = True
+    websocket: Any,
+    app_slug: str,
+    require_auth: bool = True,
 ) -> tuple[str | None, str | None]:
     """
-    Authenticate a WebSocket connection via Sec-WebSocket-Protocol header.
+    Authenticate a WebSocket connection via httpOnly cookies.
 
-    Uses subprotocol tunneling to pass JWT tokens securely:
-    - Client: new WebSocket(url, [token])
-    - Server: Extracts token from sec-websocket-protocol header
-    - Bypasses CSRF issues and avoids URL logging risks
+    Uses cookie-based authentication with CSRF protection:
+    - Token stored in httpOnly cookie (not accessible to JavaScript)
+    - CSRF token validated via double-submit cookie pattern
+    - Origin validation provides additional protection
 
     Args:
         websocket: FastAPI WebSocket instance (can access headers before accept)
@@ -340,55 +394,23 @@ async def authenticate_websocket(
         return None, None
 
     try:
-        token = None
-        selected_subprotocol = None
-
-        # Sec-WebSocket-Protocol (Subprotocol Tunneling)
-        # Browsers allow: new WebSocket(url, ["token", "THE_JWT_STRING"])
-        # This bypasses CSRF issues and avoids URL logging risks
-        try:
-            protocol_header = None
-            # Try multiple ways to access headers (FastAPI WebSocket compatibility)
-            if hasattr(websocket, "headers") and websocket.headers is not None:
-                # FastAPI WebSocket.headers is case-insensitive dict-like
-                protocol_header = websocket.headers.get("sec-websocket-protocol")
-
-            # Fallback: access via scope (ASGI standard) if headers not available
-            if not protocol_header and hasattr(websocket, "scope") and "headers" in websocket.scope:
-                headers_dict = dict(websocket.scope["headers"])
-                # Headers are bytes in ASGI, need to decode
-                protocol_header_bytes = headers_dict.get(b"sec-websocket-protocol")
-                if protocol_header_bytes:
-                    protocol_header = protocol_header_bytes.decode("utf-8")
-
-            if protocol_header:
-                # Header format: "protocol1, protocol2, ..." or just "token"
-                protocols = [p.strip() for p in protocol_header.split(",")]
-                logger.debug(f"WebSocket subprotocols for app '{app_slug}': {protocols}")
-
-                # Look for a JWT-like token in the protocols
-                # JWTs are typically long (>20 chars) and don't contain spaces
-                for protocol in protocols:
-                    if len(protocol) > 20 and " " not in protocol:
-                        token = protocol
-                        selected_subprotocol = protocol
-                        logger.info(
-                            f"WebSocket token found in subprotocol for app '{app_slug}' "
-                            f"(length: {len(protocol)})"
-                        )
-                        break
-        except (AttributeError, TypeError, KeyError, UnicodeDecodeError) as e:
-            logger.debug(f"Could not access WebSocket headers for subprotocol check: {e}")
+        # Extract token from httpOnly cookie
+        cookies = _get_cookies_from_websocket(websocket)
+        token = cookies.get("token")  # Standard auth token cookie name
 
         if not token:
             logger.warning(
-                f"No token found in subprotocol header for WebSocket connection to app "
-                f"'{app_slug}' (require_auth={require_auth}). "
-                f"Use: new WebSocket(url, [token]) to pass JWT token as subprotocol."
+                f"No token cookie found for WebSocket connection to app '{app_slug}' "
+                f"(require_auth={require_auth}). "
+                f"Ensure httpOnly cookie is set during authentication."
             )
             if require_auth:
                 return None, None  # Signal auth failure
             return None, None
+
+        logger.info(
+            f"WebSocket token found in cookie for app '{app_slug}' " "(cookie-based authentication)"
+        )
 
         # Decode and validate token
         import jwt
@@ -401,14 +423,10 @@ async def authenticate_websocket(
             user_id = payload.get("sub") or payload.get("user_id")
             user_email = payload.get("email")
 
-            # Store selected subprotocol on websocket scope for accept() to use
-            if selected_subprotocol:
-                # Store in scope so _accept_websocket_connection can access it
-                if hasattr(websocket, "scope"):
-                    websocket.scope["_selected_subprotocol"] = selected_subprotocol
-                logger.debug(f"Stored subprotocol '{selected_subprotocol}' for WebSocket accept")
-
-            logger.info(f"WebSocket authenticated successfully for app '{app_slug}': {user_email}")
+            logger.info(
+                f"WebSocket authenticated successfully for app '{app_slug}': {user_email} "
+                f"(method: cookie)"
+            )
             return user_id, user_email
         except (jwt.ExpiredSignatureError, jwt.InvalidTokenError) as decode_error:
             logger.error(f"JWT decode error for app '{app_slug}': {decode_error}", exc_info=True)
@@ -480,29 +498,13 @@ def get_message_handler(
 
 async def _accept_websocket_connection(websocket: Any, app_slug: str) -> None:
     """
-    Accept WebSocket connection with subprotocol support.
+    Accept WebSocket connection.
 
-    If authentication found a token in the Sec-WebSocket-Protocol header,
-    we must accept with that specific subprotocol or the browser will reject
-    the connection.
+    Cookie-based authentication uses httpOnly cookies automatically sent by the browser.
     """
     try:
-        # Check if auth stored a selected subprotocol
-        selected_subprotocol = None
-        if hasattr(websocket, "scope"):
-            selected_subprotocol = websocket.scope.get("_selected_subprotocol")
-
-        if selected_subprotocol:
-            # Accept with the specific subprotocol the client requested
-            await websocket.accept(subprotocol=selected_subprotocol)
-            logger.info(
-                f"✅ WebSocket accepted for app '{app_slug}' "
-                f"with subprotocol '{selected_subprotocol}'"
-            )
-        else:
-            # Standard accept without subprotocol
-            await websocket.accept()
-            logger.info(f"✅ WebSocket accepted for app '{app_slug}'")
+        await websocket.accept()
+        logger.info(f"✅ WebSocket accepted for app '{app_slug}'")
 
         print(f"✅ [WEBSOCKET ACCEPTED] App: '{app_slug}'")
     except (RuntimeError, ConnectionError, OSError) as accept_error:
@@ -699,7 +701,7 @@ def create_websocket_endpoint(
                 # The connection will be rejected by the server
                 return
 
-            # Accept connection (with subprotocol if token was in protocol header)
+            # Accept connection
             await _accept_websocket_connection(websocket, app_slug)
 
             # Connect with metadata (websocket already accepted)

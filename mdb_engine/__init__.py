@@ -82,12 +82,15 @@ from .repositories import Entity, MongoRepository, Repository, UnitOfWork
 from .utils import clean_mongo_doc, clean_mongo_docs
 
 __version__ = (
-    "0.4.14"  # WebSocket security documentation and test updates
+    "0.5.0"  # Major WebSocket security overhaul - cookie-based authentication
+    # - BREAKING CHANGE: Removed subprotocol tunneling support
+    # - NEW: Exclusive httpOnly cookie-based WebSocket authentication
     # - Comprehensive security guide (WEBSOCKET_SECURITY_MULTI_APP_SSO.md)
-    # - Updated all documentation to reflect subprotocol-only authentication
-    # - Added integration tests for subprotocol authentication in multi-app SSO
-    # - Enhanced unit test documentation with security-focused explanations
+    # - Updated all documentation to reflect cookie-based authentication
+    # - Enhanced CSRF protection for WebSocket upgrades
+    # - Added integration tests for cookie-based WebSocket authentication
     # - Complete test coverage for WebSocket security scenarios
+    # - Multi-app SSO compatibility with path="/" cookies
 )
 
 __all__ = [
