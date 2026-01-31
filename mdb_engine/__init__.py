@@ -82,11 +82,11 @@ from .repositories import Entity, MongoRepository, Repository, UnitOfWork
 from .utils import clean_mongo_doc, clean_mongo_docs
 
 __version__ = (
-    "0.4.9"  # Fix: WebSocket + CSRF + Multi-App architecture
-    # - CSRF middleware now added to parent app when child apps use shared auth
-    # - CORS config properly merged from child apps to parent app
-    # - WebSocket origin validation uses parent app's CORS config
-    # - Comprehensive integration tests added
+    "0.4.10"  # Fix: allow_credentials preserved in CORS config merge
+    # - Fixed bug where allow_credentials was set to False even when child apps require True
+    # - Dynamic CORS middleware reads from app.state.cors_config at request time
+    # - Merge logic now ensures if ANY child app has allow_credentials: True, parent gets True
+    # - Essential for SSO cookie-based authentication in WebSocket connections
 )
 
 __all__ = [

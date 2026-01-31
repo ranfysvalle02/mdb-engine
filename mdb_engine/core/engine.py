@@ -2213,15 +2213,29 @@ class MongoDBEngine:
                     child_origins = child_cors.get("allow_origins", [])
                     parent_origins = parent_cors.get("allow_origins", [])
                     merged_origins = list(set(parent_origins + child_origins))
+
+                    # CRITICAL: If ANY child app requires credentials, parent must allow them
+                    # This is essential for SSO cookie-based authentication
+                    child_requires_credentials = child_cors.get("allow_credentials", False)
+                    parent_allows_credentials = parent_cors.get("allow_credentials", False)
+                    merged_allow_credentials = (
+                        child_requires_credentials or parent_allows_credentials
+                    )
+
                     parent_app.state.cors_config = {
                         **parent_cors,
                         **child_cors,
                         "allow_origins": merged_origins if merged_origins else ["*"],
+                        # If ANY child requires credentials, parent gets True (for SSO)
+                        "allow_credentials": merged_allow_credentials,
                     }
                 else:
                     # Parent has no CORS config, use child's
                     parent_app.state.cors_config = child_cors
-                logger.debug(f"✅ Merged CORS config from child app '{slug}' to parent app")
+                logger.debug(
+                    f"✅ Merged CORS config from child app '{slug}' to parent app "
+                    f"(allow_credentials={parent_app.state.cors_config.get('allow_credentials')})"
+                )
 
         async def _register_websocket_routes(
             parent_app: "FastAPI",
@@ -2670,11 +2684,14 @@ class MongoDBEngine:
         # Set default CORS config on parent app for WebSocket origin validation
         # This ensures CSRF middleware can validate WebSocket origins even if child apps
         # don't configure CORS
+        # NOTE: allow_credentials defaults to False here, but will be set to True
+        # during merge if any child app requires it (essential for SSO cookie-based auth)
         from ..auth.config_helpers import CORS_DEFAULTS
 
         parent_app.state.cors_config = CORS_DEFAULTS.copy()
         parent_app.state.cors_config["enabled"] = True
         parent_app.state.cors_config["allow_origins"] = ["*"]  # Default to allow all for WebSocket
+        # Keep allow_credentials as False initially - will be merged from child apps
         logger.debug("Set default CORS config on parent app for WebSocket origin validation")
 
         # Store app reference in engine for get_mounted_apps()
@@ -2716,22 +2733,99 @@ class MongoDBEngine:
             logger.info("CSRFMiddleware added to parent app for WebSocket origin validation")
 
         # Add shared CORS middleware if configured
-        # (Individual apps can add their own CORS, but parent-level is useful)
+        # NOTE: We create a dynamic CORS middleware that reads from app.state.cors_config
+        # This allows the config to be updated after child apps are mounted and merged
         try:
-            from fastapi.middleware.cors import CORSMiddleware
+            from starlette.middleware.base import BaseHTTPMiddleware
+            from starlette.requests import Request
+            from starlette.responses import Response
 
-            # Use CORS config from parent app state (set above)
-            cors_origins = parent_app.state.cors_config.get("allow_origins", ["*"])
-            cors_credentials = parent_app.state.cors_config.get("allow_credentials", True)
+            class DynamicCORSMiddleware(BaseHTTPMiddleware):
+                """
+                Dynamic CORS middleware that reads config from app.state.cors_config.
 
-            parent_app.add_middleware(
-                CORSMiddleware,
-                allow_origins=cors_origins,
-                allow_credentials=cors_credentials,
-                allow_methods=["*"],
-                allow_headers=["*"],
+                This allows CORS config to be updated after child apps are mounted
+                and their configs are merged, which is essential for SSO multi-app
+                setups where allow_credentials must be True for cookie-based auth.
+                """
+
+                async def dispatch(self, request: Request, call_next):
+                    # Read CORS config from app.state (may have been merged from child apps)
+                    cors_config = getattr(request.app.state, "cors_config", {})
+
+                    if not cors_config.get("enabled", False):
+                        # CORS not enabled, pass through
+                        return await call_next(request)
+
+                    # Handle preflight OPTIONS request
+                    if request.method == "OPTIONS":
+                        origin = request.headers.get("origin")
+                        allowed_origins = cors_config.get("allow_origins", ["*"])
+                        allow_credentials = cors_config.get("allow_credentials", False)
+
+                        # Check if origin is allowed
+                        origin_allowed = False
+                        if "*" in allowed_origins:
+                            origin_allowed = True
+                        elif origin in allowed_origins:
+                            origin_allowed = True
+
+                        if origin_allowed:
+                            headers = {
+                                "Access-Control-Allow-Methods": ", ".join(
+                                    cors_config.get("allow_methods", ["*"])
+                                ),
+                                "Access-Control-Allow-Headers": ", ".join(
+                                    cors_config.get("allow_headers", ["*"])
+                                ),
+                                "Access-Control-Max-Age": str(cors_config.get("max_age", 3600)),
+                            }
+                            if allow_credentials:
+                                headers["Access-Control-Allow-Credentials"] = "true"
+                            if origin:
+                                headers["Access-Control-Allow-Origin"] = origin
+
+                            expose_headers = cors_config.get("expose_headers", [])
+                            if expose_headers:
+                                headers["Access-Control-Expose-Headers"] = ", ".join(expose_headers)
+
+                            return Response(status_code=200, headers=headers)
+                        else:
+                            return Response(status_code=403)
+
+                    # Handle actual request
+                    response = await call_next(request)
+
+                    # Add CORS headers to response
+                    origin = request.headers.get("origin")
+                    allowed_origins = cors_config.get("allow_origins", ["*"])
+                    allow_credentials = cors_config.get("allow_credentials", False)
+
+                    # Check if origin is allowed
+                    origin_allowed = False
+                    if "*" in allowed_origins:
+                        origin_allowed = True
+                    elif origin and origin in allowed_origins:
+                        origin_allowed = True
+
+                    if origin_allowed:
+                        if origin:
+                            response.headers["Access-Control-Allow-Origin"] = origin
+                        if allow_credentials:
+                            response.headers["Access-Control-Allow-Credentials"] = "true"
+
+                        expose_headers = cors_config.get("expose_headers", [])
+                        if expose_headers:
+                            response.headers["Access-Control-Expose-Headers"] = ", ".join(
+                                expose_headers
+                            )
+
+                    return response
+
+            parent_app.add_middleware(DynamicCORSMiddleware)
+            logger.debug(
+                "Dynamic CORS middleware added for parent app (reads from app.state.cors_config)"
             )
-            logger.debug("CORS middleware added for parent app")
         except ImportError:
             logger.warning("CORS middleware not available")
 

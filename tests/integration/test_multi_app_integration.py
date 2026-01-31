@@ -1027,3 +1027,135 @@ class TestWebSocketWithCORSCConfig:
 
         # Cleanup
         await engine.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_allow_credentials_preserved_in_merged_cors(
+        self, mongodb_connection_string, tmp_path
+    ):
+        """Test that allow_credentials: True from child apps is preserved in parent CORS config."""
+        import os
+
+        from httpx import ASGITransport, AsyncClient
+
+        from mdb_engine.core.engine import MongoDBEngine
+
+        # Create manifest with allow_credentials: True
+        manifest = {
+            "schema_version": "2.0",
+            "slug": "credentials-app",
+            "name": "Credentials Test App",
+            "auth": {"mode": "shared", "roles": ["viewer"]},
+            "cors": {
+                "enabled": True,
+                "allow_origins": ["http://localhost:3000"],
+                "allow_credentials": True,  # CRITICAL: This must be preserved
+                "allow_methods": ["*"],
+                "allow_headers": ["*"],
+            },
+        }
+        manifest_path = tmp_path / "manifest.json"
+        manifest_path.write_text(json.dumps(manifest))
+
+        db_name = f"test_credentials_{os.getpid()}"
+        engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name=db_name)
+
+        app = engine.create_multi_app(
+            apps=[
+                {
+                    "slug": "credentials-app",
+                    "manifest": manifest_path,
+                    "path_prefix": "/credentials-app",
+                }
+            ],
+            title="Credentials Test",
+        )
+
+        async with app.router.lifespan_context(app):
+            # Verify parent app's CORS config has allow_credentials: True
+            cors_config = app.state.cors_config
+            assert cors_config.get("allow_credentials") is True, (
+                f"allow_credentials should be True after merge, "
+                f"but got {cors_config.get('allow_credentials')}. "
+                f"Full config: {cors_config}"
+            )
+
+            # Verify CORS middleware reads from app.state dynamically
+            # Make a request and check CORS headers
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                response = await client.options(
+                    "/credentials-app/api/test",
+                    headers={"Origin": "http://localhost:3000"},
+                )
+                # Should include Access-Control-Allow-Credentials header
+                assert (
+                    "access-control-allow-credentials" in response.headers
+                ), "CORS response should include allow-credentials header"
+                assert (
+                    response.headers["access-control-allow-credentials"].lower() == "true"
+                ), "allow-credentials should be 'true'"
+
+        # Cleanup
+        await engine.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_multiple_apps_credentials_merge_correctly(
+        self, mongodb_connection_string, tmp_path
+    ):
+        """Test that if ANY child app has allow_credentials: True, parent gets True."""
+        import os
+
+        from mdb_engine.core.engine import MongoDBEngine
+
+        # Create two manifests - one with credentials, one without
+        manifest1 = {
+            "schema_version": "2.0",
+            "slug": "app-with-creds",
+            "name": "App With Credentials",
+            "auth": {"mode": "shared"},
+            "cors": {
+                "enabled": True,
+                "allow_origins": ["http://localhost:3000"],
+                "allow_credentials": True,  # This should make parent True
+            },
+        }
+        manifest1_path = tmp_path / "manifest1.json"
+        manifest1_path.write_text(json.dumps(manifest1))
+
+        manifest2 = {
+            "schema_version": "2.0",
+            "slug": "app-without-creds",
+            "name": "App Without Credentials",
+            "auth": {"mode": "shared"},
+            "cors": {
+                "enabled": True,
+                "allow_origins": ["http://localhost:3000"],
+                "allow_credentials": False,  # This should not override
+            },
+        }
+        manifest2_path = tmp_path / "manifest2.json"
+        manifest2_path.write_text(json.dumps(manifest2))
+
+        db_name = f"test_multi_creds_{os.getpid()}"
+        engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name=db_name)
+
+        app = engine.create_multi_app(
+            apps=[
+                {"slug": "app-with-creds", "manifest": manifest1_path, "path_prefix": "/app1"},
+                {"slug": "app-without-creds", "manifest": manifest2_path, "path_prefix": "/app2"},
+            ],
+            title="Multi Credentials Test",
+        )
+
+        async with app.router.lifespan_context(app):
+            # Verify parent app's CORS config has allow_credentials: True
+            # (because at least one child app requires it)
+            cors_config = app.state.cors_config
+            assert cors_config.get("allow_credentials") is True, (
+                f"allow_credentials should be True (merged from app-with-creds), "
+                f"but got {cors_config.get('allow_credentials')}"
+            )
+
+        # Cleanup
+        await engine.shutdown()
