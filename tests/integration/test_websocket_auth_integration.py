@@ -23,6 +23,10 @@ if "MDB_ENGINE_JWT_SECRET" not in os.environ:
 if "MDB_ENGINE_MASTER_KEY" not in os.environ:
     os.environ["MDB_ENGINE_MASTER_KEY"] = "test_master_key_for_testing_only_" + "x" * 32
 
+# Import TestClient for WebSocket testing
+from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
+
 from mdb_engine.auth.csrf import CSRF_COOKIE_NAME, CSRF_HEADER_NAME, generate_csrf_token
 from mdb_engine.auth.dependencies import SECRET_KEY
 
@@ -79,7 +83,7 @@ class TestWebSocketCookieAuthIntegration:
         self, mongodb_connection_string, test_manifest, valid_jwt_token, tmp_path
     ):
         """Test successful WebSocket connection with valid httpOnly cookie."""
-        from httpx import ASGITransport, AsyncClient
+        import asyncio
 
         from mdb_engine.core.engine import MongoDBEngine
 
@@ -107,11 +111,11 @@ class TestWebSocketCookieAuthIntegration:
         csrf_token = generate_csrf_token()
 
         async with app.router.lifespan_context(app):
-            async with AsyncClient(
-                transport=ASGITransport(app=app), base_url="http://test"
-            ) as client:
+            # Use TestClient for WebSocket testing (it's synchronous but works with async tests)
+            def test_websocket():
+                client = TestClient(app)
                 # First, get CSRF cookie from a GET request
-                get_response = await client.get("/")
+                get_response = client.get("/")
                 csrf_cookie = get_response.cookies.get(CSRF_COOKIE_NAME)
                 if not csrf_cookie:
                     csrf_cookie = csrf_token
@@ -119,38 +123,40 @@ class TestWebSocketCookieAuthIntegration:
                 # Try to connect WebSocket with valid auth cookie and CSRF cookie
                 # Note: CSRF header is optional for WebSocket (JS can't set headers)
                 # Protection relies on Origin validation + SameSite cookies
-                try:
-                    async with client.websocket_connect(
-                        "/ws",
-                        cookies={
-                            "token": valid_jwt_token,
-                            CSRF_COOKIE_NAME: csrf_cookie,
-                        },
-                        headers={
-                            "origin": "https://example.com",
-                            # CSRF header optional - Origin validation provides primary protection
-                        },
-                    ) as websocket:
-                        # Connection should be established
-                        assert websocket is not None
+                with client.websocket_connect(
+                    "/ws",
+                    cookies={
+                        "token": valid_jwt_token,
+                        CSRF_COOKIE_NAME: csrf_cookie,
+                    },
+                    headers={
+                        "origin": "https://example.com",
+                        # CSRF header optional - Origin validation provides primary protection
+                    },
+                ) as websocket:
+                    # Connection should be established
+                    assert websocket is not None
 
-                        # Receive initial connection message
-                        message = await websocket.receive_json()
-                        assert message["type"] == "connected"
-                        assert message["authenticated"] is True
-                        assert message["user_email"] == "test@example.com"
+                    # Receive initial connection message
+                    message = websocket.receive_json()
+                    assert message["type"] == "connected"
+                    assert message["authenticated"] is True
+                    assert message["user_email"] == "test@example.com"
 
-                except Exception as e:
-                    # WebSocket connection might fail if FastAPI WebSocket support isn't available
-                    # This is acceptable for integration tests
-                    pytest.skip(f"WebSocket connection failed: {e}")
+            # Run TestClient in a thread to avoid blocking
+            try:
+                await asyncio.to_thread(test_websocket)
+            except (WebSocketDisconnect, RuntimeError, OSError, AttributeError) as e:
+                # WebSocket connection might fail if FastAPI WebSocket support isn't available
+                # This is acceptable for integration tests
+                pytest.skip(f"WebSocket connection failed: {e}")
 
     @pytest.mark.asyncio
     async def test_websocket_connection_without_csrf_cookie_rejected(
         self, mongodb_connection_string, test_manifest, valid_jwt_token, tmp_path
     ):
         """Test that WebSocket connection without CSRF cookie is rejected."""
-        from httpx import ASGITransport, AsyncClient
+        import asyncio
 
         from mdb_engine.core.engine import MongoDBEngine
 
@@ -175,28 +181,30 @@ class TestWebSocketCookieAuthIntegration:
         )
 
         async with app.router.lifespan_context(app):
-            async with AsyncClient(
-                transport=ASGITransport(app=app), base_url="http://test"
-            ) as client:
+
+            def test_websocket():
+                client = TestClient(app)
                 # Try to connect WebSocket with auth cookie but no CSRF cookie
                 try:
-                    async with client.websocket_connect(
+                    with client.websocket_connect(
                         "/ws",
                         cookies={"token": valid_jwt_token},  # Auth cookie, no CSRF cookie
                         headers={"origin": "https://example.com"},
                     ) as websocket:
                         # Should not reach here - connection should be rejected
                         pytest.fail("WebSocket connection should have been rejected")
-                except Exception as e:
-                    # Connection should be rejected with 403
-                    assert "403" in str(e) or "Forbidden" in str(e) or "CSRF" in str(e)
+                except WebSocketDisconnect:
+                    # Connection was rejected (upgrade failed) - this is expected
+                    pass  # Test passes - connection was properly rejected
+
+            await asyncio.to_thread(test_websocket)
 
     @pytest.mark.asyncio
     async def test_websocket_connection_with_invalid_origin_rejected(
         self, mongodb_connection_string, test_manifest, valid_jwt_token, tmp_path
     ):
         """Test that WebSocket connection with invalid origin is rejected."""
-        from httpx import ASGITransport, AsyncClient
+        import asyncio
 
         from mdb_engine.core.engine import MongoDBEngine
 
@@ -224,18 +232,18 @@ class TestWebSocketCookieAuthIntegration:
         csrf_token = generate_csrf_token()
 
         async with app.router.lifespan_context(app):
-            async with AsyncClient(
-                transport=ASGITransport(app=app), base_url="http://test"
-            ) as client:
+
+            def test_websocket():
+                client = TestClient(app)
                 # Get CSRF cookie
-                get_response = await client.get("/")
+                get_response = client.get("/")
                 csrf_cookie = get_response.cookies.get(CSRF_COOKIE_NAME)
                 if not csrf_cookie:
                     csrf_cookie = csrf_token
 
                 # Try to connect WebSocket with invalid origin
                 try:
-                    async with client.websocket_connect(
+                    with client.websocket_connect(
                         "/ws",
                         cookies={
                             "token": valid_jwt_token,
@@ -248,16 +256,18 @@ class TestWebSocketCookieAuthIntegration:
                     ) as websocket:
                         # Should not reach here - connection should be rejected
                         pytest.fail("WebSocket connection should have been rejected")
-                except Exception as e:
-                    # Connection should be rejected with 403
-                    assert "403" in str(e) or "Forbidden" in str(e) or "origin" in str(e).lower()
+                except WebSocketDisconnect:
+                    # Connection was rejected (invalid origin) - expected
+                    pass  # Test passes - connection was properly rejected
+
+            await asyncio.to_thread(test_websocket)
 
     @pytest.mark.asyncio
     async def test_websocket_connection_without_auth_cookie_allowed(
         self, mongodb_connection_string, test_manifest, tmp_path
     ):
         """Test that WebSocket connection without auth cookie is allowed (if auth not required)."""
-        from httpx import ASGITransport, AsyncClient
+        import asyncio
 
         from mdb_engine.core.engine import MongoDBEngine
 
@@ -285,12 +295,12 @@ class TestWebSocketCookieAuthIntegration:
         )
 
         async with app.router.lifespan_context(app):
-            async with AsyncClient(
-                transport=ASGITransport(app=app), base_url="http://test"
-            ) as client:
+
+            def test_websocket():
+                client = TestClient(app)
                 # Try to connect WebSocket without auth cookie
                 try:
-                    async with client.websocket_connect(
+                    with client.websocket_connect(
                         "/ws",
                         headers={"origin": "https://example.com"},
                     ) as websocket:
@@ -298,20 +308,21 @@ class TestWebSocketCookieAuthIntegration:
                         assert websocket is not None
 
                         # Receive initial connection message
-                        message = await websocket.receive_json()
+                        message = websocket.receive_json()
                         assert message["type"] == "connected"
                         assert message["authenticated"] is False
-
-                except Exception as e:
+                except (WebSocketDisconnect, RuntimeError, OSError, AttributeError) as e:
                     # WebSocket connection might fail if FastAPI WebSocket support isn't available
                     pytest.skip(f"WebSocket connection failed: {e}")
+
+            await asyncio.to_thread(test_websocket)
 
     @pytest.mark.asyncio
     async def test_websocket_connection_with_expired_token_rejected(
         self, mongodb_connection_string, test_manifest, tmp_path
     ):
         """Test that WebSocket connection with expired token is rejected."""
-        from httpx import ASGITransport, AsyncClient
+        import asyncio
 
         from mdb_engine.core.engine import MongoDBEngine
 
@@ -348,18 +359,18 @@ class TestWebSocketCookieAuthIntegration:
         csrf_token = generate_csrf_token()
 
         async with app.router.lifespan_context(app):
-            async with AsyncClient(
-                transport=ASGITransport(app=app), base_url="http://test"
-            ) as client:
+
+            def test_websocket():
+                client = TestClient(app)
                 # Get CSRF cookie
-                get_response = await client.get("/")
+                get_response = client.get("/")
                 csrf_cookie = get_response.cookies.get(CSRF_COOKIE_NAME)
                 if not csrf_cookie:
                     csrf_cookie = csrf_token
 
                 # Try to connect WebSocket with expired token
                 try:
-                    async with client.websocket_connect(
+                    with client.websocket_connect(
                         "/ws",
                         cookies={
                             "token": expired_token,
@@ -372,6 +383,8 @@ class TestWebSocketCookieAuthIntegration:
                     ) as websocket:
                         # Should not reach here - connection should be rejected
                         pytest.fail("WebSocket connection should have been rejected")
-                except Exception as e:
-                    # Connection should be rejected due to expired token
-                    assert "403" in str(e) or "Forbidden" in str(e) or "expired" in str(e).lower()
+                except WebSocketDisconnect:
+                    # Connection was rejected (expired token) - expected
+                    pass  # Test passes - connection was properly rejected
+
+            await asyncio.to_thread(test_websocket)

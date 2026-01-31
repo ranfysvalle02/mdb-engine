@@ -2,8 +2,21 @@
 
 Complete troubleshooting guide for WebSocket connections in multi-app SSO deployments, including common errors, debugging techniques, and solutions.
 
+## Quick Reference: Common Issues
+
+| Error | Code | Cause | Quick Fix |
+|-------|------|-------|-----------|
+| Connection fails immediately | 403 | CORS origin not allowed | Add frontend origin to `cors.allow_origins` |
+| Connection fails immediately | 403 | Missing `allow_credentials` | Set `cors.allow_credentials: true` |
+| Connection fails immediately | 403 | Wrong WebSocket URL | Use `/app1/ws` not `/ws` |
+| Connects then closes | 1008 | No auth cookie | Ensure user is logged in first |
+| Connects then closes | 1008 | Expired token | Refresh token before connecting |
+| Connects then closes | 1008 | Missing CSRF cookie | Make GET request first to get CSRF cookie |
+| Route not found | 404 | WebSocket not in manifest | Add `websockets` section to manifest |
+
 ## Table of Contents
 
+- [Quick Setup Checklist](#quick-setup-checklist)
 - [Common WebSocket Errors](#common-websocket-errors)
 - [Error Code 1006: Abnormal Closure](#error-code-1006-abnormal-closure)
 - [403 Forbidden Errors](#403-forbidden-errors)
@@ -14,6 +27,26 @@ Complete troubleshooting guide for WebSocket connections in multi-app SSO deploy
 - [Backend Configuration Checklist](#backend-configuration-checklist)
 - [Server-Side Debugging](#server-side-debugging)
 - [Client-Side Debugging](#client-side-debugging)
+
+---
+
+## Quick Setup Checklist
+
+Before troubleshooting, verify these basics:
+
+### Backend ✅
+- [ ] Manifest has `websockets` section with endpoint path
+- [ ] Manifest has `cors.enabled: true` and `cors.allow_credentials: true`
+- [ ] CORS `allow_origins` includes your frontend domain
+- [ ] Login endpoint uses `set_auth_cookies()` helper
+- [ ] Multi-app uses `create_multi_app()` with proper path prefixes
+
+### Frontend ✅
+- [ ] User is logged in before connecting WebSocket
+- [ ] Login request uses `credentials: 'include'`
+- [ ] WebSocket URL includes full path prefix (`/app1/ws`)
+- [ ] No token passed manually (browser sends cookie automatically)
+- [ ] Error handling for 403 and 1008 errors
 
 ---
 

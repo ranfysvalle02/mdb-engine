@@ -45,6 +45,17 @@ See [WebSocket Security Guide](./WEBSOCKET_SECURITY_MULTI_APP_SSO.md) for compre
 
 **Key Point**: WebSocket routes are registered on the **parent app**, so parent app middleware (CSRF) validates origins using the **parent app's merged CORS config**.
 
+## Quick Setup Checklist
+
+Before diving into details, ensure you have:
+
+- [ ] **Backend**: Cookies set with `path="/"` during login (automatic in MDB-Engine)
+- [ ] **Backend**: CORS configured with `allow_credentials: true`
+- [ ] **Backend**: WebSocket endpoint defined in manifest
+- [ ] **Backend**: CSRF middleware enabled (automatic for shared auth)
+- [ ] **Frontend**: User authenticated before connecting WebSocket
+- [ ] **Frontend**: WebSocket URL includes full path prefix (e.g., `/app1/ws`)
+
 ## Manifest Configuration
 
 ### 1. Auth Hub Manifest
@@ -78,6 +89,11 @@ See [WebSocket Security Guide](./WEBSOCKET_SECURITY_MULTI_APP_SSO.md) for compre
   }
 }
 ```
+
+**Key Points:**
+- ✅ `"mode": "shared"` enables SSO and CSRF middleware
+- ✅ `"allow_credentials": true` is **REQUIRED** for cookie-based auth
+- ✅ CORS origins must match your frontend domain exactly
 
 ### 2. SSO App with WebSocket
 
@@ -122,6 +138,12 @@ See [WebSocket Security Guide](./WEBSOCKET_SECURITY_MULTI_APP_SSO.md) for compre
 }
 ```
 
+**Key Points:**
+- ✅ `websockets` section defines your WebSocket endpoint
+- ✅ `auth.required: true` means users must be authenticated
+- ✅ `cors.allow_credentials: true` is **REQUIRED** for cookies
+- ✅ CORS origins are merged from all apps to parent app
+
 ### 3. Development (Wildcard Origins)
 
 For development, you can use wildcard origins:
@@ -140,9 +162,45 @@ For development, you can use wildcard origins:
 
 **⚠️ Warning**: Wildcard origins (`["*"]`) are **not recommended for production**. Use specific origins instead.
 
-## Multi-App Setup
+## Backend Setup
 
-### Python Code
+### Step 1: Ensure Cookies Are Set Correctly
+
+**CRITICAL**: Cookies must be set with `path="/"` to work across mounted apps. MDB-Engine does this automatically, but verify your login endpoint uses `set_auth_cookies()`:
+
+```python
+from mdb_engine.auth.cookie_utils import set_auth_cookies
+from mdb_engine.auth.utils import login_user
+
+@app.post("/login")
+async def login(request: Request, email: str, password: str):
+    # ... validate credentials ...
+    
+    # Generate tokens
+    access_token, refresh_token = generate_tokens(user)
+    
+    # Create response
+    response = JSONResponse({"success": True})
+    
+    # Set cookies - path="/" is set automatically
+    set_auth_cookies(
+        response,
+        access_token,
+        refresh_token,
+        request=request,
+        config=config  # Your manifest auth config
+    )
+    
+    return response
+```
+
+**What happens automatically:**
+- ✅ Cookies are set with `path="/"` (required for multi-app)
+- ✅ Cookies are `httpOnly=True` (XSS protection)
+- ✅ Cookies are `secure=True` in production (HTTPS only)
+- ✅ Cookies use `samesite="lax"` (CSRF protection)
+
+### Step 2: Multi-App Setup
 
 ```python
 from pathlib import Path
@@ -183,6 +241,12 @@ if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
 ```
 
+**What happens automatically:**
+- ✅ CSRF middleware added to parent app (if any child uses shared auth)
+- ✅ CORS configs merged from all child apps
+- ✅ WebSocket routes registered on parent app with full path prefixes
+- ✅ Origin validation uses merged CORS config
+
 ## What Happens Automatically
 
 ### 1. CSRF Middleware on Parent App
@@ -221,14 +285,40 @@ WebSocket routes are **automatically registered** on the parent app with full pa
 - Child app WebSocket `/ws` → Parent app route `/app1/ws`
 - Child app WebSocket `/events` → Parent app route `/app2/events`
 
-## Frontend WebSocket Connection
+## Frontend Setup
 
-### JavaScript/TypeScript
+### Step 1: Ensure User Is Authenticated
+
+**CRITICAL**: User must be logged in before connecting WebSocket. The httpOnly cookie is set during login:
+
+```typescript
+// Login first - this sets the httpOnly cookie
+async function login(email: string, password: string) {
+  const response = await fetch('/auth-hub/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include', // IMPORTANT: sends cookies
+    body: JSON.stringify({ email, password })
+  });
+  
+  if (response.ok) {
+    // Cookie is now set - can connect WebSocket
+    return await response.json();
+  }
+  throw new Error('Login failed');
+}
+
+// After login, cookie is available for WebSocket
+await login('user@example.com', 'password');
+```
+
+### Step 2: Connect WebSocket
 
 **IMPORTANT**: MDB-Engine uses **httpOnly cookies** for WebSocket authentication. The browser automatically sends cookies on WebSocket upgrade requests - no token needed in JavaScript!
 
 ```typescript
 // Connect to WebSocket - browser automatically sends httpOnly cookies
+// CRITICAL: Include full path prefix (e.g., /app1/ws, not /ws)
 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 const wsUrl = `${protocol}//${window.location.host}/app1/ws`;
 
@@ -236,23 +326,42 @@ const wsUrl = `${protocol}//${window.location.host}/app1/ws`;
 const ws = new WebSocket(wsUrl);
 
 ws.onopen = () => {
-  console.log('WebSocket connected');
+  console.log('✅ WebSocket connected');
   ws.send(JSON.stringify({ type: 'ping' }));
 };
 
 ws.onmessage = (event) => {
   const data = JSON.parse(event.data);
-  console.log('Received:', data);
+  console.log('📨 Received:', data);
 };
 
 ws.onerror = (error) => {
-  console.error('WebSocket error:', error);
+  console.error('❌ WebSocket error:', error);
+  // Common errors:
+  // - 403: CSRF/Origin validation failed or missing cookie
+  // - 1008: Authentication failed (invalid/expired token)
 };
 
-ws.onclose = () => {
-  console.log('WebSocket closed');
+ws.onclose = (event) => {
+  console.log('🔌 WebSocket closed', {
+    code: event.code,
+    reason: event.reason,
+    wasClean: event.wasClean
+  });
+  
+  // Reconnect logic if needed
+  if (event.code === 1008) {
+    // Auth failure - may need to refresh token
+    console.warn('Authentication failed - may need to refresh token');
+  }
 };
 ```
+
+**Key Points:**
+- ✅ **No token in JavaScript** - browser sends httpOnly cookie automatically
+- ✅ **Include path prefix** - use `/app1/ws`, not `/ws`
+- ✅ **Use `credentials: 'include'`** - for login requests (ensures cookies are sent/received)
+- ✅ **Handle errors** - 403 = CSRF/Origin issue, 1008 = auth failure
 
 **Why Cookie-Based Authentication?**
 - ✅ XSS protection (tokens not accessible to JavaScript)
@@ -414,53 +523,165 @@ No additional backend code needed - it's handled automatically!
 }
 ```
 
-## Troubleshooting
+## Common Setup Issues & Solutions
 
-### 403 Forbidden on WebSocket Connection
+### Issue 1: 403 Forbidden on WebSocket Connection
 
-**Cause**: Origin validation failed (CSRF middleware rejected the request)
+**Symptoms:**
+- WebSocket connection fails immediately
+- Browser console shows 403 error
+- Server logs show "Invalid origin" or "CSRF token missing"
 
-**Solutions**:
-1. ✅ Ensure CORS config includes your frontend origin
-2. ✅ Check that `allow_credentials: true` is set
-3. ✅ Verify WebSocket URL uses correct path prefix (`/app1/ws`, not `/ws`)
-4. ✅ Check browser console for CORS errors
+**Causes & Solutions:**
 
-**Debug**:
+1. **CORS Origin Not Allowed**
+   ```json
+   // ❌ WRONG: Missing frontend origin
+   "cors": {
+     "allow_origins": ["https://yourdomain.com"]
+   }
+   
+   // ✅ CORRECT: Include your frontend origin
+   "cors": {
+     "allow_origins": [
+       "http://localhost:3000",  // Your frontend
+       "https://yourdomain.com"
+     ],
+     "allow_credentials": true
+   }
+   ```
+
+2. **Missing `allow_credentials`**
+   ```json
+   // ❌ WRONG: Cookies won't be sent
+   "cors": {
+     "allow_origins": ["*"],
+     "allow_credentials": false
+   }
+   
+   // ✅ CORRECT: Cookies sent with requests
+   "cors": {
+     "allow_origins": ["http://localhost:3000"],
+     "allow_credentials": true
+   }
+   ```
+
+3. **Wrong WebSocket URL**
+   ```typescript
+   // ❌ WRONG: Missing path prefix
+   const ws = new WebSocket('ws://localhost:8000/ws');
+   
+   // ✅ CORRECT: Include full path prefix
+   const ws = new WebSocket('ws://localhost:8000/app1/ws');
+   ```
+
+**Debug Steps:**
 ```python
 # Check parent app's CORS config
-print(app.state.cors_config["allow_origins"])
+print("CORS Origins:", app.state.cors_config["allow_origins"])
+print("Allow Credentials:", app.state.cors_config["allow_credentials"])
+
+# Check WebSocket routes
+for route in app.routes:
+    if hasattr(route, 'path') and 'ws' in route.path:
+        print(f"WebSocket Route: {route.path}")
 ```
 
-### WebSocket Route Not Found (404)
+### Issue 2: Authentication Fails (1008 Error)
 
-**Cause**: WebSocket route not registered on parent app
+**Symptoms:**
+- WebSocket connects then immediately closes
+- Error code 1008 (Policy Violation)
+- Server logs show "No token cookie found"
 
-**Solutions**:
+**Causes & Solutions:**
+
+1. **Cookie Not Set During Login**
+   ```python
+   # ✅ CORRECT: Use set_auth_cookies() helper
+   from mdb_engine.auth.cookie_utils import set_auth_cookies
+   
+   response = JSONResponse({"success": True})
+   set_auth_cookies(response, access_token, refresh_token, request=request)
+   ```
+
+2. **Cookie Path Issue (Multi-App)**
+   ```python
+   # ✅ CORRECT: path="/" is set automatically by set_auth_cookies()
+   # Verify in browser DevTools → Application → Cookies
+   # Cookie should show: Path: /
+   ```
+
+3. **Token Expired**
+   ```typescript
+   // Refresh token before connecting
+   async function refreshToken() {
+     const response = await fetch('/auth-hub/refresh', {
+       method: 'POST',
+       credentials: 'include'
+     });
+     return response.ok;
+   }
+   
+   // Connect after refresh
+   await refreshToken();
+   const ws = new WebSocket('ws://localhost:8000/app1/ws');
+   ```
+
+**Debug Steps:**
+```javascript
+// Check cookies in browser console
+console.log('Cookies:', document.cookie);
+
+// Check in DevTools → Application → Cookies
+// Should see:
+// - token: <jwt-token> (httpOnly: true, Path: /)
+// - csrf_token: <csrf-token> (httpOnly: false, Path: /)
+```
+
+### Issue 3: WebSocket Route Not Found (404)
+
+**Symptoms:**
+- WebSocket connection fails with 404
+- Route doesn't exist
+
+**Solutions:**
 1. ✅ Verify `websockets` section exists in manifest
-2. ✅ Check that app was mounted successfully (check logs)
-3. ✅ Ensure path prefix matches WebSocket URL (`/app1/ws`)
+2. ✅ Check that app was mounted successfully (check startup logs)
+3. ✅ Ensure path prefix matches WebSocket URL
 
-**Debug**:
+**Debug:**
 ```python
-# List all routes
+# List all WebSocket routes
 for route in app.routes:
     if hasattr(route, 'path'):
-        print(f"{route.methods if hasattr(route, 'methods') else 'WS'}: {route.path}")
+        route_type = 'WS' if not hasattr(route, 'methods') else route.methods
+        print(f"{route_type}: {route.path}")
 ```
 
-### Authentication Fails
+### Issue 4: CSRF Cookie Missing
 
-**Cause**: Cookie not sent or invalid token
+**Symptoms:**
+- 403 error with "CSRF token missing" message
+- Works in some browsers but not others
 
-**Solutions**:
-1. ✅ Ensure httpOnly cookie is set during login/authentication
-2. ✅ Check browser DevTools → Application → Cookies to verify cookie exists
-3. ✅ Verify cookie has `path="/"` (required for multi-app setups)
-4. ✅ Ensure CORS `allow_credentials: true` is set
-5. ✅ Verify JWT secret matches across all apps
-6. ✅ Check token expiration
-7. ✅ Verify CSRF cookie is present (if authenticated)
+**Solutions:**
+1. **Get CSRF Cookie First**
+   ```typescript
+   // Make a GET request to get CSRF cookie
+   await fetch('http://localhost:8000/', {
+     credentials: 'include'
+   });
+   
+   // Now WebSocket connection will have CSRF cookie
+   const ws = new WebSocket('ws://localhost:8000/app1/ws');
+   ```
+
+2. **Verify CSRF Cookie Exists**
+   ```javascript
+   // Check in DevTools → Application → Cookies
+   // Should see: csrf_token cookie
+   ```
 
 ## Complete Example
 
@@ -495,6 +716,43 @@ See the full working example in:
 - Handle token expiration gracefully (reconnect after refresh)
 - Never log or expose tokens in client-side code
 
+## Complete Setup Checklist
+
+### Backend Checklist
+
+- [ ] **Manifest Configuration**
+  - [ ] `auth.mode: "shared"` for SSO apps
+  - [ ] `websockets` section defined with endpoint path
+  - [ ] `cors.enabled: true`
+  - [ ] `cors.allow_credentials: true` (REQUIRED)
+  - [ ] `cors.allow_origins` includes your frontend domain
+
+- [ ] **Cookie Setup**
+  - [ ] Login endpoint uses `set_auth_cookies()` helper
+  - [ ] Cookies automatically set with `path="/"` (for multi-app)
+  - [ ] Cookies are `httpOnly=True` (XSS protection)
+
+- [ ] **Multi-App Setup**
+  - [ ] Apps mounted with `create_multi_app()`
+  - [ ] Path prefixes start with `/` (e.g., `/app1`)
+  - [ ] CSRF middleware automatically added (if shared auth)
+
+### Frontend Checklist
+
+- [ ] **Authentication**
+  - [ ] User logs in before connecting WebSocket
+  - [ ] Login request uses `credentials: 'include'`
+  - [ ] Cookie is set (check DevTools → Cookies)
+
+- [ ] **WebSocket Connection**
+  - [ ] WebSocket URL includes full path prefix (`/app1/ws`)
+  - [ ] No token passed manually (browser sends cookie)
+  - [ ] Error handling for 403 (CSRF/Origin) and 1008 (Auth)
+
+- [ ] **CORS Configuration**
+  - [ ] Frontend origin matches CORS `allow_origins`
+  - [ ] All API requests use `credentials: 'include'`
+
 ## Key Takeaways
 
 1. ✅ **CSRF middleware is automatically added** to parent app when child apps use shared auth
@@ -502,10 +760,11 @@ See the full working example in:
 3. ✅ **WebSocket routes are registered** on parent app with full path prefixes
 4. ✅ **Origin validation** uses parent app's merged CORS config
 5. ✅ **Cookie-based authentication** - Browser automatically sends httpOnly cookies
-6. ✅ **Always include CORS config** in each child app's manifest
-7. ✅ **Use specific origins in production**, not wildcards
-8. ✅ **WebSocket URLs must include path prefix**: `/app1/ws`, not `/ws`
-9. ✅ **Ensure `allow_credentials: true`** in CORS config for cookie support
+6. ✅ **Cookies use `path="/"`** automatically - works with mounted apps
+7. ✅ **Always include CORS config** in each child app's manifest
+8. ✅ **Use specific origins in production**, not wildcards
+9. ✅ **WebSocket URLs must include path prefix**: `/app1/ws`, not `/ws`
+10. ✅ **Ensure `allow_credentials: true`** in CORS config for cookie support
 
 ---
 
