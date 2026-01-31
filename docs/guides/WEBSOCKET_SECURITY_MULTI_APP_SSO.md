@@ -503,7 +503,7 @@ async def login(response: Response):
 @subapp.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     # Cookie is automatically available via websocket.cookies
-    token = websocket.cookies.get("token")
+    token = websocket.cookies.get("mdb_auth_token")  # Use AUTH_COOKIE_NAME constant in production
     # Authentication works seamlessly!
 ```
 
@@ -1030,7 +1030,7 @@ from mdb_engine.routing.websockets import authenticate_websocket
 async def test_cookie_authentication_success():
     """Test successful authentication via httpOnly cookie."""
     mock_ws = create_mock_websocket()
-    mock_ws.cookies = {"token": valid_token}
+    mock_ws.cookies = {"mdb_auth_token": valid_token}
     
     user_id, user_email = await authenticate_websocket(mock_ws, "app1", True)
     
@@ -1040,7 +1040,7 @@ async def test_cookie_authentication_success():
 async def test_cookie_authentication_failure():
     """Test authentication failure with invalid token."""
     mock_ws = create_mock_websocket()
-    mock_ws.cookies = {"token": "invalid-token"}
+    mock_ws.cookies = {"mdb_auth_token": "invalid-token"}
     
     with pytest.raises(jwt.InvalidTokenError):
         await authenticate_websocket(mock_ws, "app1", True)

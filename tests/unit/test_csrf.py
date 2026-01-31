@@ -25,6 +25,7 @@ from mdb_engine.auth.csrf import (
     get_csrf_token,
     validate_csrf_token,
 )
+from mdb_engine.auth.shared_middleware import AUTH_COOKIE_NAME
 
 
 class TestTokenGeneration:
@@ -653,7 +654,7 @@ class TestWebSocketCSRFValidation:
                 "upgrade": "websocket",
                 "origin": "https://example.com",
             },
-            cookies={"token": "auth-token"},  # Auth cookie present, no CSRF cookie
+            cookies={"mdb_auth_token": "auth-token"},  # Auth cookie present, no CSRF cookie
         )
         assert response.status_code == 403
         assert "CSRF" in response.json()["detail"]
@@ -678,7 +679,7 @@ class TestWebSocketCSRFValidation:
                 # CSRF header not required - Origin validation + SameSite cookies provide protection
             },
             cookies={
-                "token": "auth-token",  # Auth cookie
+                "mdb_auth_token": "auth-token",  # Auth cookie
                 CSRF_COOKIE_NAME: csrf_token,  # CSRF cookie
             },
         )
@@ -703,7 +704,7 @@ class TestWebSocketCSRFValidation:
                 CSRF_HEADER_NAME: csrf_token,  # Optional header, but validated if present
             },
             cookies={
-                "token": "auth-token",
+                AUTH_COOKIE_NAME: "auth-token",
                 CSRF_COOKIE_NAME: csrf_token,
             },
         )
@@ -718,7 +719,7 @@ class TestWebSocketCSRFValidation:
                 CSRF_HEADER_NAME: "different-token",  # Mismatched header
             },
             cookies={
-                "token": "auth-token",
+                AUTH_COOKIE_NAME: "auth-token",
                 CSRF_COOKIE_NAME: csrf_token,
             },
         )
@@ -744,7 +745,7 @@ class TestWebSocketCSRFValidation:
                 CSRF_HEADER_NAME: "different-token",
             },
             cookies={
-                "token": "auth-token",
+                AUTH_COOKIE_NAME: "auth-token",
                 CSRF_COOKIE_NAME: csrf_token,
             },
         )
@@ -781,7 +782,7 @@ class TestWebSocketCSRFValidation:
                 "upgrade": "websocket",
                 "origin": "https://evil.com",  # Invalid origin
             },
-            cookies={"token": "auth-token"},
+            cookies={AUTH_COOKIE_NAME: "auth-token"},
         )
         assert response.status_code == 403
         assert "origin" in response.json()["detail"].lower()
@@ -824,7 +825,7 @@ class TestWebSocketCSRFValidation:
                     CSRF_HEADER_NAME: csrf_token,
                 },
                 cookies={
-                    "token": "auth-token",
+                    AUTH_COOKIE_NAME: "auth-token",
                     CSRF_COOKIE_NAME: csrf_token,
                 },
             )

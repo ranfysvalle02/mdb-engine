@@ -29,6 +29,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from mdb_engine.auth.csrf import CSRF_COOKIE_NAME, CSRF_HEADER_NAME, generate_csrf_token
 from mdb_engine.auth.dependencies import SECRET_KEY
+from mdb_engine.auth.shared_middleware import AUTH_COOKIE_NAME
 
 
 @pytest.mark.integration
@@ -126,7 +127,7 @@ class TestWebSocketCookieAuthIntegration:
                 with client.websocket_connect(
                     "/ws",
                     cookies={
-                        "token": valid_jwt_token,
+                        AUTH_COOKIE_NAME: valid_jwt_token,
                         CSRF_COOKIE_NAME: csrf_cookie,
                     },
                     headers={
@@ -188,7 +189,7 @@ class TestWebSocketCookieAuthIntegration:
                 try:
                     with client.websocket_connect(
                         "/ws",
-                        cookies={"token": valid_jwt_token},  # Auth cookie, no CSRF cookie
+                        cookies={AUTH_COOKIE_NAME: valid_jwt_token},  # Auth cookie, no CSRF cookie
                         headers={"origin": "https://example.com"},
                     ) as websocket:
                         # Should not reach here - connection should be rejected
@@ -246,7 +247,7 @@ class TestWebSocketCookieAuthIntegration:
                     with client.websocket_connect(
                         "/ws",
                         cookies={
-                            "token": valid_jwt_token,
+                            AUTH_COOKIE_NAME: valid_jwt_token,
                             CSRF_COOKIE_NAME: csrf_cookie,
                         },
                         headers={
@@ -373,7 +374,7 @@ class TestWebSocketCookieAuthIntegration:
                     with client.websocket_connect(
                         "/ws",
                         cookies={
-                            "token": expired_token,
+                            AUTH_COOKIE_NAME: expired_token,
                             CSRF_COOKIE_NAME: csrf_cookie,
                         },
                         headers={

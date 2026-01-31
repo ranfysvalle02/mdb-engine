@@ -592,7 +592,7 @@ for route in app.routes:
 **Symptoms:**
 - WebSocket connects then immediately closes
 - Error code 1008 (Policy Violation)
-- Server logs show "No token cookie found"
+- Server logs show "No mdb_auth_token cookie found" or "No token cookie found"
 
 **Causes & Solutions:**
 

@@ -293,7 +293,7 @@ MDB-Engine uses **httpOnly cookies** for WebSocket authentication. Tokens are st
 
 **Symptoms:**
 - WebSocket connection rejected immediately
-- Server logs show: "No token cookie found"
+- Server logs show: "No token cookie found" or "No mdb_auth_token cookie found"
 - Connection closes with code 1008 (Policy Violation)
 
 **Solutions:**
@@ -314,7 +314,7 @@ MDB-Engine uses **httpOnly cookies** for WebSocket authentication. Tokens are st
 2. **Check Cookie in Browser DevTools:**
    ```javascript
    // Check browser DevTools → Application → Cookies
-   // Verify "token" cookie exists with:
+   // Verify "mdb_auth_token" cookie exists with:
    // - HttpOnly: true
    // - Secure: true (in production)
    // - SameSite: Lax
@@ -338,7 +338,7 @@ MDB-Engine uses **httpOnly cookies** for WebSocket authentication. Tokens are st
 **Solutions:**
 
 1. **Verify Cookie Contains Valid Token:**
-   - Check browser DevTools → Application → Cookies → "token"
+   - Check browser DevTools → Application → Cookies → "mdb_auth_token"
    - Verify cookie value is a valid JWT (three parts separated by dots)
    - Ensure cookie wasn't corrupted or modified
 

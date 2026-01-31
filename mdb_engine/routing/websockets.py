@@ -395,13 +395,17 @@ async def authenticate_websocket(
 
     try:
         # Extract token from httpOnly cookie
+        # Use same cookie name as SharedAuthMiddleware for consistency
+        from ..auth.shared_middleware import AUTH_COOKIE_NAME
+
         cookies = _get_cookies_from_websocket(websocket)
-        token = cookies.get("token")  # Standard auth token cookie name
+        token = cookies.get(AUTH_COOKIE_NAME)  # Use mdb_auth_token (same as shared middleware)
 
         if not token:
-            logger.warning(
-                f"No token cookie found for WebSocket connection to app '{app_slug}' "
+            logger.error(
+                f"❌ No token cookie found for WebSocket connection to app '{app_slug}' "
                 f"(require_auth={require_auth}). "
+                f"Available cookies: {list(cookies.keys()) if cookies else 'none'}. "
                 f"Ensure httpOnly cookie is set during authentication."
             )
             if require_auth:
@@ -428,8 +432,11 @@ async def authenticate_websocket(
                 f"(method: cookie)"
             )
             return user_id, user_email
-        except (jwt.ExpiredSignatureError, jwt.InvalidTokenError) as decode_error:
-            logger.error(f"JWT decode error for app '{app_slug}': {decode_error}", exc_info=True)
+        except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
+            logger.exception(
+                f"❌ JWT decode error for app '{app_slug}'. "
+                f"Token present: {bool(token)}, Token length: {len(token) if token else 0}"
+            )
             raise
 
     except WebSocketDisconnect:
@@ -689,12 +696,26 @@ def create_websocket_endpoint(
             # CRITICAL: Authenticate BEFORE accepting connection
             # This prevents CSRF middleware from rejecting established connections
             # We can access headers/query_params before accept() is called
+
+            # Debug: Log cookies before authentication
+            try:
+                cookies = _get_cookies_from_websocket(websocket)
+                cookie_names = list(cookies.keys()) if cookies else []
+                logger.info(
+                    f"🔍 WebSocket cookies for app '{app_slug}': {cookie_names} "
+                    f"(require_auth={require_auth})"
+                )
+            except (AttributeError, TypeError, KeyError, RuntimeError) as cookie_error:
+                logger.warning(f"Could not extract cookies for debugging: {cookie_error}")
+
             user_id, user_email = await authenticate_websocket(websocket, app_slug, require_auth)
 
             # Handle authentication failure
             if require_auth and not user_id:
-                logger.warning(
-                    f"WebSocket authentication failed for app '{app_slug}' - rejecting connection"
+                logger.error(
+                    f"❌ WebSocket authentication FAILED for app '{app_slug}' - "
+                    f"rejecting connection. require_auth={require_auth}, "
+                    f"user_id={user_id}, user_email={user_email}"
                 )
                 # Reject without accepting - FastAPI will send 403 if accept() not called
                 # We can't call websocket.close() before accept(), so we just return

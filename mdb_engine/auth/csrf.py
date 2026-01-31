@@ -315,7 +315,10 @@ class CSRFMiddleware(BaseHTTPMiddleware):
 
             # Cookie-based authentication requires CSRF protection
             # Check if authentication token cookie is present
-            auth_token_cookie = request.cookies.get("token")
+            # Use same cookie name as SharedAuthMiddleware for consistency
+            from .shared_middleware import AUTH_COOKIE_NAME
+
+            auth_token_cookie = request.cookies.get(AUTH_COOKIE_NAME)
             if auth_token_cookie:
                 # For WebSocket upgrades, CSRF protection relies on:
                 # 1. Origin validation (already done above) - primary defense

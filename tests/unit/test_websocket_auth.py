@@ -25,6 +25,7 @@ import jwt
 import pytest
 
 from mdb_engine.auth.dependencies import SECRET_KEY
+from mdb_engine.auth.shared_middleware import AUTH_COOKIE_NAME
 from mdb_engine.routing.websockets import _get_cookies_from_websocket, authenticate_websocket
 
 
@@ -57,11 +58,11 @@ class TestCookieExtraction:
     @pytest.mark.asyncio
     async def test_get_cookies_from_websocket_cookies_attribute(self, mock_websocket):
         """Test extracting cookies from WebSocket.cookies attribute."""
-        mock_websocket.cookies = {"token": "test-token", "csrf_token": "csrf-value"}
+        mock_websocket.cookies = {AUTH_COOKIE_NAME: "test-token", "csrf_token": "csrf-value"}
 
         cookies = _get_cookies_from_websocket(mock_websocket)
 
-        assert cookies["token"] == "test-token"
+        assert cookies[AUTH_COOKIE_NAME] == "test-token"
         assert cookies["csrf_token"] == "csrf-value"
 
     @pytest.mark.asyncio
@@ -70,12 +71,14 @@ class TestCookieExtraction:
         # Simulate ASGI-style headers in scope
         mock_websocket.cookies = None  # No cookies attribute
         mock_websocket.scope = {
-            "headers": [(b"cookie", b"token=test-token; csrf_token=csrf-value")]
+            "headers": [
+                (b"cookie", f"{AUTH_COOKIE_NAME}=test-token; csrf_token=csrf-value".encode())
+            ]
         }
 
         cookies = _get_cookies_from_websocket(mock_websocket)
 
-        assert cookies["token"] == "test-token"
+        assert cookies[AUTH_COOKIE_NAME] == "test-token"
         assert cookies["csrf_token"] == "csrf-value"
 
     @pytest.mark.asyncio
@@ -92,7 +95,9 @@ class TestCookieExtraction:
     async def test_get_cookies_from_websocket_malformed_cookie(self, mock_websocket):
         """Test handling malformed cookie strings."""
         mock_websocket.cookies = None
-        mock_websocket.scope = {"headers": [(b"cookie", b"malformed=cookie=value; valid=token")]}
+        mock_websocket.scope = {
+            "headers": [(b"cookie", b"malformed=cookie=value; valid=mdb_auth_token")]
+        }
 
         cookies = _get_cookies_from_websocket(mock_websocket)
 
@@ -117,8 +122,8 @@ class TestWebSocketCookieAuthentication:
         Security: Validates that valid JWT tokens in httpOnly cookies
         are correctly extracted and validated.
         """
-        # Set up WebSocket with token in cookie
-        mock_websocket.cookies = {"token": valid_jwt_token}
+        # Set up WebSocket with token in cookie (use correct cookie name)
+        mock_websocket.cookies = {AUTH_COOKIE_NAME: valid_jwt_token}
 
         user_id, user_email = await authenticate_websocket(
             mock_websocket, "test_app", require_auth=True
@@ -137,7 +142,7 @@ class TestWebSocketCookieAuthentication:
         exceptions during decode, which is the expected secure behavior.
         """
         invalid_token = "not.a.valid.jwt.token"
-        mock_websocket.cookies = {"token": invalid_token}
+        mock_websocket.cookies = {AUTH_COOKIE_NAME: invalid_token}
 
         # Invalid JWT tokens raise exceptions during decode
         with pytest.raises(jwt.DecodeError):
@@ -158,7 +163,7 @@ class TestWebSocketCookieAuthentication:
             "exp": datetime.utcnow() - timedelta(hours=1),  # Expired
         }
         expired_token = jwt.encode(expired_payload, str(SECRET_KEY), algorithm="HS256")
-        mock_websocket.cookies = {"token": expired_token}
+        mock_websocket.cookies = {AUTH_COOKIE_NAME: expired_token}
 
         with pytest.raises(jwt.ExpiredSignatureError):
             await authenticate_websocket(mock_websocket, "test_app", require_auth=True)
@@ -174,7 +179,9 @@ class TestWebSocketCookieAuthentication:
         """
         # Simulate ASGI-style headers in scope
         mock_websocket.cookies = None  # No cookies attribute
-        mock_websocket.scope = {"headers": [(b"cookie", f"token={valid_jwt_token}".encode())]}
+        mock_websocket.scope = {
+            "headers": [(b"cookie", f"{AUTH_COOKIE_NAME}={valid_jwt_token}".encode())]
+        }
 
         user_id, user_email = await authenticate_websocket(
             mock_websocket, "test_app", require_auth=True
@@ -220,7 +227,7 @@ class TestWebSocketAuthenticationNoAuth:
         not required, it is ignored. This ensures that public endpoints
         remain public and tokens are not unnecessarily processed or logged.
         """
-        mock_websocket.cookies = {"token": valid_jwt_token}
+        mock_websocket.cookies = {AUTH_COOKIE_NAME: valid_jwt_token}
 
         user_id, user_email = await authenticate_websocket(
             mock_websocket, "test_app", require_auth=False
@@ -277,5 +284,31 @@ class TestWebSocketAuthenticationErrors:
         )
 
         # Should fail - no way to access cookies
+        assert user_id is None
+        assert user_email is None
+
+    @pytest.mark.asyncio
+    async def test_websocket_auth_uses_correct_cookie_name(self, mock_websocket, valid_jwt_token):
+        """
+        Regression test: Ensure WebSocket authentication uses AUTH_COOKIE_NAME (mdb_auth_token).
+
+        This test prevents regressions where WebSocket authentication might use
+        a hardcoded "token" cookie name instead of the shared AUTH_COOKIE_NAME.
+        This ensures consistency with SharedAuthMiddleware and prevents auth failures.
+        """
+        # Test with correct cookie name (should work)
+        mock_websocket.cookies = {AUTH_COOKIE_NAME: valid_jwt_token}
+        user_id, user_email = await authenticate_websocket(
+            mock_websocket, "test_app", require_auth=True
+        )
+        assert user_id == "user123"
+        assert user_email == "test@example.com"
+
+        # Test with old/wrong cookie name (should fail)
+        mock_websocket.cookies = {"token": valid_jwt_token}  # Wrong name
+        user_id, user_email = await authenticate_websocket(
+            mock_websocket, "test_app", require_auth=True
+        )
+        # Should fail because wrong cookie name
         assert user_id is None
         assert user_email is None
