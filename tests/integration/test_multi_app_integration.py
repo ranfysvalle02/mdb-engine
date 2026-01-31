@@ -820,3 +820,132 @@ class TestMultiAppIntegration:
 
         # Cleanup
         await engine.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_get_scoped_db_dependency_in_multi_app(self, mongodb_connection_string, tmp_path):
+        """
+        Test that get_scoped_db dependency works correctly in multi-app setups.
+
+        This test verifies that child apps have engine set in their state,
+        allowing get_scoped_db and other dependencies to resolve correctly.
+        Without this fix, the dependency would return 503 Service Unavailable.
+        """
+        import os
+
+        from fastapi import Depends
+        from httpx import ASGITransport, AsyncClient
+
+        from mdb_engine.core.engine import MongoDBEngine
+        from mdb_engine.dependencies import get_scoped_db
+
+        manifests_dir = tmp_path / "manifests"
+        manifests_dir.mkdir()
+
+        # Create test app manifest with public route for testing
+        test_app_manifest = {
+            "schema_version": "2.0",
+            "slug": "test-db-app",
+            "name": "Test DB App",
+            "auth": {
+                "mode": "app",
+                "public_routes": ["/api/test-db"],
+            },
+            "data_access": {
+                "read_scopes": ["test-db-app"],
+                "write_scope": "test-db-app",
+            },
+        }
+        test_app_path = manifests_dir / "test-db-app" / "manifest.json"
+        test_app_path.parent.mkdir()
+        test_app_path.write_text(json.dumps(test_app_manifest))
+
+        # Use unique database name per test
+        db_name = f"test_get_scoped_db_multi_app_{os.getpid()}"
+        engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name=db_name)
+
+        # Create multi-app with test app mounted at path prefix
+        app = engine.create_multi_app(
+            apps=[
+                {
+                    "slug": "test-db-app",
+                    "manifest": test_app_path,
+                    "path_prefix": "/test-db-app",
+                },
+            ]
+        )
+
+        # Add test route to the mounted app that uses get_scoped_db dependency
+        async with app.router.lifespan_context(app):
+            # Find the mounted app
+            mounted_app = None
+            for route in app.routes:
+                if hasattr(route, "app") and hasattr(route.app, "state"):
+                    if getattr(route.app.state, "app_slug", None) == "test-db-app":
+                        mounted_app = route.app
+                        break
+
+            assert mounted_app is not None, "Mounted app not found"
+
+            # Verify that child app has engine in state (this is what we're testing)
+            assert hasattr(mounted_app.state, "engine"), (
+                "REGRESSION: Child app missing engine in state. "
+                "get_scoped_db dependency will fail with 503."
+            )
+            assert mounted_app.state.engine is not None, (
+                "REGRESSION: Child app engine is None. "
+                "get_scoped_db dependency will fail with 503."
+            )
+            assert (
+                mounted_app.state.engine == engine
+            ), "Child app engine should reference the same engine instance."
+            assert hasattr(
+                mounted_app.state, "app_slug"
+            ), "REGRESSION: Child app missing app_slug in state."
+            assert (
+                mounted_app.state.app_slug == "test-db-app"
+            ), "Child app slug should be set correctly."
+
+            # Add test route that uses get_scoped_db dependency
+            @mounted_app.get("/api/test-db")
+            async def test_db_route(db=Depends(get_scoped_db)):
+                """
+                Test route that uses get_scoped_db dependency.
+                This would fail with 503 if child_app.state.engine is not set.
+                """
+                # Verify we got a database connection
+                assert db is not None, "Database connection should not be None"
+
+                # Try to access a collection to verify it's working
+                # This would fail if the dependency didn't resolve correctly
+                test_collection = db.test_collection
+                assert test_collection is not None, "Should be able to access collection"
+
+                return {
+                    "status": "success",
+                    "message": "get_scoped_db dependency resolved successfully",
+                    "app_slug": mounted_app.state.app_slug,
+                    "has_engine": hasattr(mounted_app.state, "engine"),
+                }
+
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                # Test the route with get_scoped_db dependency
+                # This should return 200, not 503
+                response = await client.get("/test-db-app/api/test-db")
+
+                assert response.status_code == 200, (
+                    f"REGRESSION: Route with get_scoped_db dependency returned "
+                    f"{response.status_code} instead of 200. "
+                    f"This indicates the dependency failed to resolve. "
+                    f"Response: {response.text}"
+                )
+
+                response_data = response.json()
+                assert response_data["status"] == "success"
+                assert response_data["message"] == "get_scoped_db dependency resolved successfully"
+                assert response_data["app_slug"] == "test-db-app"
+                assert response_data["has_engine"] is True
+
+        # Cleanup
+        await engine.shutdown()

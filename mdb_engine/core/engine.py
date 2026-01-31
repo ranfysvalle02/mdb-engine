@@ -2294,6 +2294,8 @@ class MongoDBEngine:
                     # Store parent app reference and current app info for middleware
                     child_app.state.parent_app = app
                     child_app.state.app_slug = slug
+                    # Required for get_scoped_db and other dependencies
+                    child_app.state.engine = engine
                     child_app.state.app_base_path = path_prefix
                     child_app.state.app_auth_hub_url = auth_hub_url
                     child_app.state.app_manifest = app_manifest_data
