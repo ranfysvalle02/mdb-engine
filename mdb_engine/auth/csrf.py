@@ -210,14 +210,15 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         are registered on parent app), then falls back to request host.
         """
         try:
-            # Check current app's CORS config (parent app for WebSocket routes in multi-app)
+            # For WebSocket routes on parent app, request.app is parent app
+            # Parent app has merged CORS config from all child apps
             cors_config = getattr(request.app.state, "cors_config", None)
             if cors_config and cors_config.get("allow_origins"):
                 origins = cors_config["allow_origins"]
                 if origins:
                     return origins if isinstance(origins, list) else [origins]
-        except (AttributeError, TypeError, KeyError):
-            pass
+        except (AttributeError, TypeError, KeyError) as e:
+            logger.debug(f"Could not read CORS config from app.state: {e}")
 
         # Fallback: Check if this is a multi-app setup and try to find mounted app's CORS config
         try:
@@ -249,6 +250,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                 origin = f"{scheme}://{host}"
             return [origin]
         except (AttributeError, TypeError):
+            # Return empty list if we can't determine origin (will reject)
             return []
 
     def _validate_websocket_origin(self, request: Request) -> bool:
@@ -275,9 +277,12 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             if origin == allowed or origin.rstrip("/") == allowed.rstrip("/"):
                 return True
 
+        cors_config = getattr(request.app.state, "cors_config", None)
+        cors_enabled = cors_config.get("enabled", False) if cors_config else False
         logger.warning(
             f"WebSocket upgrade rejected - invalid Origin: {origin} "
             f"(allowed: {allowed_origins}, app: {getattr(request.app, 'title', 'unknown')}, "
+            f"path: {request.url.path}, CORS enabled: {cors_enabled}, "
             f"has_cors_config: {hasattr(request.app.state, 'cors_config')})"
         )
         return False

@@ -2212,7 +2212,18 @@ class MongoDBEngine:
                     # Merge allow_origins lists
                     child_origins = child_cors.get("allow_origins", [])
                     parent_origins = parent_cors.get("allow_origins", [])
-                    merged_origins = list(set(parent_origins + child_origins))
+
+                    # CRITICAL: Handle wildcard origins correctly
+                    # If any child or parent has wildcard, merged config gets wildcard
+                    if "*" in child_origins:
+                        merged_origins = ["*"]  # Wildcard takes precedence
+                    elif "*" in parent_origins:
+                        merged_origins = ["*"]  # Keep wildcard if already set
+                    else:
+                        # Merge unique origins
+                        merged_origins = list(set(parent_origins + child_origins))
+                        if not merged_origins:
+                            merged_origins = ["*"]  # Default to wildcard if empty
 
                     # CRITICAL: If ANY child app requires credentials, parent must allow them
                     # This is essential for SSO cookie-based authentication
@@ -2225,16 +2236,17 @@ class MongoDBEngine:
                     parent_app.state.cors_config = {
                         **parent_cors,
                         **child_cors,
-                        "allow_origins": merged_origins if merged_origins else ["*"],
+                        "allow_origins": merged_origins,
                         # If ANY child requires credentials, parent gets True (for SSO)
                         "allow_credentials": merged_allow_credentials,
                     }
                 else:
                     # Parent has no CORS config, use child's
                     parent_app.state.cors_config = child_cors
-                logger.debug(
-                    f"✅ Merged CORS config from child app '{slug}' to parent app "
-                    f"(allow_credentials={parent_app.state.cors_config.get('allow_credentials')})"
+                logger.info(
+                    f"✅ Merged CORS config from '{slug}': "
+                    f"origins={parent_app.state.cors_config.get('allow_origins')}, "
+                    f"credentials={parent_app.state.cors_config.get('allow_credentials')}"
                 )
 
         async def _register_websocket_routes(
@@ -2246,12 +2258,16 @@ class MongoDBEngine:
             """Register WebSocket routes on parent app for a child app."""
             websockets_config = child_manifest.get("websockets")
             if not websockets_config:
+                logger.debug(f"No WebSocket configuration found for app '{slug}'")
                 return
 
             try:
                 from fastapi import APIRouter
 
                 from ..routing.websockets import create_websocket_endpoint
+
+                registered_count = 0
+                failed_count = 0
 
                 for endpoint_name, endpoint_config in websockets_config.items():
                     ws_path = endpoint_config.get("path", f"/{endpoint_name}")
@@ -2273,24 +2289,65 @@ class MongoDBEngine:
 
                     ping_interval = endpoint_config.get("ping_interval", 30)
 
-                    # Create WebSocket handler
-                    handler = create_websocket_endpoint(
-                        app_slug=slug,
-                        path=ws_path,
-                        endpoint_name=endpoint_name,
-                        handler=None,
-                        require_auth=require_auth,
-                        ping_interval=ping_interval,
-                    )
+                    try:
+                        # Create WebSocket handler
+                        handler = create_websocket_endpoint(
+                            app_slug=slug,
+                            path=ws_path,
+                            endpoint_name=endpoint_name,
+                            handler=None,
+                            require_auth=require_auth,
+                            ping_interval=ping_interval,
+                        )
 
-                    # Register on parent app with full path
-                    ws_router = APIRouter()
-                    ws_router.websocket(full_ws_path)(handler)
-                    parent_app.include_router(ws_router)
+                        # Register on parent app with full path
+                        ws_router = APIRouter()
+                        ws_router.websocket(full_ws_path)(handler)
+                        parent_app.include_router(ws_router)
 
+                        logger.info(
+                            f"✅ Registered WebSocket route '{full_ws_path}' "
+                            f"for mounted app '{slug}' (mounted at '{path_prefix}', "
+                            f"auth: {require_auth}, ping: {ping_interval}s)"
+                        )
+
+                        # Verify route was actually registered
+                        registered_routes = [
+                            r
+                            for r in parent_app.routes
+                            if hasattr(r, "path") and full_ws_path in str(getattr(r, "path", ""))
+                        ]
+                        if registered_routes:
+                            registered_count += 1
+                            logger.debug(
+                                f"✅ Verified WebSocket route '{full_ws_path}' "
+                                f"registered for '{slug}'"
+                            )
+                        else:
+                            failed_count += 1
+                            logger.warning(
+                                f"⚠️  WebSocket route '{full_ws_path}' not found after registration "
+                                f"for '{slug}' - route may not be accessible"
+                            )
+                    except (ValueError, TypeError, AttributeError, RuntimeError) as e:
+                        failed_count += 1
+                        logger.error(
+                            f"Failed to register WebSocket route '{full_ws_path}' "
+                            f"for mounted app '{slug}': {e}",
+                            exc_info=True,
+                        )
+
+                # Summary logging
+                total_routes = len(websockets_config)
+                if registered_count > 0:
                     logger.info(
-                        f"✅ Registered WebSocket route '{full_ws_path}' "
-                        f"for mounted app '{slug}' (mounted at '{path_prefix}')"
+                        f"✅ WebSocket registration summary for '{slug}': "
+                        f"{registered_count}/{total_routes} routes registered successfully"
+                    )
+                if failed_count > 0:
+                    logger.warning(
+                        f"⚠️  WebSocket registration issues for '{slug}': "
+                        f"{failed_count}/{total_routes} routes failed to register"
                     )
             except ImportError:
                 logger.warning(
@@ -2667,6 +2724,38 @@ class MongoDBEngine:
             # Update app.state.mounted_apps with final status (entries already updated in place)
             # This ensures the state reflects the final mounted_apps list
             app.state.mounted_apps = mounted_apps
+
+            # VERIFICATION: Log final configuration state
+            logger.info("=" * 60)
+            logger.info("MDB-Engine Multi-App Configuration Verification")
+            logger.info("=" * 60)
+
+            # Verify CORS config
+            cors_config = getattr(app.state, "cors_config", None)
+            if cors_config:
+                logger.info(
+                    f"✅ CORS Config: enabled={cors_config.get('enabled')}, "
+                    f"origins={cors_config.get('allow_origins')}, "
+                    f"credentials={cors_config.get('allow_credentials')}"
+                )
+            else:
+                logger.warning("⚠️  No CORS config found on parent app")
+
+            # Verify WebSocket routes
+            ws_routes = [
+                r for r in app.routes if hasattr(r, "path") and "/ws" in str(getattr(r, "path", ""))
+            ]
+            if ws_routes:
+                logger.info(f"✅ Found {len(ws_routes)} WebSocket route(s):")
+                for route in ws_routes:
+                    route_path = getattr(route, "path", "unknown")
+                    logger.info(f"   🔌 {route_path}")
+            else:
+                logger.warning(
+                    "⚠️  No WebSocket routes found - check manifest.json websockets config"
+                )
+
+            logger.info("=" * 60)
 
             yield
 

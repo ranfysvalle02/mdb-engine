@@ -82,11 +82,13 @@ from .repositories import Entity, MongoRepository, Repository, UnitOfWork
 from .utils import clean_mongo_doc, clean_mongo_docs
 
 __version__ = (
-    "0.4.10"  # Fix: allow_credentials preserved in CORS config merge
-    # - Fixed bug where allow_credentials was set to False even when child apps require True
-    # - Dynamic CORS middleware reads from app.state.cors_config at request time
-    # - Merge logic now ensures if ANY child app has allow_credentials: True, parent gets True
-    # - Essential for SSO cookie-based authentication in WebSocket connections
+    "0.4.11"  # Automatic WebSocket support improvements
+    # - Improved CORS config merging with proper wildcard handling
+    # - WebSocket route verification after registration
+    # - Startup verification logging for CORS config and WebSocket routes
+    # - Enhanced CSRF middleware error messages with path and CORS status
+    # - Better logging throughout WebSocket registration process
+    # - All WebSocket multi-app SSO features now work automatically
 )
 
 __all__ = [

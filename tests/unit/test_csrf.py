@@ -543,3 +543,82 @@ class TestWebSocketOriginValidation:
         request.app.state.cors_config = {"allow_origins": ["https://example.com"]}
 
         assert middleware._validate_websocket_origin(request) is False
+
+    def test_websocket_error_message_includes_path_and_cors_status(self, app):
+        """Test that WebSocket rejection error messages include path and CORS status."""
+        import logging
+
+        client = TestClient(app, raise_server_exceptions=False)
+
+        app.state.cors_config = {
+            "enabled": True,
+            "allow_origins": ["https://example.com"],
+        }
+
+        # Capture warning logs
+        log_capture = []
+        handler = logging.Handler()
+        handler.emit = lambda record: log_capture.append(record.getMessage())
+
+        logger = logging.getLogger("mdb_engine.auth.csrf")
+        logger.addHandler(handler)
+        logger.setLevel(logging.WARNING)
+
+        response = client.get(
+            "/test/ws",
+            headers={
+                "upgrade": "websocket",
+                "origin": "https://evil.com",
+            },
+        )
+
+        assert response.status_code == 403
+
+        # Check that error message includes path and CORS status
+        error_logs = [log for log in log_capture if "WebSocket upgrade rejected" in log]
+        assert len(error_logs) > 0, "Error should be logged"
+        error_msg = error_logs[0]
+        assert "path:" in error_msg.lower() or "/test/ws" in error_msg
+        assert "cors enabled:" in error_msg.lower()
+
+        logger.removeHandler(handler)
+
+    def test_get_allowed_origins_reads_from_parent_app_state(self, app):
+        """Test that _get_allowed_origins reads from parent app's merged CORS config."""
+        middleware = CSRFMiddleware(app)
+
+        # Set CORS config on app state (simulating merged config from child apps)
+        app.state.cors_config = {
+            "allow_origins": ["https://app1.com", "https://app2.com"],
+        }
+
+        # Create a mock request
+        request = MagicMock(spec=Request)
+        request.app = app
+        request.url.path = "/app-3/ws"
+
+        allowed_origins = middleware._get_allowed_origins(request)
+
+        assert "https://app1.com" in allowed_origins
+        assert "https://app2.com" in allowed_origins
+
+    def test_get_allowed_origins_handles_missing_cors_config(self, app):
+        """Test that _get_allowed_origins handles missing CORS config gracefully."""
+        middleware = CSRFMiddleware(app)
+
+        # Don't set CORS config
+        if hasattr(app.state, "cors_config"):
+            delattr(app.state, "cors_config")
+
+        # Create a mock request
+        request = MagicMock(spec=Request)
+        request.app = app
+        request.url.path = "/test/ws"
+        request.url.hostname = "testserver"
+        request.url.scheme = "http"
+        request.url.port = None
+
+        allowed_origins = middleware._get_allowed_origins(request)
+
+        # Should fall back to request host or return empty list
+        assert isinstance(allowed_origins, list)

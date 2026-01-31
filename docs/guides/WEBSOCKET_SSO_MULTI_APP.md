@@ -474,6 +474,7 @@ See the full working example in:
 ---
 
 **Related Documentation:**
+- [WebSocket Troubleshooting Guide](./WEBSOCKET_TROUBLESHOOTING.md) - **Start here if you're having connection issues!**
 - [SSO Multi-App Setup Guide](./SSO_MULTI_APP_SETUP.md)
 - [WebSocket Routing README](../../mdb_engine/routing/README.md)
 - [SSO Multi-App Cheat Sheet](../api/SSO_MULTI_APP_CHEATSHEET.md)

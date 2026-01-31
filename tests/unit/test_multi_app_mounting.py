@@ -1247,6 +1247,60 @@ class TestWebSocketRoutesWithMountedApps:
                     # App should still be created successfully
                     assert app is not None
 
+    @pytest.mark.asyncio
+    async def test_websocket_registration_summary_logging(
+        self, mock_mongo_database, temp_manifest_with_websocket
+    ):
+        """Test that WebSocket registration includes summary logging."""
+        import logging
+
+        from mdb_engine.core.engine import MongoDBEngine
+
+        engine = MongoDBEngine(mongo_uri="mongodb://localhost:27017", db_name="test_db")
+
+        # Capture logs
+        log_capture = []
+        handler = logging.Handler()
+        handler.emit = lambda record: log_capture.append(record.getMessage())
+
+        logger = logging.getLogger("mdb_engine.core.engine")
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+
+        with patch.object(engine, "_connection_manager") as mock_conn:
+            mock_conn.mongo_db = mock_mongo_database
+            mock_conn.mongo_client = MagicMock()
+            mock_conn.initialized = True
+            mock_conn.initialize = AsyncMock()
+            mock_conn.shutdown = AsyncMock()
+
+            mock_handler = MagicMock()
+            mock_router = MagicMock()
+
+            with patch(
+                "mdb_engine.routing.websockets.create_websocket_endpoint",
+                return_value=mock_handler,
+            ):
+                with patch("fastapi.APIRouter", return_value=mock_router):
+                    app = engine.create_multi_app(
+                        apps=[
+                            {
+                                "slug": "ws-app",
+                                "manifest": temp_manifest_with_websocket,
+                                "path_prefix": "/app-3",
+                            }
+                        ]
+                    )
+
+                    async with app.router.lifespan_context(app):
+                        # Check that summary logging occurred
+                        summary_logs = [
+                            log for log in log_capture if "WebSocket registration summary" in log
+                        ]
+                        assert len(summary_logs) > 0, "Registration summary should be logged"
+
+        logger.removeHandler(handler)
+
 
 class TestCORSCConfigPropagation:
     """Test CORS config propagation from child apps to parent app."""

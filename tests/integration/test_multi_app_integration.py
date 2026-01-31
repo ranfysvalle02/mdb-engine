@@ -1159,3 +1159,198 @@ class TestWebSocketWithCORSCConfig:
 
         # Cleanup
         await engine.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_cors_wildcard_merging(self, mongodb_connection_string, tmp_path):
+        """Test that CORS wildcard origins are merged correctly."""
+        import os
+
+        from mdb_engine.core.engine import MongoDBEngine
+
+        # Create two manifests - one with wildcard, one with specific origins
+        manifest1 = {
+            "schema_version": "2.0",
+            "slug": "wildcard-app",
+            "name": "Wildcard App",
+            "auth": {"mode": "shared"},
+            "cors": {
+                "enabled": True,
+                "allow_origins": ["*"],  # Wildcard should take precedence
+                "allow_credentials": True,
+            },
+        }
+        manifest1_path = tmp_path / "manifest1.json"
+        manifest1_path.write_text(json.dumps(manifest1))
+
+        manifest2 = {
+            "schema_version": "2.0",
+            "slug": "specific-app",
+            "name": "Specific App",
+            "auth": {"mode": "shared"},
+            "cors": {
+                "enabled": True,
+                "allow_origins": ["http://localhost:3000"],
+                "allow_credentials": False,
+            },
+        }
+        manifest2_path = tmp_path / "manifest2.json"
+        manifest2_path.write_text(json.dumps(manifest2))
+
+        db_name = f"test_wildcard_merge_{os.getpid()}"
+        engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name=db_name)
+
+        app = engine.create_multi_app(
+            apps=[
+                {"slug": "wildcard-app", "manifest": manifest1_path, "path_prefix": "/wildcard"},
+                {"slug": "specific-app", "manifest": manifest2_path, "path_prefix": "/specific"},
+            ],
+            title="Wildcard Merge Test",
+        )
+
+        async with app.router.lifespan_context(app):
+            # Verify parent app's CORS config has wildcard (takes precedence)
+            cors_config = app.state.cors_config
+            assert (
+                "*" in cors_config["allow_origins"]
+            ), f"Wildcard should be in merged origins, got {cors_config['allow_origins']}"
+            assert cors_config["allow_origins"] == [
+                "*"
+            ], "Merged origins should be ['*'] when any child has wildcard"
+            # Credentials should be True (OR logic)
+            assert cors_config["allow_credentials"] is True
+
+        await engine.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_websocket_route_verification(self, mongodb_connection_string, tmp_path):
+        """Test that WebSocket routes are verified after registration."""
+        import logging
+        import os
+
+        from mdb_engine.core.engine import MongoDBEngine
+
+        manifest = {
+            "schema_version": "2.0",
+            "slug": "ws-verify-app",
+            "name": "WebSocket Verify App",
+            "auth": {"mode": "shared", "roles": ["viewer"], "require_role": "viewer"},
+            "websockets": {
+                "realtime": {
+                    "path": "/ws",
+                    "auth": {"required": False},
+                    "ping_interval": 30,
+                }
+            },
+            "cors": {
+                "enabled": True,
+                "allow_origins": ["*"],
+                "allow_credentials": True,
+            },
+        }
+        manifest_path = tmp_path / "manifest.json"
+        manifest_path.write_text(json.dumps(manifest))
+
+        db_name = f"test_ws_verify_{os.getpid()}"
+        engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name=db_name)
+
+        # Capture logs to verify route verification messages
+        log_capture = []
+        handler = logging.Handler()
+        handler.emit = lambda record: log_capture.append(record.getMessage())
+
+        logger = logging.getLogger("mdb_engine.core.engine")
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+
+        app = engine.create_multi_app(
+            apps=[
+                {
+                    "slug": "ws-verify-app",
+                    "manifest": manifest_path,
+                    "path_prefix": "/ws-app",
+                }
+            ],
+            title="WebSocket Verify Test",
+        )
+
+        async with app.router.lifespan_context(app):
+            # Verify WebSocket route exists
+            ws_routes = [
+                route
+                for route in app.routes
+                if hasattr(route, "path") and "/ws-app/ws" in str(getattr(route, "path", ""))
+            ]
+            assert len(ws_routes) > 0, "WebSocket route should be registered"
+
+            # Check that verification logging occurred
+            verification_logs = [log for log in log_capture if "Verified WebSocket route" in log]
+            assert len(verification_logs) > 0, "Route verification should be logged"
+
+        logger.removeHandler(handler)
+        await engine.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_startup_verification_logging(self, mongodb_connection_string, tmp_path):
+        """Test that startup verification logs CORS config and WebSocket routes."""
+        import logging
+        import os
+
+        from mdb_engine.core.engine import MongoDBEngine
+
+        manifest = {
+            "schema_version": "2.0",
+            "slug": "startup-verify-app",
+            "name": "Startup Verify App",
+            "auth": {"mode": "shared"},
+            "websockets": {"realtime": {"path": "/ws", "auth": {"required": False}}},
+            "cors": {
+                "enabled": True,
+                "allow_origins": ["http://localhost:3000"],
+                "allow_credentials": True,
+            },
+        }
+        manifest_path = tmp_path / "manifest.json"
+        manifest_path.write_text(json.dumps(manifest))
+
+        db_name = f"test_startup_verify_{os.getpid()}"
+        engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name=db_name)
+
+        # Capture logs
+        log_capture = []
+        handler = logging.Handler()
+        handler.emit = lambda record: log_capture.append(record.getMessage())
+
+        logger = logging.getLogger("mdb_engine.core.engine")
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+
+        app = engine.create_multi_app(
+            apps=[
+                {
+                    "slug": "startup-verify-app",
+                    "manifest": manifest_path,
+                    "path_prefix": "/startup-app",
+                }
+            ],
+            title="Startup Verify Test",
+        )
+
+        async with app.router.lifespan_context(app):
+            # Check that startup verification logging occurred
+            verification_logs = [
+                log
+                for log in log_capture
+                if "MDB-Engine Multi-App Configuration Verification" in log
+            ]
+            assert len(verification_logs) > 0, "Startup verification should be logged"
+
+            # Check that CORS config is logged
+            cors_logs = [log for log in log_capture if "CORS Config:" in log]
+            assert len(cors_logs) > 0, "CORS config should be logged"
+
+            # Check that WebSocket routes are logged
+            ws_logs = [log for log in log_capture if "WebSocket route" in log or "Found" in log]
+            assert len(ws_logs) > 0, "WebSocket routes should be logged"
+
+        logger.removeHandler(handler)
+        await engine.shutdown()
