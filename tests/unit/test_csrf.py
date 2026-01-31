@@ -115,10 +115,10 @@ class TestWebSocketSessionKeyValidation:
 
         app = FastAPI()
 
-        # Set up encryption service
-        if "MDB_ENGINE_MASTER_KEY" not in os.environ:
-            test_master_key = base64.b64encode(b"x" * 32).decode()
-            os.environ["MDB_ENGINE_MASTER_KEY"] = test_master_key
+        # Set up encryption service - always set a valid master key for this test
+        # (override any existing value that might be incorrectly formatted)
+        test_master_key = base64.b64encode(b"x" * 32).decode()
+        os.environ["MDB_ENGINE_MASTER_KEY"] = test_master_key
 
         encryption_service = EnvelopeEncryptionService()
 
