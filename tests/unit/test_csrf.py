@@ -790,30 +790,33 @@ class TestWebSocketCSRFValidation:
         """Test that expired CSRF tokens are rejected for WebSocket upgrades."""
         import time
 
-        from mdb_engine.auth.csrf import generate_csrf_token
+        from mdb_engine.auth.csrf import DEFAULT_TOKEN_TTL, generate_csrf_token
 
         client = TestClient(app, raise_server_exceptions=False)
 
         app.state.cors_config = {"allow_origins": ["https://example.com"]}
 
-        # Generate expired CSRF token
+        # Generate CSRF token
         secret = "test-secret"
-        expired_token = generate_csrf_token(secret=secret)
+        csrf_token = generate_csrf_token(secret=secret)
 
-        # Simulate time passing
+        # Simulate time passing beyond token TTL to make it expired
+        # DEFAULT_TOKEN_TTL is 3600 seconds (1 hour), so we need to advance time by more than that
         with patch("mdb_engine.auth.csrf.time") as mock_time:
-            mock_time.time.return_value = time.time() + 10000  # 10 seconds in future
+            # Advance time beyond token TTL to make token expired
+            mock_time.time.return_value = time.time() + DEFAULT_TOKEN_TTL + 100
 
             response = client.get(
                 "/",
                 headers={
                     "upgrade": "websocket",
+                    "connection": "upgrade",  # Add Connection header for proper WebSocket upgrade
                     "origin": "https://example.com",
-                    CSRF_HEADER_NAME: expired_token,
+                    CSRF_HEADER_NAME: csrf_token,
                 },
                 cookies={
                     "token": "auth-token",
-                    CSRF_COOKIE_NAME: expired_token,
+                    CSRF_COOKIE_NAME: csrf_token,
                 },
             )
             # Should fail CSRF validation due to expiration

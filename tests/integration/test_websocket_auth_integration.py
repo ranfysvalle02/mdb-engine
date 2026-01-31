@@ -86,8 +86,18 @@ class TestWebSocketCookieAuthIntegration:
         db_name = f"test_ws_auth_{os.getpid()}"
         engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name=db_name)
 
-        # Create app with WebSocket support
-        app = engine.create_app(test_manifest)
+        # Create app with WebSocket support using create_multi_app
+        # (create_app requires a Path, create_multi_app accepts dicts)
+        app = engine.create_multi_app(
+            apps=[
+                {
+                    "slug": test_manifest["slug"],
+                    "manifest": test_manifest,
+                    "path_prefix": "",
+                }
+            ],
+            title="Test WebSocket App",
+        )
 
         # Generate CSRF token
         csrf_token = generate_csrf_token()
@@ -144,8 +154,17 @@ class TestWebSocketCookieAuthIntegration:
         db_name = f"test_ws_csrf_{os.getpid()}"
         engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name=db_name)
 
-        # Create app with WebSocket support
-        app = engine.create_app(test_manifest)
+        # Create app with WebSocket support using create_multi_app
+        app = engine.create_multi_app(
+            apps=[
+                {
+                    "slug": test_manifest["slug"],
+                    "manifest": test_manifest,
+                    "path_prefix": "",
+                }
+            ],
+            title="Test WebSocket App",
+        )
 
         async with app.router.lifespan_context(app):
             async with AsyncClient(
@@ -177,8 +196,17 @@ class TestWebSocketCookieAuthIntegration:
         db_name = f"test_ws_origin_{os.getpid()}"
         engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name=db_name)
 
-        # Create app with WebSocket support
-        app = engine.create_app(test_manifest)
+        # Create app with WebSocket support using create_multi_app
+        app = engine.create_multi_app(
+            apps=[
+                {
+                    "slug": test_manifest["slug"],
+                    "manifest": test_manifest,
+                    "path_prefix": "",
+                }
+            ],
+            title="Test WebSocket App",
+        )
 
         # Generate CSRF token
         csrf_token = generate_csrf_token()
@@ -228,8 +256,17 @@ class TestWebSocketCookieAuthIntegration:
         db_name = f"test_ws_anon_{os.getpid()}"
         engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name=db_name)
 
-        # Create app with WebSocket support
-        app = engine.create_app(test_manifest)
+        # Create app with WebSocket support using create_multi_app
+        app = engine.create_multi_app(
+            apps=[
+                {
+                    "slug": test_manifest["slug"],
+                    "manifest": test_manifest,
+                    "path_prefix": "",
+                }
+            ],
+            title="Test WebSocket App",
+        )
 
         async with app.router.lifespan_context(app):
             async with AsyncClient(
@@ -275,8 +312,17 @@ class TestWebSocketCookieAuthIntegration:
         db_name = f"test_ws_expired_{os.getpid()}"
         engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name=db_name)
 
-        # Create app with WebSocket support
-        app = engine.create_app(test_manifest)
+        # Create app with WebSocket support using create_multi_app
+        app = engine.create_multi_app(
+            apps=[
+                {
+                    "slug": test_manifest["slug"],
+                    "manifest": test_manifest,
+                    "path_prefix": "",
+                }
+            ],
+            title="Test WebSocket App",
+        )
 
         # Generate CSRF token
         csrf_token = generate_csrf_token()
