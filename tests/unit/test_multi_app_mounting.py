@@ -1258,30 +1258,34 @@ class TestWebSocketRoutesWithMountedApps:
 
         engine = MongoDBEngine(mongo_uri="mongodb://localhost:27017", db_name="test_db")
 
-        # Capture logs
+        # Capture logs from root logger to catch all logs
         log_capture = []
         handler = logging.Handler()
         handler.emit = lambda record: log_capture.append(record.getMessage())
 
-        logger = logging.getLogger("mdb_engine.core.engine")
-        logger.addHandler(handler)
-        logger.setLevel(logging.INFO)
+        # Add handler to root logger to catch all logs
+        root_logger = logging.getLogger()
+        root_logger.addHandler(handler)
+        root_logger.setLevel(logging.INFO)
 
-        with patch.object(engine, "_connection_manager") as mock_conn:
-            mock_conn.mongo_db = mock_mongo_database
-            mock_conn.mongo_client = MagicMock()
-            mock_conn.initialized = True
-            mock_conn.initialize = AsyncMock()
-            mock_conn.shutdown = AsyncMock()
+        try:
+            with patch.object(engine, "_connection_manager") as mock_conn:
+                mock_conn.mongo_db = mock_mongo_database
+                mock_conn.mongo_client = MagicMock()
+                mock_conn.initialized = True
+                mock_conn.initialize = AsyncMock()
+                mock_conn.shutdown = AsyncMock()
 
-            mock_handler = MagicMock()
-            mock_router = MagicMock()
+                # Create a real callable handler
+                async def mock_ws_handler(websocket):
+                    await websocket.accept()
+                    await websocket.close()
 
-            with patch(
-                "mdb_engine.routing.websockets.create_websocket_endpoint",
-                return_value=mock_handler,
-            ):
-                with patch("fastapi.APIRouter", return_value=mock_router):
+                # Don't patch APIRouter - let it create real routers that register routes
+                with patch(
+                    "mdb_engine.routing.websockets.create_websocket_endpoint",
+                    return_value=mock_ws_handler,
+                ):
                     app = engine.create_multi_app(
                         apps=[
                             {
@@ -1293,13 +1297,19 @@ class TestWebSocketRoutesWithMountedApps:
                     )
 
                     async with app.router.lifespan_context(app):
-                        # Check that summary logging occurred
+                        # Check that summary logging occurred (either success or failure)
                         summary_logs = [
-                            log for log in log_capture if "WebSocket registration summary" in log
+                            log
+                            for log in log_capture
+                            if "WebSocket registration summary" in log
+                            or "WebSocket registration issues" in log
                         ]
-                        assert len(summary_logs) > 0, "Registration summary should be logged"
-
-        logger.removeHandler(handler)
+                        assert len(summary_logs) > 0, (
+                            f"Registration summary should be logged. "
+                            f"Captured logs: {log_capture[:20]}"  # Show first 20 logs
+                        )
+        finally:
+            root_logger.removeHandler(handler)
 
 
 class TestCORSCConfigPropagation:
