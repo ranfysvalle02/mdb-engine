@@ -82,12 +82,12 @@ from .repositories import Entity, MongoRepository, Repository, UnitOfWork
 from .utils import clean_mongo_doc, clean_mongo_docs
 
 __version__ = (
-    "0.4.13"  # WebSocket subprotocol authentication (header tunneling)
-    # - Authenticate WebSocket connections via Sec-WebSocket-Protocol header ONLY
-    # - Bypasses CSRF issues by tunneling JWT tokens through subprotocols
-    # - Authenticate BEFORE accepting connection (prevents CSRF middleware conflicts)
-    # - Forward-facing: Only subprotocol authentication (no query params/cookies)
-    # - Browser-compatible: new WebSocket(url, [token]) works natively
+    "0.4.14"  # WebSocket security documentation and test updates
+    # - Comprehensive security guide (WEBSOCKET_SECURITY_MULTI_APP_SSO.md)
+    # - Updated all documentation to reflect subprotocol-only authentication
+    # - Added integration tests for subprotocol authentication in multi-app SSO
+    # - Enhanced unit test documentation with security-focused explanations
+    # - Complete test coverage for WebSocket security scenarios
 )
 
 __all__ = [
