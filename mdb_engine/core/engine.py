@@ -2252,6 +2252,12 @@ class MongoDBEngine:
                         on_shutdown=on_shutdown,
                     )
 
+                    # CRITICAL: Set engine state BEFORE importing routes
+                    # Routes may use dependencies that need request.app.state.engine
+                    # This must be set before route decorators execute
+                    child_app.state.engine = engine
+                    child_app.state.app_slug = slug
+
                     # Automatically import routes from app module
                     # This discovers and imports route modules (web.py, routes.py, etc.)
                     # so that route decorators are executed and routes are registered
@@ -2292,10 +2298,8 @@ class MongoDBEngine:
                         auth_hub_url = os.getenv("AUTH_HUB_URL", "/auth-hub")
 
                     # Store parent app reference and current app info for middleware
+                    # Note: engine and app_slug are already set above (before route import)
                     child_app.state.parent_app = app
-                    child_app.state.app_slug = slug
-                    # Required for get_scoped_db and other dependencies
-                    child_app.state.engine = engine
                     child_app.state.app_base_path = path_prefix
                     child_app.state.app_auth_hub_url = auth_hub_url
                     child_app.state.app_manifest = app_manifest_data
