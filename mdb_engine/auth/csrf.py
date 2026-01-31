@@ -190,6 +190,8 @@ class CSRFMiddleware(BaseHTTPMiddleware):
 
     def _is_exempt(self, path: str) -> bool:
         """Check if a path is exempt from CSRF validation."""
+        # WebSocket upgrade requests are handled separately in dispatch()
+        # Don't exempt them here - they need origin validation
         for pattern in self.exempt_routes:
             if fnmatch.fnmatch(path, pattern):
                 return True
@@ -201,14 +203,42 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         return upgrade_header == "websocket"
 
     def _get_allowed_origins(self, request: Request) -> list[str]:
-        """Get allowed origins from app state (CORS config) or use request host as fallback."""
+        """
+        Get allowed origins from app state (CORS config) or use request host as fallback.
+
+        For multi-app setups, checks parent app's CORS config first (since WebSocket routes
+        are registered on parent app), then falls back to request host.
+        """
         try:
+            # Check current app's CORS config (parent app for WebSocket routes in multi-app)
             cors_config = getattr(request.app.state, "cors_config", None)
             if cors_config and cors_config.get("allow_origins"):
-                return cors_config["allow_origins"]
+                origins = cors_config["allow_origins"]
+                if origins:
+                    return origins if isinstance(origins, list) else [origins]
         except (AttributeError, TypeError, KeyError):
             pass
 
+        # Fallback: Check if this is a multi-app setup and try to find mounted app's CORS config
+        try:
+            if hasattr(request.app.state, "mounted_apps"):
+                # This is a parent app in multi-app setup
+                # Try to find which mounted app this request is for
+                path = request.url.path
+                mounted_apps = request.app.state.mounted_apps
+
+                # Find matching mounted app by path prefix
+                for app_info in mounted_apps:
+                    path_prefix = app_info.get("path_prefix", "")
+                    if path_prefix and path.startswith(path_prefix):
+                        # Try to get child app's CORS config if available
+                        # Note: Child app might not be directly accessible, so we rely on
+                        # parent app's merged CORS config (set during mounting)
+                        break
+        except (AttributeError, TypeError, KeyError):
+            pass
+
+        # Final fallback: Use request host
         try:
             host = request.url.hostname
             scheme = request.url.scheme
@@ -263,12 +293,22 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         path = request.url.path
         method = request.method
 
+        # CRITICAL: Handle WebSocket upgrade requests BEFORE other CSRF checks
+        # WebSocket upgrades don't use CSRF tokens, but need origin validation
         if self._is_websocket_upgrade(request):
+            # Validate origin for WebSocket connections (CSWSH protection)
             if not self._validate_websocket_origin(request):
+                logger.warning(
+                    f"WebSocket origin validation failed for {path}: "
+                    f"origin={request.headers.get('origin')}, "
+                    f"allowed={self._get_allowed_origins(request)}"
+                )
                 return JSONResponse(
                     status_code=status.HTTP_403_FORBIDDEN,
                     content={"detail": "Invalid origin for WebSocket connection"},
                 )
+            # Origin validated - allow WebSocket upgrade to proceed
+            # No CSRF token check needed for WebSocket upgrades
             return await call_next(request)
 
         if self._is_exempt(path):

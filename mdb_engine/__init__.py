@@ -82,8 +82,11 @@ from .repositories import Entity, MongoRepository, Repository, UnitOfWork
 from .utils import clean_mongo_doc, clean_mongo_docs
 
 __version__ = (
-    "0.4.8"  # Fix: WebSocket routes now work correctly with mounted apps
-    # WebSocket routes are registered on parent app with full mount path prefix
+    "0.4.9"  # Fix: WebSocket + CSRF + Multi-App architecture
+    # - CSRF middleware now added to parent app when child apps use shared auth
+    # - CORS config properly merged from child apps to parent app
+    # - WebSocket origin validation uses parent app's CORS config
+    # - Comprehensive integration tests added
 )
 
 __all__ = [

@@ -2699,15 +2699,35 @@ class MongoDBEngine:
         parent_app.add_middleware(RequestScopeMiddleware)
         logger.debug("RequestScopeMiddleware added for parent app")
 
+        # CRITICAL: Add CSRF middleware to parent app if any child app uses shared auth
+        # WebSocket routes are registered on parent app, so parent app middleware runs first
+        # CSRF middleware on parent app validates WebSocket origin using parent app's CORS config
+        if has_shared_auth:
+            from ..auth.csrf import create_csrf_middleware
+
+            # Create CSRF middleware with default config (will use parent app's CORS config)
+            # Exempt routes that don't need CSRF (health checks, etc.)
+            parent_csrf_config = {
+                "csrf_protection": True,
+                "public_routes": ["/health", "/docs", "/openapi.json", "/_mdb/routes"],
+            }
+            csrf_middleware = create_csrf_middleware(parent_csrf_config)
+            parent_app.add_middleware(csrf_middleware)
+            logger.info("CSRFMiddleware added to parent app for WebSocket origin validation")
+
         # Add shared CORS middleware if configured
         # (Individual apps can add their own CORS, but parent-level is useful)
         try:
             from fastapi.middleware.cors import CORSMiddleware
 
+            # Use CORS config from parent app state (set above)
+            cors_origins = parent_app.state.cors_config.get("allow_origins", ["*"])
+            cors_credentials = parent_app.state.cors_config.get("allow_credentials", True)
+
             parent_app.add_middleware(
                 CORSMiddleware,
-                allow_origins=["*"],  # Can be configured via manifest later
-                allow_credentials=True,
+                allow_origins=cors_origins,
+                allow_credentials=cors_credentials,
                 allow_methods=["*"],
                 allow_headers=["*"],
             )
