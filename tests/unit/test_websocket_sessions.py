@@ -12,8 +12,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 # Set test master key before importing
-if "MDB_ENGINE_MASTER_KEY" not in os.environ:
-    os.environ["MDB_ENGINE_MASTER_KEY"] = base64.b64encode(b"x" * 32).decode()
+# Always set a valid base64-encoded master key (other test files may have set it incorrectly)
+os.environ["MDB_ENGINE_MASTER_KEY"] = base64.b64encode(b"x" * 32).decode()
 
 from mdb_engine.auth.websocket_sessions import (
     SESSION_TTL_HOURS,

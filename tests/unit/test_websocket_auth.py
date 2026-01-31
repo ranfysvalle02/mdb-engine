@@ -328,8 +328,9 @@ class TestWebSocketSessionKeyAuthentication:
         from mdb_engine.core.encryption import EnvelopeEncryptionService
 
         # Set up encryption service
-        if "MDB_ENGINE_MASTER_KEY" not in os.environ:
-            os.environ["MDB_ENGINE_MASTER_KEY"] = base64.b64encode(b"x" * 32).decode()
+        # Always set a valid base64-encoded master key for this fixture
+        # (other test files may have set it as a plain string at import time)
+        os.environ["MDB_ENGINE_MASTER_KEY"] = base64.b64encode(b"x" * 32).decode()
 
         encryption_service = EnvelopeEncryptionService()
 

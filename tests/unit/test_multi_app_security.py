@@ -10,6 +10,7 @@ Tests critical security features:
 """
 
 import asyncio
+import base64
 import json
 import os
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -24,7 +25,7 @@ if "MDB_ENGINE_JWT_SECRET" not in os.environ:
     os.environ["MDB_ENGINE_JWT_SECRET"] = "test_jwt_secret_for_testing_only_" + "x" * 32
 
 if "MDB_ENGINE_MASTER_KEY" not in os.environ:
-    os.environ["MDB_ENGINE_MASTER_KEY"] = "test_master_key_for_testing_only_" + "x" * 32
+    os.environ["MDB_ENGINE_MASTER_KEY"] = base64.b64encode(b"x" * 32).decode()
 
 
 # Shared fixtures
