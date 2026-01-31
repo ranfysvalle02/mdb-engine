@@ -2435,7 +2435,7 @@ class MongoDBEngine:
                                 f"WebSocket support not available - skipping WebSocket routes "
                                 f"for mounted app '{slug}'"
                             )
-                        except Exception as e:
+                        except (ValueError, TypeError, AttributeError, RuntimeError) as e:
                             logger.error(
                                 f"Failed to register WebSocket routes for mounted app "
                                 f"'{slug}': {e}",
