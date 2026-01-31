@@ -1033,3 +1033,216 @@ class TestStartupShutdownHooks:
                     }
                 ]
             )
+
+
+class TestWebSocketRoutesWithMountedApps:
+    """Test WebSocket routes registration for mounted apps."""
+
+    @pytest.fixture
+    def temp_manifest_with_websocket(self, tmp_path):
+        """Create a temporary manifest file with WebSocket configuration."""
+        manifest = {
+            "schema_version": "2.0",
+            "slug": "ws-app",
+            "name": "WebSocket App",
+            "auth": {"mode": "app"},
+            "websockets": {
+                "realtime": {
+                    "path": "/ws",
+                    "auth": {"required": False},
+                    "ping_interval": 30,
+                }
+            },
+        }
+        manifest_path = tmp_path / "manifest.json"
+        manifest_path.write_text(json.dumps(manifest))
+        return manifest_path
+
+    @pytest.fixture
+    def temp_manifest(self, tmp_path):
+        """Create temporary manifest file without WebSocket config."""
+        manifest = {
+            "schema_version": "2.0",
+            "slug": "no-ws-app",
+            "name": "No WebSocket App",
+            "auth": {"mode": "app"},
+        }
+        manifest_path = tmp_path / "manifest.json"
+        manifest_path.write_text(json.dumps(manifest))
+        return manifest_path
+
+    @pytest.mark.asyncio
+    async def test_websocket_routes_registered_on_parent_app(
+        self, mock_mongo_database, temp_manifest_with_websocket
+    ):
+        """Test that WebSocket routes are registered on parent app with mount prefix."""
+        from mdb_engine.core.engine import MongoDBEngine
+
+        engine = MongoDBEngine(mongo_uri="mongodb://localhost:27017", db_name="test_db")
+
+        with patch.object(engine, "_connection_manager") as mock_conn:
+            mock_conn.mongo_db = mock_mongo_database
+            mock_conn.mongo_client = MagicMock()
+            mock_conn.initialized = True
+            mock_conn.initialize = AsyncMock()
+            mock_conn.shutdown = AsyncMock()
+
+            mock_handler = MagicMock()
+            mock_router = MagicMock()
+            mock_include_router = MagicMock()
+
+            with patch(
+                "mdb_engine.routing.websockets.create_websocket_endpoint",
+                return_value=mock_handler,
+            ) as mock_create:
+                with patch("fastapi.APIRouter", return_value=mock_router) as mock_router_class:
+                    app = engine.create_multi_app(
+                        apps=[
+                            {
+                                "slug": "ws-app",
+                                "manifest": temp_manifest_with_websocket,
+                                "path_prefix": "/app-3",
+                            }
+                        ]
+                    )
+                    # Mock include_router on the app instance
+                    app.include_router = mock_include_router
+
+                    # WebSocket routes are registered during lifespan, so run it
+                    async with app.router.lifespan_context(app):
+                        # Verify WebSocket endpoint was created with correct parameters
+                        mock_create.assert_called_once()
+                        call_kwargs = mock_create.call_args[1]
+                        assert call_kwargs["app_slug"] == "ws-app"
+                        assert call_kwargs["path"] == "/ws"
+                        assert call_kwargs["endpoint_name"] == "realtime"
+                        assert call_kwargs["require_auth"] is False
+                        assert call_kwargs["ping_interval"] == 30
+
+                        # Verify router was created and WebSocket route registered
+                        assert mock_router_class.called
+                        mock_router.websocket.assert_called_once_with("/app-3/ws")
+                        assert mock_include_router.called
+
+    @pytest.mark.asyncio
+    async def test_websocket_routes_multiple_endpoints(self, mock_mongo_database, tmp_path):
+        """Test WebSocket routes with multiple endpoints."""
+        from mdb_engine.core.engine import MongoDBEngine
+
+        manifest = {
+            "schema_version": "2.0",
+            "slug": "multi-ws-app",
+            "name": "Multi WebSocket App",
+            "auth": {"mode": "app"},
+            "websockets": {
+                "realtime": {"path": "/ws", "auth": {"required": False}},
+                "events": {"path": "/events", "auth": {"required": True}},
+            },
+        }
+        manifest_path = tmp_path / "manifest.json"
+        manifest_path.write_text(json.dumps(manifest))
+
+        engine = MongoDBEngine(mongo_uri="mongodb://localhost:27017", db_name="test_db")
+
+        with patch.object(engine, "_connection_manager") as mock_conn:
+            mock_conn.mongo_db = mock_mongo_database
+            mock_conn.mongo_client = MagicMock()
+            mock_conn.initialized = True
+            mock_conn.initialize = AsyncMock()
+            mock_conn.shutdown = AsyncMock()
+
+            mock_handler = MagicMock()
+            mock_router = MagicMock()
+
+            with patch(
+                "mdb_engine.routing.websockets.create_websocket_endpoint",
+                return_value=mock_handler,
+            ):
+                with patch("fastapi.APIRouter", return_value=mock_router):
+                    app = engine.create_multi_app(
+                        apps=[
+                            {
+                                "slug": "multi-ws-app",
+                                "manifest": manifest_path,
+                                "path_prefix": "/multi",
+                            }
+                        ]
+                    )
+
+                    # WebSocket routes are registered during lifespan, so run it
+                    async with app.router.lifespan_context(app):
+                        # Should have registered 2 WebSocket routes
+                        assert mock_router.websocket.call_count == 2
+
+                        # Check that routes were registered with correct paths
+                        call_paths = [call[0][0] for call in mock_router.websocket.call_args_list]
+                        assert "/multi/ws" in call_paths
+                        assert "/multi/events" in call_paths
+
+    @pytest.mark.asyncio
+    async def test_websocket_routes_no_config(self, mock_mongo_database, temp_manifest):
+        """Test that apps without WebSocket config don't register routes."""
+        from mdb_engine.core.engine import MongoDBEngine
+
+        engine = MongoDBEngine(mongo_uri="mongodb://localhost:27017", db_name="test_db")
+
+        with patch.object(engine, "_connection_manager") as mock_conn:
+            mock_conn.mongo_db = mock_mongo_database
+            mock_conn.mongo_client = MagicMock()
+            mock_conn.initialized = True
+            mock_conn.initialize = AsyncMock()
+            mock_conn.shutdown = AsyncMock()
+
+            with patch("fastapi.APIRouter") as mock_router_class:
+                app = engine.create_multi_app(
+                    apps=[
+                        {
+                            "slug": "no-ws-app",
+                            "manifest": temp_manifest,
+                            "path_prefix": "/no-ws",
+                        }
+                    ]
+                )
+
+                # WebSocket routes are registered during lifespan, so run it
+                async with app.router.lifespan_context(app):
+                    # Should not create any routers for WebSocket routes
+                    assert not mock_router_class.called
+
+    @pytest.mark.asyncio
+    async def test_websocket_routes_import_error_handled(
+        self, mock_mongo_database, temp_manifest_with_websocket
+    ):
+        """Test that ImportError for WebSocket support is handled gracefully."""
+        from mdb_engine.core.engine import MongoDBEngine
+
+        engine = MongoDBEngine(mongo_uri="mongodb://localhost:27017", db_name="test_db")
+
+        with patch.object(engine, "_connection_manager") as mock_conn:
+            mock_conn.mongo_db = mock_mongo_database
+            mock_conn.mongo_client = MagicMock()
+            mock_conn.initialized = True
+            mock_conn.initialize = AsyncMock()
+            mock_conn.shutdown = AsyncMock()
+
+            # Simulate ImportError when trying to import WebSocket support
+            with patch(
+                "mdb_engine.routing.websockets.create_websocket_endpoint",
+                side_effect=ImportError("WebSocket support not available"),
+            ):
+                # Should not raise, but log warning
+                app = engine.create_multi_app(
+                    apps=[
+                        {
+                            "slug": "ws-app",
+                            "manifest": temp_manifest_with_websocket,
+                            "path_prefix": "/app-3",
+                        }
+                    ]
+                )
+
+                # WebSocket routes are registered during lifespan, so run it
+                # Should not raise, but log warning
+                async with app.router.lifespan_context(app):
+                    # App should still be created successfully
+                    assert app is not None

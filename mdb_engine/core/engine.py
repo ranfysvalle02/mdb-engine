@@ -2375,6 +2375,73 @@ class MongoDBEngine:
 
                     # Mount child app at path prefix
                     app.mount(path_prefix, child_app)
+
+                    # CRITICAL FIX: Register WebSocket routes on parent app with full path
+                    # FastAPI's app.mount() doesn't handle WebSocket routes correctly,
+                    # so we need to register them on the parent app with the mount prefix
+                    # Get WebSocket config from manifest directly (app registration happens
+                    # asynchronously in lifespan, so config may not be available yet)
+                    websockets_config = app_manifest_data.get("websockets")
+                    if websockets_config:
+                        try:
+                            from fastapi import APIRouter
+
+                            from ..routing.websockets import create_websocket_endpoint
+
+                            for endpoint_name, endpoint_config in websockets_config.items():
+                                ws_path = endpoint_config.get("path", f"/{endpoint_name}")
+                                # Combine mount prefix with WebSocket path
+                                full_ws_path = f"{path_prefix.rstrip('/')}{ws_path}"
+
+                                # Handle auth configuration
+                                auth_config = endpoint_config.get("auth", {})
+                                if isinstance(auth_config, dict) and "required" in auth_config:
+                                    require_auth = auth_config.get("required", True)
+                                elif "require_auth" in endpoint_config:
+                                    require_auth = endpoint_config.get("require_auth", True)
+                                else:
+                                    # Use app's auth_policy if available
+                                    if "auth_policy" in app_manifest_data:
+                                        require_auth = app_manifest_data["auth_policy"].get(
+                                            "required", True
+                                        )
+                                    else:
+                                        require_auth = True
+
+                                ping_interval = endpoint_config.get("ping_interval", 30)
+
+                                # Create WebSocket handler
+                                # Use original path for handler (mount handled internally)
+                                handler = create_websocket_endpoint(
+                                    app_slug=slug,
+                                    path=ws_path,
+                                    endpoint_name=endpoint_name,
+                                    handler=None,
+                                    require_auth=require_auth,
+                                    ping_interval=ping_interval,
+                                )
+
+                                # Register on parent app with full path
+                                ws_router = APIRouter()
+                                ws_router.websocket(full_ws_path)(handler)
+                                app.include_router(ws_router)
+
+                                logger.info(
+                                    f"✅ Registered WebSocket route '{full_ws_path}' "
+                                    f"for mounted app '{slug}' (mounted at '{path_prefix}')"
+                                )
+                        except ImportError:
+                            logger.warning(
+                                f"WebSocket support not available - skipping WebSocket routes "
+                                f"for mounted app '{slug}'"
+                            )
+                        except Exception as e:
+                            logger.error(
+                                f"Failed to register WebSocket routes for mounted app "
+                                f"'{slug}': {e}",
+                                exc_info=True,
+                            )
+
                     # Update existing entry instead of appending
                     entry = _find_mounted_app_entry(slug)
                     if entry:
