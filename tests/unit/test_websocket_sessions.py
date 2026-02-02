@@ -28,7 +28,7 @@ def mock_mongo_db():
     """Create a mock MongoDB database."""
     db = AsyncMock()
     collection = AsyncMock()
-    db.__getitem__ = MagicMock(return_value=collection)
+    db.__getitem__ = MagicMock(return_value=collection)  # noqa: SLF001
     return db, collection
 
 

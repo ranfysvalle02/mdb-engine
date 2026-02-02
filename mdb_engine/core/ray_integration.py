@@ -360,10 +360,10 @@ def ray_actor_decorator(
         # Convert to Ray remote class
         ray_cls = ray.remote(cls)
 
-        # Store metadata on the class
-        ray_cls._app_slug = actor_app_slug
-        ray_cls._namespace = actor_namespace
-        ray_cls._isolated = isolated
+        # Store metadata on the class (intentional dynamic attribute setting for Ray)
+        ray_cls._app_slug = actor_app_slug  # noqa: SLF001
+        ray_cls._namespace = actor_namespace  # noqa: SLF001
+        ray_cls._isolated = isolated  # noqa: SLF001
 
         # Add spawn class method
         @classmethod

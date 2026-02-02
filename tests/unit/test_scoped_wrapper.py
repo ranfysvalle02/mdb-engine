@@ -133,7 +133,7 @@ class TestScopedCollectionWrapper:
         # Note: find returns a cursor, so we check the underlying collection call
         # The actual call happens when cursor is used, but wrapper prepares the filter
         # We can verify by checking the wrapper's filter injection logic
-        scoped_filter = wrapper._inject_read_filter(user_filter)
+        scoped_filter = wrapper._inject_read_filter(user_filter)  # noqa: SLF001
         assert "$and" in scoped_filter
         assert {"status": "active"} in scoped_filter["$and"]
         assert {"app_id": {"$in": ["test_app"]}} in scoped_filter["$and"]
@@ -147,7 +147,7 @@ class TestScopedCollectionWrapper:
             write_scope="app1",
         )
 
-        scoped_filter = wrapper._inject_read_filter({"name": "Test"})
+        scoped_filter = wrapper._inject_read_filter({"name": "Test"})  # noqa: SLF001
         assert "$and" in scoped_filter
         assert {"app_id": {"$in": ["app1", "app2"]}} in scoped_filter["$and"]
 
@@ -229,10 +229,10 @@ class TestScopedCollectionWrapper:
             write_scope="test_app",
         )
 
-        result = wrapper._inject_read_filter(None)
+        result = wrapper._inject_read_filter(None)  # noqa: SLF001
         assert result == {"app_id": {"$in": ["test_app"]}}
 
-        result = wrapper._inject_read_filter({})
+        result = wrapper._inject_read_filter({})  # noqa: SLF001
         assert result == {"app_id": {"$in": ["test_app"]}}
 
     def test_inject_read_filter_with_user_filter(self):
@@ -244,7 +244,7 @@ class TestScopedCollectionWrapper:
         )
 
         user_filter = {"name": "Test", "value": {"$gt": 100}}
-        result = wrapper._inject_read_filter(user_filter)
+        result = wrapper._inject_read_filter(user_filter)  # noqa: SLF001
 
         assert "$and" in result
         assert user_filter in result["$and"]
@@ -412,8 +412,8 @@ class TestScopedMongoWrapper:
 
         collection = wrapper.test_collection
         assert isinstance(collection, ScopedCollectionWrapper)
-        assert collection._write_scope == "test_app"
-        assert collection._read_scopes == ["test_app"]
+        assert collection._write_scope == "test_app"  # noqa: SLF001
+        assert collection._read_scopes == ["test_app"]  # noqa: SLF001
 
     def test_get_collection_caching(self, mock_mongo_database):
         """Test that collection wrappers are cached."""
@@ -451,7 +451,7 @@ class TestScopedMongoWrapper:
         collection = wrapper.get_collection("other_collection")
         assert isinstance(collection, ScopedCollectionWrapper)
         # Should use the name as-is without adding prefix again (cross-app access)
-        assert collection._write_scope == "test_app"
+        assert collection._write_scope == "test_app"  # noqa: SLF001
 
     def test_get_collection_caching_via_get_collection(self, mock_mongo_database):
         """Test that get_collection caches wrappers."""
@@ -497,7 +497,7 @@ class TestScopedMongoWrapper:
 
         # Mock _ensure_app_id_index at class level
         with patch(
-            "mdb_engine.database.scoped_wrapper.ScopedMongoWrapper._ensure_app_id_index",
+            "mdb_engine.database.scoped_wrapper.ScopedMongoWrapper._ensure_app_id_index",  # noqa: SLF001
             new_callable=AsyncMock,
             return_value=True,
         ):
@@ -532,7 +532,7 @@ class TestScopedMongoWrapper:
         mock_mongo_database.client = mock_client
 
         # Clear cache to ensure fresh check
-        ScopedMongoWrapper._app_id_index_cache.clear()
+        ScopedMongoWrapper._app_id_index_cache.clear()  # noqa: SLF001
 
         collection = wrapper.get_collection("test_collection")
 
@@ -564,12 +564,12 @@ class TestScopedMongoWrapper:
 
         # Mock _ensure_app_id_index to raise OperationFailure at class level
         with patch(
-            "mdb_engine.database.scoped_wrapper.ScopedMongoWrapper._ensure_app_id_index",
+            "mdb_engine.database.scoped_wrapper.ScopedMongoWrapper._ensure_app_id_index",  # noqa: SLF001
             new_callable=AsyncMock,
             side_effect=OperationFailure("Index failed"),
         ):
             # Clear cache
-            ScopedMongoWrapper._app_id_index_cache.clear()
+            ScopedMongoWrapper._app_id_index_cache.clear()  # noqa: SLF001
 
             collection = wrapper.get_collection("test_collection")
 
@@ -757,7 +757,7 @@ class TestScopedCollectionWrapperEdgeCases:
         )
 
         user_filter = {"$and": [{"name": "Test"}, {"value": {"$gt": 100}}]}
-        result = wrapper._inject_read_filter(user_filter)
+        result = wrapper._inject_read_filter(user_filter)  # noqa: SLF001
 
         # Should merge with existing $and - the $and itself becomes part of the outer $and
         assert "$and" in result
@@ -773,7 +773,7 @@ class TestScopedCollectionWrapperEdgeCases:
         )
 
         user_filter = {"$or": [{"name": "Test1"}, {"name": "Test2"}]}
-        result = wrapper._inject_read_filter(user_filter)
+        result = wrapper._inject_read_filter(user_filter)  # noqa: SLF001
 
         # Should wrap $or in $and with app_id
         assert "$and" in result
@@ -791,7 +791,7 @@ class TestScopedCollectionWrapperEdgeCases:
             write_scope="test_app",
         )
 
-        result = wrapper._inject_read_filter({"name": "Test"})
+        result = wrapper._inject_read_filter({"name": "Test"})  # noqa: SLF001
         # Should still have filter structure, but with empty $in
         assert "$and" in result or "app_id" in result
 
@@ -811,7 +811,7 @@ class TestScopedCollectionWrapperEdgeCases:
         )
 
         # Set auto_index_manager directly (it's a property, so set the private attribute)
-        wrapper._auto_index_manager = mock_auto_index_manager
+        wrapper._auto_index_manager = mock_auto_index_manager  # noqa: SLF001
 
         # Mock cursor
         mock_cursor = MagicMock()
@@ -897,7 +897,7 @@ class TestScopedCollectionWrapperEdgeCases:
         )
 
         # Set auto_index_manager directly (it's a property, so set the private attribute)
-        wrapper._auto_index_manager = mock_auto_index_manager
+        wrapper._auto_index_manager = mock_auto_index_manager  # noqa: SLF001
 
         mock_mongo_collection.count_documents = AsyncMock(return_value=5)
 
@@ -916,7 +916,7 @@ class TestAsyncAtlasIndexManager:
         from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager
 
         manager = AsyncAtlasIndexManager(mock_mongo_collection)
-        assert manager._collection == mock_mongo_collection
+        assert manager._collection == mock_mongo_collection  # noqa: SLF001
 
     def test_index_manager_initialization_invalid_type(self):
         """Test initialization with invalid collection type."""
@@ -936,7 +936,7 @@ class TestAsyncAtlasIndexManager:
         mock_mongo_collection.database = mock_database
 
         manager = AsyncAtlasIndexManager(mock_mongo_collection)
-        await manager._ensure_collection_exists()
+        await manager._ensure_collection_exists()  # noqa: SLF001
 
         mock_database.create_collection.assert_called_once()
 
@@ -1012,7 +1012,7 @@ class TestAsyncAtlasIndexManager:
         from mdb_engine.exceptions import MongoDBEngineError
 
         with pytest.raises(MongoDBEngineError, match="connection failed"):
-            await manager._ensure_collection_exists()
+            await manager._ensure_collection_exists()  # noqa: SLF001
 
     @pytest.mark.asyncio
     async def test_index_manager_ensure_collection_operation_error(self, mock_mongo_collection):
@@ -1031,7 +1031,7 @@ class TestAsyncAtlasIndexManager:
         from mdb_engine.exceptions import MongoDBEngineError
 
         with pytest.raises(MongoDBEngineError):
-            await manager._ensure_collection_exists()
+            await manager._ensure_collection_exists()  # noqa: SLF001
 
     @pytest.mark.asyncio
     async def test_index_manager_check_definition_changed_vector(self, mock_mongo_collection):
@@ -1044,7 +1044,7 @@ class TestAsyncAtlasIndexManager:
         definition = {"fields": [{"type": "vector", "path": "embedding", "numDimensions": 1536}]}
         latest_def = {"fields": [{"type": "vector", "path": "embedding", "numDimensions": 768}]}
 
-        changed, reason = manager._check_definition_changed(
+        changed, reason = manager._check_definition_changed(  # noqa: SLF001
             definition, latest_def, "vectorsearch", "test_idx"
         )
         assert changed is True
@@ -1054,7 +1054,7 @@ class TestAsyncAtlasIndexManager:
         latest_def_same = {
             "fields": [{"type": "vector", "path": "embedding", "numDimensions": 1536}]
         }
-        changed, reason = manager._check_definition_changed(
+        changed, reason = manager._check_definition_changed(  # noqa: SLF001
             definition, latest_def_same, "vectorsearch", "test_idx"
         )
         assert changed is False
@@ -1070,7 +1070,7 @@ class TestAsyncAtlasIndexManager:
         definition = {"mappings": {"dynamic": True}}
         latest_def = {"mappings": {"dynamic": False}}
 
-        changed, reason = manager._check_definition_changed(
+        changed, reason = manager._check_definition_changed(  # noqa: SLF001
             definition, latest_def, "search", "test_idx"
         )
         assert changed is True
@@ -1078,7 +1078,7 @@ class TestAsyncAtlasIndexManager:
 
         # Test search with same mappings
         latest_def_same = {"mappings": {"dynamic": True}}
-        changed, reason = manager._check_definition_changed(
+        changed, reason = manager._check_definition_changed(  # noqa: SLF001
             definition, latest_def_same, "search", "test_idx"
         )
         assert changed is False
@@ -1094,7 +1094,7 @@ class TestAsyncAtlasIndexManager:
         definition = {"mappings": {"dynamic": True}}
         latest_def = {"mappings": {"dynamic": False}}
 
-        changed, reason = manager._check_definition_changed(
+        changed, reason = manager._check_definition_changed(  # noqa: SLF001
             definition, latest_def, "vectorsearch", "test_idx"
         )
         # Should log warning but not detect change
@@ -1116,7 +1116,7 @@ class TestAsyncAtlasIndexManager:
 
         manager = AsyncAtlasIndexManager(mock_mongo_collection)
         # Should handle gracefully and continue
-        await manager._ensure_collection_exists()
+        await manager._ensure_collection_exists()  # noqa: SLF001
 
         # Test other CollectionInvalid error
         mock_database.create_collection = AsyncMock(side_effect=CollectionInvalid("Other error"))
@@ -1124,7 +1124,7 @@ class TestAsyncAtlasIndexManager:
         from mdb_engine.exceptions import MongoDBEngineError
 
         with pytest.raises(MongoDBEngineError):
-            await manager._ensure_collection_exists()
+            await manager._ensure_collection_exists()  # noqa: SLF001
 
     @pytest.mark.asyncio
     async def test_handle_existing_index_definition_changed(self, mock_mongo_collection):
@@ -1135,7 +1135,7 @@ class TestAsyncAtlasIndexManager:
 
         # Mock _check_definition_changed to return True (definition changed)
         with patch(
-            "mdb_engine.database.scoped_wrapper.AsyncAtlasIndexManager._check_definition_changed",
+            "mdb_engine.database.scoped_wrapper.AsyncAtlasIndexManager._check_definition_changed",  # noqa: SLF001
             return_value=(True, "mappings changed"),
         ):
             with patch(
@@ -1149,7 +1149,7 @@ class TestAsyncAtlasIndexManager:
                 }
                 definition = {"mappings": {"dynamic": False}}
 
-                result = await manager._handle_existing_index(
+                result = await manager._handle_existing_index(  # noqa: SLF001
                     existing_index, definition, "vectorsearch", "test_idx"
                 )
 
@@ -1168,7 +1168,7 @@ class TestAsyncAtlasIndexManager:
         manager = AsyncAtlasIndexManager(mock_mongo_collection)
 
         with patch(
-            "mdb_engine.database.scoped_wrapper.AsyncAtlasIndexManager._check_definition_changed",
+            "mdb_engine.database.scoped_wrapper.AsyncAtlasIndexManager._check_definition_changed",  # noqa: SLF001
             return_value=(False, None),
         ):
             existing_index = {
@@ -1178,7 +1178,7 @@ class TestAsyncAtlasIndexManager:
             }
             definition = {"mappings": {"dynamic": False}}
 
-            result = await manager._handle_existing_index(
+            result = await manager._handle_existing_index(  # noqa: SLF001
                 existing_index, definition, "vectorsearch", "test_idx"
             )
 
@@ -1192,7 +1192,7 @@ class TestAsyncAtlasIndexManager:
         manager = AsyncAtlasIndexManager(mock_mongo_collection)
 
         with patch(
-            "mdb_engine.database.scoped_wrapper.AsyncAtlasIndexManager._check_definition_changed",
+            "mdb_engine.database.scoped_wrapper.AsyncAtlasIndexManager._check_definition_changed",  # noqa: SLF001
             return_value=(False, None),
         ):
             existing_index = {
@@ -1203,7 +1203,7 @@ class TestAsyncAtlasIndexManager:
             }
             definition = {"mappings": {"dynamic": False}}
 
-            result = await manager._handle_existing_index(
+            result = await manager._handle_existing_index(  # noqa: SLF001
                 existing_index, definition, "vectorsearch", "test_idx"
             )
 
@@ -1217,7 +1217,7 @@ class TestAsyncAtlasIndexManager:
         manager = AsyncAtlasIndexManager(mock_mongo_collection)
 
         with patch(
-            "mdb_engine.database.scoped_wrapper.AsyncAtlasIndexManager._check_definition_changed",
+            "mdb_engine.database.scoped_wrapper.AsyncAtlasIndexManager._check_definition_changed",  # noqa: SLF001
             return_value=(False, None),
         ):
             existing_index = {
@@ -1228,7 +1228,7 @@ class TestAsyncAtlasIndexManager:
             }
             definition = {"mappings": {"dynamic": False}}
 
-            result = await manager._handle_existing_index(
+            result = await manager._handle_existing_index(  # noqa: SLF001
                 existing_index, definition, "vectorsearch", "test_idx"
             )
 
@@ -1248,10 +1248,10 @@ class TestAutoIndexManager:
         index_manager = AsyncAtlasIndexManager(mock_mongo_collection)
         auto_manager = AutoIndexManager(mock_mongo_collection, index_manager)
 
-        result = auto_manager._extract_index_fields_from_filter(None)
+        result = auto_manager._extract_index_fields_from_filter(None)  # noqa: SLF001
         assert result == []
 
-        result = auto_manager._extract_index_fields_from_filter({})
+        result = auto_manager._extract_index_fields_from_filter({})  # noqa: SLF001
         assert result == []
 
     def test_extract_index_fields_from_filter_equality(self, mock_mongo_collection):
@@ -1267,7 +1267,7 @@ class TestAutoIndexManager:
         auto_manager = AutoIndexManager(mock_mongo_collection, index_manager)
 
         filter_dict = {"name": "test", "status": "active"}
-        result = auto_manager._extract_index_fields_from_filter(filter_dict)
+        result = auto_manager._extract_index_fields_from_filter(filter_dict)  # noqa: SLF001
 
         assert len(result) == 2
         assert ("name", ASCENDING) in result
@@ -1294,7 +1294,7 @@ class TestAutoIndexManager:
             "tags": {"$in": ["tag1", "tag2"]},
             "active": {"$exists": True},
         }
-        result = auto_manager._extract_index_fields_from_filter(filter_dict)
+        result = auto_manager._extract_index_fields_from_filter(filter_dict)  # noqa: SLF001
 
         assert len(result) == 7
         assert ("age", ASCENDING) in result
@@ -1327,7 +1327,7 @@ class TestAutoIndexManager:
                 ]
             }
         }
-        result = auto_manager._extract_index_fields_from_filter(filter_dict)
+        result = auto_manager._extract_index_fields_from_filter(filter_dict)  # noqa: SLF001
 
         # Should extract fields from nested $and within field value
         assert len(result) >= 2
@@ -1350,7 +1350,7 @@ class TestAutoIndexManager:
                 {"status": "active"},
             ]
         }
-        result = auto_manager._extract_index_fields_from_filter(filter_dict)
+        result = auto_manager._extract_index_fields_from_filter(filter_dict)  # noqa: SLF001
 
         assert result == []
 
@@ -1370,7 +1370,7 @@ class TestAutoIndexManager:
             "name": "test",
             "$and": [{"name": "test"}],
         }
-        result = auto_manager._extract_index_fields_from_filter(filter_dict)
+        result = auto_manager._extract_index_fields_from_filter(filter_dict)  # noqa: SLF001
 
         assert len(result) == 1
         assert ("name", ASCENDING) in result
@@ -1385,10 +1385,10 @@ class TestAutoIndexManager:
         index_manager = AsyncAtlasIndexManager(mock_mongo_collection)
         auto_manager = AutoIndexManager(mock_mongo_collection, index_manager)
 
-        result = auto_manager._extract_sort_fields(None)
+        result = auto_manager._extract_sort_fields(None)  # noqa: SLF001
         assert result == []
 
-        result = auto_manager._extract_sort_fields([])
+        result = auto_manager._extract_sort_fields([])  # noqa: SLF001
         assert result == []
 
     def test_extract_sort_fields_dict(self, mock_mongo_collection):
@@ -1402,7 +1402,7 @@ class TestAutoIndexManager:
         auto_manager = AutoIndexManager(mock_mongo_collection, index_manager)
 
         sort_dict = {"name": 1, "age": -1}
-        result = auto_manager._extract_sort_fields(sort_dict)
+        result = auto_manager._extract_sort_fields(sort_dict)  # noqa: SLF001
 
         assert result == [("name", 1), ("age", -1)]
 
@@ -1417,7 +1417,7 @@ class TestAutoIndexManager:
         auto_manager = AutoIndexManager(mock_mongo_collection, index_manager)
 
         sort_list = [("name", 1), ("age", -1)]
-        result = auto_manager._extract_sort_fields(sort_list)
+        result = auto_manager._extract_sort_fields(sort_list)  # noqa: SLF001
 
         assert result == sort_list
 
@@ -1431,7 +1431,7 @@ class TestAutoIndexManager:
         index_manager = AsyncAtlasIndexManager(mock_mongo_collection)
         auto_manager = AutoIndexManager(mock_mongo_collection, index_manager)
 
-        result = auto_manager._extract_sort_fields("invalid")
+        result = auto_manager._extract_sort_fields("invalid")  # noqa: SLF001
         assert result == []
 
     def test_generate_index_name_empty(self, mock_mongo_collection):
@@ -1444,7 +1444,7 @@ class TestAutoIndexManager:
         index_manager = AsyncAtlasIndexManager(mock_mongo_collection)
         auto_manager = AutoIndexManager(mock_mongo_collection, index_manager)
 
-        result = auto_manager._generate_index_name([])
+        result = auto_manager._generate_index_name([])  # noqa: SLF001
         assert result == "auto_idx_empty"
 
     def test_generate_index_name_single_field(self, mock_mongo_collection):
@@ -1459,10 +1459,10 @@ class TestAutoIndexManager:
         index_manager = AsyncAtlasIndexManager(mock_mongo_collection)
         auto_manager = AutoIndexManager(mock_mongo_collection, index_manager)
 
-        result = auto_manager._generate_index_name([("name", ASCENDING)])
+        result = auto_manager._generate_index_name([("name", ASCENDING)])  # noqa: SLF001
         assert result == "auto_name_asc"
 
-        result = auto_manager._generate_index_name([("age", DESCENDING)])
+        result = auto_manager._generate_index_name([("age", DESCENDING)])  # noqa: SLF001
         assert result == "auto_age_desc"
 
     def test_generate_index_name_multiple_fields(self, mock_mongo_collection):
@@ -1477,7 +1477,7 @@ class TestAutoIndexManager:
         index_manager = AsyncAtlasIndexManager(mock_mongo_collection)
         auto_manager = AutoIndexManager(mock_mongo_collection, index_manager)
 
-        result = auto_manager._generate_index_name(
+        result = auto_manager._generate_index_name(  # noqa: SLF001
             [
                 ("name", ASCENDING),
                 ("age", DESCENDING),
@@ -1501,7 +1501,7 @@ class TestAutoIndexManager:
 
         # Set query count above threshold to trigger index creation
         index_name = "auto_name_asc"
-        auto_manager._query_counts[index_name] = 10  # Above default threshold
+        auto_manager._query_counts[index_name] = 10  # Above default threshold  # noqa: SLF001
 
         # Call ensure_index_for_query concurrently multiple times
         async def call_ensure_index():
@@ -1515,7 +1515,7 @@ class TestAutoIndexManager:
 
         # Verify only one task was created (check pending_tasks)
         # After all tasks complete, pending_tasks should be empty
-        assert len(auto_manager._pending_tasks) == 0
+        assert len(auto_manager._pending_tasks) == 0  # noqa: SLF001
 
         # Verify create_index was called only once (not 5 times)
         assert mock_index_manager.create_index.call_count == 1
@@ -1536,7 +1536,7 @@ class TestAutoIndexManager:
 
         # Set query count above threshold
         index_name = "auto_name_asc"
-        auto_manager._query_counts[index_name] = 10
+        auto_manager._query_counts[index_name] = 10  # noqa: SLF001
 
         # Call ensure_index_for_query
         await auto_manager.ensure_index_for_query({"name": "test"})
@@ -1545,8 +1545,8 @@ class TestAutoIndexManager:
         await asyncio.sleep(0.1)
 
         # Verify task was cleaned up
-        assert index_name not in auto_manager._pending_tasks
-        assert len(auto_manager._pending_tasks) == 0
+        assert index_name not in auto_manager._pending_tasks  # noqa: SLF001
+        assert len(auto_manager._pending_tasks) == 0  # noqa: SLF001
 
     @pytest.mark.asyncio
     async def test_ensure_index_for_query_pending_task_blocks_duplicate(
@@ -1572,7 +1572,7 @@ class TestAutoIndexManager:
 
         # Set query count above threshold
         index_name = "auto_name_asc"
-        auto_manager._query_counts[index_name] = 10
+        auto_manager._query_counts[index_name] = 10  # noqa: SLF001
 
         # Start first call (will create task)
         task1 = asyncio.create_task(auto_manager.ensure_index_for_query({"name": "test"}))
@@ -1581,7 +1581,7 @@ class TestAutoIndexManager:
         await asyncio.sleep(0.01)
 
         # Verify task is in pending_tasks
-        assert index_name in auto_manager._pending_tasks
+        assert index_name in auto_manager._pending_tasks  # noqa: SLF001
 
         # Start second call immediately (should see pending task and return early)
         await auto_manager.ensure_index_for_query({"name": "test"})
@@ -1610,14 +1610,14 @@ class TestAutoIndexManager:
 
         # Set query count above threshold
         index_name = "auto_name_asc"
-        auto_manager._query_counts[index_name] = 10
+        auto_manager._query_counts[index_name] = 10  # noqa: SLF001
 
         # First call - creates index
         await auto_manager.ensure_index_for_query({"name": "test"})
 
         # Wait for the actual task to complete
-        if index_name in auto_manager._pending_tasks:
-            await auto_manager._pending_tasks[index_name]
+        if index_name in auto_manager._pending_tasks:  # noqa: SLF001
+            await auto_manager._pending_tasks[index_name]  # noqa: SLF001
         # Give it a bit more time to ensure cleanup
         await asyncio.sleep(0.05)
 
@@ -1627,17 +1627,17 @@ class TestAutoIndexManager:
         # Mark index as failed in cache (simulating need to retry)
         # This simulates a scenario where the index creation appeared to succeed
         # but then failed, or we need to retry for some reason
-        async with auto_manager._lock:
-            auto_manager._creation_cache[index_name] = False
+        async with auto_manager._lock:  # noqa: SLF001
+            auto_manager._creation_cache[index_name] = False  # noqa: SLF001
             # Ensure pending task is cleaned up
-            auto_manager._pending_tasks.pop(index_name, None)
+            auto_manager._pending_tasks.pop(index_name, None)  # noqa: SLF001
 
         # Second call with same query - should create new task since previous completed
         await auto_manager.ensure_index_for_query({"name": "test"})
 
         # Wait for the second task to complete
-        if index_name in auto_manager._pending_tasks:
-            await auto_manager._pending_tasks[index_name]
+        if index_name in auto_manager._pending_tasks:  # noqa: SLF001
+            await auto_manager._pending_tasks[index_name]  # noqa: SLF001
         await asyncio.sleep(0.05)
 
         # Verify create_index was called twice (first attempt and retry)
@@ -1662,7 +1662,7 @@ class TestAsyncAtlasIndexManagerCreateIndex:
         )
 
         # Should not raise - just logs warning
-        await manager._create_new_search_index(
+        await manager._create_new_search_index(  # noqa: SLF001
             "test_idx", {"mappings": {"dynamic": True}}, "vectorsearch"
         )
 
@@ -1681,7 +1681,7 @@ class TestAsyncAtlasIndexManagerCreateIndex:
 
         # Should raise OperationFailure (not wrapped)
         with pytest.raises(OperationFailure):
-            await manager._create_new_search_index(
+            await manager._create_new_search_index(  # noqa: SLF001
                 "test_idx", {"mappings": {"dynamic": True}}, "vectorsearch"
             )
 
@@ -1695,7 +1695,7 @@ class TestAsyncAtlasIndexManagerCreateIndex:
 
         # Mock get_search_index to return None (no existing index)
         with patch(
-            "mdb_engine.database.scoped_wrapper.AsyncAtlasIndexManager._ensure_collection_exists",
+            "mdb_engine.database.scoped_wrapper.AsyncAtlasIndexManager._ensure_collection_exists",  # noqa: SLF001
             new_callable=AsyncMock,
         ):
             with patch(
@@ -1706,14 +1706,14 @@ class TestAsyncAtlasIndexManagerCreateIndex:
                 with patch(
                     (
                         "mdb_engine.database.scoped_wrapper."
-                        "AsyncAtlasIndexManager._create_new_search_index"
+                        "AsyncAtlasIndexManager._create_new_search_index"  # noqa: SLF001
                     ),
                     new_callable=AsyncMock,
                 ) as mock_create:
                     with patch(
                         (
                             "mdb_engine.database.scoped_wrapper."
-                            "AsyncAtlasIndexManager._wait_for_search_index_ready"
+                            "AsyncAtlasIndexManager._wait_for_search_index_ready"  # noqa: SLF001
                         ),
                         new_callable=AsyncMock,
                         return_value=True,
@@ -1746,7 +1746,7 @@ class TestAsyncAtlasIndexManagerCreateIndex:
             raise OperationFailure("DB error")
 
         with patch(
-            "mdb_engine.database.scoped_wrapper.AsyncAtlasIndexManager._ensure_collection_exists",
+            "mdb_engine.database.scoped_wrapper.AsyncAtlasIndexManager._ensure_collection_exists",  # noqa: SLF001
             new_callable=AsyncMock,
         ):
             with patch(
@@ -1773,7 +1773,7 @@ class TestAsyncAtlasIndexManagerCreateIndex:
             raise ConnectionFailure("Connection error")
 
         with patch(
-            "mdb_engine.database.scoped_wrapper.AsyncAtlasIndexManager._ensure_collection_exists",
+            "mdb_engine.database.scoped_wrapper.AsyncAtlasIndexManager._ensure_collection_exists",  # noqa: SLF001
             new_callable=AsyncMock,
         ):
             with patch(
@@ -1803,7 +1803,7 @@ class TestAsyncAtlasIndexManagerCreateIndex:
             raise InvalidOperation("Invalid operation")
 
         with patch(
-            "mdb_engine.database.scoped_wrapper.AsyncAtlasIndexManager._ensure_collection_exists",
+            "mdb_engine.database.scoped_wrapper.AsyncAtlasIndexManager._ensure_collection_exists",  # noqa: SLF001
             new_callable=AsyncMock,
         ):
             with patch(
@@ -1832,7 +1832,7 @@ class TestAsyncAtlasIndexManagerCreateIndex:
             yield  # Make it an async generator
 
         mock_cursor = MagicMock()
-        mock_cursor.__aiter__ = lambda self: async_iter()
+        mock_cursor.__aiter__ = lambda self: async_iter()  # noqa: SLF001
         mock_mongo_collection.aggregate = MagicMock(return_value=mock_cursor)
 
         result = await manager.get_search_index("test_idx")
@@ -1854,7 +1854,7 @@ class TestAsyncAtlasIndexManagerCreateIndex:
             yield
 
         mock_cursor = MagicMock()
-        mock_cursor.__aiter__ = lambda self: async_iter()
+        mock_cursor.__aiter__ = lambda self: async_iter()  # noqa: SLF001
         mock_mongo_collection.aggregate = MagicMock(return_value=mock_cursor)
 
         result = await manager.get_search_index("test_idx")
@@ -1876,7 +1876,7 @@ class TestAsyncAtlasIndexManagerCreateIndex:
             yield
 
         mock_cursor = MagicMock()
-        mock_cursor.__aiter__ = lambda self: async_iter()
+        mock_cursor.__aiter__ = lambda self: async_iter()  # noqa: SLF001
         mock_mongo_collection.aggregate = MagicMock(return_value=mock_cursor)
 
         result = await manager.get_search_index("test_idx")
@@ -1899,7 +1899,7 @@ class TestAsyncAtlasIndexManagerCreateIndex:
             yield
 
         mock_cursor = MagicMock()
-        mock_cursor.__aiter__ = lambda self: async_iter()
+        mock_cursor.__aiter__ = lambda self: async_iter()  # noqa: SLF001
         mock_mongo_collection.aggregate = MagicMock(return_value=mock_cursor)
 
         with pytest.raises(MongoDBEngineError, match="Error retrieving search index"):
@@ -1920,7 +1920,7 @@ class TestAsyncAtlasIndexManagerCreateIndex:
             return
 
         mock_cursor = MagicMock()
-        mock_cursor.__aiter__ = lambda self: async_iter()
+        mock_cursor.__aiter__ = lambda self: async_iter()  # noqa: SLF001
         mock_mongo_collection.aggregate = MagicMock(return_value=mock_cursor)
 
         result = await manager.get_search_index("nonexistent_idx")
@@ -1937,7 +1937,7 @@ class TestAsyncAtlasIndexManagerCreateIndex:
         mock_mongo_collection.create_search_index = AsyncMock()
 
         with patch("mdb_engine.database.scoped_wrapper.logger") as mock_logger:
-            await manager._create_new_search_index(
+            await manager._create_new_search_index(  # noqa: SLF001
                 "test_idx", {"mappings": {"dynamic": True}}, "vectorsearch"
             )
 
@@ -1966,7 +1966,7 @@ class TestAsyncAtlasIndexManagerCreateIndex:
             return existing_index
 
         with patch(
-            "mdb_engine.database.scoped_wrapper.AsyncAtlasIndexManager._ensure_collection_exists",
+            "mdb_engine.database.scoped_wrapper.AsyncAtlasIndexManager._ensure_collection_exists",  # noqa: SLF001
             new_callable=AsyncMock,
         ):
             with patch(
@@ -1976,7 +1976,7 @@ class TestAsyncAtlasIndexManagerCreateIndex:
                 with patch(
                     (
                         "mdb_engine.database.scoped_wrapper."
-                        "AsyncAtlasIndexManager._handle_existing_index"
+                        "AsyncAtlasIndexManager._handle_existing_index"  # noqa: SLF001
                     ),
                     new_callable=AsyncMock,
                     return_value=True,
@@ -2003,7 +2003,7 @@ class TestAsyncAtlasIndexManagerCreateIndex:
             return None
 
         with patch(
-            "mdb_engine.database.scoped_wrapper.AsyncAtlasIndexManager._ensure_collection_exists",
+            "mdb_engine.database.scoped_wrapper.AsyncAtlasIndexManager._ensure_collection_exists",  # noqa: SLF001
             new_callable=AsyncMock,
         ):
             with patch(
@@ -2013,14 +2013,14 @@ class TestAsyncAtlasIndexManagerCreateIndex:
                 with patch(
                     (
                         "mdb_engine.database.scoped_wrapper."
-                        "AsyncAtlasIndexManager._create_new_search_index"
+                        "AsyncAtlasIndexManager._create_new_search_index"  # noqa: SLF001
                     ),
                     new_callable=AsyncMock,
                 ):
                     with patch(
                         (
                             "mdb_engine.database.scoped_wrapper."
-                            "AsyncAtlasIndexManager._wait_for_search_index_ready"
+                            "AsyncAtlasIndexManager._wait_for_search_index_ready"  # noqa: SLF001
                         ),
                         new_callable=AsyncMock,
                         return_value=True,
@@ -2054,7 +2054,7 @@ class TestAsyncAtlasIndexManagerCreateIndex:
             return existing_index
 
         with patch(
-            "mdb_engine.database.scoped_wrapper.AsyncAtlasIndexManager._ensure_collection_exists",
+            "mdb_engine.database.scoped_wrapper.AsyncAtlasIndexManager._ensure_collection_exists",  # noqa: SLF001
             new_callable=AsyncMock,
         ):
             with patch(
@@ -2064,7 +2064,7 @@ class TestAsyncAtlasIndexManagerCreateIndex:
                 with patch(
                     (
                         "mdb_engine.database.scoped_wrapper."
-                        "AsyncAtlasIndexManager._handle_existing_index"
+                        "AsyncAtlasIndexManager._handle_existing_index"  # noqa: SLF001
                     ),
                     new_callable=AsyncMock,
                     return_value=False,
@@ -2072,7 +2072,7 @@ class TestAsyncAtlasIndexManagerCreateIndex:
                     with patch(
                         (
                             "mdb_engine.database.scoped_wrapper."
-                            "AsyncAtlasIndexManager._wait_for_search_index_ready"
+                            "AsyncAtlasIndexManager._wait_for_search_index_ready"  # noqa: SLF001
                         ),
                         new_callable=AsyncMock,
                         return_value=True,
@@ -2085,7 +2085,7 @@ class TestAsyncAtlasIndexManagerCreateIndex:
                         )
 
                         assert result is True
-                        manager._wait_for_search_index_ready.assert_called_once()
+                        manager._wait_for_search_index_ready.assert_called_once()  # noqa: SLF001
 
     @pytest.mark.asyncio
     async def test_list_search_indexes_success(self, mock_mongo_collection):
@@ -2389,10 +2389,10 @@ class TestScopedCollectionWrapperSecurity:
         collection2 = wrapper.products
 
         # Verify they share the same validators/limiters
-        assert collection1._query_validator is wrapper._query_validator
-        assert collection1._resource_limiter is wrapper._resource_limiter
-        assert collection2._query_validator is wrapper._query_validator
-        assert collection2._resource_limiter is wrapper._resource_limiter
+        assert collection1._query_validator is wrapper._query_validator  # noqa: SLF001
+        assert collection1._resource_limiter is wrapper._resource_limiter  # noqa: SLF001
+        assert collection2._query_validator is wrapper._query_validator  # noqa: SLF001
+        assert collection2._resource_limiter is wrapper._resource_limiter  # noqa: SLF001
 
     @pytest.mark.asyncio
     async def test_find_with_none_filter(self, mock_mongo_collection):

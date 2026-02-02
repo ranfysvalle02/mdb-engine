@@ -91,7 +91,8 @@ def get_shared_mongo_client(
         # Verify client is still connected
         try:
             # Non-blocking check - if client was closed, it will be None or invalid
-            if hasattr(_shared_client, "_topology") and _shared_client._topology is not None:
+            # Accessing MongoDB client's internal _topology attribute to check connection status
+            if hasattr(_shared_client, "_topology") and _shared_client._topology is not None:  # noqa: SLF001
                 return _shared_client
         except (AttributeError, RuntimeError):
             # Client was closed or invalid, reset and recreate
@@ -104,7 +105,8 @@ def get_shared_mongo_client(
         # Double-check pattern: another thread may have initialized while we waited
         if _shared_client is not None:
             try:
-                if hasattr(_shared_client, "_topology") and _shared_client._topology is not None:
+                # Accessing MongoDB client's internal _topology attribute to check connection status
+                if hasattr(_shared_client, "_topology") and _shared_client._topology is not None:  # noqa: SLF001
                     return _shared_client
             except (AttributeError, RuntimeError):
                 # Client was closed or invalid, reset and recreate
@@ -234,7 +236,8 @@ async def get_pool_metrics(
     for registered_client in _registered_clients:
         try:
             # Verify client is still valid
-            if hasattr(registered_client, "_topology") and registered_client._topology is not None:
+            # Accessing MongoDB client's internal _topology attribute to check connection status
+            if hasattr(registered_client, "_topology") and registered_client._topology is not None:  # noqa: SLF001
                 return await _get_client_pool_metrics(registered_client)
         except (AttributeError, RuntimeError):
             # Type 2: Recoverable - if this client is invalid, try next one

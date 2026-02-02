@@ -474,8 +474,8 @@ class TestAppDB:
         mock_db = MagicMock(spec=ScopedMongoWrapper)
         app_db = AppDB(mock_db)
 
-        assert app_db._wrapper is mock_db
-        assert app_db._collection_cache == {}
+        assert app_db._wrapper is mock_db  # noqa: SLF001
+        assert app_db._collection_cache == {}  # noqa: SLF001
 
     def test_app_db_collection(self, mock_scoped_collection):
         """Test AppDB.collection method (lines 523-548)."""
@@ -513,7 +513,7 @@ class TestAppDB:
         app_db = AppDB(mock_db)
 
         with pytest.raises(AttributeError):
-            _ = app_db._private
+            _ = app_db._private  # noqa: SLF001
 
     def test_app_db_raw_property(self, mock_scoped_collection):
         """Test AppDB.raw property (lines 564-577)."""
@@ -561,7 +561,7 @@ class TestAppDB:
         app_db = await get_app_db(mock_request, get_scoped_db_func=get_scoped_db_func)
 
         assert isinstance(app_db, AppDB)
-        assert app_db._wrapper is mock_db
+        assert app_db._wrapper is mock_db  # noqa: SLF001
 
     @pytest.mark.asyncio
     async def test_get_app_db_no_func(self):

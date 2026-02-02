@@ -56,21 +56,21 @@ class TestSharedAuthMiddleware:
 
     def test_init(self, middleware, mock_user_pool):
         """Test middleware initialization."""
-        assert middleware._user_pool == mock_user_pool
-        assert middleware._app_slug == "test_app"
-        assert middleware._require_role is None
-        assert "/health" in middleware._public_routes
+        assert middleware._user_pool == mock_user_pool  # noqa: SLF001
+        assert middleware._app_slug == "test_app"  # noqa: SLF001
+        assert middleware._require_role is None  # noqa: SLF001
+        assert "/health" in middleware._public_routes  # noqa: SLF001
 
     def test_is_public_route_exact_match(self, middleware):
         """Test public route detection with exact match."""
-        assert middleware._is_public_route("/health") is True
-        assert middleware._is_public_route("/protected") is False
+        assert middleware._is_public_route("/health") is True  # noqa: SLF001
+        assert middleware._is_public_route("/protected") is False  # noqa: SLF001
 
     def test_is_public_route_wildcard(self, middleware):
         """Test public route detection with wildcard."""
-        assert middleware._is_public_route("/api/public/endpoint") is True
-        assert middleware._is_public_route("/api/public/nested/path") is True
-        assert middleware._is_public_route("/api/private") is False
+        assert middleware._is_public_route("/api/public/endpoint") is True  # noqa: SLF001
+        assert middleware._is_public_route("/api/public/nested/path") is True  # noqa: SLF001
+        assert middleware._is_public_route("/api/private") is False  # noqa: SLF001
 
     def test_extract_token_from_cookie(self, middleware):
         """Test token extraction from cookie."""
@@ -78,7 +78,7 @@ class TestSharedAuthMiddleware:
         request.cookies = {"mdb_auth_token": "test-token"}
         request.headers = {}
 
-        token = middleware._extract_token(request)
+        token = middleware._extract_token(request)  # noqa: SLF001
         assert token == "test-token"
 
     def test_extract_token_from_header(self, middleware):
@@ -87,7 +87,7 @@ class TestSharedAuthMiddleware:
         request.cookies = {}
         request.headers = {"Authorization": "Bearer test-token-header"}
 
-        token = middleware._extract_token(request)
+        token = middleware._extract_token(request)  # noqa: SLF001
         assert token == "test-token-header"
 
     def test_extract_token_none(self, middleware):
@@ -96,7 +96,7 @@ class TestSharedAuthMiddleware:
         request.cookies = {}
         request.headers = {}
 
-        token = middleware._extract_token(request)
+        token = middleware._extract_token(request)  # noqa: SLF001
         assert token is None
 
     def test_extract_token_invalid_header(self, middleware):
@@ -105,7 +105,7 @@ class TestSharedAuthMiddleware:
         request.cookies = {}
         request.headers = {"Authorization": "Basic credentials"}  # Not Bearer
 
-        token = middleware._extract_token(request)
+        token = middleware._extract_token(request)  # noqa: SLF001
         assert token is None
 
     @pytest.mark.asyncio
@@ -278,10 +278,10 @@ class TestCreateSharedAuthMiddleware:
         instance = middleware_class(mock_app)
 
         # Hierarchy should be: admin > editor > viewer
-        assert instance._role_hierarchy is not None
-        assert "admin" in instance._role_hierarchy
-        assert "viewer" in instance._role_hierarchy["admin"]
-        assert "editor" in instance._role_hierarchy["admin"]
+        assert instance._role_hierarchy is not None  # noqa: SLF001
+        assert "admin" in instance._role_hierarchy  # noqa: SLF001
+        assert "viewer" in instance._role_hierarchy["admin"]  # noqa: SLF001
+        assert "editor" in instance._role_hierarchy["admin"]  # noqa: SLF001
 
 
 class TestLazySharedAuthMiddleware:
@@ -310,9 +310,9 @@ class TestLazySharedAuthMiddleware:
         mock_app = MagicMock()
         instance = middleware_class(mock_app)
 
-        assert instance._app_slug == "test_app"
-        assert instance._require_role == "viewer"
-        assert "/health" in instance._public_routes
+        assert instance._app_slug == "test_app"  # noqa: SLF001
+        assert instance._require_role == "viewer"  # noqa: SLF001
+        assert "/health" in instance._public_routes  # noqa: SLF001
 
     def test_lazy_middleware_generates_hierarchy(self):
         """Test that lazy middleware auto-generates role hierarchy."""
@@ -332,10 +332,10 @@ class TestLazySharedAuthMiddleware:
         instance = middleware_class(mock_app)
 
         # Hierarchy should be: admin > editor > viewer
-        assert instance._role_hierarchy is not None
-        assert "admin" in instance._role_hierarchy
-        assert "viewer" in instance._role_hierarchy["admin"]
-        assert "editor" in instance._role_hierarchy["admin"]
+        assert instance._role_hierarchy is not None  # noqa: SLF001
+        assert "admin" in instance._role_hierarchy  # noqa: SLF001
+        assert "viewer" in instance._role_hierarchy["admin"]  # noqa: SLF001
+        assert "editor" in instance._role_hierarchy["admin"]  # noqa: SLF001
 
     @pytest.mark.asyncio
     async def test_lazy_middleware_no_user_pool(self):

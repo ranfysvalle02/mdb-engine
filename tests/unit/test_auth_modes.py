@@ -205,7 +205,7 @@ class TestSharedAuthExports:
         from mdb_engine.auth import SharedUserPool
 
         mock_db = MagicMock()
-        mock_db.__getitem__ = MagicMock(return_value=MagicMock())
+        mock_db.__getitem__ = MagicMock(return_value=MagicMock())  # noqa: SLF001
 
         pool = SharedUserPool(
             mongo_db=mock_db,
@@ -213,4 +213,4 @@ class TestSharedAuthExports:
         )
 
         assert pool is not None
-        assert pool._jwt_secret == "test-secret"
+        assert pool._jwt_secret == "test-secret"  # noqa: SLF001

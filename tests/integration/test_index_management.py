@@ -40,7 +40,7 @@ class TestIndexManagement:
         collection = scoped_db.test_collection
 
         # Get the real collection to check indexes
-        real_collection = collection._collection
+        real_collection = collection._collection  # noqa: SLF001
 
         # Wait a moment for indexes to be ready (MongoDB indexes are created asynchronously)
         import asyncio
@@ -92,7 +92,7 @@ class TestIndexManagement:
 
         scoped_db = engine.get_scoped_db("idempotent_index_test")
         collection = scoped_db.test_collection
-        real_collection = collection._collection
+        real_collection = collection._collection  # noqa: SLF001
 
         indexes_after_first = await real_collection.list_indexes().to_list(length=100)
         index_names_first = [idx["name"] for idx in indexes_after_first]
@@ -135,7 +135,7 @@ class TestIndexManagement:
 
         scoped_db = engine.get_scoped_db("multi_index_test")
         collection = scoped_db.test_collection
-        real_collection = collection._collection
+        real_collection = collection._collection  # noqa: SLF001
 
         indexes = await real_collection.list_indexes().to_list(length=100)
         index_names = [idx["name"] for idx in indexes]
@@ -170,14 +170,14 @@ class TestIndexManagement:
 
         # Check collection1 indexes
         coll1 = scoped_db.collection1
-        real_coll1 = coll1._collection
+        real_coll1 = coll1._collection  # noqa: SLF001
         indexes1 = await real_coll1.list_indexes().to_list(length=100)
         index_names1 = [idx["name"] for idx in indexes1]
         assert "multi_collection_index_test_coll1_index" in index_names1
 
         # Check collection2 indexes
         coll2 = scoped_db.collection2
-        real_coll2 = coll2._collection
+        real_coll2 = coll2._collection  # noqa: SLF001
         indexes2 = await real_coll2.list_indexes().to_list(length=100)
         index_names2 = [idx["name"] for idx in indexes2]
         assert "multi_collection_index_test_coll2_index" in index_names2
@@ -225,7 +225,7 @@ class TestIndexManagement:
         await engine.register_app(manifest_with_index, create_indexes=True)
 
         # Verify index was created despite existing data
-        real_collection = collection._collection
+        real_collection = collection._collection  # noqa: SLF001
         indexes = await real_collection.list_indexes().to_list(length=100)
         index_names = [idx["name"] for idx in indexes]
         assert "existing_data_test_existing_data_index" in index_names

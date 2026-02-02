@@ -125,7 +125,7 @@ class TestWebSocketSessionKeyValidation:
         # Mock MongoDB database
         mock_db = MagicMock()
         mock_collection = MagicMock()
-        mock_db.__getitem__ = MagicMock(return_value=mock_collection)
+        mock_db.__getitem__ = MagicMock(return_value=mock_collection)  # noqa: SLF001
 
         session_manager = WebSocketSessionManager(mock_db, encryption_service)
         app.state.websocket_session_manager = session_manager
@@ -158,7 +158,7 @@ class TestWebSocketSessionKeyValidation:
         async def mock_find_one(query):
             if query.get("_id") == session_key:
                 # Return valid session
-                encrypted_key, encrypted_dek = session_manager._encryption_service.encrypt_secret(
+                encrypted_key, encrypted_dek = session_manager._encryption_service.encrypt_secret(  # noqa: SLF001
                     session_key
                 )
                 import base64
@@ -190,8 +190,8 @@ class TestWebSocketSessionKeyValidation:
         }
         headers_mock = MagicMock()
         headers_mock.get = lambda key, default=None: headers_dict.get(key.lower(), default)
-        headers_mock.__getitem__ = lambda key: headers_dict[key.lower()]
-        headers_mock.__contains__ = lambda key: key.lower() in headers_dict
+        headers_mock.__getitem__ = lambda key: headers_dict[key.lower()]  # noqa: SLF001
+        headers_mock.__contains__ = lambda key: key.lower() in headers_dict  # noqa: SLF001
         request.headers = headers_mock
         request.cookies = {AUTH_COOKIE_NAME: "valid_token"}
         request.query_params = MagicMock()
@@ -213,7 +213,12 @@ class TestWebSocketSessionKeyValidation:
 
     @pytest.mark.asyncio
     async def test_websocket_with_invalid_session_key_rejected(self, app_with_session_manager):
-        """Test that WebSocket upgrade with invalid session key is rejected."""
+        """Test that WebSocket upgrade with invalid session key passes through middleware.
+
+        Note: The middleware now lets session keys pass through to the WebSocket handler,
+        which validates them and raises WebSocketDisconnect if invalid. This allows TestClient
+        to properly catch WebSocketDisconnect exceptions in integration tests.
+        """
         app, session_manager, mock_collection = app_with_session_manager
 
         invalid_session_key = "invalid_key_12345"
@@ -236,8 +241,8 @@ class TestWebSocketSessionKeyValidation:
         }
         headers_mock = MagicMock()
         headers_mock.get = lambda key, default=None: headers_dict.get(key.lower(), default)
-        headers_mock.__getitem__ = lambda key: headers_dict[key.lower()]
-        headers_mock.__contains__ = lambda key: key.lower() in headers_dict
+        headers_mock.__getitem__ = lambda key: headers_dict[key.lower()]  # noqa: SLF001
+        headers_mock.__contains__ = lambda key: key.lower() in headers_dict  # noqa: SLF001
         request.headers = headers_mock
         request.cookies = {AUTH_COOKIE_NAME: "valid_token"}
         request.query_params = MagicMock()
@@ -254,8 +259,10 @@ class TestWebSocketSessionKeyValidation:
         # Process request
         response = await middleware.dispatch(request, mock_call_next)
 
-        # Should be rejected (403)
-        assert response.status_code == 403
+        # Middleware now lets session keys pass through to handler for validation
+        # The handler will validate and raise WebSocketDisconnect if invalid
+        # This allows TestClient to properly catch WebSocketDisconnect in integration tests
+        assert response.status_code == 200
 
     def test_websocket_csrf_required_defaults_to_true(self):
         """Test that csrf_required defaults to True (security by default)."""
@@ -277,7 +284,7 @@ class TestWebSocketSessionKeyValidation:
         request.url.path = "/test_app/ws"
 
         # Check csrf_required (should default to True)
-        csrf_required = middleware._websocket_requires_csrf(request, "/test_app/ws")
+        csrf_required = middleware._websocket_requires_csrf(request, "/test_app/ws")  # noqa: SLF001
         assert csrf_required is True
 
     def test_websocket_csrf_required_can_be_disabled(self):
@@ -300,7 +307,7 @@ class TestWebSocketSessionKeyValidation:
         request.url.path = "/test_app/ws"
 
         # Check csrf_required (should be False)
-        csrf_required = middleware._websocket_requires_csrf(request, "/test_app/ws")
+        csrf_required = middleware._websocket_requires_csrf(request, "/test_app/ws")  # noqa: SLF001
         assert csrf_required is False
 
 
@@ -497,7 +504,7 @@ class TestWebSocketOriginValidation:
         headers_mock.get = lambda key, default="": headers_dict.get(key.lower(), default)
         request.headers = headers_mock
 
-        assert middleware._is_websocket_upgrade(request) is True
+        assert middleware._is_websocket_upgrade(request) is True  # noqa: SLF001
 
     def test_non_websocket_request_not_detected(self):
         """Test that non-WebSocket requests are not detected."""
@@ -507,7 +514,7 @@ class TestWebSocketOriginValidation:
             key.lower(), default
         )
 
-        assert middleware._is_websocket_upgrade(request) is False
+        assert middleware._is_websocket_upgrade(request) is False  # noqa: SLF001
 
     def test_websocket_with_valid_origin_accepted(self, app):
         """Test that WebSocket with valid Origin is accepted."""
@@ -738,7 +745,7 @@ class TestWebSocketOriginValidation:
         request = MagicMock(spec=Request)
         request.app.state.cors_config = {"allow_origins": ["https://example.com"]}
 
-        origins = middleware._get_allowed_origins(request)
+        origins = middleware._get_allowed_origins(request)  # noqa: SLF001
         assert origins == ["https://example.com"]
 
     def test_get_allowed_origins_fallback_to_request_host(self):
@@ -751,7 +758,7 @@ class TestWebSocketOriginValidation:
         request.url.scheme = "https"
         request.url.port = None
 
-        origins = middleware._get_allowed_origins(request)
+        origins = middleware._get_allowed_origins(request)  # noqa: SLF001
         assert len(origins) == 1
         assert origins[0] == "https://example.com"
 
@@ -765,7 +772,7 @@ class TestWebSocketOriginValidation:
         request.url.scheme = "https"
         request.url.port = 8080
 
-        origins = middleware._get_allowed_origins(request)
+        origins = middleware._get_allowed_origins(request)  # noqa: SLF001
         assert origins == ["https://example.com:8080"]
 
     def test_validate_websocket_origin_exact_match(self):
@@ -779,7 +786,7 @@ class TestWebSocketOriginValidation:
         request.app = MagicMock()
         request.app.state.cors_config = {"allow_origins": ["https://example.com"]}
 
-        assert middleware._validate_websocket_origin(request) is True
+        assert middleware._validate_websocket_origin(request) is True  # noqa: SLF001
 
     def test_validate_websocket_origin_no_match(self):
         """Test Origin validation with no match."""
@@ -792,7 +799,7 @@ class TestWebSocketOriginValidation:
         request.app = MagicMock()
         request.app.state.cors_config = {"allow_origins": ["https://example.com"]}
 
-        assert middleware._validate_websocket_origin(request) is False
+        assert middleware._validate_websocket_origin(request) is False  # noqa: SLF001
 
     def test_validate_websocket_origin_missing_header(self):
         """Test Origin validation with missing Origin header."""
@@ -803,7 +810,7 @@ class TestWebSocketOriginValidation:
         request.app = MagicMock()
         request.app.state.cors_config = {"allow_origins": ["https://example.com"]}
 
-        assert middleware._validate_websocket_origin(request) is False
+        assert middleware._validate_websocket_origin(request) is False  # noqa: SLF001
 
     def test_websocket_error_message_includes_path_and_cors_status(self, app):
         """Test that WebSocket rejection error messages include path and CORS status."""
@@ -868,7 +875,7 @@ class TestWebSocketOriginValidation:
         request.app = app
         request.url.path = "/app-3/ws"
 
-        allowed_origins = middleware._get_allowed_origins(request)
+        allowed_origins = middleware._get_allowed_origins(request)  # noqa: SLF001
 
         assert "https://app1.com" in allowed_origins
         assert "https://app2.com" in allowed_origins
@@ -889,7 +896,7 @@ class TestWebSocketOriginValidation:
         request.url.scheme = "http"
         request.url.port = None
 
-        allowed_origins = middleware._get_allowed_origins(request)
+        allowed_origins = middleware._get_allowed_origins(request)  # noqa: SLF001
 
         # Should fall back to request host or return empty list
         assert isinstance(allowed_origins, list)

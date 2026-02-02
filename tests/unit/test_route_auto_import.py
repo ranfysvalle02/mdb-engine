@@ -78,7 +78,7 @@ async def post_data():
         child_app = engine.create_app(slug="test_app", manifest=manifest_path, is_sub_app=True)
 
         # Manually call _import_app_routes to test it
-        engine._import_app_routes(child_app, manifest_path, "test_app")
+        engine._import_app_routes(child_app, manifest_path, "test_app")  # noqa: SLF001
 
         # Verify routes were registered
         assert len(child_app.routes) >= 3  # At least our 3 routes
@@ -118,7 +118,7 @@ async def from_routes():
         engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name="test_db")
         child_app = engine.create_app(slug="test_app", manifest=manifest_path, is_sub_app=True)
 
-        engine._import_app_routes(child_app, manifest_path, "test_app")
+        engine._import_app_routes(child_app, manifest_path, "test_app")  # noqa: SLF001
 
         # Verify route was registered
         client = TestClient(child_app)
@@ -159,7 +159,7 @@ async def root():
         engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name="test_db")
         child_app = engine.create_app(slug="test_app", manifest=manifest_path, is_sub_app=True)
 
-        engine._import_app_routes(child_app, manifest_path, "test_app")
+        engine._import_app_routes(child_app, manifest_path, "test_app")  # noqa: SLF001
 
         # Verify web.py was used (not routes.py)
         client = TestClient(child_app)
@@ -206,7 +206,7 @@ async def custom():
         engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name="test_db")
         child_app = engine.create_app(slug="test_app", manifest=manifest_path, is_sub_app=True)
 
-        engine._import_app_routes(child_app, manifest_path, "test_app")
+        engine._import_app_routes(child_app, manifest_path, "test_app")  # noqa: SLF001
 
         # Verify custom_routes.py was used
         client = TestClient(child_app)
@@ -224,7 +224,7 @@ async def custom():
         child_app = engine.create_app(slug="test_app", manifest=manifest_path, is_sub_app=True)
 
         # Should not raise an exception
-        engine._import_app_routes(child_app, manifest_path, "test_app")
+        engine._import_app_routes(child_app, manifest_path, "test_app")  # noqa: SLF001
 
         # App should still work (just no custom routes)
         assert isinstance(child_app, FastAPI)
@@ -252,7 +252,7 @@ async def root():
         child_app = engine.create_app(slug="test_app", manifest=manifest_path, is_sub_app=True)
 
         # Should not raise exception, just log warning
-        engine._import_app_routes(child_app, manifest_path, "test_app")
+        engine._import_app_routes(child_app, manifest_path, "test_app")  # noqa: SLF001
 
         # App should still be functional
         assert isinstance(child_app, FastAPI)
@@ -293,7 +293,7 @@ async def root():
         engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name="test_db")
         child_app = engine.create_app(slug="test_app", manifest=manifest_path, is_sub_app=True)
 
-        engine._import_app_routes(child_app, manifest_path, "test_app")
+        engine._import_app_routes(child_app, manifest_path, "test_app")  # noqa: SLF001
 
         # Verify route works with relative import
         client = TestClient(child_app)
@@ -333,7 +333,7 @@ async def after():
         child_app = engine.create_app(slug="test_app", manifest=manifest_path, is_sub_app=True)
 
         with pytest.warns() as record:
-            engine._import_app_routes(child_app, manifest_path, "test_app")
+            engine._import_app_routes(child_app, manifest_path, "test_app")  # noqa: SLF001
 
         # Should have warning about app being overwritten
         assert len(record) > 0
@@ -449,7 +449,7 @@ async def engine_check():
         engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name="test_db")
         child_app = engine.create_app(slug="test_app", manifest=manifest_path, is_sub_app=True)
 
-        engine._import_app_routes(child_app, manifest_path, "test_app")
+        engine._import_app_routes(child_app, manifest_path, "test_app")  # noqa: SLF001
 
         # Verify route can access engine
         client = TestClient(child_app)
@@ -472,7 +472,7 @@ async def engine_check():
         child_app = engine.create_app(slug="test_app", manifest=manifest_path, is_sub_app=True)
 
         # Should not raise exception
-        engine._import_app_routes(child_app, manifest_path, "test_app")
+        engine._import_app_routes(child_app, manifest_path, "test_app")  # noqa: SLF001
 
         # No routes should be added
         routes_before = len(child_app.routes)

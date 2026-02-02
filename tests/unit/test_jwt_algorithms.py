@@ -55,7 +55,7 @@ class TestHS256Algorithm:
         db = MagicMock()
         collection = AsyncMock()
         collection.create_index = AsyncMock()
-        db.__getitem__ = MagicMock(return_value=collection)
+        db.__getitem__ = MagicMock(return_value=collection)  # noqa: SLF001
         return db
 
     def test_hs256_with_secret(self, mock_mongo_db):
@@ -100,7 +100,7 @@ class TestHS256Algorithm:
 
         assert pool.jwt_algorithm == "HS256"
         # Should have auto-generated secret
-        assert pool._jwt_secret is not None
+        assert pool._jwt_secret is not None  # noqa: SLF001
 
 
 class TestRS256Algorithm:
@@ -112,7 +112,7 @@ class TestRS256Algorithm:
         db = MagicMock()
         collection = AsyncMock()
         collection.create_index = AsyncMock()
-        db.__getitem__ = MagicMock(return_value=collection)
+        db.__getitem__ = MagicMock(return_value=collection)  # noqa: SLF001
         return db
 
     # Note: We use a minimal RSA key format for testing
@@ -207,7 +207,7 @@ class TestES256Algorithm:
         db = MagicMock()
         collection = AsyncMock()
         collection.create_index = AsyncMock()
-        db.__getitem__ = MagicMock(return_value=collection)
+        db.__getitem__ = MagicMock(return_value=collection)  # noqa: SLF001
         return db
 
     EC_PRIVATE_KEY = """-----BEGIN EC PRIVATE KEY-----
@@ -256,7 +256,7 @@ class TestUnsupportedAlgorithm:
         db = MagicMock()
         collection = AsyncMock()
         collection.create_index = AsyncMock()
-        db.__getitem__ = MagicMock(return_value=collection)
+        db.__getitem__ = MagicMock(return_value=collection)  # noqa: SLF001
         return db
 
     def test_unsupported_algorithm_fails(self, mock_mongo_db):
@@ -290,7 +290,7 @@ class TestTokenGenerationAndValidation:
         collection = AsyncMock()
         collection.find_one = AsyncMock(return_value=None)
         collection.create_index = AsyncMock()
-        db.__getitem__ = MagicMock(return_value=collection)
+        db.__getitem__ = MagicMock(return_value=collection)  # noqa: SLF001
         return db
 
     @pytest.mark.asyncio
@@ -313,7 +313,7 @@ class TestTokenGenerationAndValidation:
         collection.find_one = AsyncMock(return_value=user_doc)
         collection.update_one = AsyncMock()
         collection.create_index = AsyncMock()
-        mock_mongo_db.__getitem__ = MagicMock(return_value=collection)
+        mock_mongo_db.__getitem__ = MagicMock(return_value=collection)  # noqa: SLF001
 
         pool = SharedUserPool(
             mock_mongo_db,

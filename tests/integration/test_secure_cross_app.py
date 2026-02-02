@@ -76,7 +76,7 @@ class TestSecureCrossAppAccess:
         assert result is True
 
         # Verify secret was stored
-        secret_exists = await engine._app_secrets_manager.app_secret_exists("click_tracker")
+        secret_exists = await engine._app_secrets_manager.app_secret_exists("click_tracker")  # noqa: SLF001
         assert secret_exists is True
 
     async def test_dashboard_registration(
@@ -90,7 +90,7 @@ class TestSecureCrossAppAccess:
         assert result is True
 
         # Verify secret was stored
-        secret_exists = await engine._app_secrets_manager.app_secret_exists(
+        secret_exists = await engine._app_secrets_manager.app_secret_exists(  # noqa: SLF001
             "click_tracker_dashboard"
         )
         assert secret_exists is True
@@ -105,7 +105,7 @@ class TestSecureCrossAppAccess:
         await engine.register_app(click_tracker_manifest)
 
         # Get the generated secret (for testing - in production, retrieve securely)
-        secret = await engine._app_secrets_manager.get_app_secret("click_tracker")
+        secret = await engine._app_secrets_manager.get_app_secret("click_tracker")  # noqa: SLF001
 
         # Get scoped database with token
         db = engine.get_scoped_db("click_tracker", app_token=secret)
@@ -142,8 +142,8 @@ class TestSecureCrossAppAccess:
         await engine.register_app(dashboard_manifest)
 
         # Get secrets
-        tracker_secret = await engine._app_secrets_manager.get_app_secret("click_tracker")
-        dashboard_secret = await engine._app_secrets_manager.get_app_secret(
+        tracker_secret = await engine._app_secrets_manager.get_app_secret("click_tracker")  # noqa: SLF001
+        dashboard_secret = await engine._app_secrets_manager.get_app_secret(  # noqa: SLF001
             "click_tracker_dashboard"
         )
 
@@ -182,7 +182,7 @@ class TestSecureCrossAppAccess:
         await engine.register_app(click_tracker_manifest)
         await engine.register_app(dashboard_manifest)
 
-        dashboard_secret = await engine._app_secrets_manager.get_app_secret(
+        dashboard_secret = await engine._app_secrets_manager.get_app_secret(  # noqa: SLF001
             "click_tracker_dashboard"
         )
 
@@ -234,7 +234,7 @@ class TestSecureCrossAppAccess:
         # Register ClickTracker only (no Dashboard)
         await engine.register_app(click_tracker_manifest)
 
-        tracker_secret = await engine._app_secrets_manager.get_app_secret("click_tracker")
+        tracker_secret = await engine._app_secrets_manager.get_app_secret("click_tracker")  # noqa: SLF001
 
         # Try to access unauthorized scope
         with pytest.raises(ValueError, match="not authorized to read from"):
@@ -254,14 +254,14 @@ class TestSecureCrossAppAccess:
         await engine.register_app(click_tracker_manifest)
 
         # Get secret
-        secret = await engine._app_secrets_manager.get_app_secret("click_tracker")
+        secret = await engine._app_secrets_manager.get_app_secret("click_tracker")  # noqa: SLF001
 
         # Verify secret can be used
-        is_valid = await engine._app_secrets_manager.verify_app_secret("click_tracker", secret)
+        is_valid = await engine._app_secrets_manager.verify_app_secret("click_tracker", secret)  # noqa: SLF001
         assert is_valid is True
 
         # Verify wrong secret is rejected
-        is_invalid = await engine._app_secrets_manager.verify_app_secret(
+        is_invalid = await engine._app_secrets_manager.verify_app_secret(  # noqa: SLF001
             "click_tracker", "wrong_secret"
         )
         assert is_invalid is False
@@ -276,21 +276,21 @@ class TestSecureCrossAppAccess:
         await engine.register_app(click_tracker_manifest)
 
         # Get original secret
-        original_secret = await engine._app_secrets_manager.get_app_secret("click_tracker")
+        original_secret = await engine._app_secrets_manager.get_app_secret("click_tracker")  # noqa: SLF001
 
         # Rotate secret
-        new_secret = await engine._app_secrets_manager.rotate_app_secret("click_tracker")
+        new_secret = await engine._app_secrets_manager.rotate_app_secret("click_tracker")  # noqa: SLF001
 
         assert new_secret != original_secret
 
         # Old secret should be invalid
-        is_valid_old = await engine._app_secrets_manager.verify_app_secret(
+        is_valid_old = await engine._app_secrets_manager.verify_app_secret(  # noqa: SLF001
             "click_tracker", original_secret
         )
         assert is_valid_old is False
 
         # New secret should be valid
-        is_valid_new = await engine._app_secrets_manager.verify_app_secret(
+        is_valid_new = await engine._app_secrets_manager.verify_app_secret(  # noqa: SLF001
             "click_tracker", new_secret
         )
         assert is_valid_new is True
@@ -319,8 +319,8 @@ class TestSecureCrossAppAccess:
         }
         await engine.register_app(other_app_manifest)
 
-        tracker_secret = await engine._app_secrets_manager.get_app_secret("click_tracker")
-        other_secret = await engine._app_secrets_manager.get_app_secret("other_app")
+        tracker_secret = await engine._app_secrets_manager.get_app_secret("click_tracker")  # noqa: SLF001
+        other_secret = await engine._app_secrets_manager.get_app_secret("other_app")  # noqa: SLF001
 
         # Insert data in ClickTracker
         tracker_db = engine.get_scoped_db("click_tracker", app_token=tracker_secret)

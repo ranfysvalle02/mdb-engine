@@ -1,0 +1,45 @@
+{
+  "schema_version": "2.0",
+  "slug": "notifications-app",
+  "name": "Notifications App",
+  "description": "Real-time notifications with WebSocket ticket authentication",
+  "status": "active",
+  "auth": {
+    "mode": "shared",
+    "auth_hub_url": "/auth-hub",
+    "roles": ["user"],
+    "require_role": "user",
+    "public_routes": ["/health"]
+  },
+  "websockets": {
+    "notifications": {
+      "path": "/ws",
+      "auth": {
+        "required": true,
+        "csrf_required": false
+      },
+      "ping_interval": 30,
+      "ticket_ttl_seconds": 3
+    }
+  },
+  "cors": {
+    "enabled": true,
+    "allow_origins": ["http://localhost:8000"],
+    "allow_credentials": true,
+    "allow_methods": ["*"],
+    "allow_headers": ["*"]
+  },
+  "managed_indexes": {
+    "notifications": [
+      {
+        "type": "regular",
+        "keys": {"user_id": 1, "created_at": -1},
+        "name": "user_notifications_idx"
+      }
+    ]
+  },
+  "data_access": {
+    "read_scopes": ["notifications-app"],
+    "write_scope": "notifications-app"
+  }
+}

@@ -31,14 +31,14 @@ class TestAppRayActorExtended:
             mock_engine_instance = MockEngine.return_value
             mock_engine_instance.initialize = AsyncMock()
 
-            await actor._ensure_initialized()
+            await actor._ensure_initialized()  # noqa: SLF001
 
-            assert actor._initialized is True
-            assert actor._engine is not None
+            assert actor._initialized is True  # noqa: SLF001
+            assert actor._engine is not None  # noqa: SLF001
             mock_engine_instance.initialize.assert_awaited_once()
 
             # Second call should be no-op
-            await actor._ensure_initialized()
+            await actor._ensure_initialized()  # noqa: SLF001
             assert mock_engine_instance.initialize.await_count == 1
 
     @pytest.mark.asyncio
@@ -53,10 +53,11 @@ class TestAppRayActorExtended:
             mock_engine_instance.initialize = AsyncMock(side_effect=Exception("DB Error"))
 
             with pytest.raises(Exception, match="DB Error"):
-                await actor._ensure_initialized()
+                await actor._ensure_initialized()  # noqa: SLF001
 
-            assert actor._initialized is False
-            assert actor._engine is not None  # Engine instance created but init failed
+            assert actor._initialized is False  # noqa: SLF001
+            # Engine instance created but init failed
+            assert actor._engine is not None  # noqa: SLF001
 
     @pytest.mark.asyncio
     async def test_ensure_initialized_failure_with_fallback(self):
@@ -70,28 +71,28 @@ class TestAppRayActorExtended:
             mock_engine_instance.initialize = AsyncMock(side_effect=ConnectionError("DB Error"))
 
             # Should not raise exception
-            await actor._ensure_initialized()
+            await actor._ensure_initialized()  # noqa: SLF001
 
-            assert actor._initialized is True
-            assert actor._engine is None  # No engine in fallback mode
+            assert actor._initialized is True  # noqa: SLF001
+            assert actor._engine is None  # No engine in fallback mode  # noqa: SLF001
 
     @pytest.mark.asyncio
     async def test_get_app_db_success(self):
         """Test getting app db successfully."""
         actor = AppRayActor("test_app", "mongodb://localhost", "test_db")
-        actor._initialized = True
-        actor._engine = MagicMock()
-        actor._engine.get_scoped_db = MagicMock(return_value="scoped_db")
+        actor._initialized = True  # noqa: SLF001
+        actor._engine = MagicMock()  # noqa: SLF001
+        actor._engine.get_scoped_db = MagicMock(return_value="scoped_db")  # noqa: SLF001
 
         # Test with explicit token
         db = await actor.get_app_db(app_token="secret")
         assert db == "scoped_db"
-        actor._engine.get_scoped_db.assert_called_with("test_app", app_token="secret")
+        actor._engine.get_scoped_db.assert_called_with("test_app", app_token="secret")  # noqa: SLF001
 
         # Test with env var token
         with patch.dict(sys.modules["os"].environ, {"TEST_APP_SECRET": "env_secret"}):
             db = await actor.get_app_db()
-            actor._engine.get_scoped_db.assert_called_with("test_app", app_token="env_secret")
+            actor._engine.get_scoped_db.assert_called_with("test_app", app_token="env_secret")  # noqa: SLF001
 
     @pytest.mark.asyncio
     async def test_get_app_db_not_available(self):
@@ -100,8 +101,8 @@ class TestAppRayActorExtended:
         actor = AppRayActor(
             "test_app", "mongodb://localhost", "test_db", use_in_memory_fallback=True
         )
-        actor._initialized = True
-        actor._engine = None  # Simulating fallback mode
+        actor._initialized = True  # noqa: SLF001
+        actor._engine = None  # Simulating fallback mode  # noqa: SLF001
 
         with pytest.raises(RuntimeError, match="In-memory fallback not yet implemented"):
             await actor.get_app_db()
@@ -115,8 +116,8 @@ class TestAppRayActorExtended:
             # We manually simulate the state after a failed init that wasn't raised?
             # Actually _ensure_initialized raises if not fallback.
             # So if we are here, and _engine is None, it means something is wrong state-wise
-            actor._initialized = True
-            actor._engine = None
+            actor._initialized = True  # noqa: SLF001
+            actor._engine = None  # noqa: SLF001
 
             with pytest.raises(RuntimeError, match="Engine not available"):
                 await actor.get_app_db()
@@ -127,14 +128,14 @@ class TestAppRayActorExtended:
         actor = AppRayActor("test_app", "mongodb://localhost", "test_db")
         mock_engine = MagicMock()
         mock_engine.shutdown = AsyncMock()
-        actor._engine = mock_engine
-        actor._initialized = True
+        actor._engine = mock_engine  # noqa: SLF001
+        actor._initialized = True  # noqa: SLF001
 
         await actor.shutdown()
 
         mock_engine.shutdown.assert_awaited_once()
-        assert actor._engine is None
-        assert actor._initialized is False
+        assert actor._engine is None  # noqa: SLF001
+        assert actor._initialized is False  # noqa: SLF001
 
     @pytest.mark.asyncio
     async def test_health_check(self):
@@ -149,8 +150,8 @@ class TestAppRayActorExtended:
             assert status["initialized"] is False
 
             # After init
-            actor._initialized = True
-            actor._engine = MagicMock()
+            actor._initialized = True  # noqa: SLF001
+            actor._engine = MagicMock()  # noqa: SLF001
             status = await actor.health_check()
             assert status["status"] == "healthy"
             assert status["engine_available"] is True
@@ -177,9 +178,9 @@ class TestRayIntegrationLogic:
                 mock_ray.remote.assert_called()
 
                 # Check metadata was set
-                assert mock_remote_cls._app_slug == "my_app"
-                assert mock_remote_cls._namespace == "modular_labs_my_app"
-                assert mock_remote_cls._isolated is True
+                assert mock_remote_cls._app_slug == "my_app"  # noqa: SLF001
+                assert mock_remote_cls._namespace == "modular_labs_my_app"  # noqa: SLF001
+                assert mock_remote_cls._isolated is True  # noqa: SLF001
                 assert hasattr(mock_remote_cls, "spawn")
 
                 # Test auto-slug generation
@@ -187,8 +188,8 @@ class TestRayIntegrationLogic:
                 class AutoSlugActor:
                     pass
 
-                assert mock_remote_cls._app_slug == "auto_slug"
-                assert mock_remote_cls._namespace == "modular_labs"
+                assert mock_remote_cls._app_slug == "auto_slug"  # noqa: SLF001
+                assert mock_remote_cls._namespace == "modular_labs"  # noqa: SLF001
 
     @pytest.mark.asyncio
     async def test_get_ray_actor_handle_creation(self):

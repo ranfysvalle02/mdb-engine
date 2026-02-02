@@ -103,8 +103,8 @@ class TestBreachCheck:
         mock_response.raise_for_status = lambda: None
 
         mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)  # noqa: SLF001
+        mock_client.__aexit__ = AsyncMock(return_value=None)  # noqa: SLF001
         mock_client.get = AsyncMock(return_value=mock_response)
 
         with patch("httpx.AsyncClient", return_value=mock_client):
@@ -121,8 +121,8 @@ class TestBreachCheck:
         mock_response.raise_for_status = lambda: None
 
         mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)  # noqa: SLF001
+        mock_client.__aexit__ = AsyncMock(return_value=None)  # noqa: SLF001
         mock_client.get = AsyncMock(return_value=mock_response)
 
         with patch("httpx.AsyncClient", return_value=mock_client):
@@ -133,8 +133,8 @@ class TestBreachCheck:
     async def test_network_error_graceful(self):
         """Test graceful handling of network errors."""
         mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)  # noqa: SLF001
+        mock_client.__aexit__ = AsyncMock(return_value=None)  # noqa: SLF001
         mock_client.get = AsyncMock(side_effect=ConnectionError("Network error"))
 
         with patch("httpx.AsyncClient", return_value=mock_client):

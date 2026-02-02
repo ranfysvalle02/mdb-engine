@@ -184,15 +184,15 @@ async def check_engine_health(engine: Any | None) -> HealthCheckResult:
             message="MongoDBEngine not initialized",
         )
 
-    if not engine._initialized:
-        return HealthCheckResult(
-            name="engine",
-            status=HealthStatus.UNHEALTHY,
-            message="MongoDBEngine not initialized",
-        )
+        if not engine.initialized:
+            return HealthCheckResult(
+                name="engine",
+                status=HealthStatus.UNHEALTHY,
+                message="MongoDBEngine not initialized",
+            )
 
     # Check registered apps
-    app_count = len(engine._apps)
+    app_count = len(engine.apps)
 
     return HealthCheckResult(
         name="engine",

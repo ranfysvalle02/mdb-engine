@@ -19,7 +19,7 @@ class TestJWTSecretValidation:
     def mock_db(self):
         """Create a mock database."""
         db = MagicMock()
-        db.__getitem__ = MagicMock(return_value=MagicMock())
+        db.__getitem__ = MagicMock(return_value=MagicMock())  # noqa: SLF001
         return db
 
     def test_requires_jwt_secret_in_production(self, mock_db):
@@ -36,8 +36,8 @@ class TestJWTSecretValidation:
 
         with patch.dict("os.environ", {}, clear=True):
             pool = SharedUserPool(mongo_db=mock_db, allow_insecure_dev=True)
-            assert pool._jwt_secret is not None
-            assert len(pool._jwt_secret) > 20
+            assert pool._jwt_secret is not None  # noqa: SLF001
+            assert len(pool._jwt_secret) > 20  # noqa: SLF001
 
     def test_uses_env_variable(self, mock_db):
         """Test that MDB_ENGINE_JWT_SECRET env var is used."""
@@ -45,7 +45,7 @@ class TestJWTSecretValidation:
 
         with patch.dict("os.environ", {"MDB_ENGINE_JWT_SECRET": "env-secret"}):
             pool = SharedUserPool(mongo_db=mock_db)
-            assert pool._jwt_secret == "env-secret"
+            assert pool._jwt_secret == "env-secret"  # noqa: SLF001
 
     def test_explicit_secret_overrides_env(self, mock_db):
         """Test that explicit jwt_secret parameter overrides env."""
@@ -53,7 +53,7 @@ class TestJWTSecretValidation:
 
         with patch.dict("os.environ", {"MDB_ENGINE_JWT_SECRET": "env-secret"}):
             pool = SharedUserPool(mongo_db=mock_db, jwt_secret="explicit-secret")
-            assert pool._jwt_secret == "explicit-secret"
+            assert pool._jwt_secret == "explicit-secret"  # noqa: SLF001
 
 
 class TestTokenJTI:
@@ -63,7 +63,7 @@ class TestTokenJTI:
     def mock_db(self):
         """Create a mock database."""
         db = MagicMock()
-        db.__getitem__ = MagicMock(return_value=MagicMock())
+        db.__getitem__ = MagicMock(return_value=MagicMock())  # noqa: SLF001
         return db
 
     @pytest.fixture
@@ -81,9 +81,9 @@ class TestTokenJTI:
         import jwt
 
         user = {"_id": "user123", "email": "test@example.com"}
-        token = user_pool._generate_token(user)
+        token = user_pool._generate_token(user)  # noqa: SLF001
 
-        payload = jwt.decode(token, user_pool._jwt_secret, algorithms=["HS256"])
+        payload = jwt.decode(token, user_pool._jwt_secret, algorithms=["HS256"])  # noqa: SLF001
 
         assert "jti" in payload
         assert len(payload["jti"]) > 10  # JTI should be a random string
@@ -94,11 +94,11 @@ class TestTokenJTI:
 
         user = {"_id": "user123", "email": "test@example.com"}
 
-        token1 = user_pool._generate_token(user)
-        token2 = user_pool._generate_token(user)
+        token1 = user_pool._generate_token(user)  # noqa: SLF001
+        token2 = user_pool._generate_token(user)  # noqa: SLF001
 
-        payload1 = jwt.decode(token1, user_pool._jwt_secret, algorithms=["HS256"])
-        payload2 = jwt.decode(token2, user_pool._jwt_secret, algorithms=["HS256"])
+        payload1 = jwt.decode(token1, user_pool._jwt_secret, algorithms=["HS256"])  # noqa: SLF001
+        payload2 = jwt.decode(token2, user_pool._jwt_secret, algorithms=["HS256"])  # noqa: SLF001
 
         assert payload1["jti"] != payload2["jti"]
 
@@ -120,7 +120,7 @@ class TestTokenRevocation:
                 return mock_blacklist
             return mock_collection
 
-        db.__getitem__ = MagicMock(side_effect=get_collection)
+        db.__getitem__ = MagicMock(side_effect=get_collection)  # noqa: SLF001
         return db
 
     @pytest.fixture
@@ -132,7 +132,7 @@ class TestTokenRevocation:
             mongo_db=mock_db,
             jwt_secret="test-secret-key",
         )
-        pool._blacklist_indexes_created = True
+        pool._blacklist_indexes_created = True  # noqa: SLF001
         return pool
 
     @pytest.mark.asyncio
@@ -141,14 +141,14 @@ class TestTokenRevocation:
 
         # Generate a valid token
         user = {"_id": "user123", "email": "test@example.com"}
-        token = user_pool._generate_token(user)
+        token = user_pool._generate_token(user)  # noqa: SLF001
 
-        user_pool._blacklist_collection.update_one = AsyncMock()
+        user_pool._blacklist_collection.update_one = AsyncMock()  # noqa: SLF001
 
         result = await user_pool.revoke_token(token, reason="logout")
 
         assert result is True
-        user_pool._blacklist_collection.update_one.assert_called_once()
+        user_pool._blacklist_collection.update_one.assert_called_once()  # noqa: SLF001
 
     @pytest.mark.asyncio
     async def test_revoke_invalid_token_fails(self, user_pool):
@@ -170,12 +170,12 @@ class TestTokenRevocation:
                 "jti": "test-jti-123",
                 "exp": datetime.utcnow() + timedelta(hours=24),
             },
-            user_pool._jwt_secret,
+            user_pool._jwt_secret,  # noqa: SLF001
             algorithm="HS256",
         )
 
         # Mock blacklist check to return that token is revoked
-        user_pool._blacklist_collection.find_one = AsyncMock(
+        user_pool._blacklist_collection.find_one = AsyncMock(  # noqa: SLF001
             return_value={
                 "jti": "test-jti-123",
                 "expires_at": datetime.utcnow() + timedelta(hours=24),
@@ -200,15 +200,15 @@ class TestTokenRevocation:
                 "jti": "test-jti-456",
                 "exp": datetime.utcnow() + timedelta(hours=24),
             },
-            user_pool._jwt_secret,
+            user_pool._jwt_secret,  # noqa: SLF001
             algorithm="HS256",
         )
 
         # Mock blacklist check to return None (not revoked)
-        user_pool._blacklist_collection.find_one = AsyncMock(return_value=None)
+        user_pool._blacklist_collection.find_one = AsyncMock(return_value=None)  # noqa: SLF001
 
         # Mock user lookup
-        user_pool._collection.find_one = AsyncMock(
+        user_pool._collection.find_one = AsyncMock(  # noqa: SLF001
             return_value={
                 "_id": ObjectId(user_id),
                 "email": "test@example.com",
@@ -230,7 +230,7 @@ class TestSecureCookies:
     def mock_db(self):
         """Create a mock database."""
         db = MagicMock()
-        db.__getitem__ = MagicMock(return_value=MagicMock())
+        db.__getitem__ = MagicMock(return_value=MagicMock())  # noqa: SLF001
         return db
 
     @pytest.fixture
@@ -275,7 +275,7 @@ class TestSharedUserPool:
     def mock_db(self):
         """Create a mock database."""
         db = MagicMock()
-        db.__getitem__ = MagicMock(return_value=MagicMock())
+        db.__getitem__ = MagicMock(return_value=MagicMock())  # noqa: SLF001
         return db
 
     @pytest.fixture
@@ -289,15 +289,15 @@ class TestSharedUserPool:
             token_expiry_hours=24,
         )
         # Set up blacklist collection mock
-        pool._blacklist_collection = AsyncMock()
-        pool._blacklist_collection.find_one = AsyncMock(return_value=None)
+        pool._blacklist_collection = AsyncMock()  # noqa: SLF001
+        pool._blacklist_collection.find_one = AsyncMock(return_value=None)  # noqa: SLF001
         return pool
 
     def test_init(self, user_pool):
         """Test SharedUserPool initialization."""
-        assert user_pool._jwt_secret == "test-secret-key"
-        assert user_pool._token_expiry_hours == 24
-        assert user_pool._jwt_algorithm == "HS256"
+        assert user_pool._jwt_secret == "test-secret-key"  # noqa: SLF001
+        assert user_pool._token_expiry_hours == 24  # noqa: SLF001
+        assert user_pool._jwt_algorithm == "HS256"  # noqa: SLF001
 
     def test_init_requires_secret_or_insecure_dev(self, mock_db):
         """Test that secret is required unless allow_insecure_dev=True."""
@@ -310,27 +310,27 @@ class TestSharedUserPool:
 
             # Should work with allow_insecure_dev=True
             pool = SharedUserPool(mongo_db=mock_db, allow_insecure_dev=True)
-            assert pool._jwt_secret is not None
-            assert len(pool._jwt_secret) > 20
+            assert pool._jwt_secret is not None  # noqa: SLF001
+            assert len(pool._jwt_secret) > 20  # noqa: SLF001
 
     @pytest.mark.asyncio
     async def test_ensure_indexes(self, user_pool):
         """Test that indexes are created for users and blacklist."""
-        user_pool._collection.create_index = AsyncMock()
-        user_pool._blacklist_collection.create_index = AsyncMock()
+        user_pool._collection.create_index = AsyncMock()  # noqa: SLF001
+        user_pool._blacklist_collection.create_index = AsyncMock()  # noqa: SLF001
 
         await user_pool.ensure_indexes()
 
         # Should create user indexes
-        assert user_pool._collection.create_index.call_count == 2
+        assert user_pool._collection.create_index.call_count == 2  # noqa: SLF001
         # Should create blacklist indexes
-        assert user_pool._blacklist_collection.create_index.call_count == 2
+        assert user_pool._blacklist_collection.create_index.call_count == 2  # noqa: SLF001
 
     @pytest.mark.asyncio
     async def test_create_user_success(self, user_pool):
         """Test successful user creation."""
-        user_pool._collection.find_one = AsyncMock(return_value=None)
-        user_pool._collection.insert_one = AsyncMock(return_value=MagicMock(inserted_id="user123"))
+        user_pool._collection.find_one = AsyncMock(return_value=None)  # noqa: SLF001
+        user_pool._collection.insert_one = AsyncMock(return_value=MagicMock(inserted_id="user123"))  # noqa: SLF001
 
         user = await user_pool.create_user(
             email="test@example.com",
@@ -346,7 +346,7 @@ class TestSharedUserPool:
     @pytest.mark.asyncio
     async def test_create_user_duplicate_email(self, user_pool):
         """Test that duplicate email raises ValueError."""
-        user_pool._collection.find_one = AsyncMock(return_value={"email": "existing@example.com"})
+        user_pool._collection.find_one = AsyncMock(return_value={"email": "existing@example.com"})  # noqa: SLF001
 
         with pytest.raises(ValueError, match="already exists"):
             await user_pool.create_user(
@@ -361,7 +361,7 @@ class TestSharedUserPool:
 
         password_hash = bcrypt.hashpw(b"correct_password", bcrypt.gensalt()).decode("utf-8")
 
-        user_pool._collection.find_one = AsyncMock(
+        user_pool._collection.find_one = AsyncMock(  # noqa: SLF001
             return_value={
                 "_id": "user123",
                 "email": "test@example.com",
@@ -370,7 +370,7 @@ class TestSharedUserPool:
                 "app_roles": {},
             }
         )
-        user_pool._collection.update_one = AsyncMock()
+        user_pool._collection.update_one = AsyncMock()  # noqa: SLF001
 
         token = await user_pool.authenticate(
             email="test@example.com",
@@ -379,7 +379,7 @@ class TestSharedUserPool:
 
         assert token is not None
         # Update last_login should be called
-        user_pool._collection.update_one.assert_called_once()
+        user_pool._collection.update_one.assert_called_once()  # noqa: SLF001
 
     @pytest.mark.asyncio
     async def test_authenticate_wrong_password(self, user_pool):
@@ -388,7 +388,7 @@ class TestSharedUserPool:
 
         password_hash = bcrypt.hashpw(b"correct_password", bcrypt.gensalt()).decode("utf-8")
 
-        user_pool._collection.find_one = AsyncMock(
+        user_pool._collection.find_one = AsyncMock(  # noqa: SLF001
             return_value={
                 "_id": "user123",
                 "email": "test@example.com",
@@ -407,7 +407,7 @@ class TestSharedUserPool:
     @pytest.mark.asyncio
     async def test_authenticate_user_not_found(self, user_pool):
         """Test authentication when user not found."""
-        user_pool._collection.find_one = AsyncMock(return_value=None)
+        user_pool._collection.find_one = AsyncMock(return_value=None)  # noqa: SLF001
 
         token = await user_pool.authenticate(
             email="nonexistent@example.com",
@@ -430,11 +430,11 @@ class TestSharedUserPool:
                 "email": "test@example.com",
                 "exp": datetime.utcnow() + timedelta(hours=24),
             },
-            user_pool._jwt_secret,
+            user_pool._jwt_secret,  # noqa: SLF001
             algorithm="HS256",
         )
 
-        user_pool._collection.find_one = AsyncMock(
+        user_pool._collection.find_one = AsyncMock(  # noqa: SLF001
             return_value={
                 "_id": ObjectId(user_id),
                 "email": "test@example.com",
@@ -461,7 +461,7 @@ class TestSharedUserPool:
                 "email": "test@example.com",
                 "exp": datetime.utcnow() - timedelta(hours=1),
             },
-            user_pool._jwt_secret,
+            user_pool._jwt_secret,  # noqa: SLF001
             algorithm="HS256",
         )
 
@@ -478,7 +478,7 @@ class TestSharedUserPool:
     @pytest.mark.asyncio
     async def test_update_user_roles(self, user_pool):
         """Test updating user roles."""
-        user_pool._collection.update_one = AsyncMock(return_value=MagicMock(modified_count=1))
+        user_pool._collection.update_one = AsyncMock(return_value=MagicMock(modified_count=1))  # noqa: SLF001
 
         result = await user_pool.update_user_roles(
             email="test@example.com",
@@ -487,12 +487,12 @@ class TestSharedUserPool:
         )
 
         assert result is True
-        user_pool._collection.update_one.assert_called_once()
+        user_pool._collection.update_one.assert_called_once()  # noqa: SLF001
 
     @pytest.mark.asyncio
     async def test_update_user_roles_not_found(self, user_pool):
         """Test updating roles for non-existent user."""
-        user_pool._collection.update_one = AsyncMock(return_value=MagicMock(modified_count=0))
+        user_pool._collection.update_one = AsyncMock(return_value=MagicMock(modified_count=0))  # noqa: SLF001
 
         result = await user_pool.update_user_roles(
             email="nonexistent@example.com",
@@ -554,7 +554,7 @@ class TestSharedUserPool:
     @pytest.mark.asyncio
     async def test_deactivate_user(self, user_pool):
         """Test deactivating a user."""
-        user_pool._collection.update_one = AsyncMock(return_value=MagicMock(modified_count=1))
+        user_pool._collection.update_one = AsyncMock(return_value=MagicMock(modified_count=1))  # noqa: SLF001
 
         result = await user_pool.deactivate_user("test@example.com")
 
@@ -563,7 +563,7 @@ class TestSharedUserPool:
     @pytest.mark.asyncio
     async def test_activate_user(self, user_pool):
         """Test activating a user."""
-        user_pool._collection.update_one = AsyncMock(return_value=MagicMock(modified_count=1))
+        user_pool._collection.update_one = AsyncMock(return_value=MagicMock(modified_count=1))  # noqa: SLF001
 
         result = await user_pool.activate_user("test@example.com")
 

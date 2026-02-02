@@ -74,8 +74,8 @@ class TestExampleApps:
         assert result is True
 
         # Verify app is registered (check read_scopes mapping)
-        assert "click_tracker" in engine._app_read_scopes
-        assert "click_tracker" in engine._app_read_scopes["click_tracker"]
+        assert "click_tracker" in engine._app_read_scopes  # noqa: SLF001
+        assert "click_tracker" in engine._app_read_scopes["click_tracker"]  # noqa: SLF001
 
     async def test_click_tracker_track_endpoint_flow(
         self, mongodb_engine_with_secrets, click_tracker_manifest, master_key
@@ -87,7 +87,7 @@ class TestExampleApps:
         await engine.register_app(click_tracker_manifest)
 
         # Get secret
-        secret = await engine._app_secrets_manager.get_app_secret("click_tracker")
+        secret = await engine._app_secrets_manager.get_app_secret("click_tracker")  # noqa: SLF001
 
         # Simulate track endpoint
         db = engine.get_scoped_db("click_tracker", app_token=secret)
@@ -124,8 +124,8 @@ class TestExampleApps:
         await engine.register_app(dashboard_manifest)
 
         # Get secrets
-        tracker_secret = await engine._app_secrets_manager.get_app_secret("click_tracker")
-        dashboard_secret = await engine._app_secrets_manager.get_app_secret(
+        tracker_secret = await engine._app_secrets_manager.get_app_secret("click_tracker")  # noqa: SLF001
+        dashboard_secret = await engine._app_secrets_manager.get_app_secret(  # noqa: SLF001
             "click_tracker_dashboard"
         )
 
@@ -168,8 +168,8 @@ class TestExampleApps:
         await engine.register_app(dashboard_manifest)
 
         # Get secrets
-        tracker_secret = await engine._app_secrets_manager.get_app_secret("click_tracker")
-        dashboard_secret = await engine._app_secrets_manager.get_app_secret(
+        tracker_secret = await engine._app_secrets_manager.get_app_secret("click_tracker")  # noqa: SLF001
+        dashboard_secret = await engine._app_secrets_manager.get_app_secret(  # noqa: SLF001
             "click_tracker_dashboard"
         )
 

@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Notifications App - WebSocket Tickets Example</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #f5f5f5;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .header {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .header h1 {
+            font-size: 24px;
+            margin-bottom: 5px;
+        }
+        .header .subtitle {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+        .status-bar {
+            background: #fff;
+            padding: 15px 20px;
+            border-bottom: 1px solid #e0e0e0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+        }
+        .status-badge {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #ccc;
+        }
+        .status-badge.connected {
+            background: #4CAF50;
+            box-shadow: 0 0 10px #4CAF50;
+        }
+        .ticket-section {
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 15px 20px;
+            font-size: 14px;
+        }
+        .ticket-section h3 {
+            margin-bottom: 10px;
+            color: #856404;
+        }
+        .ticket-section ol {
+            margin-left: 20px;
+            color: #856404;
+        }
+        .ticket-section code {
+            background: #fff;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+        .ticket-display {
+            background: #fff;
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 10px;
+            font-family: monospace;
+            font-size: 12px;
+            word-break: break-all;
+            color: #333;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+        }
+        .ticket-info {
+            flex: 1;
+        }
+        .ticket-countdown {
+            font-weight: 600;
+            font-size: 14px;
+            padding: 4px 8px;
+            border-radius: 4px;
+            min-width: 60px;
+            text-align: center;
+        }
+        .ticket-countdown.warning {
+            background: #fff3cd;
+            color: #856404;
+            animation: pulse 1s infinite;
+        }
+        .ticket-countdown.expired {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .ticket-countdown.used {
+            background: #d4edda;
+            color: #155724;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+        .refresh-btn {
+            background: #ffc107;
+            color: #856404;
+            padding: 6px 12px;
+            font-size: 12px;
+            margin: 0;
+        }
+        .refresh-btn:hover {
+            background: #ffb300;
+        }
+        .instructions {
+            background: #e7f3ff;
+            border: 1px solid #b3d9ff;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 15px 20px;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+        .instructions h3 {
+            margin-bottom: 10px;
+            color: #004085;
+        }
+        .instructions ul {
+            margin-left: 20px;
+            color: #004085;
+        }
+        .instructions strong {
+            color: #002752;
+        }
+        .instructions code {
+            background: #fff;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 11px;
+            color: #c7254e;
+        }
+        button {
+            background: #f5576c;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-top: 10px;
+        }
+        button:hover {
+            background: #e0485c;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .container {
+            flex: 1;
+            display: flex;
+            gap: 20px;
+            padding: 20px;
+            overflow: hidden;
+        }
+        .notifications-panel {
+            flex: 1;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .notifications-panel h2 {
+            padding: 20px;
+            border-bottom: 1px solid #e0e0e0;
+            font-size: 18px;
+        }
+        .notifications {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+        }
+        .notification {
+            margin-bottom: 15px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border-left: 4px solid #f5576c;
+        }
+        .notification-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            font-size: 12px;
+            color: #666;
+        }
+        .notification-title {
+            font-weight: 600;
+            color: #f5576c;
+            font-size: 16px;
+            margin-bottom: 5px;
+        }
+        .notification-message {
+            color: #333;
+            line-height: 1.5;
+        }
+        .create-panel {
+            width: 350px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+        }
+        .create-panel h2 {
+            font-size: 18px;
+            margin-bottom: 20px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 14px;
+            font-weight: 500;
+            color: #333;
+        }
+        .form-group input,
+        .form-group textarea {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: inherit;
+        }
+        .form-group input:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: #f5576c;
+        }
+        .form-group textarea {
+            resize: vertical;
+            min-height: 80px;
+        }
+        .create-panel button {
+            width: 100%;
+            padding: 12px;
+            margin: 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🔔 Notifications App</h1>
+        <div class="subtitle">Real-time notifications with WebSocket ticket authentication</div>
+    </div>
+    
+    <div class="status-bar">
+        <div class="status-item">
+            <span class="status-badge" id="ws-status"></span>
+            <span id="ws-status-text">Disconnected</span>
+        </div>
+        <div class="status-item">
+            User: <strong>{{ user_email }}</strong>
+        </div>
+        <div class="status-item">
+            <a href="/auth-hub/logout" style="color: #f5576c; text-decoration: none;">Logout</a>
+        </div>
+    </div>
+    
+    <div class="instructions">
+        <h3>📚 How WebSocket Tickets Work & Why</h3>
+        <ul>
+            <li><strong>Security First:</strong> Tickets are short-lived (10 seconds) and single-use to prevent replay attacks</li>
+            <li><strong>No CSRF Cookies Needed:</strong> Unlike traditional WebSocket auth, tickets eliminate the need for CSRF tokens</li>
+            <li><strong>Multi-App SSO:</strong> Works seamlessly across multiple apps in a single domain</li>
+            <li><strong>Flow:</strong> JWT Cookie → Request Ticket → Connect WebSocket → Ticket Consumed</li>
+        </ul>
+        <p style="margin-top: 10px; color: #004085;">
+            <strong>Why Tickets?</strong> WebSockets can't send custom headers, making CSRF protection tricky. 
+            Tickets solve this by creating a one-time authentication token that expires quickly, reducing the 
+            window for interception while maintaining security.
+        </p>
+    </div>
+    
+    <div class="ticket-section">
+        <h3>🔐 Ticket Authentication</h3>
+        <button id="get-ticket-btn" onclick="getTicket()">Get Ticket & Connect</button>
+        <div id="ticket-display" class="ticket-display" style="display: none;">
+            <div class="ticket-info" id="ticket-info"></div>
+            <div class="ticket-countdown" id="ticket-countdown"></div>
+            <button id="refresh-ticket-btn" class="refresh-btn" onclick="refreshTicket()" style="display: none;">Refresh</button>
+        </div>
+    </div>
+    
+    <div class="container">
+        <div class="notifications-panel">
+            <h2>📬 Notifications</h2>
+            <div class="notifications" id="notifications">
+                <div style="text-align: center; color: #999; padding: 20px;">
+                    Connect to WebSocket to see notifications...
+                </div>
+            </div>
+        </div>
+        
+        <div class="create-panel">
+            <h2>➕ Create Notification</h2>
+            <div class="form-group">
+                <label for="title">Title</label>
+                <input type="text" id="title-input" placeholder="Notification title">
+            </div>
+            <div class="form-group">
+                <label for="message">Message</label>
+                <textarea id="message-input" placeholder="Notification message"></textarea>
+            </div>
+            <button id="create-btn" onclick="createNotification()" disabled>Create Notification</button>
+        </div>
+    </div>
+    
+    <script>
+        let ws = null;
+        let ticket = null;
+        let ticketExpiresAt = null;
+        let countdownInterval = null;
+        let ticketUsed = false;
+        const userId = '{{ user_id }}';
+        
+        // Load recent notifications on page load
+        async function loadNotifications() {
+            try {
+                const res = await fetch(`/notifications-app/api/notifications?user_id=${userId}`);
+                const data = await res.json();
+                const notificationsDiv = document.getElementById('notifications');
+                notificationsDiv.innerHTML = '';
+                
+                if (data.notifications && data.notifications.length > 0) {
+                    data.notifications.forEach(notif => {
+                        addNotification(notif.title, notif.message, notif.created_by, notif.created_at);
+                    });
+                } else {
+                    notificationsDiv.innerHTML = '<div style="text-align: center; color: #999; padding: 20px;">No notifications yet. Create one!</div>';
+                }
+            } catch (e) {
+                console.error('Failed to load notifications:', e);
+            }
+        }
+        
+        // Get ticket and connect WebSocket
+        async function getTicket() {
+            const btn = document.getElementById('get-ticket-btn');
+            const ticketDisplay = document.getElementById('ticket-display');
+            
+            btn.disabled = true;
+            btn.textContent = 'Getting ticket...';
+            
+            try {
+                // Step 1: Get ticket from parent app
+                const ticketRes = await fetch('/auth/ticket', {
+                    method: 'POST',
+                    credentials: 'include'  // Sends JWT cookie
+                });
+                
+                if (ticketRes.status !== 200) {
+                    alert('Failed to get ticket. Are you logged in?');
+                    btn.disabled = false;
+                    btn.textContent = 'Get Ticket & Connect';
+                    return;
+                }
+                
+                const data = await ticketRes.json();
+                ticket = data.ticket;
+                ticketUsed = false;
+                
+                // Calculate expiration time
+                ticketExpiresAt = Date.now() + (data.expires_in * 1000);
+                
+                // Display ticket with live countdown
+                const ticketInfo = document.getElementById('ticket-info');
+                ticketInfo.textContent = `Ticket: ${ticket.substring(0, 20)}...`;
+                ticketDisplay.style.display = 'flex';
+                
+                // Start countdown timer
+                startCountdown();
+                
+                // Step 2: Connect WebSocket with ticket
+                connectWebSocket();
+                
+            } catch (e) {
+                console.error('Failed to get ticket:', e);
+                alert('Failed to get ticket: ' + e.message);
+                btn.disabled = false;
+                btn.textContent = 'Get Ticket & Connect';
+            }
+        }
+        
+        // Connect WebSocket
+        function connectWebSocket() {
+            if (!ticket) {
+                alert('No ticket available. Get a ticket first.');
+                return;
+            }
+            
+            const btn = document.getElementById('get-ticket-btn');
+            btn.textContent = 'Connecting...';
+            
+            const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+            const wsUrl = `${proto}://${location.host}/notifications-app/ws?ticket=${ticket}`;
+            
+            ws = new WebSocket(wsUrl);
+            
+            ws.onopen = () => {
+                console.log('WebSocket connected');
+                updateStatus(true);
+                btn.disabled = true;
+                btn.textContent = 'Connected ✓';
+                document.getElementById('create-btn').disabled = false;
+                
+                // Mark ticket as used
+                ticketUsed = true;
+                updateTicketDisplay('used');
+                
+                // Subscribe to user-specific notifications
+                ws.send(JSON.stringify({
+                    type: 'subscribe',
+                    user_id: userId
+                }));
+                
+                // Load notifications after connection
+                loadNotifications();
+            };
+            
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                
+                if (data.type === 'connected') {
+                    console.log('WebSocket authenticated:', data);
+                } else if (data.type === 'notification') {
+                    addNotification(data.title, data.message, data.created_by, data.timestamp);
+                } else if (data.type === 'ping') {
+                    // Respond to ping
+                    ws.send(JSON.stringify({ type: 'pong' }));
+                }
+            };
+            
+            ws.onclose = () => {
+                console.log('WebSocket disconnected');
+                updateStatus(false);
+                btn.disabled = false;
+                btn.textContent = 'Get Ticket & Connect';
+                document.getElementById('create-btn').disabled = true;
+                ticket = null;  // Ticket consumed, need new one
+                ticketUsed = false;
+                stopCountdown();
+                document.getElementById('ticket-display').style.display = 'none';
+            };
+            
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                alert('WebSocket connection failed. Check console for details.');
+                updateStatus(false);
+                btn.disabled = false;
+                btn.textContent = 'Get Ticket & Connect';
+            };
+        }
+        
+        // Update connection status
+        function updateStatus(connected) {
+            const statusBadge = document.getElementById('ws-status');
+            const statusText = document.getElementById('ws-status-text');
+            
+            if (connected) {
+                statusBadge.classList.add('connected');
+                statusText.textContent = 'Connected';
+            } else {
+                statusBadge.classList.remove('connected');
+                statusText.textContent = 'Disconnected';
+            }
+        }
+        
+        // Add notification to UI
+        function addNotification(title, message, createdBy, timestamp) {
+            const notificationsDiv = document.getElementById('notifications');
+            
+            // Remove placeholder if present
+            if (notificationsDiv.innerHTML.includes('No notifications yet') || notificationsDiv.innerHTML.includes('Connect to WebSocket')) {
+                notificationsDiv.innerHTML = '';
+            }
+            
+            const notificationDiv = document.createElement('div');
+            notificationDiv.className = 'notification';
+            
+            const date = timestamp ? new Date(timestamp).toLocaleString() : new Date().toLocaleString();
+            
+            notificationDiv.innerHTML = `
+                <div class="notification-header">
+                    <span>${escapeHtml(createdBy || 'System')}</span>
+                    <span>${date}</span>
+                </div>
+                <div class="notification-title">${escapeHtml(title)}</div>
+                <div class="notification-message">${escapeHtml(message)}</div>
+            `;
+            
+            notificationsDiv.insertBefore(notificationDiv, notificationsDiv.firstChild);
+        }
+        
+        // Create notification via REST API (which broadcasts via WebSocket)
+        async function createNotification() {
+            const titleInput = document.getElementById('title-input');
+            const messageInput = document.getElementById('message-input');
+            
+            const title = titleInput.value.trim();
+            const message = messageInput.value.trim();
+            
+            if (!title || !message) {
+                alert('Please fill in both title and message');
+                return;
+            }
+            
+            // Get CSRF token from cookie
+            const csrfToken = getCsrfToken();
+            if (!csrfToken) {
+                alert('CSRF token not found. Please refresh the page.');
+                return;
+            }
+            
+            try {
+                const res = await fetch('/notifications-app/api/notifications', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-Token': csrfToken,  // Include CSRF token in header
+                    },
+                    credentials: 'include',
+                    body: JSON.stringify({
+                        title,
+                        message,
+                        user_id: null  // Broadcast to all users
+                    }),
+                });
+                
+                if (res.ok) {
+                    titleInput.value = '';
+                    messageInput.value = '';
+                } else {
+                    const errorText = await res.text();
+                    console.error('Failed to create notification:', res.status, errorText);
+                    alert('Failed to create notification: ' + (res.status === 403 ? 'CSRF token invalid. Please refresh the page.' : 'Server error'));
+                }
+            } catch (e) {
+                console.error('Failed to create notification:', e);
+                alert('Failed to create notification: ' + e.message);
+            }
+        }
+        
+        // Escape HTML
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // Get CSRF token from cookie
+        function getCsrfToken() {
+            const cookies = document.cookie.split(';');
+            for (let cookie of cookies) {
+                const [name, value] = cookie.trim().split('=');
+                if (name === 'csrf_token') {
+                    return decodeURIComponent(value);
+                }
+            }
+            return null;
+        }
+        
+        // Start countdown timer
+        function startCountdown() {
+            stopCountdown(); // Clear any existing interval
+            
+            countdownInterval = setInterval(() => {
+                if (!ticketExpiresAt) return;
+                
+                const now = Date.now();
+                const remaining = Math.max(0, Math.floor((ticketExpiresAt - now) / 1000));
+                
+                if (remaining === 0 && !ticketUsed) {
+                    // Ticket expired and not used
+                    updateTicketDisplay('expired');
+                    document.getElementById('refresh-ticket-btn').style.display = 'block';
+                    stopCountdown();
+                } else if (!ticketUsed) {
+                    // Update countdown
+                    updateTicketDisplay('active', remaining);
+                }
+            }, 100);
+        }
+        
+        // Stop countdown timer
+        function stopCountdown() {
+            if (countdownInterval) {
+                clearInterval(countdownInterval);
+                countdownInterval = null;
+            }
+        }
+        
+        // Update ticket display
+        function updateTicketDisplay(state, remaining = null) {
+            const countdownEl = document.getElementById('ticket-countdown');
+            const refreshBtn = document.getElementById('refresh-ticket-btn');
+            
+            countdownEl.className = 'ticket-countdown';
+            
+            if (state === 'used') {
+                countdownEl.textContent = '✓ Used';
+                countdownEl.classList.add('used');
+                refreshBtn.style.display = 'none';
+            } else if (state === 'expired') {
+                countdownEl.textContent = 'Expired';
+                countdownEl.classList.add('expired');
+            } else if (remaining !== null) {
+                countdownEl.textContent = `${remaining}s`;
+                if (remaining <= 3) {
+                    countdownEl.classList.add('warning');
+                }
+            }
+        }
+        
+        // Refresh ticket
+        async function refreshTicket() {
+            const refreshBtn = document.getElementById('refresh-ticket-btn');
+            refreshBtn.disabled = true;
+            refreshBtn.textContent = 'Refreshing...';
+            
+            // Get new ticket
+            await getTicket();
+            
+            refreshBtn.disabled = false;
+            refreshBtn.textContent = 'Refresh';
+            refreshBtn.style.display = 'none';
+        }
+        
+        // Auto-connect on page load if user is logged in
+        window.addEventListener('load', () => {
+            // Try to get ticket and connect automatically
+            setTimeout(() => {
+                getTicket();
+            }, 500);
+        });
+        
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', () => {
+            stopCountdown();
+        });
+    </script>
+</body>
+</html>

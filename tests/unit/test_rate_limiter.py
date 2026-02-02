@@ -110,14 +110,14 @@ class TestInMemoryRateLimitStore:
         import time
 
         old_time = time.time() - 10000  # Very old
-        store._storage["old:key"] = [(old_time, 1)]
-        store._storage["new:key"] = [(time.time(), 1)]
+        store._storage["old:key"] = [(old_time, 1)]  # noqa: SLF001
+        store._storage["new:key"] = [(time.time(), 1)]  # noqa: SLF001
 
         cleaned = store.cleanup(max_age_seconds=5000)
 
         assert cleaned == 1
-        assert "old:key" not in store._storage
-        assert "new:key" in store._storage
+        assert "old:key" not in store._storage  # noqa: SLF001
+        assert "new:key" in store._storage  # noqa: SLF001
 
 
 class TestCreateRateLimitMiddleware:
@@ -143,11 +143,11 @@ class TestCreateRateLimitMiddleware:
         mock_app = MagicMock()
         instance = middleware_class(mock_app)
 
-        assert "/login" in instance._limits
-        assert instance._limits["/login"].max_attempts == 3
-        assert instance._limits["/login"].window_seconds == 60
-        assert "/register" in instance._limits
-        assert instance._limits["/register"].max_attempts == 1
+        assert "/login" in instance._limits  # noqa: SLF001
+        assert instance._limits["/login"].max_attempts == 3  # noqa: SLF001
+        assert instance._limits["/login"].window_seconds == 60  # noqa: SLF001
+        assert "/register" in instance._limits  # noqa: SLF001
+        assert instance._limits["/register"].max_attempts == 1  # noqa: SLF001
 
 
 class TestAuthRateLimitMiddleware:
@@ -178,8 +178,8 @@ class TestAuthRateLimitMiddleware:
         mock_app = MagicMock()
         middleware = AuthRateLimitMiddleware(mock_app)
 
-        assert "/login" in middleware._limits
-        assert "/register" in middleware._limits
+        assert "/login" in middleware._limits  # noqa: SLF001
+        assert "/register" in middleware._limits  # noqa: SLF001
 
     def test_init_with_custom_limits(self):
         """Test middleware initialization with custom limits."""
@@ -187,8 +187,8 @@ class TestAuthRateLimitMiddleware:
         limits = {"/custom": RateLimit(max_attempts=10, window_seconds=120)}
         middleware = AuthRateLimitMiddleware(mock_app, limits=limits)
 
-        assert "/custom" in middleware._limits
-        assert middleware._limits["/custom"].max_attempts == 10
+        assert "/custom" in middleware._limits  # noqa: SLF001
+        assert middleware._limits["/custom"].max_attempts == 10  # noqa: SLF001
 
     def test_get_client_ip_direct(self):
         """Test getting client IP from direct connection."""
@@ -199,7 +199,7 @@ class TestAuthRateLimitMiddleware:
         request.headers.get.return_value = None
         request.client.host = "192.168.1.1"
 
-        ip = middleware._get_client_ip(request)
+        ip = middleware._get_client_ip(request)  # noqa: SLF001
         assert ip == "192.168.1.1"
 
     def test_get_client_ip_forwarded_for(self):
@@ -213,7 +213,7 @@ class TestAuthRateLimitMiddleware:
         )
         request.client.host = "192.168.1.1"
 
-        ip = middleware._get_client_ip(request)
+        ip = middleware._get_client_ip(request)  # noqa: SLF001
         assert ip == "10.0.0.1"
 
     def test_get_client_ip_real_ip(self):
@@ -231,7 +231,7 @@ class TestAuthRateLimitMiddleware:
         request.headers.get.side_effect = get_header
         request.client.host = "192.168.1.1"
 
-        ip = middleware._get_client_ip(request)
+        ip = middleware._get_client_ip(request)  # noqa: SLF001
         assert ip == "10.0.0.5"
 
 

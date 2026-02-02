@@ -361,11 +361,11 @@ class TestGlobalMetricsFunctions:
         try:
             from mdb_engine.observability import metrics
 
-            metrics._metrics_collector = None
+            metrics._metrics_collector = None  # noqa: SLF001
             record_operation("test.global", duration_ms=10.0)
 
             collector = get_metrics_collector()
             metrics_data = collector.get_metrics()
             assert "test.global" in metrics_data["metrics"]
         finally:
-            metrics._metrics_collector = original_collector
+            metrics._metrics_collector = original_collector  # noqa: SLF001

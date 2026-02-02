@@ -934,7 +934,9 @@ async def my_route(request: Request):
 
 ### Quick Setup
 
-MDB-Engine uses **secure-by-default WebSocket authentication** with encrypted session keys in multi-app SSO setups.
+MDB-Engine uses **ticket-based authentication** for WebSocket connections in multi-app SSO setups.
+
+**Tickets are short-lived (10 seconds), single-use, and stored in-memory.**
 
 #### 1. Configure WebSocket in Manifest
 
@@ -945,7 +947,7 @@ MDB-Engine uses **secure-by-default WebSocket authentication** with encrypted se
       "path": "/ws",
       "auth": {
         "required": true,
-        "csrf_required": true  // Default: secure-by-default with encrypted session keys
+        "csrf_required": false  // Origin + SameSite provide sufficient protection
       },
       "ping_interval": 30
     }
@@ -964,19 +966,26 @@ MDB-Engine uses **secure-by-default WebSocket authentication** with encrypted se
 #### 2. Client Connection
 
 ```javascript
-// Step 1: Get WebSocket session key after login
-async function getWebSocketSessionKey() {
-  const response = await fetch('/auth/websocket-session', {
-    method: 'GET',
-    credentials: 'include',
+// Step 1: Login (existing flow - JWT stored in httpOnly cookie)
+await fetch('/auth-hub/login', {
+  method: 'POST',
+  credentials: 'include',
+  // ... login credentials
+});
+
+// Step 2: Exchange JWT for ticket
+async function getWebSocketTicket() {
+  const response = await fetch('/auth/ticket', {
+    method: 'POST',
+    credentials: 'include',  // Sends JWT cookie
   });
   const data = await response.json();
-  return data.session_key;
+  return data.ticket;
 }
 
-// Step 2: Connect WebSocket with session key
-const sessionKey = await getWebSocketSessionKey();
-const ws = new WebSocket(`wss://api.example.com/app1/ws?session_key=${sessionKey}`);
+// Step 3: Connect WebSocket with ticket
+const ticket = await getWebSocketTicket();
+const ws = new WebSocket(`wss://api.example.com/app1/ws?ticket=${ticket}`);
 
 ws.onopen = () => {
   console.log('WebSocket connected securely');
@@ -985,12 +994,13 @@ ws.onopen = () => {
 
 #### 3. Security Benefits
 
-- ✅ **XSS Protection** - Session keys not accessible to JavaScript
-- ✅ **CSRF Protection** - Encrypted session keys + Origin validation + SameSite cookies
-- ✅ **Defense-in-Depth** - Multiple security layers
-- ✅ **Encrypted Storage** - Session keys encrypted via envelope encryption
-- ✅ **Secure-by-Default** - CSRF required by default
-- ✅ **Backward Compatible** - Falls back to cookie-based auth if needed
+- ✅ **Single-Use** - Tickets consumed immediately (prevents replay attacks)
+- ✅ **Short TTL** - 10-second expiration reduces interception window
+- ✅ **No Database** - In-memory storage, faster validation
+- ✅ **No Dependencies** - Works without encryption service
+- ✅ **CSRF Protection** - Origin validation + SameSite cookies
+- ✅ **XSS Protection** - Tickets not accessible to JavaScript
+- ✅ **Secure-by-Default** - Single authentication method, no confusion
 
 **For comprehensive security documentation, see:**
 - [WebSocket Security Guide](./WEBSOCKET_SECURITY_MULTI_APP_SSO.md) - Complete security guide

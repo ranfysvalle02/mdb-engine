@@ -87,7 +87,7 @@ class TestAppRayActorInstantiation:
         assert actor.mongo_uri == "mongodb://localhost:27017"
         assert actor.db_name == "test_db"
         assert actor.use_in_memory_fallback is False
-        assert actor._initialized is False
+        assert actor._initialized is False  # noqa: SLF001
 
     def test_instantiation_with_fallback(self):
         """Test AppRayActor instantiation with fallback enabled."""

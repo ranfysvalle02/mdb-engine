@@ -426,5 +426,5 @@ Output ONLY your next guess (the complete phrase)."""
 
         except Exception as e:
             if self.state:
-                async with self.state._lock:
+                async with self.state._lock:  # noqa: SLF001
                     self.state.last_error = str(e)

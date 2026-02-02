@@ -166,10 +166,10 @@ class TestScopedCollectionWrapperSecurityIntegration:
         collection2 = wrapper.products
 
         # Verify they share the same validators/limiters
-        assert collection1._query_validator is wrapper._query_validator
-        assert collection1._resource_limiter is wrapper._resource_limiter
-        assert collection2._query_validator is wrapper._query_validator
-        assert collection2._resource_limiter is wrapper._resource_limiter
+        assert collection1._query_validator is wrapper._query_validator  # noqa: SLF001
+        assert collection1._resource_limiter is wrapper._resource_limiter  # noqa: SLF001
+        assert collection2._query_validator is wrapper._query_validator  # noqa: SLF001
+        assert collection2._resource_limiter is wrapper._resource_limiter  # noqa: SLF001
 
     @pytest.mark.asyncio
     async def test_count_documents_with_none_filter(self, mock_mongo_collection):

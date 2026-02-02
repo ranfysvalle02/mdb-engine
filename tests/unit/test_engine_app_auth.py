@@ -47,7 +47,7 @@ class TestEngineAppAuthentication:
         await engine.initialize()
 
         # Mock the secrets collection BEFORE register_app
-        secrets_collection = engine._app_secrets_manager._secrets_collection
+        secrets_collection = engine._app_secrets_manager._secrets_collection  # noqa: SLF001
         secrets_collection.find_one = AsyncMock(return_value=None)
         secrets_collection.insert_one = AsyncMock()
 
@@ -65,7 +65,7 @@ class TestEngineAppAuthentication:
         await engine.initialize()
 
         # Mock the secrets collection BEFORE register_app
-        secrets_collection = engine._app_secrets_manager._secrets_collection
+        secrets_collection = engine._app_secrets_manager._secrets_collection  # noqa: SLF001
         secrets_collection.find_one = AsyncMock(return_value=None)
         secrets_collection.insert_one = AsyncMock()
 
@@ -89,7 +89,7 @@ class TestEngineAppAuthentication:
         manifest["slug"] = "test_app"
 
         # Mock the secrets collection to simulate secret storage
-        secrets_collection = engine._app_secrets_manager._secrets_collection
+        secrets_collection = engine._app_secrets_manager._secrets_collection  # noqa: SLF001
         # Sequence: 1) app_secret_exists check (None),
         #          2) store_app_secret check (None),
         #          3) get_scoped_db_async check (exists)
@@ -123,7 +123,7 @@ class TestEngineAppAuthentication:
         await engine.register_app(sample_manifest)
 
         # Get the actual secret that was generated
-        secret = await engine._app_secrets_manager.get_app_secret("test_app")
+        secret = await engine._app_secrets_manager.get_app_secret("test_app")  # noqa: SLF001
 
         # In async context, verification is skipped, so this should work
         # The token will be verified at query time
@@ -161,13 +161,13 @@ class TestEngineAppAuthentication:
         await engine.register_app(manifest)
 
         # Get the actual secret
-        secret = await engine._app_secrets_manager.get_app_secret("test_app")
+        secret = await engine._app_secrets_manager.get_app_secret("test_app")  # noqa: SLF001
 
         # In async context, verification is skipped but read_scopes are still used
         engine.get_scoped_db("test_app", app_token=secret)
         # Verify read_scopes were set from manifest
-        assert "test_app" in engine._app_read_scopes["test_app"]
-        assert "other_app" in engine._app_read_scopes["test_app"]
+        assert "test_app" in engine._app_read_scopes["test_app"]  # noqa: SLF001
+        assert "other_app" in engine._app_read_scopes["test_app"]  # noqa: SLF001
 
     async def test_get_scoped_db_validates_read_scopes(
         self, mongodb_engine_with_secrets, master_key
@@ -187,7 +187,7 @@ class TestEngineAppAuthentication:
         await engine.register_app(manifest)
 
         # Get the actual secret
-        secret = await engine._app_secrets_manager.get_app_secret("test_app")
+        secret = await engine._app_secrets_manager.get_app_secret("test_app")  # noqa: SLF001
 
         # Try to access unauthorized scope
         # In async context, token verification is skipped, but authorization is still checked
@@ -212,16 +212,16 @@ class TestEngineAppAuthentication:
             },
         }
 
-        secrets_collection = engine._connection_manager.mongo_db["_mdb_engine_app_secrets"]
+        secrets_collection = engine._connection_manager.mongo_db["_mdb_engine_app_secrets"]  # noqa: SLF001
         secrets_collection.find_one = AsyncMock(return_value=None)
         secrets_collection.insert_one = AsyncMock()
 
         await engine.register_app(manifest)
 
         # Verify read_scopes were stored
-        assert "test_app" in engine._app_read_scopes
-        assert "test_app" in engine._app_read_scopes["test_app"]
-        assert "shared_app" in engine._app_read_scopes["test_app"]
+        assert "test_app" in engine._app_read_scopes  # noqa: SLF001
+        assert "test_app" in engine._app_read_scopes["test_app"]  # noqa: SLF001
+        assert "shared_app" in engine._app_read_scopes["test_app"]  # noqa: SLF001
 
     async def test_register_app_warns_missing_apps(self, mongodb_engine_with_secrets, master_key):
         """Test that register_app warns if referenced apps don't exist."""
@@ -236,7 +236,7 @@ class TestEngineAppAuthentication:
             },
         }
 
-        secrets_collection = engine._connection_manager.mongo_db["_mdb_engine_app_secrets"]
+        secrets_collection = engine._connection_manager.mongo_db["_mdb_engine_app_secrets"]  # noqa: SLF001
         secrets_collection.find_one = AsyncMock(return_value=None)
         secrets_collection.insert_one = AsyncMock()
 

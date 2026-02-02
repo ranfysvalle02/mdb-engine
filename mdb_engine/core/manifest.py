@@ -1373,6 +1373,20 @@ MANIFEST_SCHEMA_V2 = {
                                 "alive (default: 30, min: 5, max: 300)"
                             ),
                         },
+                        "ticket_ttl_seconds": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 60,
+                            "default": 10,
+                            "description": (
+                                "WebSocket ticket time-to-live in seconds (default: 10). "
+                                "Tickets are single-use authentication tokens for "
+                                "WebSocket connections. "
+                                "Shorter TTL (3-5s) provides better security but requires "
+                                "faster connection. "
+                                "Longer TTL (10-30s) is more forgiving for slow networks."
+                            ),
+                        },
                     },
                     "required": ["path"],
                     "additionalProperties": False,

@@ -57,10 +57,10 @@ class TestAppRegistrationErrorHandling:
             mock_collection.replace_one = AsyncMock(
                 return_value=MagicMock(modified_count=1, upserted_id="test_id")
             )
-            mock_mongo_database.__getitem__ = lambda name: mock_collection
+            mock_mongo_database.__getitem__ = lambda name: mock_collection  # noqa: SLF001
             app_registration_manager.mongo_db = mock_mongo_database
             # Also need to set apps_config attribute
-            app_registration_manager._mongo_db = mock_mongo_database
+            app_registration_manager._mongo_db = mock_mongo_database  # noqa: SLF001
             mock_mongo_database.apps_config = mock_collection
 
             # Mock callbacks that raise errors
@@ -77,7 +77,7 @@ class TestAppRegistrationErrorHandling:
 
             # Should still register app even if callbacks fail
             assert result is True
-            assert sample_manifest["slug"] in app_registration_manager._apps
+            assert sample_manifest["slug"] in app_registration_manager.apps
 
     @pytest.mark.asyncio
     async def test_register_app_persistence_errors(
@@ -97,15 +97,15 @@ class TestAppRegistrationErrorHandling:
             mock_collection.replace_one = AsyncMock(
                 side_effect=ConnectionFailure("Connection failed")
             )
-            mock_mongo_database.__getitem__ = lambda name: mock_collection
+            mock_mongo_database.__getitem__ = lambda name: mock_collection  # noqa: SLF001
             mock_mongo_database.apps_config = mock_collection
             app_registration_manager.mongo_db = mock_mongo_database
-            app_registration_manager._mongo_db = mock_mongo_database
+            app_registration_manager._mongo_db = mock_mongo_database  # noqa: SLF001
 
             result = await app_registration_manager.register_app(sample_manifest)
             # Should still register app in memory even if persistence fails
             assert result is True
-            assert sample_manifest["slug"] in app_registration_manager._apps
+            assert sample_manifest["slug"] in app_registration_manager.apps
 
             # Test OperationFailure
             mock_collection.replace_one = AsyncMock(
@@ -134,10 +134,10 @@ class TestAppRegistrationErrorHandling:
             mock_collection.replace_one = AsyncMock(
                 return_value=MagicMock(modified_count=1, upserted_id="test_id")
             )
-            mock_mongo_database.__getitem__ = lambda name: mock_collection
+            mock_mongo_database.__getitem__ = lambda name: mock_collection  # noqa: SLF001
             mock_mongo_database.apps_config = mock_collection
             app_registration_manager.mongo_db = mock_mongo_database
-            app_registration_manager._mongo_db = mock_mongo_database
+            app_registration_manager._mongo_db = mock_mongo_database  # noqa: SLF001
 
             # Mock auth integration to raise errors - the function is imported from auth.integration
             # Test AttributeError (function doesn't exist in module)
@@ -189,10 +189,10 @@ class TestAppRegistrationEdgeCases:
             mock_collection.replace_one = AsyncMock(
                 return_value=MagicMock(modified_count=1, upserted_id="test_id")
             )
-            mock_mongo_database.__getitem__ = lambda name: mock_collection
+            mock_mongo_database.__getitem__ = lambda name: mock_collection  # noqa: SLF001
             app_registration_manager.mongo_db = mock_mongo_database
             # Also need to set apps_config attribute
-            app_registration_manager._mongo_db = mock_mongo_database
+            app_registration_manager._mongo_db = mock_mongo_database  # noqa: SLF001
             mock_mongo_database.apps_config = mock_collection
 
             # Create callbacks
@@ -246,10 +246,10 @@ class TestAppRegistrationEdgeCases:
             mock_collection.replace_one = AsyncMock(
                 return_value=MagicMock(modified_count=1, upserted_id="test_id")
             )
-            mock_mongo_database.__getitem__ = lambda name: mock_collection
+            mock_mongo_database.__getitem__ = lambda name: mock_collection  # noqa: SLF001
             app_registration_manager.mongo_db = mock_mongo_database
             # Also need to set apps_config attribute
-            app_registration_manager._mongo_db = mock_mongo_database
+            app_registration_manager._mongo_db = mock_mongo_database  # noqa: SLF001
             mock_mongo_database.apps_config = mock_collection
 
             # Callbacks that fail
@@ -263,7 +263,7 @@ class TestAppRegistrationEdgeCases:
 
             # Should still register app
             assert result is True
-            assert sample_manifest["slug"] in app_registration_manager._apps
+            assert sample_manifest["slug"] in app_registration_manager.apps
 
     @pytest.mark.asyncio
     async def test_register_app_callbacks_run_in_parallel(
@@ -284,9 +284,9 @@ class TestAppRegistrationEdgeCases:
             mock_collection.replace_one = AsyncMock(
                 return_value=MagicMock(modified_count=1, upserted_id="test_id")
             )
-            mock_mongo_database.__getitem__ = lambda name: mock_collection
+            mock_mongo_database.__getitem__ = lambda name: mock_collection  # noqa: SLF001
             app_registration_manager.mongo_db = mock_mongo_database
-            app_registration_manager._mongo_db = mock_mongo_database
+            app_registration_manager._mongo_db = mock_mongo_database  # noqa: SLF001
             mock_mongo_database.apps_config = mock_collection
 
             # Track callback execution times
@@ -358,9 +358,9 @@ class TestAppRegistrationEdgeCases:
             mock_collection.replace_one = AsyncMock(
                 return_value=MagicMock(modified_count=1, upserted_id="test_id")
             )
-            mock_mongo_database.__getitem__ = lambda name: mock_collection
+            mock_mongo_database.__getitem__ = lambda name: mock_collection  # noqa: SLF001
             app_registration_manager.mongo_db = mock_mongo_database
-            app_registration_manager._mongo_db = mock_mongo_database
+            app_registration_manager._mongo_db = mock_mongo_database  # noqa: SLF001
             mock_mongo_database.apps_config = mock_collection
 
             # Track which callbacks executed
@@ -413,9 +413,9 @@ class TestAppRegistrationEdgeCases:
             mock_collection.replace_one = AsyncMock(
                 return_value=MagicMock(modified_count=1, upserted_id="test_id")
             )
-            mock_mongo_database.__getitem__ = lambda name: mock_collection
+            mock_mongo_database.__getitem__ = lambda name: mock_collection  # noqa: SLF001
             app_registration_manager.mongo_db = mock_mongo_database
-            app_registration_manager._mongo_db = mock_mongo_database
+            app_registration_manager._mongo_db = mock_mongo_database  # noqa: SLF001
             mock_mongo_database.apps_config = mock_collection
 
             # Create failing callback
@@ -453,11 +453,11 @@ class TestAppRegistrationEdgeCases:
         mock_collection = MagicMock()
         # find() is NOT async - it returns a cursor immediately
         mock_collection.find = MagicMock(return_value=mock_cursor)
-        mock_mongo_database.__getitem__ = lambda name: mock_collection
+        mock_mongo_database.__getitem__ = lambda name: mock_collection  # noqa: SLF001
         mock_mongo_database.apps_config = mock_collection
 
         app_registration_manager.mongo_db = mock_mongo_database
-        app_registration_manager._mongo_db = mock_mongo_database
+        app_registration_manager._mongo_db = mock_mongo_database  # noqa: SLF001
 
         register_callback = AsyncMock()
         count = await app_registration_manager.reload_apps(register_app_callback=register_callback)
@@ -479,11 +479,11 @@ class TestAppRegistrationEdgeCases:
         mock_collection = MagicMock()
         # find() is NOT async - it returns a cursor immediately
         mock_collection.find = MagicMock(return_value=mock_cursor)
-        mock_mongo_database.__getitem__ = lambda name: mock_collection
+        mock_mongo_database.__getitem__ = lambda name: mock_collection  # noqa: SLF001
         mock_mongo_database.apps_config = mock_collection
 
         app_registration_manager.mongo_db = mock_mongo_database
-        app_registration_manager._mongo_db = mock_mongo_database
+        app_registration_manager._mongo_db = mock_mongo_database  # noqa: SLF001
 
         # Callback that fails with a MongoDB exception (which will be caught)
         from pymongo.errors import OperationFailure
@@ -509,11 +509,11 @@ class TestAppRegistrationEdgeCases:
         mock_collection = MagicMock()
         # find() is NOT async - it returns a cursor immediately
         mock_collection.find = MagicMock(return_value=mock_cursor)
-        mock_mongo_database.__getitem__ = lambda name: mock_collection
+        mock_mongo_database.__getitem__ = lambda name: mock_collection  # noqa: SLF001
         mock_mongo_database.apps_config = mock_collection
 
         app_registration_manager.mongo_db = mock_mongo_database
-        app_registration_manager._mongo_db = mock_mongo_database
+        app_registration_manager._mongo_db = mock_mongo_database  # noqa: SLF001
 
         # Mock successful validation
         app_registration_manager.manifest_validator.validate = AsyncMock(

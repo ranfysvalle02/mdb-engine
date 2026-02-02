@@ -149,6 +149,7 @@ class MongoDBEngine:
         self._encryption_service: EnvelopeEncryptionService | None = None
         self._app_secrets_manager: AppSecretsManager | None = None
         self._websocket_session_manager: Any | None = None  # WebSocketSessionManager
+        self._websocket_ticket_store: Any | None = None  # WebSocketTicketStore
 
         # Store app read_scopes mapping for validation
         self._app_read_scopes: dict[str, list[str]] = {}
@@ -210,6 +211,13 @@ class MongoDBEngine:
                 encryption_service=self._encryption_service,
             )
 
+        # Initialize WebSocket ticket store (in-memory, no dependencies needed)
+        # Tickets are preferred for multi-app SSO setups (short-lived, single-use)
+        from ..auth.websocket_tickets import WebSocketTicketStore
+
+        self._websocket_ticket_store = WebSocketTicketStore()
+        logger.info("WebSocket ticket store initialized")
+
         # Set up component managers
         self._app_registration_manager = AppRegistrationManager(
             mongo_db=self._connection_manager.mongo_db,
@@ -264,6 +272,16 @@ class MongoDBEngine:
     def has_ray(self) -> bool:
         """Check if Ray is enabled and initialized."""
         return self.enable_ray and self.ray_actor is not None
+
+    @property
+    def connection_manager(self):
+        """
+        Get the connection manager.
+
+        Returns:
+            ConnectionManager instance
+        """
+        return self._connection_manager
 
     @property
     def mongo_client(self) -> AsyncIOMotorClient:
@@ -709,6 +727,25 @@ class MongoDBEngine:
             app: FastAPI application instance
             slug: App slug
         """
+        # CRITICAL: Ensure websocket_ticket_store is available
+        # Ticket authentication is required for WebSocket connections
+        if not self._websocket_ticket_store:
+            error_msg = (
+                f"WebSocket routes cannot be registered for app '{slug}': "
+                "websocket_ticket_store is not available. "
+                "WebSocket authentication requires ticket store to be initialized."
+            )
+            contextual_logger.error(error_msg)
+            raise RuntimeError(error_msg)
+
+        # Ensure ticket store is in app state (may have been set in create_app)
+        if (
+            not hasattr(app.state, "websocket_ticket_store")
+            or app.state.websocket_ticket_store is None
+        ):
+            app.state.websocket_ticket_store = self._websocket_ticket_store
+            contextual_logger.debug(f"WebSocket ticket store stored in app state for '{slug}'")
+
         # Check if WebSockets are configured for this app
         websockets_config = self.get_websocket_config(slug)
         if not websockets_config:
@@ -915,9 +952,9 @@ class MongoDBEngine:
         return get_embedding_service_for_app(slug, self)
 
     @property
-    def _apps(self) -> dict[str, Any]:
+    def apps(self) -> dict[str, Any]:
         """
-        Get the apps dictionary (for backward compatibility with tests).
+        Get all registered apps.
 
         Returns:
             Dictionary of registered apps
@@ -927,7 +964,27 @@ class MongoDBEngine:
         """
         if not self._app_registration_manager:
             raise RuntimeError("MongoDBEngine not initialized. Call initialize() first.")
-        return self._app_registration_manager._apps
+        return self._app_registration_manager.apps
+
+    @property
+    def websocket_ticket_store(self):
+        """
+        Get the WebSocket ticket store.
+
+        Returns:
+            WebSocketTicketStore instance or None if not initialized
+        """
+        return self._websocket_ticket_store
+
+    @property
+    def websocket_session_manager(self):
+        """
+        Get the WebSocket session manager.
+
+        Returns:
+            WebSocketSessionManager instance or None if not initialized
+        """
+        return self._websocket_session_manager
 
     def list_apps(self) -> list[str]:
         """
@@ -1100,6 +1157,73 @@ class MongoDBEngine:
     # FastAPI Integration Methods
     # =========================================================================
 
+    async def _register_websocket_endpoints(self, app: "FastAPI", engine: "MongoDBEngine") -> None:
+        """Register WebSocket ticket and session endpoints."""
+        # Register WebSocket ticket endpoint AFTER initialization
+        # (ticket store is now available)
+        if engine.websocket_ticket_store:
+            app.state.websocket_ticket_store = engine.websocket_ticket_store
+            logger.info("WebSocket ticket store stored in app state")
+
+            # Set global ticket store for WebSocket authentication (works with routers)
+            from ..routing.websockets import set_global_websocket_ticket_store
+
+            set_global_websocket_ticket_store(engine.websocket_ticket_store)
+            logger.info("Global WebSocket ticket store set for multi-app authentication")
+
+            # Register WebSocket ticket endpoint
+            from ..auth.websocket_tickets import create_websocket_ticket_endpoint
+
+            ticket_endpoint = create_websocket_ticket_endpoint(engine.websocket_ticket_store)
+            app.post("/auth/ticket")(ticket_endpoint)
+            logger.info("WebSocket ticket endpoint registered at /auth/ticket")
+
+        # Register WebSocket session endpoint AFTER initialization
+        # (session manager is now available)
+        if engine.websocket_session_manager:
+            app.state.websocket_session_manager = engine.websocket_session_manager
+            logger.info("WebSocket session manager stored in app state")
+
+            # Register WebSocket session endpoint
+            from ..auth.websocket_sessions import create_websocket_session_endpoint
+
+            session_endpoint = create_websocket_session_endpoint(engine.websocket_session_manager)
+            app.get("/auth/websocket-session")(session_endpoint)
+            logger.info("WebSocket session endpoint registered at /auth/websocket-session")
+
+    async def _configure_websocket_ticket_ttl(
+        self, app: "FastAPI", app_manifest: dict[str, Any], slug: str
+    ) -> None:
+        """Configure WebSocket ticket TTL from manifest."""
+        websockets_config = app_manifest.get("websockets", {})
+        if not websockets_config:
+            return
+
+        from ..auth.websocket_tickets import WebSocketTicketStore
+
+        ticket_ttl_values: list[int] = []
+        for endpoint_config in websockets_config.values():
+            if isinstance(endpoint_config, dict):
+                ticket_ttl = endpoint_config.get("ticket_ttl_seconds")
+                if ticket_ttl is not None:
+                    ticket_ttl_values.append(ticket_ttl)
+
+        if ticket_ttl_values:
+            configured_ticket_ttl = min(ticket_ttl_values)  # Use minimum for maximum security
+            # Reinitialize ticket store if needed
+            ticket_store = self._websocket_ticket_store
+            if ticket_store is None or ticket_store.ticket_ttl != configured_ticket_ttl:
+                self._websocket_ticket_store = WebSocketTicketStore(
+                    ticket_ttl_seconds=configured_ticket_ttl
+                )
+                logger.info(
+                    f"WebSocket ticket store initialized with TTL: "
+                    f"{configured_ticket_ttl}s (from app '{slug}' manifest)"
+                )
+                # Update app state if ticket store was already set
+                if hasattr(app.state, "websocket_ticket_store"):
+                    app.state.websocket_ticket_store = self._websocket_ticket_store
+
     def create_app(
         self,
         slug: str,
@@ -1199,8 +1323,15 @@ class MongoDBEngine:
             if not is_sub_app:
                 await engine.initialize()
 
+            # Register WebSocket endpoints
+            await self._register_websocket_endpoints(app, engine)
+
             # Load and register manifest
             app_manifest = await engine.load_manifest(manifest_path)
+
+            # Configure WebSocket ticket TTL from manifest
+            await self._configure_websocket_ticket_ttl(app, app_manifest, slug)
+
             await engine.register_app(app_manifest)
 
             # Auto-detect multi-site mode from manifest
@@ -1235,11 +1366,11 @@ class MongoDBEngine:
                             f"Sub-app '{slug}' uses shared auth but user_pool not found. "
                             "Initializing now (parent should have initialized it)."
                         )
-                        await engine._initialize_shared_user_pool(app, app_manifest)
+                        await self._initialize_shared_user_pool(app, app_manifest)
                     else:
                         logger.debug(f"Sub-app '{slug}' using shared user_pool from parent app")
                 else:
-                    await engine._initialize_shared_user_pool(app, app_manifest)
+                    await self._initialize_shared_user_pool(app, app_manifest)
             else:
                 logger.info(f"Per-app auth mode for '{slug}'")
                 # Auto-retrieve app token for "app" mode
@@ -1505,6 +1636,10 @@ class MongoDBEngine:
                 f"(require_role={auth_config.get('require_role')})"
             )
 
+        # NOTE: WebSocket ticket endpoint registration is moved to lifespan context manager
+        # (after engine.initialize()) because ticket store is only available after initialization.
+        # This ensures consistency with create_multi_app() behavior.
+
         # Add CSRF middleware (after auth - auto-enabled for shared mode)
         # CSRF protection is enabled by default for shared auth mode
         # SKIP for sub-apps in multi-app setups - parent app handles CSRF
@@ -1512,8 +1647,17 @@ class MongoDBEngine:
         if csrf_config and not is_sub_app:  # Don't add CSRF to child apps
             from ..auth.csrf import create_csrf_middleware
 
+            # Add ticket endpoint to public routes (it handles its own auth)
+            public_routes = auth_config.get("public_routes", [])
+            public_routes_with_ticket = list(public_routes) + ["/auth/ticket"]
+
+            csrf_config_with_routes = {
+                **auth_config,
+                "public_routes": public_routes_with_ticket,
+            }
+
             csrf_middleware = create_csrf_middleware(
-                manifest_auth=auth_config,
+                manifest_auth=csrf_config_with_routes,
             )
             app.add_middleware(csrf_middleware)
             logger.info(f"CSRFMiddleware added for '{slug}'")
@@ -2142,6 +2286,7 @@ class MongoDBEngine:
             )
 
         # Check if any app uses shared auth and collect public routes for CSRF exemption
+        # Also collect ticket TTL values from websocket configs
         has_shared_auth = False
         all_public_routes = [
             "/health",
@@ -2149,6 +2294,7 @@ class MongoDBEngine:
             "/openapi.json",
             "/_mdb/routes",
         ]  # Base exempt routes
+        ticket_ttl_values: list[int] = []  # Collect ticket TTLs from all apps
         for app_config in apps:
             try:
                 manifest_path = app_config["manifest"]
@@ -2168,8 +2314,44 @@ class MongoDBEngine:
                         prefixed_route = f"{path_prefix.rstrip('/')}/{route}"
                     if prefixed_route not in all_public_routes:
                         all_public_routes.append(prefixed_route)
+
+                # Collect ticket TTL from websocket configs
+                websockets_config = app_manifest_pre.get("websockets", {})
+                if websockets_config:
+                    for endpoint_config in websockets_config.values():
+                        if isinstance(endpoint_config, dict):
+                            ticket_ttl = endpoint_config.get("ticket_ttl_seconds")
+                            if ticket_ttl is not None:
+                                ticket_ttl_values.append(ticket_ttl)
             except (FileNotFoundError, json.JSONDecodeError, KeyError) as e:
                 logger.warning(f"Could not check auth mode for app '{app_config.get('slug')}': {e}")
+
+        # Determine ticket TTL: use minimum from app configs (most secure), or default
+        from ..auth.websocket_tickets import DEFAULT_TICKET_TTL_SECONDS
+
+        if ticket_ttl_values:
+            configured_ticket_ttl = min(ticket_ttl_values)  # Use minimum for maximum security
+            logger.info(
+                f"Ticket TTL configured from app manifests: {configured_ticket_ttl}s "
+                f"(found values: {ticket_ttl_values}, using minimum)"
+            )
+        else:
+            configured_ticket_ttl = DEFAULT_TICKET_TTL_SECONDS
+            logger.debug(
+                f"No ticket TTL specified in app manifests, using default: {configured_ticket_ttl}s"
+            )
+
+        # Reinitialize ticket store with configured TTL if different from current
+        if (
+            self._websocket_ticket_store is None
+            or self._websocket_ticket_store.ticket_ttl != configured_ticket_ttl
+        ):
+            from ..auth.websocket_tickets import WebSocketTicketStore
+
+            self._websocket_ticket_store = WebSocketTicketStore(
+                ticket_ttl_seconds=configured_ticket_ttl
+            )
+            logger.info(f"WebSocket ticket store initialized with TTL: {configured_ticket_ttl}s")
 
         # Validate hooks before creating lifespan (fail fast)
         for app_config in apps:
@@ -2291,10 +2473,49 @@ class MongoDBEngine:
                 logger.debug(f"No WebSocket configuration found for app '{slug}'")
                 return
 
+            # CRITICAL: Check if session manager is required and available
+            # Some endpoints require session keys (csrf_required=True), which need
+            # session manager
+            requires_session_manager = False
+            for _endpoint_name, endpoint_config in websockets_config.items():
+                auth_config = endpoint_config.get("auth", {})
+                if isinstance(auth_config, dict):
+                    csrf_required = auth_config.get("csrf_required", True)  # Default to True
+                    if csrf_required:
+                        requires_session_manager = True
+                        break
+
+            if requires_session_manager and not engine.websocket_session_manager:
+                error_msg = (
+                    f"WebSocket routes cannot be registered for app '{slug}': "
+                    "websocket_session_manager is not available. "
+                    "WebSocket endpoints with csrf_required=True require "
+                    "session manager to be initialized. "
+                    "Set MDB_ENGINE_MASTER_KEY environment variable to enable "
+                    "session manager."
+                )
+                logger.error(error_msg)
+                raise RuntimeError(error_msg)
+
+            # CRITICAL: Ensure websocket_ticket_store is available
+            # Ticket authentication is required for WebSocket connections
+            if not engine.websocket_ticket_store:
+                error_msg = (
+                    f"WebSocket routes cannot be registered for app '{slug}': "
+                    "websocket_ticket_store is not available. "
+                    "WebSocket authentication requires ticket store to be initialized."
+                )
+                logger.error(error_msg)
+                raise RuntimeError(error_msg)
+
             # Store WebSocket config in parent app state for CSRF middleware to access
             if not hasattr(parent_app.state, "websocket_configs"):
                 parent_app.state.websocket_configs = {}
             parent_app.state.websocket_configs[slug] = websockets_config
+            logger.info(
+                f"✅ Stored WebSocket config for '{slug}' in parent app state "
+                f"({len(websockets_config)} endpoint(s))"
+            )
 
             try:
                 from fastapi import APIRouter
@@ -2335,15 +2556,50 @@ class MongoDBEngine:
                             ping_interval=ping_interval,
                         )
 
-                        # Register on parent app with full path
-                        ws_router = APIRouter()
-                        ws_router.websocket(full_ws_path)(handler)
-                        parent_app.include_router(ws_router)
+                        # Register on parent app with full path using FastAPI's
+                        # proper WebSocket registration
+                        # We register BEFORE mounting apps to ensure WebSocket
+                        # routes are checked first
+                        try:
+                            # Use FastAPI's APIRouter approach (same as single-app mode)
+                            # This maintains FastAPI features
+                            # (dependency injection, OpenAPI docs, etc.)
+                            ws_router = APIRouter()
+                            ws_router.websocket(full_ws_path)(handler)
+
+                            # Include router BEFORE mounting child app to ensure route priority
+                            parent_app.include_router(ws_router)
+
+                            logger.info(
+                                f"✅ Registered WebSocket route '{full_ws_path}' "
+                                f"using FastAPI APIRouter "
+                                f"(registered before app mount to ensure priority)"
+                            )
+                        except (
+                            ValueError,
+                            RuntimeError,
+                            AttributeError,
+                            TypeError,
+                        ) as fastapi_error:
+                            logger.error(
+                                f"❌ Failed to register WebSocket route "
+                                f"'{full_ws_path}' with FastAPI: {fastapi_error}",
+                                exc_info=True,
+                            )
+                            raise
 
                         logger.info(
                             f"✅ Registered WebSocket route '{full_ws_path}' "
                             f"for mounted app '{slug}' (mounted at '{path_prefix}', "
                             f"auth: {require_auth}, ping: {ping_interval}s)"
+                        )
+                        import sys
+
+                        print(
+                            f"✅ [ROUTE REGISTRATION] WebSocket route '{full_ws_path}' "
+                            f"registered for '{slug}' using FastAPI APIRouter",
+                            file=sys.stderr,
+                            flush=True,
                         )
 
                         # Verify route was actually registered
@@ -2352,6 +2608,26 @@ class MongoDBEngine:
                             for r in parent_app.routes
                             if hasattr(r, "path") and full_ws_path in str(getattr(r, "path", ""))
                         ]
+
+                        # CRITICAL: Log all WebSocket routes to verify registration
+                        # FastAPI APIRouter creates routes of type 'APIWebSocketRoute'
+                        all_ws_routes = [
+                            (r.path, type(r).__name__)
+                            for r in parent_app.routes
+                            if hasattr(r, "path")
+                            and ("ws" in str(r.path).lower() or hasattr(r, "endpoint"))
+                        ]
+                        import sys
+
+                        print(
+                            f"📋 [ROUTE VERIFICATION] All WebSocket-like routes: {all_ws_routes}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+                        logger.info(
+                            f"📋 [ROUTE VERIFICATION] All WebSocket-like routes: {all_ws_routes}"
+                        )
+
                         if registered_routes:
                             registered_count += 1
                             logger.debug(
@@ -2403,6 +2679,40 @@ class MongoDBEngine:
             # Initialize engine
             await engine.initialize()
 
+            # Register WebSocket ticket endpoint AFTER initialization
+            # (ticket store is now available)
+            if engine.websocket_ticket_store:
+                app.state.websocket_ticket_store = engine.websocket_ticket_store
+                logger.info("WebSocket ticket store stored in parent app state")
+
+                # Set global ticket store for WebSocket authentication (works with routers)
+                from ..routing.websockets import set_global_websocket_ticket_store
+
+                set_global_websocket_ticket_store(engine.websocket_ticket_store)
+                logger.info("Global WebSocket ticket store set for multi-app authentication")
+
+                # Register WebSocket ticket endpoint on parent app
+                from ..auth.websocket_tickets import create_websocket_ticket_endpoint
+
+                ticket_endpoint = create_websocket_ticket_endpoint(engine.websocket_ticket_store)
+                app.post("/auth/ticket")(ticket_endpoint)
+                logger.info("WebSocket ticket endpoint registered at /auth/ticket")
+
+            # Register WebSocket session endpoint AFTER initialization
+            # (session manager is now available)
+            if engine.websocket_session_manager:
+                app.state.websocket_session_manager = engine.websocket_session_manager
+                logger.info("WebSocket session manager stored in parent app state")
+
+                # Register WebSocket session endpoint on parent app
+                from ..auth.websocket_sessions import create_websocket_session_endpoint
+
+                session_endpoint = create_websocket_session_endpoint(
+                    engine.websocket_session_manager
+                )
+                app.get("/auth/websocket-session")(session_endpoint)
+                logger.info("WebSocket session endpoint registered at /auth/websocket-session")
+
             # Initialize shared user pool once if any app uses shared auth
             if has_shared_auth:
                 logger.info("Initializing shared user pool for multi-app deployment")
@@ -2414,7 +2724,7 @@ class MongoDBEngine:
                             app_manifest_pre = json.load(f)
                         auth_config = app_manifest_pre.get("auth", {})
                         if auth_config.get("mode") == "shared":
-                            await engine._initialize_shared_user_pool(app, app_manifest_pre)
+                            await self._initialize_shared_user_pool(app, app_manifest_pre)
                             shared_user_pool_initialized = True
                             logger.info("Shared user pool initialized for multi-app deployment")
                             break
@@ -2509,6 +2819,11 @@ class MongoDBEngine:
                         )
                         logger.debug(f"Shared WebSocket session manager with child app '{slug}'")
 
+                    # Share WebSocket ticket store with child app
+                    if hasattr(app.state, "websocket_ticket_store"):
+                        child_app.state.websocket_ticket_store = app.state.websocket_ticket_store
+                        logger.debug(f"Shared WebSocket ticket store with child app '{slug}'")
+
                     # Add middleware for app context helpers
                     from starlette.middleware.base import BaseHTTPMiddleware
                     from starlette.requests import Request
@@ -2596,14 +2911,16 @@ class MongoDBEngine:
                     child_app.add_middleware(middleware_class)
                     logger.debug(f"Added AppContextMiddleware to child app '{slug}'")
 
-                    # Mount child app at path prefix
+                    # CRITICAL FIX: Register WebSocket routes on parent app BEFORE mounting
+                    # This ensures WebSocket routes are checked before mounted app routes
+                    # Mounted apps create catch-all routes that intercept /app-slug/* paths
+                    await _register_websocket_routes(app, app_manifest_data, slug, path_prefix)
+
+                    # Mount child app at path prefix (AFTER WebSocket routes are registered)
                     app.mount(path_prefix, child_app)
 
                     # CRITICAL FIX: Merge CORS config from child app to parent app
                     await _merge_cors_config_to_parent(app, child_app, app_manifest_data, slug)
-
-                    # CRITICAL FIX: Register WebSocket routes on parent app with full path
-                    await _register_websocket_routes(app, app_manifest_data, slug, path_prefix)
 
                     # Update existing entry instead of appending
                     entry = _find_mounted_app_entry(slug)
@@ -2733,6 +3050,11 @@ class MongoDBEngine:
                                 "manifest_path": str(manifest_path),
                             }
                         )
+                    # Always re-raise RuntimeError for critical failures
+                    # (like missing session manager)
+                    # These are configuration errors that should fail fast
+                    if isinstance(e, RuntimeError) and "websocket_session_manager" in str(e):
+                        raise RuntimeError(error_msg) from e
                     if strict:
                         raise RuntimeError(error_msg) from e
                     continue
@@ -2826,11 +3148,78 @@ class MongoDBEngine:
         logger.debug("Set default CORS config on parent app for WebSocket origin validation")
 
         # Store app reference in engine for get_mounted_apps()
-        engine._multi_app_instance = parent_app
+        self._multi_app_instance = parent_app
 
-        # Add request scope middleware
+        # Add diagnostic ASGI middleware FIRST (outermost - runs before everything)
+        # This will catch WebSocket upgrades before any other middleware
         from starlette.middleware.base import BaseHTTPMiddleware
 
+        class DiagnosticMiddleware(BaseHTTPMiddleware):
+            """Diagnostic middleware to log ALL requests, especially WebSocket upgrades."""
+
+            async def dispatch(self, request, call_next):
+                path = request.url.path
+                method = request.method
+                upgrade_header = request.headers.get("upgrade", "").lower()
+                connection_header = request.headers.get("connection", "").lower()
+                origin_header = request.headers.get("origin")
+
+                # Log WebSocket upgrade attempts IMMEDIATELY
+                if upgrade_header == "websocket" or "websocket" in path.lower():
+                    import sys
+
+                    print(
+                        f"🔬 [DIAGNOSTIC MIDDLEWARE] WebSocket upgrade detected: "
+                        f"{method} {path}, upgrade={upgrade_header}, "
+                        f"connection={connection_header}, origin={origin_header}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    logger.info(
+                        f"🔬 [DIAGNOSTIC MIDDLEWARE] WebSocket upgrade: {method} {path}, "
+                        f"origin={origin_header}"
+                    )
+
+                try:
+                    response = await call_next(request)
+
+                    # Log response for WebSocket upgrades
+                    if upgrade_header == "websocket" or "websocket" in path.lower():
+                        import sys
+
+                        print(
+                            f"🔬 [DIAGNOSTIC MIDDLEWARE] WebSocket response: "
+                            f"{method} {path} -> {response.status_code}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+                        logger.info(
+                            f"🔬 [DIAGNOSTIC MIDDLEWARE] WebSocket response: "
+                            f"{method} {path} -> {response.status_code}"
+                        )
+
+                    return response
+                except (RuntimeError, ConnectionError, ValueError, AttributeError) as e:
+                    if upgrade_header == "websocket" or "websocket" in path.lower():
+                        import sys
+
+                        print(
+                            f"🔬 [DIAGNOSTIC MIDDLEWARE] WebSocket exception: "
+                            f"{method} {path} -> {type(e).__name__}: {e}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+                        logger.error(
+                            f"🔬 [DIAGNOSTIC MIDDLEWARE] WebSocket exception: "
+                            f"{method} {path} -> {type(e).__name__}: {e}",
+                            exc_info=True,
+                        )
+                    raise
+
+        parent_app.add_middleware(DiagnosticMiddleware)
+        logger.debug("DiagnosticMiddleware added for parent app (outermost layer)")
+
+        # Add request scope middleware
         from ..di import ScopeManager
 
         class RequestScopeMiddleware(BaseHTTPMiddleware):
@@ -2854,32 +3243,27 @@ class MongoDBEngine:
             from ..auth.csrf import create_csrf_middleware
 
             # Create CSRF middleware with default config (will use parent app's CORS config)
-            # Exempt routes that don't need CSRF (health checks, public routes from child apps)
-            # all_public_routes includes base routes + child app public routes with path prefixes
-            # Add WebSocket session endpoint to public routes (it handles its own auth)
-            public_routes_with_session_endpoint = list(all_public_routes) + [
-                "/auth/websocket-session"
+            # Exempt routes that don't need CSRF (health checks, public routes
+            # from child apps)
+            # all_public_routes includes base routes + child app public routes
+            # with path prefixes
+            # Add WebSocket session and ticket endpoints to public routes
+            # (they handle their own auth)
+            public_routes_with_websocket_endpoints = list(all_public_routes) + [
+                "/auth/websocket-session",
+                "/auth/ticket",
             ]
             parent_csrf_config = {
                 "csrf_protection": True,
-                "public_routes": public_routes_with_session_endpoint,
+                "public_routes": public_routes_with_websocket_endpoints,
             }
             csrf_middleware = create_csrf_middleware(parent_csrf_config)
             parent_app.add_middleware(csrf_middleware)
 
-            # Store WebSocket session manager in app state for CSRF middleware and endpoints
-            if self._websocket_session_manager:
-                parent_app.state.websocket_session_manager = self._websocket_session_manager
-                logger.info("WebSocket session manager stored in parent app state")
-
-                # Register WebSocket session endpoint on parent app
-                from ..auth.websocket_sessions import create_websocket_session_endpoint
-
-                session_endpoint = create_websocket_session_endpoint(
-                    self._websocket_session_manager
-                )
-                parent_app.get("/auth/websocket-session")(session_endpoint)
-                logger.info("WebSocket session endpoint registered at /auth/websocket-session")
+            # NOTE: WebSocket ticket and session endpoint registrations are moved to lifespan
+            # context manager (after engine.initialize()) because they're only available after
+            # initialization. The CSRF middleware still needs to know about these routes, so
+            # they're added to public_routes_with_websocket_endpoints above.
 
             logger.info("CSRFMiddleware added to parent app for WebSocket origin validation")
 
@@ -2903,6 +3287,21 @@ class MongoDBEngine:
                 async def dispatch(self, request: Request, call_next):
                     # Read CORS config from app.state (may have been merged from child apps)
                     cors_config = getattr(request.app.state, "cors_config", {})
+
+                    # CRITICAL: Log WebSocket upgrade requests to see if CORS
+                    # is intercepting them
+                    upgrade_header = request.headers.get("upgrade", "").lower()
+                    if upgrade_header == "websocket" or "websocket" in request.url.path.lower():
+                        import sys
+
+                        print(
+                            f"🌐 [CORS MIDDLEWARE] WebSocket upgrade: "
+                            f"{request.method} {request.url.path}, "
+                            f"origin={request.headers.get('origin')}, "
+                            f"cors_enabled={cors_config.get('enabled', False)}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
 
                     if not cors_config.get("enabled", False):
                         # CORS not enabled, pass through
@@ -2979,6 +3378,46 @@ class MongoDBEngine:
             )
         except ImportError:
             logger.warning("CORS middleware not available")
+
+        # Wrap parent app in ASGI wrapper to intercept WebSocket connections at ASGI level
+        # This must be done AFTER all middleware and routes are registered
+        from starlette.types import ASGIApp, Receive, Scope, Send
+
+        class WebSocketASGIWrapper:
+            """ASGI wrapper to intercept WebSocket connections before FastAPI routing."""
+
+            def __init__(self, app: ASGIApp):
+                self.app = app
+                # Delegate attribute access to underlying app
+                self.__dict__.update(app.__dict__)
+
+            def __getattr__(self, name):
+                # Delegate any missing attributes to underlying app
+                return getattr(self.app, name)
+
+            async def __call__(self, scope: Scope, receive: Receive, send: Send):
+                # Intercept WebSocket connections at ASGI level
+                if scope["type"] == "websocket":
+                    import sys
+
+                    path = scope.get("path", "unknown")
+                    headers_dict = {k.decode(): v.decode() for k, v in scope.get("headers", [])}
+                    origin = headers_dict.get("origin", "missing")
+                    upgrade = headers_dict.get("upgrade", "missing")
+                    connection = headers_dict.get("connection", "missing")
+                    print(
+                        f"🌐 [ASGI WEBSOCKET] Intercepted at ASGI level: path={path}, "
+                        f"origin={origin}, upgrade={upgrade}, connection={connection}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    logger.info(f"🌐 [ASGI WEBSOCKET] Intercepted: path={path}, origin={origin}")
+
+                # Call the actual app
+                await self.app(scope, receive, send)
+
+        # Wrap the app (but keep reference to original for internal use)
+        WebSocketASGIWrapper(parent_app)  # Wrapped for WebSocket support
 
         # Add unified health check endpoint
         @parent_app.get("/health")
@@ -3266,7 +3705,163 @@ class MongoDBEngine:
 
         logger.info(f"Multi-app parent created with {len(apps)} app(s) configured")
 
-        return parent_app
+        # CRITICAL: Wrap the FastAPI app in an ASGI wrapper to intercept WebSocket connections
+        # BEFORE FastAPI's routing handles them. This will catch rejections at the framework level.
+        from starlette.types import ASGIApp, Receive, Scope, Send
+
+        class WebSocketASGIInterceptor:
+            """ASGI wrapper to intercept WebSocket connections at the ASGI level."""
+
+            def __init__(self, app: ASGIApp):
+                self.app = app
+                # Delegate attribute access to underlying FastAPI app
+                # This allows app.routes, etc. to work
+                # Note: We don't copy state here - we delegate it via property
+                # to ensure changes to app.state are always visible
+                for key, value in app.__dict__.items():
+                    if key != "state":  # Don't copy state - delegate it
+                        setattr(self, key, value)
+
+            @property
+            def state(self):
+                # Always delegate state access to underlying app
+                # This ensures changes to app.state are immediately visible
+                return self.app.state
+
+            def __getattr__(self, name):
+                # Delegate any missing attributes to underlying app
+                return getattr(self.app, name)
+
+            @property
+            def __class__(self):
+                # Make isinstance() checks work by returning the underlying app's class
+                # This allows isinstance(wrapper, FastAPI) to return True
+                return type(self.app)
+
+            async def __call__(self, scope: Scope, receive: Receive, send: Send):
+                # Intercept WebSocket connections at ASGI level (before FastAPI routing)
+                if scope["type"] == "websocket":
+                    import sys
+
+                    path = scope.get("path", "unknown")
+                    headers = {k.decode(): v.decode() for k, v in scope.get("headers", [])}
+                    origin = headers.get("origin", "missing")
+                    upgrade = headers.get("upgrade", "missing")
+                    connection = headers.get("connection", "missing")
+
+                    print(
+                        f"🌐 [ASGI INTERCEPTOR] WebSocket connection at ASGI level: "
+                        f"path={path}, origin={origin}, upgrade={upgrade}, connection={connection}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    logger.info(f"🌐 [ASGI INTERCEPTOR] WebSocket: path={path}, origin={origin}")
+
+                    # Wrap send to catch ALL messages to see what FastAPI is doing
+                    async def intercepted_send(message):
+                        import sys
+
+                        msg_type = message.get("type", "unknown")
+                        print(
+                            f"🌐 [ASGI INTERCEPTOR] Message type: {msg_type}, "
+                            f"keys: {list(message.keys())}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+
+                        if msg_type == "websocket.close":
+                            print(
+                                f"🌐 [ASGI INTERCEPTOR] WebSocket closed: "
+                                f"code={message.get('code', 'unknown')}, "
+                                f"reason={message.get('reason', 'unknown')}",
+                                file=sys.stderr,
+                                flush=True,
+                            )
+                            logger.warning(
+                                f"🌐 [ASGI INTERCEPTOR] WebSocket closed: "
+                                f"code={message.get('code')}, reason={message.get('reason')}"
+                            )
+                        elif msg_type == "websocket.accept":
+                            print(
+                                "🌐 [ASGI INTERCEPTOR] WebSocket ACCEPTED!",
+                                file=sys.stderr,
+                                flush=True,
+                            )
+                            logger.info("🌐 [ASGI INTERCEPTOR] WebSocket ACCEPTED!")
+                        elif msg_type == "websocket.http.response.start":
+                            status = message.get("status", "unknown")
+                            print(
+                                f"🌐 [ASGI INTERCEPTOR] HTTP response: status={status}",
+                                file=sys.stderr,
+                                flush=True,
+                            )
+                            logger.warning(f"🌐 [ASGI INTERCEPTOR] HTTP response: status={status}")
+
+                        await send(message)
+
+                    # Wrap receive to see what FastAPI is receiving
+                    async def intercepted_receive():
+                        msg = await receive()
+                        import sys
+
+                        msg_type = msg.get("type", "unknown")
+                        print(
+                            f"🌐 [ASGI INTERCEPTOR] Received message: type={msg_type}, "
+                            f"keys: {list(msg.keys())}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+                        if msg_type == "websocket.connect":
+                            print(
+                                "🌐 [ASGI INTERCEPTOR] WebSocket CONNECT received!",
+                                file=sys.stderr,
+                                flush=True,
+                            )
+                        return msg
+
+                    # Check if route exists before calling app
+                    import sys
+
+                    if hasattr(self.app, "routes"):
+                        ws_routes = [
+                            r for r in self.app.routes if hasattr(r, "path") and "ws" in str(r.path)
+                        ]
+                        print(
+                            f"🌐 [ASGI INTERCEPTOR] Found {len(ws_routes)} WebSocket route(s): "
+                            f"{[r.path for r in ws_routes]}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+
+                    try:
+                        await self.app(scope, intercepted_receive, intercepted_send)
+                    except (
+                        RuntimeError,
+                        ConnectionError,
+                        OSError,
+                        ValueError,
+                        AttributeError,
+                    ) as e:
+                        import sys
+
+                        print(
+                            f"🌐 [ASGI INTERCEPTOR] Exception during WebSocket handling: "
+                            f"{type(e).__name__}: {e}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+                        logger.error(
+                            f"🌐 [ASGI INTERCEPTOR] Exception: {type(e).__name__}: {e}",
+                            exc_info=True,
+                        )
+                        raise
+                else:
+                    # Non-WebSocket requests pass through normally
+                    await self.app(scope, receive, send)
+
+        # Re-enable ASGI interceptor to debug WebSocket connection issues
+        # This will show us exactly what's happening at the ASGI level
+        return WebSocketASGIInterceptor(parent_app)
 
     def get_mounted_apps(self, app: Optional["FastAPI"] = None) -> list[dict[str, Any]]:
         """

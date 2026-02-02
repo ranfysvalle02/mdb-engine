@@ -14,6 +14,20 @@ from collections.abc import AsyncGenerator
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+# Enable nest_asyncio to allow TestClient to work with async Motor operations
+# TestClient creates its own event loop (via anyio), but Motor operations need
+# to run in that loop. nest_asyncio allows nested event loops.
+# CRITICAL: Apply nest_asyncio BEFORE importing pytest or any async libraries
+try:
+    import nest_asyncio
+
+    # Apply nest_asyncio globally - this patches asyncio to allow nested event loops
+    # This must be done before any event loops are created
+    nest_asyncio.apply()
+except ImportError:
+    # nest_asyncio not available - tests may fail with event loop conflicts
+    pass
+
 import pytest
 from motor.motor_asyncio import (
     AsyncIOMotorClient,

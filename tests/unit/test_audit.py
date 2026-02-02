@@ -68,22 +68,22 @@ class TestAuthAuditLogInit:
         mock_db = MagicMock()
         audit_log = AuthAuditLog(mock_db)
 
-        assert audit_log._retention_days == DEFAULT_RETENTION_DAYS
-        assert audit_log._indexes_created is False
+        assert audit_log._retention_days == DEFAULT_RETENTION_DAYS  # noqa: SLF001
+        assert audit_log._indexes_created is False  # noqa: SLF001
 
     def test_init_with_custom_retention(self):
         """Test initialization with custom retention period."""
         mock_db = MagicMock()
         audit_log = AuthAuditLog(mock_db, retention_days=30)
 
-        assert audit_log._retention_days == 30
+        assert audit_log._retention_days == 30  # noqa: SLF001
 
     def test_collection_name(self):
         """Test that correct collection is used."""
         mock_db = MagicMock()
         audit_log = AuthAuditLog(mock_db)
 
-        mock_db.__getitem__.assert_called_with(AUDIT_COLLECTION)
+        mock_db.__getitem__.assert_called_with(AUDIT_COLLECTION)  # noqa: SLF001
 
 
 class TestAuthAuditLogEnsureIndexes:
@@ -94,23 +94,23 @@ class TestAuthAuditLogEnsureIndexes:
         """Test that indexes are created."""
         mock_db = MagicMock()
         mock_collection = AsyncMock()
-        mock_db.__getitem__.return_value = mock_collection
+        mock_db.__getitem__.return_value = mock_collection  # noqa: SLF001
 
         audit_log = AuthAuditLog(mock_db)
         await audit_log.ensure_indexes()
 
         assert mock_collection.create_index.call_count >= 4  # At least 4 indexes
-        assert audit_log._indexes_created is True
+        assert audit_log._indexes_created is True  # noqa: SLF001
 
     @pytest.mark.asyncio
     async def test_skips_if_already_created(self):
         """Test that indexes are not recreated."""
         mock_db = MagicMock()
         mock_collection = AsyncMock()
-        mock_db.__getitem__.return_value = mock_collection
+        mock_db.__getitem__.return_value = mock_collection  # noqa: SLF001
 
         audit_log = AuthAuditLog(mock_db)
-        audit_log._indexes_created = True
+        audit_log._indexes_created = True  # noqa: SLF001
 
         await audit_log.ensure_indexes()
 
@@ -126,10 +126,10 @@ class TestAuthAuditLogEvents:
         mock_db = MagicMock()
         mock_collection = AsyncMock()
         mock_collection.insert_one.return_value = MagicMock(inserted_id="test_id")
-        mock_db.__getitem__.return_value = mock_collection
+        mock_db.__getitem__.return_value = mock_collection  # noqa: SLF001
 
         audit = AuthAuditLog(mock_db)
-        audit._indexes_created = True  # Skip index creation
+        audit._indexes_created = True  # Skip index creation  # noqa: SLF001
         return audit
 
     @pytest.mark.asyncio
@@ -142,9 +142,9 @@ class TestAuthAuditLogEvents:
         )
 
         assert doc_id == "test_id"
-        audit_log._collection.insert_one.assert_called_once()
+        audit_log._collection.insert_one.assert_called_once()  # noqa: SLF001
 
-        call_args = audit_log._collection.insert_one.call_args[0][0]
+        call_args = audit_log._collection.insert_one.call_args[0][0]  # noqa: SLF001
         assert call_args["action"] == "login_success"
         assert call_args["success"] is True
         assert call_args["user_email"] == "test@example.com"
@@ -163,7 +163,7 @@ class TestAuthAuditLogEvents:
             details={"reason": "invalid_password"},
         )
 
-        call_args = audit_log._collection.insert_one.call_args[0][0]
+        call_args = audit_log._collection.insert_one.call_args[0][0]  # noqa: SLF001
         assert call_args["user_id"] == "user_123"
         assert call_args["app_slug"] == "my_app"
         assert call_args["ip_address"] == "192.168.1.1"
@@ -178,7 +178,7 @@ class TestAuthAuditLogEvents:
             success=True,
         )
 
-        call_args = audit_log._collection.insert_one.call_args[0][0]
+        call_args = audit_log._collection.insert_one.call_args[0][0]  # noqa: SLF001
         assert "expires_at" in call_args
         assert "timestamp" in call_args
 
@@ -197,10 +197,10 @@ class TestAuthAuditLogConvenience:
         mock_db = MagicMock()
         mock_collection = AsyncMock()
         mock_collection.insert_one.return_value = MagicMock(inserted_id="test_id")
-        mock_db.__getitem__.return_value = mock_collection
+        mock_db.__getitem__.return_value = mock_collection  # noqa: SLF001
 
         audit = AuthAuditLog(mock_db)
-        audit._indexes_created = True
+        audit._indexes_created = True  # noqa: SLF001
         return audit
 
     @pytest.mark.asyncio
@@ -212,7 +212,7 @@ class TestAuthAuditLogConvenience:
             app_slug="my_app",
         )
 
-        call_args = audit_log._collection.insert_one.call_args[0][0]
+        call_args = audit_log._collection.insert_one.call_args[0][0]  # noqa: SLF001
         assert call_args["action"] == "login_success"
         assert call_args["success"] is True
 
@@ -225,7 +225,7 @@ class TestAuthAuditLogConvenience:
             ip_address="192.168.1.1",
         )
 
-        call_args = audit_log._collection.insert_one.call_args[0][0]
+        call_args = audit_log._collection.insert_one.call_args[0][0]  # noqa: SLF001
         assert call_args["action"] == "login_failed"
         assert call_args["success"] is False
         assert call_args["details"]["reason"] == "invalid_password"
@@ -238,7 +238,7 @@ class TestAuthAuditLogConvenience:
             ip_address="192.168.1.1",
         )
 
-        call_args = audit_log._collection.insert_one.call_args[0][0]
+        call_args = audit_log._collection.insert_one.call_args[0][0]  # noqa: SLF001
         assert call_args["action"] == "logout"
         assert call_args["success"] is True
 
@@ -251,7 +251,7 @@ class TestAuthAuditLogConvenience:
             user_agent="Mozilla/5.0",
         )
 
-        call_args = audit_log._collection.insert_one.call_args[0][0]
+        call_args = audit_log._collection.insert_one.call_args[0][0]  # noqa: SLF001
         assert call_args["action"] == "register"
         assert call_args["success"] is True
 
@@ -266,7 +266,7 @@ class TestAuthAuditLogConvenience:
             changed_by="admin@example.com",
         )
 
-        call_args = audit_log._collection.insert_one.call_args[0][0]
+        call_args = audit_log._collection.insert_one.call_args[0][0]  # noqa: SLF001
         assert call_args["action"] == "role_granted"
         assert call_args["details"]["old_roles"] == ["viewer"]
         assert call_args["details"]["new_roles"] == ["viewer", "editor"]
@@ -282,7 +282,7 @@ class TestAuthAuditLogConvenience:
             changed_by="admin@example.com",
         )
 
-        call_args = audit_log._collection.insert_one.call_args[0][0]
+        call_args = audit_log._collection.insert_one.call_args[0][0]  # noqa: SLF001
         assert call_args["action"] == "role_revoked"
 
     @pytest.mark.asyncio
@@ -293,7 +293,7 @@ class TestAuthAuditLogConvenience:
             reason="logout",
         )
 
-        call_args = audit_log._collection.insert_one.call_args[0][0]
+        call_args = audit_log._collection.insert_one.call_args[0][0]  # noqa: SLF001
         assert call_args["action"] == "token_revoked"
         assert call_args["details"]["reason"] == "logout"
 
@@ -306,7 +306,7 @@ class TestAuthAuditLogConvenience:
             email="test@example.com",
         )
 
-        call_args = audit_log._collection.insert_one.call_args[0][0]
+        call_args = audit_log._collection.insert_one.call_args[0][0]  # noqa: SLF001
         assert call_args["action"] == "rate_limit_exceeded"
         assert call_args["success"] is False
         assert call_args["details"]["endpoint"] == "/login"
@@ -320,10 +320,10 @@ class TestAuthAuditLogQueries:
         """Create audit log with mocked collection."""
         mock_db = MagicMock()
         mock_collection = MagicMock()  # Use regular MagicMock for chain methods
-        mock_db.__getitem__.return_value = mock_collection
+        mock_db.__getitem__.return_value = mock_collection  # noqa: SLF001
 
         audit = AuthAuditLog(mock_db)
-        audit._indexes_created = True
+        audit._indexes_created = True  # noqa: SLF001
         return audit
 
     @pytest.mark.asyncio
@@ -342,7 +342,7 @@ class TestAuthAuditLogQueries:
         mock_limit = MagicMock(return_value=mock_cursor)
         mock_sort = MagicMock(return_value=MagicMock(limit=mock_limit))
         mock_find = MagicMock(return_value=MagicMock(sort=mock_sort))
-        audit_log._collection.find = mock_find
+        audit_log._collection.find = mock_find  # noqa: SLF001
 
         events = await audit_log.get_recent_events(hours=24)
 
@@ -353,7 +353,7 @@ class TestAuthAuditLogQueries:
     @pytest.mark.asyncio
     async def test_count_failed_logins(self, audit_log):
         """Test count_failed_logins query."""
-        audit_log._collection.count_documents = AsyncMock(return_value=5)
+        audit_log._collection.count_documents = AsyncMock(return_value=5)  # noqa: SLF001
 
         count = await audit_log.count_failed_logins(
             email="test@example.com",
@@ -361,7 +361,7 @@ class TestAuthAuditLogQueries:
         )
 
         assert count == 5
-        audit_log._collection.count_documents.assert_called_once()
+        audit_log._collection.count_documents.assert_called_once()  # noqa: SLF001
 
     @pytest.mark.asyncio
     async def test_get_security_summary(self, audit_log):
@@ -376,7 +376,7 @@ class TestAuthAuditLogQueries:
             ]
         )
 
-        audit_log._collection.aggregate = MagicMock(return_value=mock_cursor)
+        audit_log._collection.aggregate = MagicMock(return_value=mock_cursor)  # noqa: SLF001
 
         summary = await audit_log.get_security_summary(hours=24)
 

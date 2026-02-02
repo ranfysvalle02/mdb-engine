@@ -134,7 +134,7 @@ class TestConnectionManagerMetricsRegistration:
                 # Should not raise, just skip metrics registration
                 await manager.initialize()
 
-                assert manager._initialized is True
+                assert manager._initialized is True  # noqa: SLF001
 
 
 class TestGetSharedClient:
@@ -146,12 +146,12 @@ class TestGetSharedClient:
         from mdb_engine.database.connection import get_shared_mongo_client
 
         # Reset shared client
-        original_client = conn_module._shared_client
-        conn_module._shared_client = None
+        original_client = conn_module._shared_client  # noqa: SLF001
+        conn_module._shared_client = None  # noqa: SLF001
 
         try:
             mock_client = MagicMock()
-            mock_client._topology = MagicMock()  # Valid topology
+            mock_client._topology = MagicMock()  # Valid topology  # noqa: SLF001
             mock_client.admin.command = AsyncMock(return_value={"ok": 1})
 
             with patch(
@@ -174,27 +174,27 @@ class TestGetSharedClient:
 
                 assert client1 is client2
         finally:
-            conn_module._shared_client = original_client
+            conn_module._shared_client = original_client  # noqa: SLF001
 
     def test_get_shared_client_fast_path_invalid_topology(self, connection_config):
         """Test get_shared_mongo_client fast path with invalid topology (lines 95-98)."""
         import mdb_engine.database.connection as conn_module
         from mdb_engine.database.connection import get_shared_mongo_client
 
-        original_client = conn_module._shared_client
-        conn_module._shared_client = None
+        original_client = conn_module._shared_client  # noqa: SLF001
+        conn_module._shared_client = None  # noqa: SLF001
 
         try:
             # Create a mock client with invalid topology
             invalid_client = MagicMock()
-            invalid_client._topology = None  # Invalid
+            invalid_client._topology = None  # Invalid  # noqa: SLF001
 
             mock_new_client = MagicMock()
-            mock_new_client._topology = MagicMock()
+            mock_new_client._topology = MagicMock()  # noqa: SLF001
             mock_new_client.admin.command = AsyncMock(return_value={"ok": 1})
 
             # Set invalid client as shared
-            conn_module._shared_client = invalid_client
+            conn_module._shared_client = invalid_client  # noqa: SLF001
 
             with patch(
                 "mdb_engine.database.connection.AsyncIOMotorClient",
@@ -209,15 +209,15 @@ class TestGetSharedClient:
 
                 assert client is mock_new_client
         finally:
-            conn_module._shared_client = original_client
+            conn_module._shared_client = original_client  # noqa: SLF001
 
     def test_get_shared_client_fast_path_attribute_error(self, connection_config):
         """Test get_shared_mongo_client fast path handling AttributeError (lines 95-98)."""
         import mdb_engine.database.connection as conn_module
         from mdb_engine.database.connection import get_shared_mongo_client
 
-        original_client = conn_module._shared_client
-        conn_module._shared_client = None
+        original_client = conn_module._shared_client  # noqa: SLF001
+        conn_module._shared_client = None  # noqa: SLF001
 
         try:
             # Create a mock client that raises AttributeError when accessing _topology
@@ -227,14 +227,14 @@ class TestGetSharedClient:
             def get_topology():
                 raise AttributeError("No topology")
 
-            type(error_client)._topology = property(lambda self: get_topology())
+            type(error_client)._topology = property(lambda self: get_topology())  # noqa: SLF001
 
             mock_new_client = MagicMock()
-            mock_new_client._topology = MagicMock()
+            mock_new_client._topology = MagicMock()  # noqa: SLF001
             mock_new_client.admin.command = AsyncMock(return_value={"ok": 1})
 
             # Set error client as shared
-            conn_module._shared_client = error_client
+            conn_module._shared_client = error_client  # noqa: SLF001
 
             with patch(
                 "mdb_engine.database.connection.AsyncIOMotorClient",
@@ -252,15 +252,15 @@ class TestGetSharedClient:
                 # that the function completes without error
                 assert client is not None
         finally:
-            conn_module._shared_client = original_client
+            conn_module._shared_client = original_client  # noqa: SLF001
 
     def test_get_shared_client_fast_path_runtime_error(self, connection_config):
         """Test get_shared_mongo_client fast path handling RuntimeError (lines 95-98)."""
         import mdb_engine.database.connection as conn_module
         from mdb_engine.database.connection import get_shared_mongo_client
 
-        original_client = conn_module._shared_client
-        conn_module._shared_client = None
+        original_client = conn_module._shared_client  # noqa: SLF001
+        conn_module._shared_client = None  # noqa: SLF001
 
         try:
             # Create a mock client that raises RuntimeError when accessing _topology
@@ -269,13 +269,13 @@ class TestGetSharedClient:
             def get_topology():
                 raise RuntimeError("Runtime error")
 
-            type(error_client)._topology = property(lambda self: get_topology())
+            type(error_client)._topology = property(lambda self: get_topology())  # noqa: SLF001
 
             mock_new_client = MagicMock()
-            mock_new_client._topology = MagicMock()
+            mock_new_client._topology = MagicMock()  # noqa: SLF001
             mock_new_client.admin.command = AsyncMock(return_value={"ok": 1})
 
-            conn_module._shared_client = error_client
+            conn_module._shared_client = error_client  # noqa: SLF001
 
             with patch(
                 "mdb_engine.database.connection.AsyncIOMotorClient",
@@ -289,17 +289,17 @@ class TestGetSharedClient:
 
                 assert client is not None
                 # Should have reset _shared_client on error
-                assert conn_module._shared_client is not error_client
+                assert conn_module._shared_client is not error_client  # noqa: SLF001
         finally:
-            conn_module._shared_client = original_client
+            conn_module._shared_client = original_client  # noqa: SLF001
 
     def test_get_shared_client_double_check_attribute_error(self, connection_config):
         """Test get_shared_mongo_client double-check pattern handling AttributeError."""
         import mdb_engine.database.connection as conn_module
         from mdb_engine.database.connection import get_shared_mongo_client
 
-        original_client = conn_module._shared_client
-        conn_module._shared_client = None
+        original_client = conn_module._shared_client  # noqa: SLF001
+        conn_module._shared_client = None  # noqa: SLF001
 
         try:
             # Create client that will raise AttributeError inside the lock
@@ -313,13 +313,13 @@ class TestGetSharedClient:
                     raise AttributeError("No topology")
                 return MagicMock()
 
-            type(error_client)._topology = property(lambda self: get_topology())
+            type(error_client)._topology = property(lambda self: get_topology())  # noqa: SLF001
 
             mock_new_client = MagicMock()
-            mock_new_client._topology = MagicMock()
+            mock_new_client._topology = MagicMock()  # noqa: SLF001
             mock_new_client.admin.command = AsyncMock(return_value={"ok": 1})
 
-            conn_module._shared_client = error_client
+            conn_module._shared_client = error_client  # noqa: SLF001
 
             with patch(
                 "mdb_engine.database.connection.AsyncIOMotorClient",
@@ -333,15 +333,15 @@ class TestGetSharedClient:
 
                 assert client is not None
         finally:
-            conn_module._shared_client = original_client
+            conn_module._shared_client = original_client  # noqa: SLF001
 
     def test_get_shared_client_double_check_runtime_error(self, connection_config):
         """Test get_shared_mongo_client double-check pattern handling RuntimeError."""
         import mdb_engine.database.connection as conn_module
         from mdb_engine.database.connection import get_shared_mongo_client
 
-        original_client = conn_module._shared_client
-        conn_module._shared_client = None
+        original_client = conn_module._shared_client  # noqa: SLF001
+        conn_module._shared_client = None  # noqa: SLF001
 
         try:
             # Create client that will raise RuntimeError inside the lock
@@ -354,13 +354,13 @@ class TestGetSharedClient:
                     raise RuntimeError("Runtime error")
                 return MagicMock()
 
-            type(error_client)._topology = property(lambda self: get_topology())
+            type(error_client)._topology = property(lambda self: get_topology())  # noqa: SLF001
 
             mock_new_client = MagicMock()
-            mock_new_client._topology = MagicMock()
+            mock_new_client._topology = MagicMock()  # noqa: SLF001
             mock_new_client.admin.command = AsyncMock(return_value={"ok": 1})
 
-            conn_module._shared_client = error_client
+            conn_module._shared_client = error_client  # noqa: SLF001
 
             with patch(
                 "mdb_engine.database.connection.AsyncIOMotorClient",
@@ -374,19 +374,19 @@ class TestGetSharedClient:
 
                 assert client is not None
         finally:
-            conn_module._shared_client = original_client
+            conn_module._shared_client = original_client  # noqa: SLF001
 
     def test_get_shared_client_returns_client(self, connection_config):
         """Test get_shared_mongo_client returns client after creation (line 156)."""
         import mdb_engine.database.connection as conn_module
         from mdb_engine.database.connection import get_shared_mongo_client
 
-        original_client = conn_module._shared_client
-        conn_module._shared_client = None
+        original_client = conn_module._shared_client  # noqa: SLF001
+        conn_module._shared_client = None  # noqa: SLF001
 
         try:
             mock_client = MagicMock()
-            mock_client._topology = MagicMock()
+            mock_client._topology = MagicMock()  # noqa: SLF001
             mock_client.admin.command = AsyncMock(return_value={"ok": 1})
 
             with patch(
@@ -401,21 +401,21 @@ class TestGetSharedClient:
 
                 # Should return the created client
                 assert client is mock_client
-                assert conn_module._shared_client is mock_client
+                assert conn_module._shared_client is mock_client  # noqa: SLF001
         finally:
-            conn_module._shared_client = original_client
+            conn_module._shared_client = original_client  # noqa: SLF001
 
     def test_get_shared_client_double_check_pattern(self, connection_config):
         """Test get_shared_mongo_client double-check pattern in lock (lines 104-114)."""
         import mdb_engine.database.connection as conn_module
         from mdb_engine.database.connection import get_shared_mongo_client
 
-        original_client = conn_module._shared_client
-        conn_module._shared_client = None
+        original_client = conn_module._shared_client  # noqa: SLF001
+        conn_module._shared_client = None  # noqa: SLF001
 
         try:
             mock_client = MagicMock()
-            mock_client._topology = MagicMock()
+            mock_client._topology = MagicMock()  # noqa: SLF001
             mock_client.admin.command = AsyncMock(return_value={"ok": 1})
 
             with patch(
@@ -438,7 +438,7 @@ class TestGetSharedClient:
 
                 assert client1 is client2
         finally:
-            conn_module._shared_client = original_client
+            conn_module._shared_client = original_client  # noqa: SLF001
 
     def test_get_shared_client_creation_errors(self, connection_config):
         """Test get_shared_mongo_client error handling during creation (lines 146-149)."""
@@ -447,8 +447,8 @@ class TestGetSharedClient:
         import mdb_engine.database.connection as conn_module
         from mdb_engine.database.connection import get_shared_mongo_client
 
-        original_client = conn_module._shared_client
-        conn_module._shared_client = None
+        original_client = conn_module._shared_client  # noqa: SLF001
+        conn_module._shared_client = None  # noqa: SLF001
 
         try:
             # Test ConnectionFailure
@@ -463,7 +463,7 @@ class TestGetSharedClient:
                         min_pool_size=1,
                     )
                 # Should reset _shared_client on error
-                assert conn_module._shared_client is None
+                assert conn_module._shared_client is None  # noqa: SLF001
 
             # Test ServerSelectionTimeoutError
             with patch(
@@ -476,7 +476,7 @@ class TestGetSharedClient:
                         max_pool_size=10,
                         min_pool_size=1,
                     )
-                assert conn_module._shared_client is None
+                assert conn_module._shared_client is None  # noqa: SLF001
 
             # Test ValueError
             with patch(
@@ -489,7 +489,7 @@ class TestGetSharedClient:
                         max_pool_size=10,
                         min_pool_size=1,
                     )
-                assert conn_module._shared_client is None
+                assert conn_module._shared_client is None  # noqa: SLF001
 
             # Test TypeError
             with patch(
@@ -502,9 +502,9 @@ class TestGetSharedClient:
                         max_pool_size=10,
                         min_pool_size=1,
                     )
-                assert conn_module._shared_client is None
+                assert conn_module._shared_client is None  # noqa: SLF001
         finally:
-            conn_module._shared_client = original_client
+            conn_module._shared_client = original_client  # noqa: SLF001
 
     def test_get_shared_client_env_vars(self, connection_config):
         """Test get_shared_mongo_client uses environment variables (lines 75-78)."""
@@ -513,12 +513,12 @@ class TestGetSharedClient:
         import mdb_engine.database.connection as conn_module
         from mdb_engine.database.connection import get_shared_mongo_client
 
-        original_client = conn_module._shared_client
-        conn_module._shared_client = None
+        original_client = conn_module._shared_client  # noqa: SLF001
+        conn_module._shared_client = None  # noqa: SLF001
 
         try:
             mock_client = MagicMock()
-            mock_client._topology = MagicMock()
+            mock_client._topology = MagicMock()  # noqa: SLF001
             mock_client.admin.command = AsyncMock(return_value={"ok": 1})
 
             # Set environment variables
@@ -544,7 +544,7 @@ class TestGetSharedClient:
                     assert call_kwargs["maxPoolSize"] == 20
                     assert call_kwargs["minPoolSize"] == 5
         finally:
-            conn_module._shared_client = original_client
+            conn_module._shared_client = original_client  # noqa: SLF001
 
 
 class TestVerifySharedClient:
@@ -559,12 +559,12 @@ class TestVerifySharedClient:
             verify_shared_client,
         )
 
-        original_client = conn_module._shared_client
-        conn_module._shared_client = None
+        original_client = conn_module._shared_client  # noqa: SLF001
+        conn_module._shared_client = None  # noqa: SLF001
 
         try:
             mock_client = MagicMock()
-            mock_client._topology = MagicMock()
+            mock_client._topology = MagicMock()  # noqa: SLF001
             mock_client.admin.command = AsyncMock(return_value={"ok": 1})
 
             with patch(
@@ -582,7 +582,7 @@ class TestVerifySharedClient:
                 result = await verify_shared_client()
                 assert result is True
         finally:
-            conn_module._shared_client = original_client
+            conn_module._shared_client = original_client  # noqa: SLF001
 
     @pytest.mark.asyncio
     async def test_verify_shared_client_none(self):
@@ -590,14 +590,14 @@ class TestVerifySharedClient:
         import mdb_engine.database.connection as conn_module
         from mdb_engine.database.connection import verify_shared_client
 
-        original_client = conn_module._shared_client
-        conn_module._shared_client = None
+        original_client = conn_module._shared_client  # noqa: SLF001
+        conn_module._shared_client = None  # noqa: SLF001
 
         try:
             result = await verify_shared_client()
             assert result is False
         finally:
-            conn_module._shared_client = original_client
+            conn_module._shared_client = original_client  # noqa: SLF001
 
 
 class TestGetPoolMetrics:
@@ -628,12 +628,12 @@ class TestGetPoolMetrics:
             get_shared_mongo_client,
         )
 
-        original_client = conn_module._shared_client
-        conn_module._shared_client = None
+        original_client = conn_module._shared_client  # noqa: SLF001
+        conn_module._shared_client = None  # noqa: SLF001
 
         try:
             mock_client = MagicMock()
-            mock_client._topology = MagicMock()
+            mock_client._topology = MagicMock()  # noqa: SLF001
             mock_client.admin.command = AsyncMock(
                 return_value={"connections": {"current": 3, "available": 7, "totalCreated": 10}}
             )
@@ -655,7 +655,7 @@ class TestGetPoolMetrics:
 
                 assert result["status"] == "connected"
         finally:
-            conn_module._shared_client = original_client
+            conn_module._shared_client = original_client  # noqa: SLF001
 
     @pytest.mark.asyncio
     async def test_get_pool_metrics_no_client(self, connection_config):
@@ -663,10 +663,10 @@ class TestGetPoolMetrics:
         import mdb_engine.database.connection as conn_module
         from mdb_engine.database.connection import get_pool_metrics
 
-        original_client = conn_module._shared_client
-        original_registered = conn_module._registered_clients.copy()
-        conn_module._shared_client = None
-        conn_module._registered_clients = []
+        original_client = conn_module._shared_client  # noqa: SLF001
+        original_registered = conn_module._registered_clients.copy()  # noqa: SLF001
+        conn_module._shared_client = None  # noqa: SLF001
+        conn_module._registered_clients = []  # noqa: SLF001
 
         try:
             result = await get_pool_metrics()
@@ -674,8 +674,8 @@ class TestGetPoolMetrics:
             assert result["status"] == "no_client"
             assert "error" in result
         finally:
-            conn_module._shared_client = original_client
-            conn_module._registered_clients = original_registered
+            conn_module._shared_client = original_client  # noqa: SLF001
+            conn_module._registered_clients = original_registered  # noqa: SLF001
 
     @pytest.mark.asyncio
     async def test_get_pool_metrics_registered_client(self, connection_config):
@@ -686,14 +686,14 @@ class TestGetPoolMetrics:
             register_client_for_metrics,
         )
 
-        original_client = conn_module._shared_client
-        original_registered = conn_module._registered_clients.copy()
-        conn_module._shared_client = None
-        conn_module._registered_clients = []
+        original_client = conn_module._shared_client  # noqa: SLF001
+        original_registered = conn_module._registered_clients.copy()  # noqa: SLF001
+        conn_module._shared_client = None  # noqa: SLF001
+        conn_module._registered_clients = []  # noqa: SLF001
 
         try:
             mock_client = MagicMock()
-            mock_client._topology = MagicMock()
+            mock_client._topology = MagicMock()  # noqa: SLF001
             mock_client.admin.command = AsyncMock(
                 return_value={"connections": {"current": 3, "available": 7, "totalCreated": 10}}
             )
@@ -705,8 +705,8 @@ class TestGetPoolMetrics:
 
             assert result["status"] == "connected"
         finally:
-            conn_module._shared_client = original_client
-            conn_module._registered_clients = original_registered
+            conn_module._shared_client = original_client  # noqa: SLF001
+            conn_module._registered_clients = original_registered  # noqa: SLF001
 
     @pytest.mark.asyncio
     async def test_get_pool_metrics_registered_client_attribute_error(self, connection_config):
@@ -717,10 +717,10 @@ class TestGetPoolMetrics:
             register_client_for_metrics,
         )
 
-        original_client = conn_module._shared_client
-        original_registered = conn_module._registered_clients.copy()
-        conn_module._shared_client = None
-        conn_module._registered_clients = []
+        original_client = conn_module._shared_client  # noqa: SLF001
+        original_registered = conn_module._registered_clients.copy()  # noqa: SLF001
+        conn_module._shared_client = None  # noqa: SLF001
+        conn_module._registered_clients = []  # noqa: SLF001
 
         try:
             # Create a class that raises AttributeError when accessing _topology
@@ -734,7 +734,7 @@ class TestGetPoolMetrics:
 
             # Second client is valid
             valid_client = MagicMock()
-            valid_client._topology = MagicMock()
+            valid_client._topology = MagicMock()  # noqa: SLF001
             valid_client.admin.command = AsyncMock(
                 return_value={"connections": {"current": 2, "available": 8, "totalCreated": 10}}
             )
@@ -748,8 +748,8 @@ class TestGetPoolMetrics:
             # Should use the valid client (skip invalid one)
             assert result["status"] == "connected"
         finally:
-            conn_module._shared_client = original_client
-            conn_module._registered_clients = original_registered
+            conn_module._shared_client = original_client  # noqa: SLF001
+            conn_module._registered_clients = original_registered  # noqa: SLF001
 
     @pytest.mark.asyncio
     async def test_get_pool_metrics_registered_client_runtime_error(self, connection_config):
@@ -760,10 +760,10 @@ class TestGetPoolMetrics:
             register_client_for_metrics,
         )
 
-        original_client = conn_module._shared_client
-        original_registered = conn_module._registered_clients.copy()
-        conn_module._shared_client = None
-        conn_module._registered_clients = []
+        original_client = conn_module._shared_client  # noqa: SLF001
+        original_registered = conn_module._registered_clients.copy()  # noqa: SLF001
+        conn_module._shared_client = None  # noqa: SLF001
+        conn_module._registered_clients = []  # noqa: SLF001
 
         try:
             # First client raises RuntimeError
@@ -772,11 +772,11 @@ class TestGetPoolMetrics:
             def get_topology():
                 raise RuntimeError("Runtime error")
 
-            type(invalid_client)._topology = property(lambda self: get_topology())
+            type(invalid_client)._topology = property(lambda self: get_topology())  # noqa: SLF001
 
             # Second client is valid
             valid_client = MagicMock()
-            valid_client._topology = MagicMock()
+            valid_client._topology = MagicMock()  # noqa: SLF001
             valid_client.admin.command = AsyncMock(
                 return_value={"connections": {"current": 2, "available": 8, "totalCreated": 10}}
             )
@@ -790,8 +790,8 @@ class TestGetPoolMetrics:
             # Should use the valid client (skip invalid one)
             assert result["status"] == "connected"
         finally:
-            conn_module._shared_client = original_client
-            conn_module._registered_clients = original_registered
+            conn_module._shared_client = original_client  # noqa: SLF001
+            conn_module._registered_clients = original_registered  # noqa: SLF001
 
     @pytest.mark.asyncio
     async def test_get_pool_metrics_shared_client_none_registered_exists(self, connection_config):
@@ -802,14 +802,14 @@ class TestGetPoolMetrics:
             register_client_for_metrics,
         )
 
-        original_client = conn_module._shared_client
-        original_registered = conn_module._registered_clients.copy()
-        conn_module._shared_client = None
-        conn_module._registered_clients = []
+        original_client = conn_module._shared_client  # noqa: SLF001
+        original_registered = conn_module._registered_clients.copy()  # noqa: SLF001
+        conn_module._shared_client = None  # noqa: SLF001
+        conn_module._registered_clients = []  # noqa: SLF001
 
         try:
             mock_client = MagicMock()
-            mock_client._topology = MagicMock()
+            mock_client._topology = MagicMock()  # noqa: SLF001
             mock_client.admin.command = AsyncMock(
                 return_value={"connections": {"current": 1, "available": 9, "totalCreated": 10}}
             )
@@ -822,8 +822,8 @@ class TestGetPoolMetrics:
 
             assert result["status"] == "connected"
         finally:
-            conn_module._shared_client = original_client
-            conn_module._registered_clients = original_registered
+            conn_module._shared_client = original_client  # noqa: SLF001
+            conn_module._registered_clients = original_registered  # noqa: SLF001
 
 
 class TestGetClientPoolMetrics:
@@ -920,7 +920,7 @@ class TestGetClientPoolMetrics:
                 ):
                     return None
                 # For other attributes, raise AttributeError so getattr returns None
-                raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+                raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")  # noqa: SLF001
 
         client = ClientWithoutPoolSize()
 
@@ -964,7 +964,7 @@ class TestGetClientPoolMetrics:
                     "min_pool_size",
                 ):
                     return None
-                raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+                raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")  # noqa: SLF001
 
         error_client = ClientWithError()
 
@@ -1006,7 +1006,7 @@ class TestGetClientPoolMetrics:
                     "min_pool_size",
                 ):
                     return None
-                raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+                raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")  # noqa: SLF001
 
         error_client = ClientWithTypeError()
 
@@ -1046,7 +1046,7 @@ class TestGetClientPoolMetrics:
                     "min_pool_size",
                 ):
                     return None
-                raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+                raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")  # noqa: SLF001
 
         error_client = ClientWithKeyError()
 
@@ -1084,12 +1084,12 @@ class TestCloseSharedClient:
             get_shared_mongo_client,
         )
 
-        original_client = conn_module._shared_client
-        conn_module._shared_client = None
+        original_client = conn_module._shared_client  # noqa: SLF001
+        conn_module._shared_client = None  # noqa: SLF001
 
         try:
             mock_client = MagicMock()
-            mock_client._topology = MagicMock()
+            mock_client._topology = MagicMock()  # noqa: SLF001
             mock_client.close = MagicMock()
 
             with patch(
@@ -1104,10 +1104,10 @@ class TestCloseSharedClient:
 
                 close_shared_client()
 
-                assert conn_module._shared_client is None
+                assert conn_module._shared_client is None  # noqa: SLF001
                 mock_client.close.assert_called_once()
         finally:
-            conn_module._shared_client = original_client
+            conn_module._shared_client = original_client  # noqa: SLF001
 
     def test_close_shared_client_error(self, connection_config):
         """Test close_shared_client handles errors (lines 379-382)."""
@@ -1117,12 +1117,12 @@ class TestCloseSharedClient:
             get_shared_mongo_client,
         )
 
-        original_client = conn_module._shared_client
-        conn_module._shared_client = None
+        original_client = conn_module._shared_client  # noqa: SLF001
+        conn_module._shared_client = None  # noqa: SLF001
 
         try:
             mock_client = MagicMock()
-            mock_client._topology = MagicMock()
+            mock_client._topology = MagicMock()  # noqa: SLF001
             mock_client.close = MagicMock(side_effect=RuntimeError("Close error"))
 
             with patch(
@@ -1138,24 +1138,24 @@ class TestCloseSharedClient:
                 close_shared_client()
 
                 # Should still reset _shared_client even on error
-                assert conn_module._shared_client is None
+                assert conn_module._shared_client is None  # noqa: SLF001
         finally:
-            conn_module._shared_client = original_client
+            conn_module._shared_client = original_client  # noqa: SLF001
 
     def test_close_shared_client_none(self):
         """Test close_shared_client when client is None."""
         import mdb_engine.database.connection as conn_module
         from mdb_engine.database.connection import close_shared_client
 
-        original_client = conn_module._shared_client
-        conn_module._shared_client = None
+        original_client = conn_module._shared_client  # noqa: SLF001
+        conn_module._shared_client = None  # noqa: SLF001
 
         try:
             # Should not raise error
             close_shared_client()
-            assert conn_module._shared_client is None
+            assert conn_module._shared_client is None  # noqa: SLF001
         finally:
-            conn_module._shared_client = original_client
+            conn_module._shared_client = original_client  # noqa: SLF001
 
 
 class TestRegisterClientForMetrics:
@@ -1166,16 +1166,16 @@ class TestRegisterClientForMetrics:
         import mdb_engine.database.connection as conn_module
         from mdb_engine.database.connection import register_client_for_metrics
 
-        original_registered = conn_module._registered_clients.copy()
-        conn_module._registered_clients = []
+        original_registered = conn_module._registered_clients.copy()  # noqa: SLF001
+        conn_module._registered_clients = []  # noqa: SLF001
 
         try:
             mock_client = MagicMock()
             register_client_for_metrics(mock_client)
 
-            assert mock_client in conn_module._registered_clients
+            assert mock_client in conn_module._registered_clients  # noqa: SLF001
         finally:
-            conn_module._registered_clients = original_registered
+            conn_module._registered_clients = original_registered  # noqa: SLF001
 
     @pytest.mark.asyncio
     async def test_verify_shared_client_connection_failure(self, connection_config):
@@ -1188,12 +1188,12 @@ class TestRegisterClientForMetrics:
             verify_shared_client,
         )
 
-        original_client = conn_module._shared_client
-        conn_module._shared_client = None
+        original_client = conn_module._shared_client  # noqa: SLF001
+        conn_module._shared_client = None  # noqa: SLF001
 
         try:
             mock_client = MagicMock()
-            mock_client._topology = MagicMock()
+            mock_client._topology = MagicMock()  # noqa: SLF001
             mock_client.admin.command = AsyncMock(return_value={"ok": 1})
 
             with patch(
@@ -1215,7 +1215,7 @@ class TestRegisterClientForMetrics:
                 result = await verify_shared_client()
                 assert result is False
         finally:
-            conn_module._shared_client = original_client
+            conn_module._shared_client = original_client  # noqa: SLF001
 
     @pytest.mark.asyncio
     async def test_verify_shared_client_timeout_error(self, connection_config):
@@ -1228,12 +1228,12 @@ class TestRegisterClientForMetrics:
             verify_shared_client,
         )
 
-        original_client = conn_module._shared_client
-        conn_module._shared_client = None
+        original_client = conn_module._shared_client  # noqa: SLF001
+        conn_module._shared_client = None  # noqa: SLF001
 
         try:
             mock_client = MagicMock()
-            mock_client._topology = MagicMock()
+            mock_client._topology = MagicMock()  # noqa: SLF001
             mock_client.admin.command = AsyncMock(return_value={"ok": 1})
 
             with patch(
@@ -1255,4 +1255,4 @@ class TestRegisterClientForMetrics:
                 result = await verify_shared_client()
                 assert result is False
         finally:
-            conn_module._shared_client = original_client
+            conn_module._shared_client = original_client  # noqa: SLF001

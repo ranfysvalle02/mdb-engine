@@ -682,6 +682,47 @@ class SharedUserPool:
         )
         return result.modified_count > 0
 
+    async def update_user_metadata(
+        self,
+        email: str,
+        metadata: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """
+        Update user metadata fields.
+
+        This allows adding or updating custom fields on the user document
+        beyond the core schema (e.g., name, profile data, preferences).
+
+        Args:
+            email: User email
+            metadata: Dictionary of fields to update
+                (e.g., {"name": "John Doe", "preferences": {...}})
+
+        Returns:
+            Updated user document (without password_hash) or None if user not found
+
+        Example:
+            user = await pool.update_user_metadata(
+                "user@example.com",
+                {"name": "John Doe", "phone": "+1234567890"}
+            )
+        """
+        # Build update document, ensuring updated_at is always set
+        update_doc = {"$set": {**metadata, "updated_at": datetime.utcnow()}}
+
+        result = await self._collection.update_one(
+            {"email": email},
+            update_doc,
+        )
+
+        if result.modified_count > 0:
+            # Fetch and return updated user
+            updated_user = await self._collection.find_one({"email": email})
+            if updated_user:
+                logger.info(f"Updated metadata for user '{email}': {list(metadata.keys())}")
+                return self._sanitize_user(updated_user)
+        return None
+
     @staticmethod
     def user_has_role(
         user: dict[str, Any],

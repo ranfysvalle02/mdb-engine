@@ -64,8 +64,8 @@ class TestMemoryServiceInitialization:
         try:
             mdb_engine.memory.Mem0MemoryService = MagicMock(return_value=mock_memory_service)
             await service_initializer.initialize_memory_service("test_app", memory_config)
-            assert "test_app" in service_initializer._memory_services
-            assert service_initializer._memory_services["test_app"] == mock_memory_service
+            assert "test_app" in service_initializer._memory_services  # noqa: SLF001
+            assert service_initializer._memory_services["test_app"] == mock_memory_service  # noqa: SLF001
         finally:
             if original_mem0:
                 mdb_engine.memory.Mem0MemoryService = original_mem0
@@ -90,14 +90,14 @@ class TestMemoryServiceInitialization:
             def raise_import_error(*args, **kwargs):
                 raise ImportError("No module named 'mem0'")
 
-            with patch("builtins.__import__", side_effect=raise_import_error):
+            with patch("builtins.__import__", side_effect=raise_import_error):  # noqa: SLF001
                 await service_initializer.initialize_memory_service("test_app", memory_config)
         finally:
             if original_mem0:
                 mdb_engine.memory.Mem0MemoryService = original_mem0
 
         # Should not raise, just log warning
-        assert "test_app" not in service_initializer._memory_services
+        assert "test_app" not in service_initializer._memory_services  # noqa: SLF001
 
     @pytest.mark.asyncio
     async def test_initialize_memory_service_config_extraction(self, service_initializer):
@@ -212,13 +212,13 @@ class TestMemoryServiceInitialization:
         # Patch Mem0MemoryService to raise an error during initialization
         # The import happens inside initialize_memory_service, so we patch at the source
         with patch(
-            "mdb_engine.memory.service.Mem0MemoryService.__init__",
+            "mdb_engine.memory.service.Mem0MemoryService.__init__",  # noqa: SLF001
             side_effect=Mem0MemoryServiceError("Service error"),
         ):
             # Should not raise, just log error
             await service_initializer.initialize_memory_service("test_app", memory_config)
 
-        assert "test_app" not in service_initializer._memory_services
+        assert "test_app" not in service_initializer._memory_services  # noqa: SLF001
 
     @pytest.mark.asyncio
     async def test_initialize_memory_service_import_errors(self, service_initializer):
@@ -255,7 +255,7 @@ class TestMemoryServiceInitialization:
             if original_mem0:
                 mdb_engine.memory.Mem0MemoryService = original_mem0
 
-        assert "test_app" not in service_initializer._memory_services
+        assert "test_app" not in service_initializer._memory_services  # noqa: SLF001
 
 
 class TestWebSocketRegistration:
@@ -277,8 +277,8 @@ class TestWebSocketRegistration:
         ):
             await service_initializer.register_websockets("test_app", websockets_config)
 
-        assert "test_app" in service_initializer._websocket_configs
-        assert service_initializer._websocket_configs["test_app"] == websockets_config
+        assert "test_app" in service_initializer._websocket_configs  # noqa: SLF001
+        assert service_initializer._websocket_configs["test_app"] == websockets_config  # noqa: SLF001
 
     @pytest.mark.asyncio
     async def test_register_websockets_import_error(self, service_initializer):
@@ -297,7 +297,7 @@ class TestWebSocketRegistration:
             await service_initializer.register_websockets("test_app", websockets_config)
 
             # Should still store config
-            assert "test_app" in service_initializer._websocket_configs
+            assert "test_app" in service_initializer._websocket_configs  # noqa: SLF001
         finally:
             # Restore modules
             sys.modules.clear()
@@ -315,7 +315,7 @@ class TestWebSocketRegistration:
             await service_initializer.register_websockets("test_app", websockets_config)
 
         # Should still store config
-        assert "test_app" in service_initializer._websocket_configs
+        assert "test_app" in service_initializer._websocket_configs  # noqa: SLF001
 
     @pytest.mark.asyncio
     async def test_register_websockets_multiple_endpoints(self, service_initializer):
@@ -334,7 +334,7 @@ class TestWebSocketRegistration:
         ):
             await service_initializer.register_websockets("test_app", websockets_config)
 
-        assert len(service_initializer._websocket_configs["test_app"]) == 3
+        assert len(service_initializer._websocket_configs["test_app"]) == 3  # noqa: SLF001
 
 
 class TestDataSeeding:
@@ -352,7 +352,7 @@ class TestDataSeeding:
         mock_collection = MagicMock()
         mock_collection.count_documents = AsyncMock(return_value=0)
         mock_collection.insert_many = AsyncMock(return_value=MagicMock(inserted_ids=["id1", "id2"]))
-        mock_db.__getitem__ = lambda name: mock_collection
+        mock_db.__getitem__ = lambda name: mock_collection  # noqa: SLF001
 
         service_initializer.get_scoped_db_fn = lambda slug: mock_db
 
@@ -448,7 +448,7 @@ class TestDataSeeding:
         mock_collection = MagicMock()
         mock_collection.count_documents = AsyncMock(return_value=0)
         mock_collection.insert_many = AsyncMock(return_value=MagicMock(inserted_ids=["id1"]))
-        mock_db.__getitem__ = lambda name: mock_collection
+        mock_db.__getitem__ = lambda name: mock_collection  # noqa: SLF001
 
         service_initializer.get_scoped_db_fn = lambda slug: mock_db
 
@@ -546,7 +546,7 @@ class TestServiceAccessors:
     async def test_get_websocket_config_exists(self, service_initializer):
         """Test getting WebSocket config when available."""
         websocket_config = {"endpoint1": {"path": "/ws"}}
-        service_initializer._websocket_configs["test_app"] = websocket_config
+        service_initializer._websocket_configs["test_app"] = websocket_config  # noqa: SLF001
 
         config = service_initializer.get_websocket_config("test_app")
         assert config == websocket_config
@@ -562,7 +562,7 @@ class TestServiceAccessors:
         """Test getting memory service when available."""
         mock_service = MagicMock()
         mock_service.memory = MagicMock()
-        service_initializer._memory_services["test_app"] = mock_service
+        service_initializer._memory_services["test_app"] = mock_service  # noqa: SLF001
 
         service = service_initializer.get_memory_service("test_app")
         assert service == mock_service
@@ -573,7 +573,7 @@ class TestServiceAccessors:
         mock_service = MagicMock()
         # No memory attribute
         del mock_service.memory
-        service_initializer._memory_services["test_app"] = mock_service
+        service_initializer._memory_services["test_app"] = mock_service  # noqa: SLF001
 
         service = service_initializer.get_memory_service("test_app")
         assert service is None
@@ -586,7 +586,7 @@ class TestServiceAccessors:
         # Remove memory attribute to trigger the warning path
         if hasattr(mock_service_no_memory, "memory"):
             delattr(mock_service_no_memory, "memory")
-        service_initializer._memory_services["test_app2"] = mock_service_no_memory
+        service_initializer._memory_services["test_app2"] = mock_service_no_memory  # noqa: SLF001
 
         service = service_initializer.get_memory_service("test_app2")
         assert service is None
@@ -594,15 +594,15 @@ class TestServiceAccessors:
     @pytest.mark.asyncio
     async def test_clear_services(self, service_initializer):
         """Test clearing all service state."""
-        service_initializer._memory_services["app1"] = MagicMock()
-        service_initializer._memory_services["app2"] = MagicMock()
-        service_initializer._websocket_configs["app1"] = {"endpoint": {}}
-        service_initializer._websocket_configs["app2"] = {"endpoint": {}}
+        service_initializer._memory_services["app1"] = MagicMock()  # noqa: SLF001
+        service_initializer._memory_services["app2"] = MagicMock()  # noqa: SLF001
+        service_initializer._websocket_configs["app1"] = {"endpoint": {}}  # noqa: SLF001
+        service_initializer._websocket_configs["app2"] = {"endpoint": {}}  # noqa: SLF001
 
         service_initializer.clear_services()
 
-        assert len(service_initializer._memory_services) == 0
-        assert len(service_initializer._websocket_configs) == 0
+        assert len(service_initializer._memory_services) == 0  # noqa: SLF001
+        assert len(service_initializer._websocket_configs) == 0  # noqa: SLF001
 
     @pytest.mark.asyncio
     async def test_register_websockets_import_error(self, service_initializer):
@@ -639,9 +639,9 @@ class TestServiceAccessors:
             def __getattr__(self, name):
                 if name == "memory":
                     raise TypeError("'NoneType' object is not callable")
-                raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+                raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")  # noqa: SLF001
 
-        service_initializer._memory_services["test_app"] = InvalidService()
+        service_initializer._memory_services["test_app"] = InvalidService()  # noqa: SLF001
         service = service_initializer.get_memory_service("test_app")
         assert service is None
 
@@ -654,8 +654,8 @@ class TestServiceAccessors:
             def __getattr__(self, name):
                 if name == "memory":
                     raise AttributeError("'NoneType' object has no attribute 'memory'")
-                raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+                raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")  # noqa: SLF001
 
-        service_initializer._memory_services["test_app"] = ServiceWithAttributeError()
+        service_initializer._memory_services["test_app"] = ServiceWithAttributeError()  # noqa: SLF001
         service = service_initializer.get_memory_service("test_app")
         assert service is None

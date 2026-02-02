@@ -51,7 +51,7 @@ class TestMongoDBEngineInstantiation:
         assert engine.mongo_uri == "mongodb://localhost:27017"
         assert engine.db_name == "test_db"
         assert engine.enable_ray is False
-        assert engine._initialized is False
+        assert engine._initialized is False  # noqa: SLF001
 
     def test_instantiation_with_ray(self):
         """Test instantiation with Ray enabled."""
@@ -106,7 +106,7 @@ class TestMongoDBEngineProperties:
             db_name="test_db",
         )
 
-        assert engine._initialized is False
+        assert engine._initialized is False  # noqa: SLF001
 
 
 class TestMongoDBEngineCreateApp:
@@ -210,7 +210,7 @@ class TestMongoDBEngineAppToken:
         )
 
         # Manually populate cache
-        engine._app_token_cache["test_app"] = "test_token"
+        engine._app_token_cache["test_app"] = "test_token"  # noqa: SLF001
 
         assert engine.get_app_token("test_app") == "test_token"
 
@@ -230,7 +230,7 @@ class TestMongoDBEngineAppToken:
         try:
             token = await engine.auto_retrieve_app_token("test_app")
             assert token == "env_token"
-            assert engine._app_token_cache["test_app"] == "env_token"
+            assert engine._app_token_cache["test_app"] == "env_token"  # noqa: SLF001
         finally:
             del os.environ["TEST_APP_SECRET"]
 

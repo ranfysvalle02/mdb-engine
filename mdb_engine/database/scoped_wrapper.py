@@ -291,7 +291,7 @@ class AsyncAtlasIndexManager:
         """
         # Unwrap _SecureCollectionProxy if present to get the real collection
         if isinstance(real_collection, _SecureCollectionProxy):
-            real_collection = real_collection._collection
+            real_collection = real_collection._collection  # noqa: SLF001
         if not isinstance(real_collection, AsyncIOMotorCollection):
             raise TypeError(f"Expected AsyncIOMotorCollection, got {type(real_collection)}")
         self._collection = real_collection
@@ -1297,7 +1297,7 @@ class ScopedCollectionWrapper:
         try:
             # Verify token if needed (lazy verification for async contexts)
             if self._parent_wrapper:
-                await self._parent_wrapper._verify_token_if_needed()
+                await self._parent_wrapper._verify_token_if_needed()  # noqa: SLF001
 
             # Validate document size before insert
             self._resource_limiter.validate_document_size(document)
@@ -1390,7 +1390,7 @@ class ScopedCollectionWrapper:
         try:
             # Verify token if needed (lazy verification for async contexts)
             if self._parent_wrapper:
-                await self._parent_wrapper._verify_token_if_needed()
+                await self._parent_wrapper._verify_token_if_needed()  # noqa: SLF001
 
             # Validate query filter for security
             self._query_validator.validate_filter(filter)

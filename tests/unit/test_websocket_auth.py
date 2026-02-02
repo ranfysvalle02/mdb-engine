@@ -53,6 +53,14 @@ def valid_jwt_token():
     return jwt.encode(payload, str(SECRET_KEY), algorithm="HS256")
 
 
+@pytest.fixture
+def mock_user_pool():
+    """Create a mock SharedUserPool for testing."""
+    pool = MagicMock()
+    pool.validate_token = AsyncMock()
+    return pool
+
+
 class TestCookieExtraction:
     """Tests for cookie extraction from WebSocket requests."""
 
@@ -116,15 +124,28 @@ class TestWebSocketCookieAuthentication:
     """
 
     @pytest.mark.asyncio
-    async def test_authenticate_via_cookie_success(self, mock_websocket, valid_jwt_token):
+    async def test_authenticate_via_cookie_success(
+        self, mock_websocket, valid_jwt_token, mock_user_pool
+    ):
         """
         Test successful authentication via httpOnly cookie.
 
         Security: Validates that valid JWT tokens in httpOnly cookies
         are correctly extracted and validated.
         """
-        # Set up WebSocket with token in cookie (use correct cookie name)
+        # Set up mock user_pool to return user data
+        mock_user_pool.validate_token.return_value = {
+            "_id": "user123",
+            "sub": "user123",
+            "user_id": "user123",
+            "email": "test@example.com",
+        }
+
+        # Set up WebSocket with token in cookie and user_pool in app state
         mock_websocket.cookies = {AUTH_COOKIE_NAME: valid_jwt_token}
+        mock_websocket.app = MagicMock()
+        mock_websocket.app.state = MagicMock()
+        mock_websocket.app.state.user_pool = mock_user_pool
 
         user_id, user_email = await authenticate_websocket(
             mock_websocket, "test_app", require_auth=True
@@ -134,7 +155,7 @@ class TestWebSocketCookieAuthentication:
         assert user_email == "test@example.com"
 
     @pytest.mark.asyncio
-    async def test_authenticate_via_cookie_invalid_token(self, mock_websocket):
+    async def test_authenticate_via_cookie_invalid_token(self, mock_websocket, mock_user_pool):
         """
         Test authentication failure with invalid token in cookie.
 
@@ -144,13 +165,19 @@ class TestWebSocketCookieAuthentication:
         """
         invalid_token = "not.a.valid.jwt.token"
         mock_websocket.cookies = {AUTH_COOKIE_NAME: invalid_token}
+        mock_websocket.app = MagicMock()
+        mock_websocket.app.state = MagicMock()
+        mock_websocket.app.state.user_pool = mock_user_pool
+
+        # Mock validate_token to raise JWT decode error
+        mock_user_pool.validate_token.side_effect = jwt.DecodeError("Invalid token")
 
         # Invalid JWT tokens raise exceptions during decode
         with pytest.raises(jwt.DecodeError):
             await authenticate_websocket(mock_websocket, "test_app", require_auth=True)
 
     @pytest.mark.asyncio
-    async def test_authenticate_via_cookie_expired_token(self, mock_websocket):
+    async def test_authenticate_via_cookie_expired_token(self, mock_websocket, mock_user_pool):
         """
         Test authentication failure with expired token.
 
@@ -165,12 +192,20 @@ class TestWebSocketCookieAuthentication:
         }
         expired_token = jwt.encode(expired_payload, str(SECRET_KEY), algorithm="HS256")
         mock_websocket.cookies = {AUTH_COOKIE_NAME: expired_token}
+        mock_websocket.app = MagicMock()
+        mock_websocket.app.state = MagicMock()
+        mock_websocket.app.state.user_pool = mock_user_pool
+
+        # Mock validate_token to raise expired signature error
+        mock_user_pool.validate_token.side_effect = jwt.ExpiredSignatureError("Token expired")
 
         with pytest.raises(jwt.ExpiredSignatureError):
             await authenticate_websocket(mock_websocket, "test_app", require_auth=True)
 
     @pytest.mark.asyncio
-    async def test_authenticate_via_cookie_scope_header(self, mock_websocket, valid_jwt_token):
+    async def test_authenticate_via_cookie_scope_header(
+        self, mock_websocket, valid_jwt_token, mock_user_pool
+    ):
         """
         Test authentication via Cookie header in ASGI scope.
 
@@ -178,11 +213,22 @@ class TestWebSocketCookieAuthentication:
         headers when WebSocket.cookies attribute is not available. This ensures
         compatibility with different WebSocket implementations while maintaining security.
         """
+        # Set up mock user_pool to return user data
+        mock_user_pool.validate_token.return_value = {
+            "_id": "user123",
+            "sub": "user123",
+            "user_id": "user123",
+            "email": "test@example.com",
+        }
+
         # Simulate ASGI-style headers in scope
         mock_websocket.cookies = None  # No cookies attribute
         mock_websocket.scope = {
             "headers": [(b"cookie", f"{AUTH_COOKIE_NAME}={valid_jwt_token}".encode())]
         }
+        mock_websocket.app = MagicMock()
+        mock_websocket.app.state = MagicMock()
+        mock_websocket.app.state.user_pool = mock_user_pool
 
         user_id, user_email = await authenticate_websocket(
             mock_websocket, "test_app", require_auth=True
@@ -289,7 +335,9 @@ class TestWebSocketAuthenticationErrors:
         assert user_email is None
 
     @pytest.mark.asyncio
-    async def test_websocket_auth_uses_correct_cookie_name(self, mock_websocket, valid_jwt_token):
+    async def test_websocket_auth_uses_correct_cookie_name(
+        self, mock_websocket, valid_jwt_token, mock_user_pool
+    ):
         """
         Regression test: Ensure WebSocket authentication uses AUTH_COOKIE_NAME (mdb_auth_token).
 
@@ -297,6 +345,17 @@ class TestWebSocketAuthenticationErrors:
         a hardcoded "token" cookie name instead of the shared AUTH_COOKIE_NAME.
         This ensures consistency with SharedAuthMiddleware and prevents auth failures.
         """
+        # Set up mock user_pool to return user data
+        mock_user_pool.validate_token.return_value = {
+            "_id": "user123",
+            "sub": "user123",
+            "user_id": "user123",
+            "email": "test@example.com",
+        }
+        mock_websocket.app = MagicMock()
+        mock_websocket.app.state = MagicMock()
+        mock_websocket.app.state.user_pool = mock_user_pool
+
         # Test with correct cookie name (should work)
         mock_websocket.cookies = {AUTH_COOKIE_NAME: valid_jwt_token}
         user_id, user_email = await authenticate_websocket(
@@ -337,7 +396,7 @@ class TestWebSocketSessionKeyAuthentication:
         # Mock MongoDB
         mock_db = MagicMock()
         mock_collection = MagicMock()
-        mock_db.__getitem__ = MagicMock(return_value=mock_collection)
+        mock_db.__getitem__ = MagicMock(return_value=mock_collection)  # noqa: SLF001
 
         session_manager = WebSocketSessionManager(mock_db, encryption_service)
         return session_manager, mock_collection
@@ -354,7 +413,7 @@ class TestWebSocketSessionKeyAuthentication:
         from datetime import datetime, timedelta
 
         expires_at = datetime.utcnow() + timedelta(hours=24)
-        encrypted_key, encrypted_dek = session_manager._encryption_service.encrypt_secret(
+        encrypted_key, encrypted_dek = session_manager._encryption_service.encrypt_secret(  # noqa: SLF001
             session_key
         )
 
@@ -471,15 +530,24 @@ class TestWebSocketSessionKeyAuthentication:
 
     @pytest.mark.asyncio
     async def test_authenticate_falls_back_to_cookie(
-        self, mock_websocket, valid_jwt_token, mock_session_manager
+        self, mock_websocket, valid_jwt_token, mock_session_manager, mock_user_pool
     ):
         """Test that authentication falls back to cookie if session key not present."""
         session_manager, mock_collection = mock_session_manager
+
+        # Set up mock user_pool to return user data
+        mock_user_pool.validate_token.return_value = {
+            "_id": "user123",
+            "sub": "user123",
+            "user_id": "user123",
+            "email": "test@example.com",
+        }
 
         # Set up mock websocket without session key but with cookie
         mock_websocket.app = MagicMock()
         mock_websocket.app.state = MagicMock()
         mock_websocket.app.state.websocket_session_manager = session_manager
+        mock_websocket.app.state.user_pool = mock_user_pool
         mock_websocket.query_params = MagicMock()
         mock_websocket.query_params.get = MagicMock(return_value=None)
         mock_websocket.headers = MagicMock()

@@ -133,8 +133,10 @@ register_message_handler("my_app", "realtime", handle_client_message)
 
 ### Authentication
 
-- Integrates with mdb_engine's JWT authentication system
-- Supports token via query parameter or cookie
+- Uses ticket-based authentication (secure-by-default)
+- Tickets are short-lived (10 seconds), single-use, and in-memory
+- Exchange JWT for ticket via `/auth/ticket` endpoint
+- Include ticket as query parameter (`?ticket=...`) or header (`X-WebSocket-Ticket`)
 - Respects app's `auth_policy` configuration
 - Can be overridden per endpoint
 
@@ -434,6 +436,11 @@ async def on_document_created(document):
 - **Simplicity**: Just declare in manifest.json, register handlers in code
 - **Flexibility**: Full two-way communication (broadcast + listen)
 - **Automatic**: Routes registered automatically during app registration
+- **FastAPI Integration**: Uses FastAPI's `APIRouter` for WebSocket registration, ensuring:
+  - ✅ Full FastAPI feature support (dependency injection, OpenAPI docs, request/response models)
+  - ✅ Consistent behavior across single-app and multi-app modes
+  - ✅ Best practices compliance with FastAPI's recommended patterns
+  - ✅ Better maintainability through FastAPI abstractions
 
 ## Message Flow
 

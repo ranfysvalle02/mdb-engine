@@ -359,6 +359,16 @@ class AppRegistrationManager:
         """
         return self._apps.get(slug)
 
+    @property
+    def apps(self) -> dict[str, dict[str, Any]]:
+        """
+        Get all registered apps.
+
+        Returns:
+            Dictionary of registered apps
+        """
+        return self._apps
+
     def list_apps(self) -> list[str]:
         """
         List all registered app slugs.

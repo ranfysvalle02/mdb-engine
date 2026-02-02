@@ -17,16 +17,16 @@ class TestMongoDBEngineIntegration:
         """Test engine initialization with real MongoDB."""
         engine = real_mongodb_engine
 
-        assert engine._initialized is True
+        assert engine._initialized is True  # noqa: SLF001
         assert engine.mongo_client is not None
 
     async def test_engine_shutdown(self, real_mongodb_engine):
         """Test engine shutdown with real MongoDB."""
         engine = real_mongodb_engine
 
-        assert engine._initialized is True
+        assert engine._initialized is True  # noqa: SLF001
         await engine.shutdown()
-        assert engine._initialized is False
+        assert engine._initialized is False  # noqa: SLF001
 
     async def test_register_app_with_real_db(self, real_mongodb_engine, sample_manifest):
         """Test app registration with real MongoDB."""
@@ -35,10 +35,10 @@ class TestMongoDBEngineIntegration:
         result = await engine.register_app(sample_manifest, create_indexes=False)
 
         assert result is True
-        assert sample_manifest["slug"] in engine._apps
+        assert sample_manifest["slug"] in engine.apps
 
         # Verify app was stored in MongoDB (using internal access for system collection)
-        apps_collection = engine._connection_manager.mongo_db["apps_config"]
+        apps_collection = engine._connection_manager.mongo_db["apps_config"]  # noqa: SLF001
         stored_app = await apps_collection.find_one({"slug": sample_manifest["slug"]})
         assert stored_app is not None
         assert stored_app["slug"] == sample_manifest["slug"]
@@ -108,8 +108,8 @@ class TestMongoDBEngineIntegration:
         scoped_db = engine.get_scoped_db("test_app")
 
         assert scoped_db is not None
-        assert scoped_db._read_scopes == ["test_app"]
-        assert scoped_db._write_scope == "test_app"
+        assert scoped_db._read_scopes == ["test_app"]  # noqa: SLF001
+        assert scoped_db._write_scope == "test_app"  # noqa: SLF001
 
     async def test_engine_context_manager(self, mongodb_connection_string):
         """Test engine as async context manager with real MongoDB."""
@@ -118,10 +118,10 @@ class TestMongoDBEngineIntegration:
         mongo_uri = mongodb_connection_string
 
         async with MongoDBEngine(mongo_uri=mongo_uri, db_name="test_context_db") as engine:
-            assert engine._initialized is True
+            assert engine._initialized is True  # noqa: SLF001
 
         # After context exit, should be shut down
-        assert engine._initialized is False
+        assert engine._initialized is False  # noqa: SLF001
 
     async def test_engine_reinitialization(self, real_mongodb_engine):
         """Test that engine can be reinitialized after shutdown."""
@@ -129,11 +129,11 @@ class TestMongoDBEngineIntegration:
 
         # Shutdown
         await engine.shutdown()
-        assert engine._initialized is False
+        assert engine._initialized is False  # noqa: SLF001
 
         # Reinitialize
         await engine.initialize()
-        assert engine._initialized is True
+        assert engine._initialized is True  # noqa: SLF001
 
     async def test_engine_security_features_integration(self, real_mongodb_engine):
         """Test that security features work end-to-end through engine."""

@@ -33,7 +33,7 @@ if "MDB_ENGINE_MASTER_KEY" not in os.environ:
 def mock_db():
     """Create a mock database."""
     db = MagicMock()
-    db.__getitem__ = MagicMock(return_value=MagicMock())
+    db.__getitem__ = MagicMock(return_value=MagicMock())  # noqa: SLF001
     return db
 
 
@@ -200,12 +200,12 @@ class TestTokenBlacklistFailClosed:
 
         # Mock blacklist check to raise error
         with patch.object(
-            user_pool_fail_closed._blacklist_collection,
+            user_pool_fail_closed._blacklist_collection,  # noqa: SLF001
             "find_one",
             side_effect=PyMongoError("Database error"),
         ):
             # Should return True (token IS revoked) when check fails
-            is_revoked = await user_pool_fail_closed._is_token_revoked("test-jti")
+            is_revoked = await user_pool_fail_closed._is_token_revoked("test-jti")  # noqa: SLF001
             assert is_revoked is True  # Fail closed - reject token
 
     @pytest.mark.asyncio
@@ -213,12 +213,12 @@ class TestTokenBlacklistFailClosed:
         """Test that blacklist check fails open (allows token) when configured."""
         # Mock blacklist check to raise error
         with patch.object(
-            user_pool_fail_open._blacklist_collection,
+            user_pool_fail_open._blacklist_collection,  # noqa: SLF001
             "find_one",
             side_effect=PyMongoError("Database error"),
         ):
             # Should return False (token NOT revoked) when check fails
-            is_revoked = await user_pool_fail_open._is_token_revoked("test-jti")
+            is_revoked = await user_pool_fail_open._is_token_revoked("test-jti")  # noqa: SLF001
             assert is_revoked is False  # Fail open - allow token
 
 
@@ -236,7 +236,7 @@ class TestRaceConditionProtection:
         mock_collection = MagicMock()
         mock_collection.create_index = AsyncMock()
         mock_collection.find_one = AsyncMock(return_value=None)
-        mock_db.__getitem__ = MagicMock(return_value=mock_collection)
+        mock_db.__getitem__ = MagicMock(return_value=mock_collection)  # noqa: SLF001
 
         with patch.object(engine, "_connection_manager") as mock_conn:
             mock_conn.mongo_db = mock_db
@@ -250,10 +250,10 @@ class TestRaceConditionProtection:
 
             # Initialize concurrently
             async def init1():
-                await engine._initialize_shared_user_pool(app1)
+                await engine._initialize_shared_user_pool(app1)  # noqa: SLF001
 
             async def init2():
-                await engine._initialize_shared_user_pool(app2)
+                await engine._initialize_shared_user_pool(app2)  # noqa: SLF001
 
             # Run concurrently
             await asyncio.gather(init1(), init2())
@@ -262,7 +262,7 @@ class TestRaceConditionProtection:
             assert hasattr(app1.state, "user_pool")
             assert hasattr(app2.state, "user_pool")
             assert app1.state.user_pool is app2.state.user_pool
-            assert app1.state.user_pool is engine._shared_user_pool
+            assert app1.state.user_pool is engine._shared_user_pool  # noqa: SLF001
 
 
 class TestSessionBindingStrictFingerprint:
@@ -493,7 +493,7 @@ class TestSecurityIntegration:
         mock_blacklist_collection.find_one = AsyncMock()
         mock_blacklist_collection.create_index = AsyncMock()
 
-        mock_db.__getitem__ = MagicMock(
+        mock_db.__getitem__ = MagicMock(  # noqa: SLF001
             side_effect=lambda key: {
                 "_mdb_engine_shared_users": mock_collection,
                 "_mdb_engine_token_blacklist": mock_blacklist_collection,
@@ -516,7 +516,7 @@ class TestSecurityIntegration:
         }
 
         # Create token
-        token = pool._generate_token(user)
+        token = pool._generate_token(user)  # noqa: SLF001
 
         # Mock blacklist check to fail
         mock_blacklist_collection.find_one.side_effect = PyMongoError("Database error")

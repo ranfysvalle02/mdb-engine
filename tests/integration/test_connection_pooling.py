@@ -31,7 +31,7 @@ class TestConnectionPooling:
         await engine.initialize()
 
         # Verify engine initialized successfully
-        assert engine._initialized is True
+        assert engine._initialized is True  # noqa: SLF001
         assert engine.mongo_client is not None
 
         # Verify options were passed
@@ -101,7 +101,7 @@ class TestConnectionPooling:
         engine = real_mongodb_engine
 
         # Engine should be healthy after initialization
-        assert engine._initialized is True
+        assert engine._initialized is True  # noqa: SLF001
 
         # Verify we can ping MongoDB
         result = await engine.mongo_client.admin.command("ping")
@@ -117,15 +117,15 @@ class TestConnectionPooling:
 
         # First initialization
         await engine.initialize()
-        assert engine._initialized is True
+        assert engine._initialized is True  # noqa: SLF001
 
         # Shutdown
         await engine.shutdown()
-        assert engine._initialized is False
+        assert engine._initialized is False  # noqa: SLF001
 
         # Reinitialize
         await engine.initialize()
-        assert engine._initialized is True
+        assert engine._initialized is True  # noqa: SLF001
 
         await engine.shutdown()
 
@@ -138,7 +138,7 @@ class TestConnectionPooling:
         with pytest.raises(InitializationError):
             await engine.initialize()
 
-        assert engine._initialized is False
+        assert engine._initialized is False  # noqa: SLF001
 
     @pytest.mark.timeout(10)  # Limit test to 10 seconds max
     async def test_connection_timeout(self):
@@ -158,7 +158,7 @@ class TestConnectionPooling:
         with pytest.raises(InitializationError):
             await engine.initialize()
 
-        assert engine._initialized is False
+        assert engine._initialized is False  # noqa: SLF001
 
     async def test_multiple_engines_same_mongodb(self, mongodb_connection_string):
         """Test that multiple engines can connect to same MongoDB."""
@@ -173,8 +173,8 @@ class TestConnectionPooling:
         await engine1.initialize()
         await engine2.initialize()
 
-        assert engine1._initialized is True
-        assert engine2._initialized is True
+        assert engine1._initialized is True  # noqa: SLF001
+        assert engine2._initialized is True  # noqa: SLF001
 
         await engine1.shutdown()
         await engine2.shutdown()

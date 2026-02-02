@@ -441,7 +441,7 @@ async def _handle_search_index(
             logger.info(f"{log_prefix} Search index '{index_name}' definition matches.")
             if not existing_index.get("queryable") and existing_index.get("status") != "FAILED":
                 logger.info(f"{log_prefix} Index '{index_name}' not queryable yet; waiting.")
-                await index_manager._wait_for_search_index_ready(
+                await index_manager._wait_for_search_index_ready(  # noqa: SLF001
                     index_name, index_manager.DEFAULT_SEARCH_TIMEOUT
                 )
                 logger.info(f"{log_prefix} Index '{index_name}' now ready.")
@@ -580,7 +580,7 @@ async def _handle_hybrid_index(
                     f"{log_prefix} Vector index '{vector_index_name}' "
                     f"not queryable yet; waiting."
                 )
-                await index_manager._wait_for_search_index_ready(
+                await index_manager._wait_for_search_index_ready(  # noqa: SLF001
                     vector_index_name, index_manager.DEFAULT_SEARCH_TIMEOUT
                 )
                 logger.info(f"{log_prefix} Vector index '{vector_index_name}' now ready.")
@@ -634,7 +634,7 @@ async def _handle_hybrid_index(
                 logger.info(
                     f"{log_prefix} Text index '{text_index_name}' " f"not queryable yet; waiting."
                 )
-                await index_manager._wait_for_search_index_ready(
+                await index_manager._wait_for_search_index_ready(  # noqa: SLF001
                     text_index_name, index_manager.DEFAULT_SEARCH_TIMEOUT
                 )
                 logger.info(f"{log_prefix} Text index '{text_index_name}' now ready.")

@@ -29,7 +29,7 @@ class TestMongoDBEngineInitialization:
             engine = MongoDBEngine(**mongodb_engine_config)
             await engine.initialize()
 
-            assert engine._initialized is True
+            assert engine._initialized is True  # noqa: SLF001
             assert engine.mongo_client is not None
 
             await engine.shutdown()
@@ -49,27 +49,27 @@ class TestMongoDBEngineInitialization:
                 await engine.initialize()
 
             assert "Failed to connect to MongoDB" in str(exc_info.value)
-            assert engine._initialized is False
+            assert engine._initialized is False  # noqa: SLF001
 
     @pytest.mark.asyncio
     async def test_engine_double_initialization(self, mongodb_engine):
         """Test that double initialization is handled gracefully."""
         # First initialization happens in fixture
-        assert mongodb_engine._initialized is True
+        assert mongodb_engine._initialized is True  # noqa: SLF001
 
         # Second initialization should be a no-op
         await mongodb_engine.initialize()
-        assert mongodb_engine._initialized is True
+        assert mongodb_engine._initialized is True  # noqa: SLF001
 
     @pytest.mark.asyncio
     async def test_engine_shutdown(self, mongodb_engine):
         """Test engine shutdown."""
-        assert mongodb_engine._initialized is True
+        assert mongodb_engine._initialized is True  # noqa: SLF001
 
         await mongodb_engine.shutdown()
 
-        assert mongodb_engine._initialized is False
-        assert len(mongodb_engine._apps) == 0
+        assert mongodb_engine._initialized is False  # noqa: SLF001
+        assert len(mongodb_engine.apps) == 0
 
     @pytest.mark.asyncio
     async def test_engine_shutdown_idempotent(self, mongodb_engine):
@@ -85,10 +85,10 @@ class TestMongoDBEngineInitialization:
             return_value=mock_mongo_client,
         ):
             async with MongoDBEngine(**mongodb_engine_config) as engine:
-                assert engine._initialized is True
+                assert engine._initialized is True  # noqa: SLF001
 
             # After context exit, should be shut down
-            assert engine._initialized is False
+            assert engine._initialized is False  # noqa: SLF001
 
 
 class TestMongoDBEngineProperties:
@@ -122,8 +122,8 @@ class TestMongoDBEngineScopedDatabase:
         scoped_db = mongodb_engine.get_scoped_db("test_app")
 
         assert scoped_db is not None
-        assert scoped_db._read_scopes == ["test_app"]
-        assert scoped_db._write_scope == "test_app"
+        assert scoped_db._read_scopes == ["test_app"]  # noqa: SLF001
+        assert scoped_db._write_scope == "test_app"  # noqa: SLF001
 
     @pytest.mark.asyncio
     async def test_get_scoped_db_custom_scopes(self, mongodb_engine, sample_manifest):
@@ -138,7 +138,7 @@ class TestMongoDBEngineScopedDatabase:
         await mongodb_engine.register_app(manifest_with_scopes, create_indexes=False)
 
         # Verify read_scopes were set correctly
-        assert mongodb_engine._app_read_scopes.get("test_app") == [
+        assert mongodb_engine._app_read_scopes.get("test_app") == [  # noqa: SLF001
             "test_app",
             "app1",
             "app2",
@@ -159,8 +159,8 @@ class TestMongoDBEngineScopedDatabase:
             app_slug="test_app", read_scopes=["app1", "app2"], write_scope="app1"
         )
 
-        assert scoped_db._read_scopes == ["app1", "app2"]
-        assert scoped_db._write_scope == "app1"
+        assert scoped_db._read_scopes == ["app1", "app2"]  # noqa: SLF001
+        assert scoped_db._write_scope == "app1"  # noqa: SLF001
 
     @pytest.mark.asyncio
     async def test_get_scoped_db_has_validators_and_limiters(self, mongodb_engine):
@@ -170,8 +170,8 @@ class TestMongoDBEngineScopedDatabase:
         # Verify validators and limiters are present
         assert hasattr(scoped_db, "_query_validator")
         assert hasattr(scoped_db, "_resource_limiter")
-        assert scoped_db._query_validator is not None
-        assert scoped_db._resource_limiter is not None
+        assert scoped_db._query_validator is not None  # noqa: SLF001
+        assert scoped_db._resource_limiter is not None  # noqa: SLF001
 
     @pytest.mark.asyncio
     async def test_get_scoped_db_collections_have_validators(
@@ -179,7 +179,7 @@ class TestMongoDBEngineScopedDatabase:
     ):
         """Test that collections created from scoped db have validators."""
         # Mock the database
-        with patch.object(mongodb_engine._connection_manager, "mongo_db", mock_mongo_database):
+        with patch.object(mongodb_engine._connection_manager, "mongo_db", mock_mongo_database):  # noqa: SLF001
             scoped_db = mongodb_engine.get_scoped_db("test_app")
 
             # Mock collection
@@ -195,8 +195,8 @@ class TestMongoDBEngineScopedDatabase:
             # Verify collection has validators
             assert hasattr(collection, "_query_validator")
             assert hasattr(collection, "_resource_limiter")
-            assert collection._query_validator is scoped_db._query_validator
-            assert collection._resource_limiter is scoped_db._resource_limiter
+            assert collection._query_validator is scoped_db._query_validator  # noqa: SLF001
+            assert collection._resource_limiter is scoped_db._resource_limiter  # noqa: SLF001
 
     @pytest.mark.asyncio
     async def test_get_scoped_db_security_features_work(self, mongodb_engine, mock_mongo_database):
@@ -206,7 +206,7 @@ class TestMongoDBEngineScopedDatabase:
         from mdb_engine.exceptions import QueryValidationError
 
         # Mock the database
-        with patch.object(mongodb_engine._connection_manager, "mongo_db", mock_mongo_database):
+        with patch.object(mongodb_engine._connection_manager, "mongo_db", mock_mongo_database):  # noqa: SLF001
             scoped_db = mongodb_engine.get_scoped_db("test_app")
 
             # Mock collection
@@ -231,7 +231,7 @@ class TestMongoDBEngineScopedDatabase:
         """Test scoped database with auto_index disabled."""
         scoped_db = mongodb_engine.get_scoped_db("test_app", auto_index=False)
 
-        assert scoped_db._auto_index is False
+        assert scoped_db._auto_index is False  # noqa: SLF001
 
 
 class TestMongoDBEngineManifestValidation:
@@ -343,7 +343,7 @@ class TestMongoDBEngineGetScopedDbSecurity:
         await mongodb_engine.register_app(manifest_with_scopes, create_indexes=False)
 
         # Verify read_scopes were set correctly
-        assert mongodb_engine._app_read_scopes.get("test_app") == [
+        assert mongodb_engine._app_read_scopes.get("test_app") == [  # noqa: SLF001
             "test_app",
             "other_app",
         ]
@@ -372,7 +372,7 @@ class TestMongoDBEngineTenantRegistration:
         result = await mongodb_engine.register_app(sample_manifest, create_indexes=False)
 
         assert result is True
-        assert sample_manifest["slug"] in mongodb_engine._apps
+        assert sample_manifest["slug"] in mongodb_engine.apps
         assert mongodb_engine.get_app(sample_manifest["slug"]) == sample_manifest
 
     @pytest.mark.asyncio
@@ -383,7 +383,7 @@ class TestMongoDBEngineTenantRegistration:
         result = await mongodb_engine.register_app(manifest_no_slug)
 
         assert result is False
-        assert len(mongodb_engine._apps) == 0
+        assert len(mongodb_engine.apps) == 0
 
     @pytest.mark.asyncio
     async def test_register_app_invalid_manifest(self, mongodb_engine, invalid_manifest):
@@ -391,7 +391,7 @@ class TestMongoDBEngineTenantRegistration:
         result = await mongodb_engine.register_app(invalid_manifest)
 
         assert result is False
-        assert len(mongodb_engine._apps) == 0
+        assert len(mongodb_engine.apps) == 0
 
     @pytest.mark.asyncio
     async def test_register_app_uninitialized(self, uninitialized_mongodb_engine, sample_manifest):
@@ -434,7 +434,7 @@ class TestMongoDBEngineWebSocket:
         """Test getting WebSocket config when available."""
         # Mock service initializer with websocket config
         websocket_config = {"endpoint1": {"path": "/ws"}}
-        mongodb_engine._service_initializer._websocket_configs["test_app"] = websocket_config
+        mongodb_engine._service_initializer._websocket_configs["test_app"] = websocket_config  # noqa: SLF001
 
         config = mongodb_engine.get_websocket_config("test_app")
         assert config == websocket_config
@@ -465,7 +465,7 @@ class TestMongoDBEngineWebSocket:
     async def test_register_websocket_routes_import_error(self, mongodb_engine):
         """Test registering WebSocket routes when FastAPI is not available."""
         websocket_config = {"endpoint1": {"path": "/ws"}}
-        mongodb_engine._service_initializer._websocket_configs["test_app"] = websocket_config
+        mongodb_engine._service_initializer._websocket_configs["test_app"] = websocket_config  # noqa: SLF001
 
         mock_app = MagicMock()
         # Simulate ImportError by replacing the module with one that raises ImportError
@@ -499,7 +499,7 @@ class TestMongoDBEngineWebSocket:
                 "ping_interval": 20,
             }
         }
-        mongodb_engine._service_initializer._websocket_configs["test_app"] = websocket_config
+        mongodb_engine._service_initializer._websocket_configs["test_app"] = websocket_config  # noqa: SLF001
 
         mock_app = MagicMock()
         mock_app.routes = []
@@ -526,7 +526,7 @@ class TestMongoDBEngineWebSocket:
         websocket_config_nested = {
             "endpoint1": {"path": "/ws/endpoint1", "auth": {"required": False}}
         }
-        mongodb_engine._service_initializer._websocket_configs["test_experiment"] = (
+        mongodb_engine._service_initializer._websocket_configs["test_experiment"] = (  # noqa: SLF001
             websocket_config_nested
         )
 
@@ -547,7 +547,7 @@ class TestMongoDBEngineWebSocket:
 
         # Test top-level require_auth (backward compatibility)
         websocket_config_top_level = {"endpoint2": {"path": "/ws/endpoint2", "require_auth": False}}
-        mongodb_engine._service_initializer._websocket_configs["test_experiment"] = (
+        mongodb_engine._service_initializer._websocket_configs["test_experiment"] = (  # noqa: SLF001
             websocket_config_top_level
         )
 
@@ -564,7 +564,7 @@ class TestMongoDBEngineWebSocket:
     async def test_register_websocket_routes_handler_creation_error(self, mongodb_engine):
         """Test WebSocket route registration when handler creation fails."""
         websocket_config = {"endpoint1": {"path": "/ws"}}
-        mongodb_engine._service_initializer._websocket_configs["test_app"] = websocket_config
+        mongodb_engine._service_initializer._websocket_configs["test_app"] = websocket_config  # noqa: SLF001
 
         mock_app = MagicMock()
         mock_app.routes = []
@@ -580,7 +580,7 @@ class TestMongoDBEngineWebSocket:
     async def test_register_websocket_routes_registration_error(self, mongodb_engine):
         """Test WebSocket route registration when FastAPI registration fails."""
         websocket_config = {"endpoint1": {"path": "/ws"}}
-        mongodb_engine._service_initializer._websocket_configs["test_app"] = websocket_config
+        mongodb_engine._service_initializer._websocket_configs["test_app"] = websocket_config  # noqa: SLF001
 
         mock_app = MagicMock()
         mock_app.routes = []
@@ -610,7 +610,7 @@ class TestMongoDBEngineAppManagement:
         assert len(mongodb_engine.list_apps()) == 1
 
         # Mock the reload_apps method to return count
-        with patch.object(mongodb_engine._app_registration_manager, "reload_apps", return_value=1):
+        with patch.object(mongodb_engine._app_registration_manager, "reload_apps", return_value=1):  # noqa: SLF001
             count = await mongodb_engine.reload_apps()
             assert count == 1
 
@@ -650,7 +650,7 @@ class TestMongoDBEngineServiceAccessors:
         """Test getting memory service when available."""
         mock_service = MagicMock()
         mock_service.memory = MagicMock()
-        mongodb_engine._service_initializer._memory_services["test_app"] = mock_service
+        mongodb_engine._service_initializer._memory_services["test_app"] = mock_service  # noqa: SLF001
 
         service = mongodb_engine.get_memory_service("test_app")
         assert service == mock_service
@@ -837,8 +837,8 @@ class TestMongoDBEngineHealthMetrics:
         """Test _apps property raises RuntimeError when not initialized (line 571)."""
         engine = MongoDBEngine(mongo_uri="mongodb://localhost:27017", db_name="test_db")
         with pytest.raises(RuntimeError, match="not initialized"):
-            # Access as property (it's a @property decorator, but private _apps)
-            _ = engine._apps
+            # Access as property
+            _ = engine.apps
 
     def test_list_apps_not_initialized(self):
         """Test list_apps raises RuntimeError when not initialized (line 584)."""
@@ -925,11 +925,11 @@ class TestMongoDBEngineHealthMetrics:
     async def test_context_manager_sync(self, mongodb_engine):
         """Test synchronous context manager."""
         # __enter__ returns self
-        result = mongodb_engine.__enter__()
+        result = mongodb_engine.__enter__()  # noqa: SLF001
         assert result is mongodb_engine
 
         # __exit__ does nothing (synchronous)
-        result = mongodb_engine.__exit__(None, None, None)
+        result = mongodb_engine.__exit__(None, None, None)  # noqa: SLF001
         assert result is None
 
     @pytest.mark.asyncio
@@ -1062,7 +1062,7 @@ class TestMongoDBEngineCallbackErrors:
         """Test handling index creation callback errors."""
         # Mock index manager to raise error
         with patch.object(
-            mongodb_engine._index_manager,
+            mongodb_engine._index_manager,  # noqa: SLF001
             "create_app_indexes",
             side_effect=Exception("Index error"),
         ):
@@ -1096,7 +1096,7 @@ class TestMongoDBEngineCallbackErrors:
         }
 
         with patch.object(
-            mongodb_engine._service_initializer,
+            mongodb_engine._service_initializer,  # noqa: SLF001
             "initialize_memory_service",
             side_effect=Exception("Memory error"),
         ):
@@ -1116,7 +1116,7 @@ class TestMongoDBEngineCallbackErrors:
         }
 
         # Set service_initializer to None
-        mongodb_engine._service_initializer = None
+        mongodb_engine._service_initializer = None  # noqa: SLF001
 
         # Should not raise, just skip memory initialization
         await mongodb_engine.register_app(manifest_with_memory, create_indexes=False)

@@ -728,6 +728,7 @@ async def startup():
     await engine.register_app(manifest, create_indexes=True)
     
     # Register WebSocket routes from manifest
+    # Uses FastAPI's APIRouter approach for full feature support
     engine.register_websocket_routes(app, "my_app")
     
     # Register message handlers

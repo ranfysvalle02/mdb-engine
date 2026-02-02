@@ -40,8 +40,8 @@ class TestEnvelopeEncryptionService:
         monkeypatch.setenv(MASTER_KEY_ENV_VAR, test_key)
 
         service = EnvelopeEncryptionService()
-        assert service._master_key is not None
-        assert len(service._master_key) == AES_KEY_SIZE
+        assert service._master_key is not None  # noqa: SLF001
+        assert len(service._master_key) == AES_KEY_SIZE  # noqa: SLF001
 
     def test_generate_master_key_missing(self, monkeypatch):
         """Test error when master key not found."""

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mdb-engine"
-version = "0.6.0"
+version = "0.7.0"
 description = "MongoDB Engine"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -56,6 +56,7 @@ test = [
     "pytest-timeout>=2.1.0",
     "pytest-xdist>=3.3.0",  # Parallel test execution
     "testcontainers>=3.7.0",
+    "nest-asyncio>=1.5.0",  # Required for TestClient with Motor in async tests
 ]
 dev = [
     # Pin ruff version to prevent local/CI drift
@@ -114,6 +115,7 @@ select = [
     "UP",     # pyupgrade
     "BLE",    # flake8-blind-except (no bare except)
     "TRY",    # tryceratops (exception handling best practices)
+    "SLF",    # flake8-self (includes SLF001: private-member-access)
 ]
 ignore = [
     "E203",   # Whitespace before ':' (conflicts with black)

@@ -131,6 +131,12 @@ from .websocket_sessions import (
     create_websocket_session_endpoint,
 )
 
+# WebSocket tickets
+from .websocket_tickets import (
+    WebSocketTicketStore,
+    create_websocket_ticket_endpoint,
+)
+
 __all__ = [
     # Base classes
     "BaseAuthorizationProvider",
@@ -241,4 +247,7 @@ __all__ = [
     # WebSocket sessions
     "WebSocketSessionManager",
     "create_websocket_session_endpoint",
+    # WebSocket tickets
+    "WebSocketTicketStore",
+    "create_websocket_ticket_endpoint",
 ]

@@ -326,6 +326,12 @@ async def register(
             app_roles=default_roles,
         )
 
+        # Add name/metadata if provided using the public API method
+        if full_name:
+            updated_user = await pool.update_user_metadata(email, {"name": full_name})
+            if updated_user:
+                user = updated_user
+
         # Authenticate and get token
         token = await pool.authenticate(email, password)
 
@@ -412,7 +418,7 @@ async def dashboard(request: Request):
     if is_admin(user):
         try:
             # Access shared users collection via connection manager
-            raw_db = engine._connection_manager.mongo_db
+            raw_db = engine.connection_manager.mongo_db
             users_collection = raw_db["_mdb_engine_shared_users"]
             users_cursor = users_collection.find({})
             all_users = await users_cursor.to_list(length=100)

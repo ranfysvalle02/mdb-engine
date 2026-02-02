@@ -62,7 +62,7 @@ class TestAsyncAtlasIndexManagerExtended:
         with patch("mdb_engine.database.scoped_wrapper.AsyncIOMotorCollection", MagicMock):
             manager = AsyncAtlasIndexManager(mock_coll)
             # Should not raise
-            await manager._ensure_collection_exists()
+            await manager._ensure_collection_exists()  # noqa: SLF001
 
     @pytest.mark.asyncio
     async def test_ensure_collection_exists_failure(self):
@@ -78,14 +78,14 @@ class TestAsyncAtlasIndexManagerExtended:
                 side_effect=ConnectionFailure("Connection lost")
             )
             with pytest.raises(MongoDBEngineError, match="connection failed"):
-                await manager._ensure_collection_exists()
+                await manager._ensure_collection_exists()  # noqa: SLF001
 
             # Other Operation Failure
             mock_coll.database.create_collection = AsyncMock(
                 side_effect=OperationFailure("Other error")
             )
             with pytest.raises(MongoDBEngineError, match="Error creating prerequisite collection"):
-                await manager._ensure_collection_exists()
+                await manager._ensure_collection_exists()  # noqa: SLF001
 
     @pytest.mark.asyncio
     async def test_handle_existing_index_failed_state(self):
@@ -106,7 +106,7 @@ class TestAsyncAtlasIndexManagerExtended:
 
             # Should return False (not ready) and log error
             with patch("mdb_engine.database.scoped_wrapper.logger") as mock_logger:
-                result = await manager._handle_existing_index(existing, definition, "search", "idx")
+                result = await manager._handle_existing_index(existing, definition, "search", "idx")  # noqa: SLF001
                 assert result is False
                 mock_logger.error.assert_called()
                 assert "FAILED state" in mock_logger.error.call_args[0][0]
@@ -129,7 +129,7 @@ class TestAsyncAtlasIndexManagerExtended:
                 }
                 new_definition = {"mappings": {"dynamic": True}}
 
-                result = await manager._handle_existing_index(
+                result = await manager._handle_existing_index(  # noqa: SLF001
                     existing, new_definition, "search", "idx"
                 )
 

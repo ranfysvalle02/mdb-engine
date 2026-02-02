@@ -41,7 +41,7 @@ class TestPathPrefixValidation:
             {"slug": "app3", "path_prefix": "/app3"},
         ]
 
-        is_valid, errors = engine._validate_path_prefixes(apps)
+        is_valid, errors = engine._validate_path_prefixes(apps)  # noqa: SLF001
         assert is_valid is True
         assert len(errors) == 0
 
@@ -55,7 +55,7 @@ class TestPathPrefixValidation:
             {"slug": "app2", "path_prefix": "/app2"},
         ]
 
-        is_valid, errors = engine._validate_path_prefixes(apps)
+        is_valid, errors = engine._validate_path_prefixes(apps)  # noqa: SLF001
         assert is_valid is False
         assert any("must start with '/'" in error for error in errors)
 
@@ -69,7 +69,7 @@ class TestPathPrefixValidation:
             {"slug": "app2", "path_prefix": "/app/v2"},  # Conflict: /app is prefix of /app/v2
         ]
 
-        is_valid, errors = engine._validate_path_prefixes(apps)
+        is_valid, errors = engine._validate_path_prefixes(apps)  # noqa: SLF001
         assert is_valid is False
         assert any("overlap" in error.lower() for error in errors)
 
@@ -83,7 +83,7 @@ class TestPathPrefixValidation:
             {"slug": "app2", "path_prefix": "/app2"},
         ]
 
-        is_valid, errors = engine._validate_path_prefixes(apps)
+        is_valid, errors = engine._validate_path_prefixes(apps)  # noqa: SLF001
         assert is_valid is False
         assert any("reserved path" in error.lower() for error in errors)
 
@@ -97,7 +97,7 @@ class TestPathPrefixValidation:
             {"slug": "app2", "path_prefix": "/app"},  # Duplicate
         ]
 
-        is_valid, errors = engine._validate_path_prefixes(apps)
+        is_valid, errors = engine._validate_path_prefixes(apps)  # noqa: SLF001
         assert is_valid is False
         assert any("duplicate" in error.lower() for error in errors)
 
@@ -546,7 +546,7 @@ class TestAutoDiscovery:
 
         engine = MongoDBEngine(mongo_uri="mongodb://localhost:27017", db_name="test_db")
 
-        apps = engine._discover_apps_from_directory(temp_apps_dir)
+        apps = engine._discover_apps_from_directory(temp_apps_dir)  # noqa: SLF001
 
         assert len(apps) == 3
         slugs = [app["slug"] for app in apps]
@@ -560,7 +560,7 @@ class TestAutoDiscovery:
 
         engine = MongoDBEngine(mongo_uri="mongodb://localhost:27017", db_name="test_db")
 
-        apps = engine._discover_apps_from_directory(
+        apps = engine._discover_apps_from_directory(  # noqa: SLF001
             temp_apps_dir, path_prefix_template="/app-{index}"
         )
 
@@ -578,7 +578,7 @@ class TestAutoDiscovery:
         engine = MongoDBEngine(mongo_uri="mongodb://localhost:27017", db_name="test_db")
 
         with pytest.raises(ValueError, match="does not exist"):
-            engine._discover_apps_from_directory(Path("/nonexistent/dir"))
+            engine._discover_apps_from_directory(Path("/nonexistent/dir"))  # noqa: SLF001
 
     def test_create_multi_app_with_auto_discovery(self, temp_apps_dir):
         """Test create_multi_app with auto-discovery."""

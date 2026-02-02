@@ -6,6 +6,18 @@
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](https://opensource.org/licenses/AGPL-3.0)
 
+## 🎉 What's New in v0.7.0
+
+**FastAPI Native WebSocket Support**: MDB-Engine now uses FastAPI's `APIRouter` approach for WebSocket registration in both single-app and multi-app modes. This provides:
+
+- ✅ **Full FastAPI Feature Support**: Dependency injection, OpenAPI documentation, request/response models
+- ✅ **Consistency**: Same registration pattern across single-app and multi-app modes  
+- ✅ **Best Practices**: Follows FastAPI's recommended WebSocket registration patterns
+- ✅ **Better Maintainability**: Uses FastAPI abstractions instead of low-level Starlette APIs
+- ✅ **Route Priority**: WebSocket routes registered before mounted apps ensure proper routing
+
+**Value**: This change ensures WebSocket endpoints benefit from all FastAPI features, making your code more maintainable and consistent with FastAPI best practices.
+
 ---
 
 ## 🎯 manifest.json: The Key to Everything
@@ -41,9 +53,99 @@ pip install mdb-engine
 
 ---
 
+## ⚠️ Prerequisites: MongoDB Must Be Running
+
+**IMPORTANT**: MDB-Engine requires a running MongoDB instance. Make sure MongoDB is running before starting your application.
+
+### Quick MongoDB Setup Options
+
+#### Option 1: Docker Compose (Recommended for Development)
+
+Create a `docker-compose.yml` file:
+
+```yaml
+services:
+  mongodb:
+    image: mongo:7.0
+    container_name: mdb_mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  mongodb_data:
+```
+
+Start MongoDB:
+```bash
+docker-compose up -d mongodb
+```
+
+#### Option 2: Docker Run (Quick Start)
+
+```bash
+docker run -d \
+  --name mdb_mongodb \
+  -p 27017:27017 \
+  -v mongodb_data:/data/db \
+  mongo:7.0
+```
+
+#### Option 3: Local MongoDB Installation
+
+**macOS (Homebrew):**
+```bash
+brew tap mongodb/brew
+brew install mongodb-community
+brew services start mongodb-community
+```
+
+**Linux (Ubuntu/Debian):**
+```bash
+sudo apt-get install -y mongodb
+sudo systemctl start mongodb
+```
+
+**Windows:**
+Download and install from [MongoDB Download Center](https://www.mongodb.com/try/download/community)
+
+#### Option 4: MongoDB Atlas (Cloud)
+
+1. Sign up at [MongoDB Atlas](https://www.mongodb.com/cloud/atlas)
+2. Create a free cluster
+3. Get your connection string: `mongodb+srv://user:password@cluster.mongodb.net/`
+
+### Verify MongoDB is Running
+
+```bash
+# Check if MongoDB is accessible
+mongosh "mongodb://localhost:27017" --eval "db.adminCommand('ping')"
+
+# Or using curl (if mongosh not available)
+curl http://localhost:27017
+```
+
+**Expected output:** `{ "ok": 1 }` or connection successful
+
+### Common Connection Strings
+
+- **Local MongoDB (default)**: `mongodb://localhost:27017`
+- **Docker MongoDB**: `mongodb://localhost:27017` (if port mapped)
+- **MongoDB Atlas**: `mongodb+srv://user:password@cluster.mongodb.net/dbname`
+
+---
+
 ## 30-Second Quick Start: Build a Todo List API
 
 Let's build a complete CRUD todo list app in 3 steps!
+
+> **⚠️ Before you start**: Make sure MongoDB is running! See [Prerequisites](#-prerequisites-mongodb-must-be-running) section above.
 
 ### Step 1: Create `manifest.json`
 
@@ -79,8 +181,9 @@ from mdb_engine import MongoDBEngine
 from mdb_engine.dependencies import get_scoped_db
 
 # Initialize engine
+# ⚠️ Make sure MongoDB is running at mongodb://localhost:27017
 engine = MongoDBEngine(
-    mongo_uri="mongodb://localhost:27017",
+    mongo_uri="mongodb://localhost:27017",  # Change if using Docker/Atlas
     db_name="my_database"
 )
 
@@ -161,14 +264,28 @@ async def delete_todo(todo_id: str, db=Depends(get_scoped_db)):
 ### Step 3: Run It!
 
 ```bash
-# Start MongoDB (if not running)
-mongod
+# ⚠️ IMPORTANT: Make sure MongoDB is running first!
+# See "Prerequisites: MongoDB Must Be Running" section above
 
 # Install dependencies
 pip install mdb-engine fastapi uvicorn
 
 # Run the app
 uvicorn app:app --reload
+```
+
+**If MongoDB is not running**, you'll see connection errors. Make sure MongoDB is started before running your app!
+
+**Quick MongoDB check:**
+```bash
+# Option 1: Docker Compose
+docker-compose up -d mongodb
+
+# Option 2: Docker Run
+docker run -d --name mdb_mongodb -p 27017:27017 mongo:7.0
+
+# Option 3: Local MongoDB
+mongod  # or brew services start mongodb-community (macOS)
 ```
 
 **Test your API:**
@@ -340,8 +457,13 @@ Clone and run:
 ```bash
 git clone https://github.com/ranfysvalle02/mdb-engine.git
 cd mdb-engine/examples/basic/chit_chat
+
+# Examples include docker-compose.yml with MongoDB
+# This will start both MongoDB and your app
 docker-compose up --build
 ```
+
+**Note**: All examples include `docker-compose.yml` files that start MongoDB automatically. If running examples without Docker, make sure MongoDB is running first!
 
 ### Basic Examples
 
@@ -372,6 +494,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from mdb_engine import MongoDBEngine
 
+# ⚠️ Make sure MongoDB is running before initializing the engine
 app = FastAPI()
 engine = MongoDBEngine(mongo_uri="mongodb://localhost:27017", db_name="my_database")
 

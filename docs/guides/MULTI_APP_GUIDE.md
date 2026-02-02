@@ -610,6 +610,58 @@ logging.basicConfig(level=logging.INFO)
 
 ---
 
+## WebSocket Support (v0.7.0+)
+
+Multi-app deployments fully support WebSocket connections with **FastAPI's native `APIRouter` approach**:
+
+### Benefits
+
+- ✅ **Full FastAPI Integration**: Dependency injection, OpenAPI docs, request/response models
+- ✅ **Consistent Behavior**: Same registration pattern for single-app and multi-app modes
+- ✅ **Route Priority**: WebSocket routes registered before mounted apps ensure proper routing
+- ✅ **Best Practices**: Follows FastAPI's recommended WebSocket patterns
+
+### Configuration
+
+WebSocket endpoints are automatically registered from your app's `manifest.json`:
+
+```json
+{
+  "websockets": {
+    "realtime": {
+      "path": "/ws",
+      "auth": {
+        "required": true
+      }
+    }
+  }
+}
+```
+
+Routes are registered on the parent app with the full path (e.g., `/app-slug/ws`), ensuring they're checked before mounted app routes.
+
+### Example
+
+```python
+# Multi-app automatically handles WebSocket registration
+app = engine.create_multi_app(
+    apps=[
+        {
+            "slug": "chat-app",
+            "manifest": Path("apps/chat-app/manifest.json"),
+            "path_prefix": "/chat-app"
+        }
+    ]
+)
+
+# WebSocket route automatically available at /chat-app/ws
+# Uses FastAPI APIRouter for full feature support
+```
+
+See [WebSocket Security Guide](./WEBSOCKET_SECURITY_ELEGANT_SOLUTION.md) for detailed security configuration.
+
+---
+
 ## Troubleshooting
 
 ### SSO Not Working

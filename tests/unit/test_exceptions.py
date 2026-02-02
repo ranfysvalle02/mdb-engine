@@ -129,6 +129,6 @@ class TestExceptionChaining:
                 raise InitializationError("Init failed")
             except InitializationError as chained_error:
                 # Manually set __cause__ to test chaining behavior
-                chained_error.__cause__ = original_error
-                assert chained_error.__cause__ == original_error
+                chained_error.__cause__ = original_error  # noqa: SLF001
+                assert chained_error.__cause__ == original_error  # noqa: SLF001
                 assert isinstance(chained_error, InitializationError)

@@ -201,7 +201,7 @@ class TestSharedUserPoolSessionBinding:
         collection.update_one = AsyncMock()
         collection.create_index = AsyncMock()
 
-        db.__getitem__ = MagicMock(return_value=collection)
+        db.__getitem__ = MagicMock(return_value=collection)  # noqa: SLF001
 
         return db
 
@@ -228,7 +228,7 @@ class TestSharedUserPoolSessionBinding:
         collection.find_one = AsyncMock(return_value=user_doc)
         collection.update_one = AsyncMock()
         collection.create_index = AsyncMock()
-        mock_mongo_db.__getitem__ = MagicMock(return_value=collection)
+        mock_mongo_db.__getitem__ = MagicMock(return_value=collection)  # noqa: SLF001
 
         pool = SharedUserPool(
             mock_mongo_db,
@@ -279,7 +279,7 @@ class TestSharedUserPoolSessionBinding:
         collection.find_one = AsyncMock(return_value=user_doc)
         collection.update_one = AsyncMock()
         collection.create_index = AsyncMock()
-        mock_mongo_db.__getitem__ = MagicMock(return_value=collection)
+        mock_mongo_db.__getitem__ = MagicMock(return_value=collection)  # noqa: SLF001
 
         pool = SharedUserPool(
             mock_mongo_db,

@@ -86,6 +86,16 @@ class CasbinAdapter(BaseAuthorizationProvider):
         self._cache_lock = asyncio.Lock()
         self._mark_initialized()
 
+    @property
+    def enforcer(self):
+        """
+        Get the Casbin enforcer instance.
+
+        Returns:
+            casbin.AsyncEnforcer instance
+        """
+        return self._enforcer
+
     async def check(
         self,
         subject: str,

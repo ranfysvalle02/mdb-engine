@@ -1376,7 +1376,8 @@ async def sync_app_user_to_casbin(
             logger.debug("sync_app_user_to_casbin: Provider is not CasbinAdapter, skipping")
             return False
 
-        enforcer = authz_provider._enforcer
+        # Access enforcer via property if available, otherwise fallback to private member
+        enforcer = getattr(authz_provider, "enforcer", None) or authz_provider._enforcer  # noqa: SLF001
 
         # Get user ID
         user_id = str(user.get("_id") or user.get("app_user_id", ""))

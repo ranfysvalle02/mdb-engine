@@ -253,6 +253,7 @@ class WebSocketEndpointDict(TypedDict, total=False):
     auth: WebSocketAuthDict
     description: str
     ping_interval: int
+    ticket_ttl_seconds: int
 
 
 class WebSocketsDict(TypedDict):
