@@ -81,7 +81,7 @@ from .repositories import Entity, MongoRepository, Repository, UnitOfWork
 # Utilities
 from .utils import clean_mongo_doc, clean_mongo_docs
 
-__version__ = "0.7.3"
+__version__ = "0.7.4"
 
 __all__ = [
     # Core Engine

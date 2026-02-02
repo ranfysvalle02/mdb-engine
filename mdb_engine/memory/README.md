@@ -2,9 +2,37 @@
 
 Mem0.ai integration for intelligent memory management in MDB_ENGINE applications. Provides semantic memory storage, retrieval, and inference capabilities with MongoDB integration.
 
+## 🎉 What's New
+
+### Extensible Architecture (Latest)
+
+**Base Class Pattern for Future Extensibility!**
+
+The memory service now uses an abstract base class pattern, enabling future memory provider implementations while maintaining backward compatibility:
+
+- **🏗️ BaseMemoryService**: Abstract base class defining the memory service interface
+- **🔌 Provider Extensibility**: Easy to add new memory providers (LangChain, custom implementations, etc.)
+- **✅ Backward Compatible**: All existing code continues to work without changes
+- **📝 Type Safety**: Better IDE support and type checking with abstract base class
+- **🎯 Consistent API**: All memory providers implement the same interface
+
+### v0.7.4 Enhancements
+
+**Enhanced Mem0 Integration - Production Ready!**
+
+- **🔧 Hybrid Update Pattern**: Content updates via Mem0 (triggers re-embedding), metadata updates via direct MongoDB (full control, no API limitations)
+- **📊 Direct MongoDB Access**: Reliable data retrieval directly from MongoDB, bypassing Mem0 API inconsistencies
+- **🏷️ Full Metadata Support**: Update any metadata field without restrictions - not limited by Mem0's API
+- **✅ Correct Mem0 Structure**: Properly handles Mem0's MongoDB structure (`_id` as document ID, `payload` for memory data)
+- **🛡️ Robust Error Handling**: Specific exception handling with proper KeyboardInterrupt/SystemExit propagation
+- **🔍 Reliable Returns**: Always returns normalized documents fetched directly from MongoDB (guaranteed structure)
+
+> 📖 **Want to understand why we use manual MongoDB access?** See the [Mem0 Implementation Guide](../../docs/guides/MEM0_IMPLEMENTATION.md) for detailed explanations of our architectural decisions, Mem0's MongoDB structure, and things to watch out for.
+
 ## Features
 
-- **Mem0 Integration**: Wrapper around Mem0.ai for intelligent memory management
+- **Extensible Architecture**: Base class pattern allows for multiple memory provider implementations
+- **Mem0 Integration**: Default implementation using Mem0.ai for intelligent memory management
 - **MongoDB Storage**: Built-in MongoDB vector store integration
 - **Auto-Detection**: Automatically detects OpenAI or Azure OpenAI from environment variables
 - **Semantic Search**: Vector-based semantic memory search
@@ -67,7 +95,7 @@ Enable memory service in your `manifest.json`:
 ### Basic Usage
 
 ```python
-from mdb_engine.memory import Mem0MemoryService
+from mdb_engine.memory import BaseMemoryService  # Base class for type hints
 from mdb_engine.core import MongoDBEngine
 
 # Initialize engine
@@ -75,7 +103,8 @@ engine = MongoDBEngine(mongo_uri="...", db_name="...")
 await engine.initialize()
 
 # Get memory service (automatically configured from manifest)
-memory_service = engine.get_memory_service("my_app")
+# Returns BaseMemoryService instance (currently Mem0MemoryService)
+memory_service: BaseMemoryService = engine.get_memory_service("my_app")
 
 # Add memory
 memory = await memory_service.add(
@@ -163,14 +192,17 @@ results = await memory_service.search(
 
 ### Get Memories
 
-Retrieve memories for a user:
+Retrieve memories for a user. The service automatically normalizes Mem0's MongoDB structure (`_id`, `payload`) into a consistent API format:
 
 ```python
 # Get all memories
 all_memories = await memory_service.get_all(user_id="user123")
+# Returns normalized format: [{"id": "...", "memory": "...", "metadata": {...}, ...}]
 
 # Get specific memory
 memory = await memory_service.get(memory_id="memory_123", user_id="user123")
+# Returns normalized format: {"id": "...", "memory": "...", "metadata": {...}, ...}
+# Note: memory_id can be either Mem0's _id or the normalized id field
 
 # Get memories with filters
 memories = await memory_service.get_all(
@@ -179,9 +211,16 @@ memories = await memory_service.get_all(
 )
 ```
 
+**Note**: The service handles Mem0's internal MongoDB structure (`_id` as document ID, `payload` containing memory data) automatically. All methods return normalized documents with consistent `id`, `memory`, `text`, and `metadata` fields.
+
 ### Update Memory
 
-Update existing memories in-place while preserving the original memory ID and creation timestamp:
+Update existing memories using a **hybrid approach** that combines Mem0's embedding capabilities with direct MongoDB control:
+
+**Architecture:**
+- **Content Updates**: Routed via Mem0 (triggers automatic re-embedding)
+- **Metadata Updates**: Routed via direct PyMongo (full control, no API limitations)
+- **Return Value**: Always fetched from MongoDB (guaranteed correct structure)
 
 ```python
 # Update memory content and metadata
@@ -200,14 +239,21 @@ updated = memory_service.update(
     metadata={"updated": True}
 )
 
-# Update only metadata (content unchanged)
+# Update only metadata (content unchanged) - FULLY SUPPORTED
 updated = memory_service.update(
     memory_id="memory_123",
     user_id="user123",
-    metadata={"category": "updated"}
+    metadata={"category": "updated", "priority": "high"}
 )
 
-# Backward compatibility: using 'data' parameter
+# Update only content (no metadata changes)
+updated = memory_service.update(
+    memory_id="memory_123",
+    user_id="user123",
+    memory="Updated content only"
+)
+
+# Using 'data' parameter
 updated = memory_service.update(
     memory_id="memory_123",
     user_id="user123",
@@ -217,12 +263,18 @@ updated = memory_service.update(
 ```
 
 **Key Features:**
+- **Hybrid Architecture**: Mem0 handles embeddings, MongoDB handles data persistence
+- **Full Metadata Support**: Update any metadata field (not limited by Mem0 API)
 - **Preserves Memory ID**: The original memory ID is maintained
 - **Preserves Creation Timestamp**: `created_at` is not modified
 - **Updates Timestamp**: `updated_at` is automatically set to current time
-- **Recomputes Embeddings**: If content changes, the embedding vector is automatically recomputed
-- **Metadata Merging**: New metadata is merged with existing metadata (doesn't replace)
+- **Recomputes Embeddings**: If content changes, the embedding vector is automatically recomputed via Mem0
+- **Reliable Returns**: Always returns the actual document from MongoDB (not Mem0's response format)
 - **Partial Updates**: Can update content only, metadata only, or both
+- **Security**: Validates user_id ownership before allowing updates
+- **Mem0 Structure Aware**: Correctly handles Mem0's MongoDB structure (`_id` as document ID, `payload` for memory data)
+- **Direct MongoDB Access**: Uses PyMongo for reliable data operations, ensuring consistency
+- **Normalized Responses**: All methods return consistent document structure regardless of Mem0's internal format
 
 ### Delete Memory
 
@@ -336,9 +388,73 @@ for memory in insights:
     print(f"Insights: {memory.get('insights')}")
 ```
 
+## Architecture
+
+### Base Class Pattern
+
+The memory service uses an abstract base class pattern for extensibility:
+
+```python
+from mdb_engine.memory import BaseMemoryService, MemoryServiceError
+
+# BaseMemoryService defines the interface
+# Mem0MemoryService implements it (default provider)
+# Future providers can inherit from BaseMemoryService
+```
+
+**Benefits:**
+- **Type Safety**: Use `BaseMemoryService` for type hints
+- **Extensibility**: Easy to add new providers (LangChain, custom, etc.)
+- **Consistency**: All providers implement the same interface
+- **Backward Compatible**: Existing code works without changes
+
+### Creating Custom Memory Providers
+
+To create a custom memory provider, inherit from `BaseMemoryService`:
+
+```python
+from mdb_engine.memory import BaseMemoryService, MemoryServiceError
+
+class CustomMemoryService(BaseMemoryService):
+    """Custom memory service implementation."""
+    
+    def __init__(self, mongo_uri: str, db_name: str, app_slug: str, config: dict | None = None):
+        # Initialize your custom implementation
+        pass
+    
+    def add(self, messages, user_id=None, metadata=None, **kwargs):
+        # Implement add method
+        pass
+    
+    # Implement all other abstract methods...
+    def get_all(self, user_id=None, limit=100, filters=None, **kwargs):
+        pass
+    
+    def search(self, query, user_id=None, limit=5, filters=None, **kwargs):
+        pass
+    
+    def get(self, memory_id, user_id=None, **kwargs):
+        pass
+    
+    def delete(self, memory_id, user_id=None, **kwargs):
+        pass
+    
+    def delete_all(self, user_id=None, **kwargs):
+        pass
+    
+    def update(self, memory_id, user_id=None, memory=None, metadata=None, **kwargs):
+        pass
+```
+
 ## API Reference
 
+### BaseMemoryService
+
+Abstract base class for all memory service implementations. Defines the standard interface.
+
 ### Mem0MemoryService
+
+Default implementation using Mem0.ai. Inherits from `BaseMemoryService`.
 
 #### Initialization
 
@@ -346,15 +462,19 @@ for memory in insights:
 Mem0MemoryService(
     mongo_uri: str,
     db_name: str,
-    collection_name: str = "memories",
-    app_slug: str = None,
-    embedding_model: str = "text-embedding-3-small",
-    embedding_dimensions: int = None,
-    chat_model: str = "gpt-4",
-    temperature: float = 0.7,
-    infer: bool = True,
-    enable_graph: bool = False,
-    config: dict = None
+    app_slug: str,
+    config: dict = None  # Optional configuration
+)
+
+# Or use the factory function
+from mdb_engine.memory import get_memory_service
+
+memory_service = get_memory_service(
+    mongo_uri="...",
+    db_name="...",
+    app_slug="...",
+    config={...},
+    provider="mem0"  # Default, future providers can be specified here
 )
 ```
 
@@ -513,15 +633,19 @@ knowledge = await memory_service.search(
 ## Error Handling
 
 ```python
-from mdb_engine.memory import Mem0MemoryServiceError
+from mdb_engine.memory import MemoryServiceError, Mem0MemoryServiceError
 
 try:
     memory = await memory_service.add(
         messages=[{"role": "user", "content": "Test"}],
         user_id="user123"
     )
-except Mem0MemoryServiceError as e:
+except MemoryServiceError as e:
+    # Base exception for all memory service errors
     print(f"Memory service error: {e}")
+except Mem0MemoryServiceError as e:
+    # Specific exception for Mem0 implementation
+    print(f"Mem0 memory service error: {e}")
 except (ValueError, TypeError, ConnectionError) as e:
     print(f"Configuration or connection error: {e}")
 ```

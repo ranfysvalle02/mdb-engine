@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     from .core.engine import MongoDBEngine
     from .database.scoped_wrapper import ScopedMongoWrapper
     from .embeddings.service import EmbeddingService
-    from .memory.service import Mem0MemoryService
+    from .memory import BaseMemoryService
 
 logger = logging.getLogger(__name__)
 
@@ -121,8 +121,8 @@ async def get_embedding_service(request: Request) -> "EmbeddingService":
         raise HTTPException(503, f"Failed to initialize embedding service: {e}") from e
 
 
-async def get_memory_service(request: Request) -> Optional["Mem0MemoryService"]:
-    """Get the Mem0 memory service if configured."""
+async def get_memory_service(request: Request) -> Optional["BaseMemoryService"]:
+    """Get the memory service if configured (defaults to Mem0 implementation)."""
     engine = getattr(request.app.state, "engine", None)
     slug = getattr(request.app.state, "app_slug", None)
     if not engine or not slug:

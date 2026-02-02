@@ -14,16 +14,25 @@ Key Features:
 - **Optional LLM Inference**: Can leverage LLM service for automatic memory
   extraction (set infer: false to disable)
 - **Graph Support**: Optional knowledge graph construction for entity relationships
+- **Extensible Architecture**: Base class allows for future memory provider implementations
 
 Dependencies:
     pip install mem0ai
 """
 
+# Import base classes
+from .base import BaseMemoryService, MemoryServiceError
+
 # Import service components (mem0 import is lazy within service.py)
 from .service import Mem0MemoryService, Mem0MemoryServiceError, get_memory_service
 
 __all__ = [
+    # Base classes (for extensibility)
+    "BaseMemoryService",
+    "MemoryServiceError",
+    # Mem0 implementation (default)
     "Mem0MemoryService",
     "Mem0MemoryServiceError",
+    # Factory function
     "get_memory_service",
 ]

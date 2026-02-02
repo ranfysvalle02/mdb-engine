@@ -11,9 +11,9 @@ This module is part of MDB_ENGINE - MongoDB Engine.
 from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
 if TYPE_CHECKING:
-    from ..memory import Mem0MemoryService
+    from ..memory import BaseMemoryService
 else:
-    Mem0MemoryService = Any
+    BaseMemoryService = Any
 
 
 # ============================================================================

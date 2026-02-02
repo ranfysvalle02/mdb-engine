@@ -523,13 +523,14 @@ async def send_message(request: Request, conversation_id: str, message: str = Fo
             context_memories = []
             for m in relevant_memories:
                 if isinstance(m, dict):
-                    memory_text = m.get("memory") or m.get("data", {}).get("memory", "")
+                    # Service normalizes responses - check standard fields
+                    memory_text = m.get("memory") or m.get("text") or ""
                     if memory_text:
                         context_memories.append(memory_text)
                         memory_search_details.append(
                             {
                                 "memory": memory_text,
-                                "id": m.get("id") or m.get("_id"),
+                                "id": m.get("id"),  # Service normalizes _id to id
                                 "score": m.get("score"),
                                 "metadata": m.get("metadata", {}),
                             }
@@ -624,15 +625,12 @@ async def send_message(request: Request, conversation_id: str, message: str = Fo
                 memory_texts = []
                 for m in result:
                     if isinstance(m, dict):
-                        memory_text = (
-                            m.get("memory")
-                            or m.get("data", {}).get("memory", "")
-                            or m.get("text", "")
-                        )
+                        # Service normalizes responses - check standard fields
+                        memory_text = m.get("memory") or m.get("text") or ""
                         if memory_text:
                             memory_texts.append(
                                 {
-                                    "id": m.get("id") or m.get("_id"),
+                                    "id": m.get("id"),  # Service normalizes _id to id
                                     "memory": memory_text,
                                     "metadata": m.get("metadata", {}),
                                 }
@@ -806,21 +804,14 @@ async def get_all_memories(request: Request, limit: int = 20):
     )
 
     # Normalize memory format for frontend
+    # Service already normalizes responses from Mem0's payload structure
     normalized_memories = []
     if isinstance(memories, list):
         for mem in memories:
             if isinstance(mem, dict):
-                memory_text = (
-                    mem.get("memory")
-                    or mem.get("text")
-                    or (
-                        mem.get("data", {}).get("memory")
-                        if isinstance(mem.get("data"), dict)
-                        else None
-                    )
-                    or str(mem)
-                )
-                memory_id = mem.get("id") or mem.get("_id") or None
+                # Service normalizes responses - check standard fields
+                memory_text = mem.get("memory") or mem.get("text") or str(mem)
+                memory_id = mem.get("id")  # Service normalizes _id to id
                 metadata = mem.get("metadata", {})
                 if not isinstance(metadata, dict):
                     metadata = {}
@@ -875,20 +866,17 @@ async def search_memories(
     )
 
     # Normalize results format
+    # Service already normalizes responses from Mem0's payload structure
     normalized_results = []
     if isinstance(results, list):
         for res in results:
             if isinstance(res, dict):
-                memory_text = (
-                    res.get("memory")
-                    or res.get("data", {}).get("memory")
-                    or res.get("text")
-                    or str(res)
-                )
+                # Service normalizes responses - check standard fields
+                memory_text = res.get("memory") or res.get("text") or str(res)
                 normalized_results.append(
                     {
                         "memory": memory_text,
-                        "id": res.get("id") or res.get("_id"),
+                        "id": res.get("id"),  # Service normalizes _id to id
                         "metadata": res.get("metadata", {}),
                         "score": res.get("score"),
                     }
@@ -927,16 +915,13 @@ async def get_memory(request: Request, memory_id: str):
     memory = await asyncio.to_thread(memory_service.get, memory_id=memory_id, user_id=user_id)
 
     # Normalize memory format
+    # Service already normalizes responses from Mem0's payload structure
     if isinstance(memory, dict):
-        memory_text = (
-            memory.get("memory")
-            or memory.get("data", {}).get("memory")
-            or memory.get("text")
-            or str(memory)
-        )
+        # Service normalizes responses - check standard fields
+        memory_text = memory.get("memory") or memory.get("text") or str(memory)
         normalized_memory = {
             "memory": memory_text,
-            "id": memory.get("id") or memory.get("_id") or memory_id,
+            "id": memory.get("id") or memory_id,  # Service normalizes _id to id
             "metadata": memory.get("metadata", {}),
             "user_id": memory.get("user_id", user_id),
         }
@@ -977,6 +962,8 @@ async def update_memory(request: Request, memory_id: str):
     )
 
     try:
+        # Update memory using the hybrid pattern
+        # The 'data' parameter can be a string (content) or dict with 'memory'/'text' key
         updated_memory = await asyncio.to_thread(
             memory_service.update, memory_id=memory_id, data=data, user_id=user_id, metadata=metadata
         )
@@ -998,16 +985,13 @@ async def update_memory(request: Request, memory_id: str):
             )
 
         # Normalize memory format
+        # Service already normalizes responses from Mem0's payload structure
         if isinstance(updated_memory, dict):
-            memory_text = (
-                updated_memory.get("memory")
-                or updated_memory.get("data", {}).get("memory")
-                or updated_memory.get("text")
-                or str(updated_memory)
-            )
+            # Service normalizes responses - check standard fields
+            memory_text = updated_memory.get("memory") or updated_memory.get("text") or str(updated_memory)
             normalized_memory = {
                 "memory": memory_text,
-                "id": updated_memory.get("id") or updated_memory.get("_id") or memory_id,
+                "id": updated_memory.get("id") or memory_id,  # Service normalizes _id to id
                 "metadata": updated_memory.get("metadata", metadata or {}),
                 "user_id": updated_memory.get("user_id", user_id),
             }

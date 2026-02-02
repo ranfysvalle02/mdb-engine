@@ -849,6 +849,10 @@ embeddings = await embedding_service.embed(["Text 1", "Text 2"])
 
 **Purpose**: Intelligent memory management for AI applications - stores and retrieves user memories.
 
+**Architecture**: Uses an abstract base class pattern (`BaseMemoryService`) for extensibility. Mem0 is the default implementation, but the architecture supports future memory providers.
+
+**v0.7.4 Enhancements**: Enhanced hybrid update pattern with direct MongoDB access for reliable metadata updates and consistent data retrieval. Properly handles Mem0's MongoDB structure (`_id`, `payload`) automatically.
+
 **Manifest Configuration:**
 ```json
 {
@@ -894,11 +898,26 @@ memories = await memory_service.search(
 
 # Get all memories for a user
 all_memories = await memory_service.get_all(user_id="user123")
+# Returns normalized format: [{"id": "...", "memory": "...", "metadata": {...}, ...}]
 
-# Update memory
-await memory_service.update(
+# Update memory (hybrid: content via Mem0, metadata via MongoDB)
+# v0.7.4: Enhanced hybrid update pattern with direct MongoDB access
+updated = await memory_service.update(
     memory_id=memory["id"],
-    memory={"content": "Updated memory"}
+    user_id="user123",
+    memory="Updated memory content",
+    metadata={"category": "updated"}  # Full metadata support via MongoDB
+)
+# Returns normalized memory document fetched directly from MongoDB
+# Mem0 structure (_id, payload) is automatically handled
+# Content updates trigger re-embedding via Mem0
+# Metadata updates go directly to MongoDB for full control
+
+# Update only metadata (no content change) - FULLY SUPPORTED
+updated = await memory_service.update(
+    memory_id=memory["id"],
+    user_id="user123",
+    metadata={"priority": "high", "tags": ["important"]}
 )
 
 # Delete memory

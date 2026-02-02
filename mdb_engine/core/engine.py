@@ -910,13 +910,14 @@ class MongoDBEngine:
 
     def get_memory_service(self, slug: str) -> Any | None:
         """
-        Get Mem0 memory service for an app.
+        Get memory service for an app (returns BaseMemoryService instance).
 
         Args:
             slug: App slug
 
         Returns:
-            Mem0MemoryService instance if memory is enabled for this app, None otherwise
+            BaseMemoryService instance (currently Mem0MemoryService) if memory is enabled
+            for this app, None otherwise
 
         Example:
             ```python

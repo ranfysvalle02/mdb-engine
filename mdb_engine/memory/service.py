@@ -1,12 +1,36 @@
 """
 Mem0 Memory Service Implementation
 Production-ready wrapper for Mem0.ai with strict metadata schema for MongoDB.
+
+v0.7.4: Enhanced with hybrid update pattern and direct MongoDB access for reliable
+memory operations. Properly handles Mem0's MongoDB structure (_id, payload).
 """
 
 import logging
 import os
 import tempfile
+from datetime import datetime
 from typing import Any
+
+from .base import BaseMemoryService, MemoryServiceError
+
+# Required: Direct PyMongo access
+try:
+    from pymongo import MongoClient
+    from pymongo.errors import (
+        ConfigurationError,
+        ConnectionFailure,
+        InvalidURI,
+        PyMongoError,
+        ServerSelectionTimeoutError,
+    )
+except ImportError:
+    MongoClient = None
+    ConnectionFailure = None
+    ConfigurationError = None
+    ServerSelectionTimeoutError = None
+    InvalidURI = None
+    PyMongoError = None
 
 # Set MEM0_DIR environment variable early to avoid permission issues
 if "MEM0_DIR" not in os.environ:
@@ -39,23 +63,29 @@ def _check_mem0_available():
 logger = logging.getLogger(__name__)
 
 
-class Mem0MemoryServiceError(Exception):
+class Mem0MemoryServiceError(MemoryServiceError):
+    """Exception raised by Mem0MemoryService operations."""
+
     pass
 
 
-class Mem0MemoryService:
+class Mem0MemoryService(BaseMemoryService):
     """
     Production-ready Mem0 Memory Service with MongoDB integration.
 
     Features:
+    - Hybrid update pattern: Mem0 for embeddings, MongoDB for data persistence
+    - Full metadata support via direct MongoDB access
     - In-place memory updates preserving IDs and timestamps
     - Automatic embedding recomputation on content changes
     - Knowledge graph support (if enabled in Mem0 config)
     - Comprehensive error handling and logging
-    - Backward compatibility with existing code
+    - Reliable return values fetched directly from MongoDB
 
-    All operations go through Mem0's API to ensure proper state management,
-    graph updates, and relationship handling.
+    Update Architecture:
+    - Content updates routed via Mem0 (triggers re-embedding)
+    - Metadata updates routed via direct PyMongo (full control)
+    - Final result always fetched from MongoDB (guaranteed structure)
     """
 
     def __init__(
@@ -76,6 +106,26 @@ class Mem0MemoryService:
         self.app_slug = app_slug
         self.collection_name = (config or {}).get("collection_name", f"{app_slug}_memories")
         self.infer = (config or {}).get("infer", True)
+
+        # ---------------------------------------------------------
+        # 1. SETUP DIRECT MONGODB ACCESS (The "Backdoor")
+        # ---------------------------------------------------------
+        if MongoClient is None:
+            raise Mem0MemoryServiceError("pymongo is required. pip install pymongo")
+
+        try:
+            self._client = MongoClient(mongo_uri)
+            self._db = self._client[db_name]
+            self.memories_collection = self._db[self.collection_name]
+            logger.info(f"✅ Direct MongoDB connection established for {self.collection_name}")
+        except BaseException as e:
+            # MongoDB connection may raise various exceptions. We catch BaseException
+            # (not Exception) to ensure we always raise Mem0MemoryServiceError for
+            # consistent error handling, but we re-raise KeyboardInterrupt and SystemExit
+            # to allow proper shutdown.
+            if isinstance(e, KeyboardInterrupt | SystemExit):
+                raise
+            raise Mem0MemoryServiceError(f"Failed to connect to MongoDB directly: {e}") from e
 
         # Ensure GOOGLE_API_KEY is set for mem0 compatibility
         # (mem0 expects GOOGLE_API_KEY, not GEMINI_API_KEY)
@@ -437,8 +487,50 @@ class Mem0MemoryService:
             return []
 
     def get(self, memory_id: str, user_id: str | None = None, **kwargs) -> dict[str, Any]:
+        """
+        Get memory by ID using direct MongoDB access for reliability.
+
+        Mem0 stores memories with _id as the MongoDB document ID.
+        Memory content and metadata are stored in the 'payload' field.
+        """
         try:
-            return self.memory.get(memory_id, **kwargs)
+            # Mem0 uses _id as the MongoDB document ID
+            doc = self.memories_collection.find_one({"_id": memory_id})
+            if doc:
+                # Extract payload (where Mem0 stores the actual memory data)
+                payload = doc.get("payload", {})
+
+                # Build normalized memory document
+                memory_doc = {
+                    "id": str(doc["_id"]),  # Convert _id to id for API consistency
+                    "memory": payload.get("memory") or payload.get("text"),
+                    "text": payload.get("text") or payload.get("memory"),
+                    "metadata": payload.get("metadata", {}),
+                    "user_id": payload.get("user_id") or payload.get("metadata", {}).get("user_id"),
+                    "created_at": payload.get("created_at"),
+                    "updated_at": payload.get("updated_at"),
+                }
+
+                # Add any other payload fields
+                for key, value in payload.items():
+                    if key not in [
+                        "memory",
+                        "text",
+                        "metadata",
+                        "user_id",
+                        "created_at",
+                        "updated_at",
+                    ]:
+                        memory_doc[key] = value
+
+                # Optional: Filter by user_id if provided
+                if user_id:
+                    doc_user_id = memory_doc.get("user_id")
+                    if doc_user_id and str(doc_user_id) != str(user_id):
+                        return None
+
+                return memory_doc
+            return None
         except (
             ValueError,
             TypeError,
@@ -448,7 +540,19 @@ class Mem0MemoryService:
             RuntimeError,
             KeyError,
         ):
-            return None
+            # Fallback to Mem0 if direct access fails
+            try:
+                return self.memory.get(memory_id, **kwargs)
+            except (
+                ValueError,
+                TypeError,
+                ConnectionError,
+                OSError,
+                AttributeError,
+                RuntimeError,
+                KeyError,
+            ):
+                return None
 
     def delete(self, memory_id: str, user_id: str | None = None, **kwargs) -> bool:
         try:
@@ -491,14 +595,26 @@ class Mem0MemoryService:
         **kwargs,
     ) -> dict[str, Any] | None:
         """
-        Update an existing memory in-place with production-grade error handling.
+        Robust Hybrid Update Pattern:
+
+        This method uses a hybrid approach that combines Mem0's embedding capabilities
+        with direct MongoDB control for maximum flexibility and reliability.
+
+        **Architecture:**
+        1. **Content Updates** → Routed via Mem0 (triggers automatic re-embedding)
+        2. **Metadata Updates** → Routed via direct PyMongo (full control, no API limitations)
+        3. **Return Value** → Always fetched from MongoDB (guaranteed correct structure)
+
+        **Why Hybrid?**
+        - Mem0's update() API doesn't support metadata parameter
+        - Mem0's return values can be inconsistent (dict, list, or status messages)
+        - Direct MongoDB access gives us full control over data persistence
+        - We use Mem0 purely as an "embedding utility" for content changes
 
         Updates the memory content and/or metadata while preserving:
         - Original memory ID (never changes)
         - Creation timestamp (created_at) - preserved
         - Other existing fields - preserved unless explicitly updated
-
-        If content is updated, the embedding vector is automatically recomputed.
 
         Args:
             memory_id: The ID of the memory to update (required)
@@ -508,12 +624,13 @@ class Mem0MemoryService:
                   Can be a string or dict with 'memory'/'text'/'content' key.
             messages: Alternative way to provide content as messages (optional).
                       Can be a string or list of dicts with 'content' key.
-            metadata: Metadata updates (optional, but NOT SUPPORTED by Mem0 update API).
-                     This parameter is accepted for API consistency but will be ignored.
+            metadata: Metadata updates (FULLY SUPPORTED via direct MongoDB).
+                     Can update any metadata field, not limited by Mem0 API.
             **kwargs: Additional arguments passed to Mem0 operations
 
         Returns:
-            Updated memory object with same ID, or None if memory not found
+            Updated memory object with same ID, fetched directly from MongoDB,
+            or None if memory not found
 
         Raises:
             Mem0MemoryServiceError: If update operation fails
@@ -521,7 +638,7 @@ class Mem0MemoryService:
 
         Example:
             ```python
-            # Update content and metadata
+            # Update content and metadata (hybrid approach)
             updated = memory_service.update(
                 memory_id="04f78986-dfad-46fe-8381-034bbee9a2fc",
                 user_id="user123",
@@ -529,78 +646,164 @@ class Mem0MemoryService:
                 metadata={"category": "technical", "updated": True}
             )
 
-            # Update only metadata (content unchanged)
+            # Update only metadata (content unchanged) - FULLY SUPPORTED
             updated = memory_service.update(
                 memory_id="04f78986-dfad-46fe-8381-034bbee9a2fc",
                 user_id="user123",
-                metadata={"category": "updated"}
+                metadata={"category": "updated", "priority": "high"}
+            )
+
+            # Update only content (no metadata)
+            updated = memory_service.update(
+                memory_id="04f78986-dfad-46fe-8381-034bbee9a2fc",
+                user_id="user123",
+                memory="Updated content only"
             )
             ```
         """
         if not memory_id or not isinstance(memory_id, str) or not memory_id.strip():
             raise ValueError("memory_id is required and must be a non-empty string")
 
+        # 1. Normalize Inputs
+        normalized_memory = self._normalize_content_input(memory, data, messages)
+        normalized_metadata = self._normalize_metadata_input(metadata, data)
+
+        # 2. Check Existence (Fast check via ID)
+        # Mem0 uses _id as the MongoDB document ID
+        existing = self.memories_collection.find_one(
+            {"_id": memory_id}, {"_id": 1, "payload.user_id": 1, "payload.metadata.user_id": 1}
+        )
+        if not existing:
+            logger.warning(f"Memory {memory_id} not found.")
+            return None
+
+        # Optional: Security Scope Check
+        # Check user_id in payload (Mem0 stores it there)
+        if user_id:
+            payload = existing.get("payload", {})
+            existing_user_id = payload.get("user_id") or payload.get("metadata", {}).get("user_id")
+            if existing_user_id and str(existing_user_id) != str(user_id):
+                logger.warning(f"Unauthorized update attempt for {memory_id} by {user_id}")
+                return None
+
+        # Use _id directly (Mem0's format)
+        actual_id = memory_id
+
         try:
-            # Normalize data parameter (alternative to memory parameter)
-            normalized_memory = self._normalize_content_input(memory, data, messages)
-            normalized_metadata = self._normalize_metadata_input(metadata, data)
+            # -------------------------------------------------
+            # STEP A: Content Update (Via Mem0 for Vectors)
+            # -------------------------------------------------
+            if normalized_memory:
+                logger.info(f"📝 Updating content for {actual_id} (triggering re-embedding)")
+                # We use Mem0 here specifically because it handles the embedding logic.
+                # We do NOT care what it returns.
+                try:
+                    # Use the actual_id (which Mem0 recognizes)
+                    self.memory.update(memory_id=actual_id, data=normalized_memory)
+                except BaseException as e:
+                    # Mem0 is a third-party library that may raise any exception.
+                    # We catch BaseException (not Exception) to ensure we always raise
+                    # Mem0MemoryServiceError for consistent error handling, but we
+                    # re-raise KeyboardInterrupt and SystemExit to allow proper shutdown.
+                    if isinstance(e, KeyboardInterrupt | SystemExit):
+                        raise
+                    # If Mem0 fails (e.g. LLM rate limit, API error), we should abort
+                    # or fall back to just text update without vector (risky for search).
+                    logger.exception(f"Mem0 embedding update failed: {e}")
+                    raise Mem0MemoryServiceError(f"Content update failed: {e}") from e
 
-            existing_memory = self.get(memory_id=memory_id, user_id=user_id, **kwargs)
-            if not existing_memory:
-                logger.warning(
-                    f"Memory {memory_id} not found for update",
-                    extra={"memory_id": memory_id, "user_id": user_id},
-                )
-                return None
+            # -------------------------------------------------
+            # STEP B: Metadata Update (Direct PyMongo)
+            # -------------------------------------------------
+            if normalized_metadata:
+                logger.info(f"🏷️ Updating metadata for {actual_id}")
 
-            # Use Mem0's built-in update method
-            # Mem0's Memory class update method handles:
-            # - In-place updates preserving memory ID
-            # - Automatic embedding recomputation
-            # - Metadata merging
-            # - User scoping
-            # - Knowledge graph updates (if enabled)
-            # - Relationship management
-            if not hasattr(self.memory, "update") or not callable(self.memory.update):
-                raise Mem0MemoryServiceError(
-                    "Mem0 update method not available. "
-                    "Please ensure you're using a compatible version of mem0ai "
-                    "that supports updates. Install with: pip install --upgrade mem0ai"
-                )
+                # Ensure user_id is in metadata for consistency
+                if user_id:
+                    normalized_metadata["user_id"] = str(user_id)
 
-            result = self._update_via_mem0(
-                memory_id=memory_id,
-                user_id=user_id,
-                memory=normalized_memory,
-                metadata=normalized_metadata,
-                **kwargs,
-            )
+                # Mem0 stores everything in the 'payload' field
+                # We need to update payload.metadata and payload.user_id
+                update_fields = {}
 
-            if result is None:
-                logger.warning(
-                    f"Mem0 update returned None for memory {memory_id}",
-                    extra={"memory_id": memory_id, "user_id": user_id},
-                )
-                return None
+                # Handle metadata updates (nested under payload.metadata)
+                for k, v in normalized_metadata.items():
+                    if k == "user_id":
+                        # user_id can be at payload.user_id or payload.metadata.user_id
+                        update_fields["payload.user_id"] = v
+                        update_fields["payload.metadata.user_id"] = v
+                    else:
+                        update_fields[f"payload.metadata.{k}"] = v
+
+                # Add timestamp to payload
+                update_fields["payload.updated_at"] = datetime.utcnow().isoformat()
+
+                # Execute Atomic Update - Mem0 uses _id
+                self.memories_collection.update_one({"_id": actual_id}, {"$set": update_fields})
+
+            # -------------------------------------------------
+            # STEP C: Return The Truth (Direct DB Fetch)
+            # -------------------------------------------------
+            # We completely ignore Mem0's return value (which might be {"message": "ok"})
+            # and fetch the actual document from the database.
+            final_doc_raw = self.memories_collection.find_one({"_id": actual_id})
+
+            if final_doc_raw:
+                # Extract payload (where Mem0 stores the actual memory data)
+                payload = final_doc_raw.get("payload", {})
+
+                # Build normalized memory document (same format as get() method)
+                final_doc = {
+                    "id": str(final_doc_raw["_id"]),  # Convert _id to id for API consistency
+                    "memory": payload.get("memory") or payload.get("text"),
+                    "text": payload.get("text") or payload.get("memory"),
+                    "metadata": payload.get("metadata", {}),
+                    "user_id": payload.get("user_id") or payload.get("metadata", {}).get("user_id"),
+                    "created_at": payload.get("created_at"),
+                    "updated_at": payload.get("updated_at"),
+                }
+
+                # Add any other payload fields
+                for key, value in payload.items():
+                    if key not in [
+                        "memory",
+                        "text",
+                        "metadata",
+                        "user_id",
+                        "created_at",
+                        "updated_at",
+                    ]:
+                        final_doc[key] = value
+
+                # Ensure date objects are serialized if your downstream expects strings
+                if isinstance(final_doc.get("created_at"), datetime):
+                    final_doc["created_at"] = final_doc["created_at"].isoformat()
+                if isinstance(final_doc.get("updated_at"), datetime):
+                    final_doc["updated_at"] = final_doc["updated_at"].isoformat()
+            else:
+                final_doc = None
 
             logger.info(
-                f"Successfully updated memory {memory_id} using Mem0 update method",
+                f"Successfully updated memory {memory_id}",
                 extra={
                     "memory_id": memory_id,
                     "content_updated": bool(normalized_memory),
                     "metadata_updated": bool(normalized_metadata),
                 },
             )
-            return result
+            return final_doc
 
         except ValueError:
             # Re-raise validation errors as-is
             raise
-        except (AttributeError, TypeError, ValueError, KeyError) as e:
-            logger.exception(
-                f"Error updating memory {memory_id}",
-                extra={"memory_id": memory_id, "user_id": user_id},
-            )
+        except BaseException as e:
+            # Catch any unexpected errors during update. We catch BaseException
+            # (not Exception) to ensure we always raise Mem0MemoryServiceError for
+            # consistent error handling, but we re-raise KeyboardInterrupt and SystemExit
+            # to allow proper shutdown.
+            if isinstance(e, KeyboardInterrupt | SystemExit):
+                raise
+            logger.exception(f"Critical error during memory update for {memory_id}")
             raise Mem0MemoryServiceError(f"Update failed: {e}") from e
 
     def _normalize_content_input(
@@ -609,121 +812,44 @@ class Mem0MemoryService:
         data: str | dict[str, Any] | None,
         messages: str | list[dict[str, str]] | None,
     ) -> str | None:
-        """
-        Normalize content input from various parameter formats.
-
-        Priority: memory > data > messages
-        """
-        # Already have memory content
-        if memory:
+        """Normalize content input from various parameter formats."""
+        if memory is not None:
             if not isinstance(memory, str):
-                raise TypeError("memory parameter must be a string")
+                raise TypeError(f"memory parameter must be a string, got {type(memory).__name__}")
             return memory.strip() if memory.strip() else None
-
-        # Check data parameter
-        if data:
+        if data is not None:
             if isinstance(data, str):
                 return data.strip() if data.strip() else None
-            elif isinstance(data, dict):
-                content = data.get("memory") or data.get("text") or data.get("content")
-                if content and isinstance(content, str):
-                    return content.strip() if content.strip() else None
-
-        # Check messages parameter
-        if messages:
+            if isinstance(data, dict):
+                return data.get("memory") or data.get("text") or data.get("content")
+            raise TypeError(f"data parameter must be a string or dict, got {type(data).__name__}")
+        if messages is not None:
             if isinstance(messages, str):
                 return messages.strip() if messages.strip() else None
-            elif isinstance(messages, list):
-                content_parts = []
-                for msg in messages:
-                    if isinstance(msg, dict) and "content" in msg:
-                        content = msg["content"]
-                        if isinstance(content, str) and content.strip():
-                            content_parts.append(content.strip())
-                if content_parts:
-                    return " ".join(content_parts)
-
+            if isinstance(messages, list):
+                return " ".join([m.get("content", "") for m in messages if isinstance(m, dict)])
+            raise TypeError(
+                f"messages parameter must be a string or list, got {type(messages).__name__}"
+            )
         return None
 
     def _normalize_metadata_input(
         self, metadata: dict[str, Any] | None, data: dict[str, Any] | None
     ) -> dict[str, Any] | None:
         """Normalize metadata input, extracting from data dict if needed."""
-        if metadata is not None and not isinstance(metadata, dict):
-            raise TypeError("metadata must be a dict or None")
-
-        # If metadata provided directly, use it
         if metadata is not None:
+            if not isinstance(metadata, dict):
+                raise TypeError(f"metadata parameter must be a dict, got {type(metadata).__name__}")
             return metadata
-
-        # Check if metadata is in data dict
-        if isinstance(data, dict) and "metadata" in data:
-            data_metadata = data.get("metadata")
-            if isinstance(data_metadata, dict):
-                return data_metadata
-
+        if data is not None and isinstance(data, dict):
+            metadata_from_data = data.get("metadata")
+            if metadata_from_data is not None and not isinstance(metadata_from_data, dict):
+                raise TypeError(
+                    f"metadata in data parameter must be a dict, "
+                    f"got {type(metadata_from_data).__name__}"
+                )
+            return metadata_from_data
         return None
-
-    def _update_via_mem0(
-        self,
-        memory_id: str,
-        user_id: str | None,
-        memory: str | None,
-        metadata: dict[str, Any] | None,
-        **kwargs,
-    ) -> dict[str, Any] | None:
-        """
-        Update memory using Mem0's built-in update method.
-
-        Note: Mem0's update() only supports content updates (text parameter).
-        Metadata updates are not supported by the Mem0 API.
-
-        Args:
-            memory_id: Memory ID to update
-            user_id: User ID for scoping (not used in update call)
-            memory: New memory content (normalized)
-            metadata: Metadata to merge (ignored - not supported by Mem0 update API)
-            **kwargs: Additional arguments passed to Mem0
-
-        Returns:
-            Updated memory dict or None if not found
-        """
-        # Filter out user_id from kwargs to prevent passing it as a direct parameter
-        filtered_kwargs = {k: v for k, v in kwargs.items() if k != "user_id"}
-
-        logger.debug(
-            f"Calling mem0.update() for memory_id={memory_id}",
-            extra={
-                "memory_id": memory_id,
-                "has_content": bool(memory),
-                "has_metadata": bool(metadata),
-                "user_id": user_id,
-            },
-        )
-
-        if metadata:
-            logger.warning(
-                f"Metadata update requested for memory {memory_id} but Mem0 update() "
-                f"does not support metadata parameter. Metadata will not be updated."
-            )
-
-        update_kwargs = {"memory_id": memory_id}
-        if memory:
-            update_kwargs["data"] = memory
-        update_kwargs.update(filtered_kwargs)
-
-        result = self.memory.update(**update_kwargs)
-
-        # Note: Mem0's update() doesn't support metadata parameter
-        # Metadata updates would require direct MongoDB access, which we avoid
-
-        # Normalize result to dict
-        if isinstance(result, dict):
-            return result
-        elif isinstance(result, list) and len(result) > 0:
-            return result[0] if isinstance(result[0], dict) else None
-        else:
-            return self.get(memory_id=memory_id)
 
     def _normalize_result(self, result: Any) -> list[dict[str, Any]]:
         """Normalize Mem0's return type (dict vs list)."""
@@ -740,5 +866,35 @@ class Mem0MemoryService:
         return []
 
 
-def get_memory_service(mongo_uri, db_name, app_slug, config=None):
-    return Mem0MemoryService(mongo_uri, db_name, app_slug, config)
+def get_memory_service(
+    mongo_uri: str,
+    db_name: str,
+    app_slug: str,
+    config: dict[str, Any] | None = None,
+    provider: str = "mem0",
+) -> BaseMemoryService:
+    """
+    Factory function to create a memory service instance.
+
+    Args:
+        mongo_uri: MongoDB connection URI
+        db_name: Database name
+        app_slug: Application slug for scoping
+        config: Memory service configuration dictionary
+        provider: Memory provider to use (default: "mem0")
+
+    Returns:
+        BaseMemoryService instance (concrete implementation based on provider)
+
+    Raises:
+        ValueError: If provider is not supported
+        Mem0MemoryServiceError: If Mem0 provider fails to initialize
+    """
+    if provider == "mem0":
+        return Mem0MemoryService(mongo_uri, db_name, app_slug, config)
+    else:
+        raise ValueError(
+            f"Unsupported memory provider: {provider}. "
+            f"Supported providers: mem0. "
+            f"Future providers can be added by implementing BaseMemoryService."
+        )

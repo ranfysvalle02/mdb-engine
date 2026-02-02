@@ -63,10 +63,10 @@ class ServiceInitializer:
         self, slug: str, memory_config: dict[str, Any] | None
     ) -> None:
         """
-        Initialize Mem0 memory service for an app.
+        Initialize memory service for an app (defaults to Mem0 implementation).
 
         Memory support is OPTIONAL - only processes if dependencies are available.
-        mem0 handles embeddings and LLM via environment variables (.env).
+        Currently uses Mem0.ai which handles embeddings and LLM via environment variables (.env).
 
         Args:
             slug: App slug
@@ -356,13 +356,14 @@ class ServiceInitializer:
 
     def get_memory_service(self, slug: str) -> Any | None:
         """
-        Get Mem0 memory service for an app.
+        Get memory service for an app (returns BaseMemoryService instance).
 
         Args:
             slug: App slug
 
         Returns:
-            Mem0MemoryService instance if memory is enabled for this app, None otherwise
+            BaseMemoryService instance (currently Mem0MemoryService) if memory is enabled
+            for this app, None otherwise
         """
         try:
             service = self._memory_services.get(slug)

@@ -31,6 +31,7 @@ Welcome to the MDB Engine documentation. This directory contains comprehensive d
 ### Guides
 - **[Authorization Guide](AUTHZ.md)** - Authentication and authorization
 - **[Testing Guide](guides/testing.md)** - Comprehensive testing documentation
+- **[Mem0 Implementation Guide](guides/MEM0_IMPLEMENTATION.md)** - Why we use manual MongoDB access and Mem0 implementation details
 - **[Contributing Guide](../CONTRIBUTING.md)** - How to contribute to the project
 
 ### API Documentation
