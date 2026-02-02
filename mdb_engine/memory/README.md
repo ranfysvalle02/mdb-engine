@@ -181,17 +181,48 @@ memories = await memory_service.get_all(
 
 ### Update Memory
 
-Update existing memories:
+Update existing memories in-place while preserving the original memory ID and creation timestamp:
 
 ```python
-# Update memory
-updated = await memory_service.update(
+# Update memory content and metadata
+updated = memory_service.update(
+    memory_id="memory_123",
+    user_id="user123",
+    memory="Updated memory content",
+    metadata={"updated": True, "category": "technical"}
+)
+
+# Update using messages format
+updated = memory_service.update(
     memory_id="memory_123",
     user_id="user123",
     messages=[{"role": "user", "content": "Updated content"}],
     metadata={"updated": True}
 )
+
+# Update only metadata (content unchanged)
+updated = memory_service.update(
+    memory_id="memory_123",
+    user_id="user123",
+    metadata={"category": "updated"}
+)
+
+# Backward compatibility: using 'data' parameter
+updated = memory_service.update(
+    memory_id="memory_123",
+    user_id="user123",
+    data="Updated content",
+    metadata={"updated": True}
+)
 ```
+
+**Key Features:**
+- **Preserves Memory ID**: The original memory ID is maintained
+- **Preserves Creation Timestamp**: `created_at` is not modified
+- **Updates Timestamp**: `updated_at` is automatically set to current time
+- **Recomputes Embeddings**: If content changes, the embedding vector is automatically recomputed
+- **Metadata Merging**: New metadata is merged with existing metadata (doesn't replace)
+- **Partial Updates**: Can update content only, metadata only, or both
 
 ### Delete Memory
 

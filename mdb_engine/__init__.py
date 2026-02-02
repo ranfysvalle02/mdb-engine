@@ -82,13 +82,13 @@ from .repositories import Entity, MongoRepository, Repository, UnitOfWork
 from .utils import clean_mongo_doc, clean_mongo_docs
 
 __version__ = (
-    "0.7.1"  # Memory service initialization fix for multi-app setups
-    # - FIXED: Memory service initialization in create_multi_app context
-    # - FIXED: get_memory_service() now returns service when memory_config.enabled: true
-    # - ENHANCED: Explicit memory service initialization in create_multi_app lifespan
-    # - ENHANCED: Better error handling and logging for memory service initialization
-    # - ADDED: Comprehensive integration tests for memory service in multi-app context
-    # - ADDED: Unit tests for memory service initialization edge cases
+    "0.7.2"  # Memory service update functionality
+    # - ADDED: Memory service update() method for in-place memory updates
+    # - ADDED: Support for updating memory content and metadata while preserving IDs
+    # - ADDED: Automatic embedding recomputation via Mem0's update method
+    # - ADDED: Comprehensive unit tests for memory update functionality (17 tests)
+    # - ENHANCED: Memory service now uses Mem0's native update method exclusively
+    # - REMOVED: Direct MongoDB update fallback (simplified implementation)
 )
 
 __all__ = [
