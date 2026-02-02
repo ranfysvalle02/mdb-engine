@@ -26,6 +26,11 @@ from ..observability import get_logger as get_contextual_logger
 logger = logging.getLogger(__name__)
 contextual_logger = get_contextual_logger(__name__)
 
+try:
+    from openai import OpenAIError
+except ImportError:
+    OpenAIError = RuntimeError
+
 
 class ServiceInitializer:
     """
@@ -54,7 +59,9 @@ class ServiceInitializer:
         self._memory_services: dict[str, Any] = {}
         self._websocket_configs: dict[str, dict[str, Any]] = {}
 
-    async def initialize_memory_service(self, slug: str, memory_config: dict[str, Any]) -> None:
+    async def initialize_memory_service(
+        self, slug: str, memory_config: dict[str, Any] | None
+    ) -> None:
         """
         Initialize Mem0 memory service for an app.
 
@@ -63,8 +70,17 @@ class ServiceInitializer:
 
         Args:
             slug: App slug
-            memory_config: Memory configuration from manifest (already validated)
+            memory_config: Memory configuration from manifest (already validated).
+                Can be None or empty dict to skip initialization.
         """
+        # Handle None or empty config
+        if not memory_config:
+            return
+
+        # Check if memory is enabled (must be checked before import)
+        if not memory_config.get("enabled", False):
+            return
+
         # Try to import Memory service (optional dependency)
         try:
             from ..memory import Mem0MemoryService, Mem0MemoryServiceError
@@ -145,12 +161,41 @@ class ServiceInitializer:
                 extra={"app_slug": slug, "error": str(e)},
                 exc_info=True,
             )
-        except (ImportError, AttributeError, TypeError, ValueError) as e:
-            contextual_logger.error(
-                f"Error initializing memory service for app '{slug}': {e}",
+        except OpenAIError as e:
+            contextual_logger.warning(
+                f"Memory service initialization skipped for app '{slug}': "
+                f"OpenAI API error. {e}",
                 extra={"app_slug": slug, "error": str(e)},
-                exc_info=True,
             )
+        except (
+            ImportError,
+            AttributeError,
+            TypeError,
+            ValueError,
+            RuntimeError,
+            ConnectionError,
+            OSError,
+        ) as e:
+            error_msg = str(e).lower()
+            error_type = type(e).__name__
+            is_api_key_error = (
+                "api_key" in error_msg
+                or "api key" in error_msg
+                or "openai" in error_type.lower()
+                or "openai" in error_msg
+            )
+            if is_api_key_error:
+                contextual_logger.warning(
+                    f"Memory service initialization skipped for app '{slug}': "
+                    f"Missing API key or configuration. {e}",
+                    extra={"app_slug": slug, "error": str(e)},
+                )
+            else:
+                contextual_logger.error(
+                    f"Error initializing memory service for app '{slug}': {e}",
+                    extra={"app_slug": slug, "error": str(e)},
+                    exc_info=True,
+                )
 
     async def register_websockets(self, slug: str, websockets_config: dict[str, Any]) -> None:
         """
@@ -330,7 +375,18 @@ class ServiceInitializer:
                         extra={"app_slug": slug},
                     )
                     return None
-            return service
+                return service
+
+            # Service not found - check if it should be initialized but wasn't
+            # This can happen in multi-app context if initialization was missed
+            # Note: We can't do async initialization here, so we just log a warning
+            # The explicit initialization in create_multi_app should handle this
+            contextual_logger.debug(
+                f"Memory service not found for '{slug}' - "
+                f"it may not be initialized yet or memory is disabled",
+                extra={"app_slug": slug},
+            )
+            return None
         except (KeyError, AttributeError, TypeError) as e:
             contextual_logger.error(
                 f"Error retrieving memory service for '{slug}': {e}",

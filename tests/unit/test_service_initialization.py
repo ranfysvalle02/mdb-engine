@@ -659,3 +659,106 @@ class TestServiceAccessors:
         service_initializer._memory_services["test_app"] = ServiceWithAttributeError()  # noqa: SLF001
         service = service_initializer.get_memory_service("test_app")
         assert service is None
+
+
+class TestMemoryServiceMultiAppContext:
+    """Test memory service behavior in multi-app context (regression tests)."""
+
+    @pytest.mark.asyncio
+    async def test_get_memory_service_returns_none_when_not_initialized(self, service_initializer):
+        """
+        REGRESSION TEST: get_memory_service should return None when service not initialized.
+
+        This test ensures that get_memory_service() correctly returns None
+        when a service hasn't been initialized yet, rather than raising an error.
+        This is important for multi-app context where initialization might be delayed.
+        """
+        # Service not initialized - should return None, not raise error
+        service = service_initializer.get_memory_service("nonexistent_app")
+        assert service is None, (
+            "get_memory_service should return None when service not initialized, "
+            "not raise an error"
+        )
+
+    @pytest.mark.asyncio
+    async def test_memory_service_initialization_idempotent(self, service_initializer):
+        """
+        Test that memory service initialization is idempotent.
+
+        Calling initialize_memory_service multiple times for the same app
+        should not cause errors and should overwrite the previous service.
+        """
+        mock_memory_service = MagicMock()
+        mock_memory_service.memory = MagicMock()
+        mock_memory_service.collection_name = "test_memories"
+
+        memory_config = {
+            "enabled": True,
+            "collection_name": "memories",
+            "embedding_model_dims": 1536,
+        }
+
+        import mdb_engine.memory
+
+        original_mem0 = getattr(mdb_engine.memory, "Mem0MemoryService", None)
+        mock_service_class = MagicMock(return_value=mock_memory_service)
+        try:
+            mdb_engine.memory.Mem0MemoryService = mock_service_class
+
+            # Initialize first time
+            await service_initializer.initialize_memory_service("test_app", memory_config)
+            first_service = service_initializer.get_memory_service("test_app")
+            assert first_service is not None
+
+            # Initialize second time (should overwrite, not error)
+            await service_initializer.initialize_memory_service("test_app", memory_config)
+            second_service = service_initializer.get_memory_service("test_app")
+            assert second_service is not None
+            assert second_service == mock_memory_service
+
+            # Should have been called twice (once per initialization)
+            assert mock_service_class.call_count == 2
+        finally:
+            if original_mem0:
+                mdb_engine.memory.Mem0MemoryService = original_mem0
+            elif hasattr(mdb_engine.memory, "Mem0MemoryService"):
+                delattr(mdb_engine.memory, "Mem0MemoryService")
+
+    @pytest.mark.asyncio
+    async def test_memory_service_initialization_skips_when_disabled(self, service_initializer):
+        """
+        Test that memory service initialization is skipped when enabled: false.
+
+        This ensures that initialize_memory_service() respects the enabled flag
+        and doesn't attempt initialization when disabled.
+        """
+        memory_config_disabled = {
+            "enabled": False,
+            "collection_name": "memories",
+        }
+
+        # Should not raise error, just return early
+        await service_initializer.initialize_memory_service("test_app", memory_config_disabled)
+
+        # Service should not be initialized
+        service = service_initializer.get_memory_service("test_app")
+        assert service is None, "Memory service should not be initialized when enabled: false"
+
+    @pytest.mark.asyncio
+    async def test_memory_service_initialization_skips_when_missing_config(
+        self, service_initializer
+    ):
+        """
+        Test that memory service initialization handles missing config gracefully.
+
+        When memory_config is None or missing, initialization should be skipped.
+        """
+        # None config
+        await service_initializer.initialize_memory_service("test_app", None)
+        service = service_initializer.get_memory_service("test_app")
+        assert service is None, "Memory service should not be initialized with None config"
+
+        # Empty config dict
+        await service_initializer.initialize_memory_service("test_app", {})
+        service = service_initializer.get_memory_service("test_app")
+        assert service is None, "Memory service should not be initialized with empty config"

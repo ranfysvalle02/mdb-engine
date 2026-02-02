@@ -36,6 +36,11 @@ from typing import TYPE_CHECKING, Any, Optional
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import PyMongoError
 
+try:
+    from openai import OpenAIError
+except ImportError:
+    OpenAIError = RuntimeError
+
 if TYPE_CHECKING:
     from fastapi import FastAPI
 
@@ -2672,7 +2677,7 @@ class MongoDBEngine:
                 )
 
         @asynccontextmanager
-        async def lifespan(app: FastAPI):
+        async def lifespan(app: FastAPI):  # noqa: C901
             """Lifespan context manager for parent app."""
             nonlocal mounted_apps, shared_user_pool_initialized
 
@@ -2911,10 +2916,59 @@ class MongoDBEngine:
                     child_app.add_middleware(middleware_class)
                     logger.debug(f"Added AppContextMiddleware to child app '{slug}'")
 
-                    # CRITICAL FIX: Register WebSocket routes on parent app BEFORE mounting
-                    # This ensures WebSocket routes are checked before mounted app routes
-                    # Mounted apps create catch-all routes that intercept /app-slug/* paths
                     await _register_websocket_routes(app, app_manifest_data, slug, path_prefix)
+
+                    memory_config = app_manifest_data.get("memory_config")
+                    if memory_config and memory_config.get("enabled", False):
+                        if engine._service_initializer:  # noqa: SLF001
+                            try:
+                                await engine._service_initializer.initialize_memory_service(  # noqa: SLF001
+                                    slug, memory_config
+                                )
+                                logger.info(
+                                    f"Memory service initialized for mounted app '{slug}' "
+                                    f"in multi-app context"
+                                )
+                            except OpenAIError as e:
+                                logger.warning(
+                                    f"Memory service initialization skipped for mounted app "
+                                    f"'{slug}': OpenAI API error. {e}",
+                                    extra={"app_slug": slug, "error": str(e)},
+                                )
+                            except (
+                                ImportError,
+                                AttributeError,
+                                TypeError,
+                                ValueError,
+                                RuntimeError,
+                                ConnectionError,
+                                OSError,
+                            ) as e:
+                                error_msg = str(e).lower()
+                                error_type = type(e).__name__
+                                is_api_key_error = (
+                                    "api_key" in error_msg
+                                    or "api key" in error_msg
+                                    or "openai" in error_type.lower()
+                                )
+                                if is_api_key_error:
+                                    logger.warning(
+                                        f"Memory service initialization skipped for mounted app "
+                                        f"'{slug}': Missing API key or configuration. {e}",
+                                        extra={"app_slug": slug, "error": str(e)},
+                                    )
+                                else:
+                                    logger.error(
+                                        f"Failed to initialize memory service for mounted app "
+                                        f"'{slug}': {e}",
+                                        exc_info=True,
+                                        extra={"app_slug": slug, "error": str(e)},
+                                    )
+                        else:
+                            logger.warning(
+                                f"Memory service requested for '{slug}' but "
+                                f"service_initializer is not available"
+                            )
 
                     # Mount child app at path prefix (AFTER WebSocket routes are registered)
                     app.mount(path_prefix, child_app)

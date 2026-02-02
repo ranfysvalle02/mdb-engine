@@ -82,19 +82,13 @@ from .repositories import Entity, MongoRepository, Repository, UnitOfWork
 from .utils import clean_mongo_doc, clean_mongo_docs
 
 __version__ = (
-    "0.6.0"  # Secure-by-default WebSocket authentication with encrypted session keys
-    # - NEW: WebSocket session key generation and management
-    # - NEW: Envelope encryption for WebSocket session keys
-    # - NEW: Secure-by-default CSRF protection (csrf_required: true)
-    # - NEW: WebSocketSessionManager with private collection storage
-    # - NEW: Session key endpoint (/auth/websocket-session)
-    # - NEW: Session key integration in login flow
-    # - ENHANCED: WebSocket authentication with session key support
-    # - ENHANCED: CSRF middleware session key validation
-    # - ENHANCED: Multi-app WebSocket routing with session keys
-    # - BACKWARD COMPATIBLE: Cookie-based authentication fallback
-    # - UPDATED: All documentation for secure-by-default approach
-    # - COMPREHENSIVE: Unit and integration tests for session keys
+    "0.7.1"  # Memory service initialization fix for multi-app setups
+    # - FIXED: Memory service initialization in create_multi_app context
+    # - FIXED: get_memory_service() now returns service when memory_config.enabled: true
+    # - ENHANCED: Explicit memory service initialization in create_multi_app lifespan
+    # - ENHANCED: Better error handling and logging for memory service initialization
+    # - ADDED: Comprehensive integration tests for memory service in multi-app context
+    # - ADDED: Unit tests for memory service initialization edge cases
 )
 
 __all__ = [
