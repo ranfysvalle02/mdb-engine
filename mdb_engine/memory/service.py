@@ -4,6 +4,9 @@ Production-ready wrapper for Mem0.ai with strict metadata schema for MongoDB.
 
 v0.7.4: Enhanced with hybrid update pattern and direct MongoDB access for reliable
 memory operations. Properly handles Mem0's MongoDB structure (_id, payload).
+
+v0.7.5: Added inject() method for manual memory insertion without LLM inference,
+and enhanced delete functionality with comprehensive documentation.
 """
 
 import logging
@@ -418,6 +421,100 @@ class Mem0MemoryService(BaseMemoryService):
             else:
                 logger.exception("Mem0 Add Failed")
                 raise Mem0MemoryServiceError(f"Add failed: {e}") from e
+
+    def inject(
+        self,
+        memory: str | dict[str, Any],
+        user_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        **kwargs,
+    ) -> dict[str, Any]:
+        """
+        Manually inject a memory without LLM inference.
+
+        This method allows direct insertion of memories without going through
+        the inference pipeline. Useful for manually adding facts, preferences,
+        or other structured data.
+
+        Args:
+            memory: Memory content as a string or dict with memory/text/content key
+            user_id: User ID for scoping (optional but recommended)
+            metadata: Additional metadata to store with the memory
+            **kwargs: Additional provider-specific arguments
+
+        Returns:
+            Created memory object with ID and metadata
+
+        Raises:
+            Mem0MemoryServiceError: If injection operation fails
+            ValueError: If memory content is invalid or empty
+        """
+        # Normalize input: convert dict to string if needed
+        if isinstance(memory, dict):
+            # Extract memory content from dict (support multiple key formats)
+            memory_content = (
+                memory.get("memory") or memory.get("text") or memory.get("content") or str(memory)
+            )
+            if not memory_content or not isinstance(memory_content, str):
+                raise ValueError(
+                    "Memory dict must contain 'memory', 'text', or 'content' key with string value"
+                )
+            # Merge any metadata from the dict
+            if "metadata" in memory and isinstance(memory["metadata"], dict):
+                final_metadata = dict(metadata) if metadata else {}
+                final_metadata.update(memory["metadata"])
+                metadata = final_metadata
+        elif isinstance(memory, str):
+            memory_content = memory.strip()
+            if not memory_content:
+                raise ValueError("Memory content cannot be empty")
+        else:
+            raise TypeError(f"Memory must be a string or dict, got {type(memory).__name__}")
+
+        # Convert to messages format for add() method
+        messages = [{"role": "user", "content": memory_content}]
+
+        try:
+            # Call add() with infer=False to bypass LLM inference
+            logger.debug(
+                f"Injecting memory without inference for user_id={user_id}, "
+                f"memory_length={len(memory_content)}"
+            )
+            result = self.add(
+                messages=messages,
+                user_id=user_id,
+                metadata=metadata,
+                infer=False,  # Explicitly disable inference
+                **kwargs,
+            )
+
+            # Return the first created memory (normalized format)
+            if result and isinstance(result, list) and len(result) > 0:
+                injected_memory = result[0]
+                logger.info(
+                    f"Successfully injected memory with id={injected_memory.get('id')} "
+                    f"for user_id={user_id}"
+                )
+                return injected_memory
+            else:
+                # This shouldn't happen, but handle gracefully
+                logger.warning(
+                    f"add() returned empty result for inject() call. "
+                    f"user_id={user_id}, memory_length={len(memory_content)}"
+                )
+                raise Mem0MemoryServiceError("Failed to inject memory: add() returned empty result")
+        except (ValueError, TypeError):
+            # Re-raise validation errors as-is
+            raise
+        except (
+            ConnectionError,
+            OSError,
+            AttributeError,
+            RuntimeError,
+            KeyError,
+        ) as e:
+            logger.exception("Mem0 inject failed")
+            raise Mem0MemoryServiceError(f"Inject failed: {e}") from e
 
     def get_all(
         self,

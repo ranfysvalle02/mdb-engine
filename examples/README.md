@@ -72,7 +72,7 @@ See [Best Practices](../docs/BEST_PRACTICES.md) for full guidance.
 | **App Secrets** | Production deployment, need encrypted tokens | Set `MDB_ENGINE_MASTER_KEY` |
 | **OSO Auth** | Fine-grained permission rules | `"provider": "oso"` in manifest |
 | **Casbin Auth** | RBAC with simple roles | `"provider": "casbin"` in manifest |
-| **Memory Service** | AI chat with persistent memory | `memory_config` in manifest |
+| **Memory Service** | AI chat with persistent memory (inject, delete, search) | `memory_config` in manifest |
 | **Embeddings** | Semantic search, RAG applications | `embedding_config` in manifest |
 
 ---
@@ -152,6 +152,25 @@ An advanced example demonstrating:
 - Using OpenAI SDK directly for LLM operations
 
 **Perfect for:** Building RAG applications with vector search
+
+### [Chit Chat](./basic/chit_chat/) 💬
+
+An AI chat application demonstrating:
+- Memory service (`Mem0MemoryService`) with persistent memory
+- Memory injection (`inject()`) for manual memory insertion without LLM inference
+- Memory deletion (`delete()`, `delete_all()`) for memory management
+- Semantic search across conversation history
+- Memory Explorer UI with inject (💉) and delete (🗑️) capabilities
+- Real-time WebSocket updates for memory changes
+- Context-aware AI responses using conversation history
+
+**Perfect for:** Building conversational AI applications with memory management
+
+**Run it:**
+```bash
+cd basic/chit_chat
+docker-compose up
+```
 
 ### [Vector Hacking](./vector_hacking/)
 
@@ -531,6 +550,14 @@ async def chat(query: str, ctx: AppContext = Depends()):
     if ctx.memory:
         results = ctx.memory.search(query=query, user_id=user["email"], limit=3)
         context = [r.get("memory") for r in results]
+    
+    # Inject memory manually (without LLM inference)
+    if ctx.memory:
+        ctx.memory.inject(
+            memory="User prefers concise responses",
+            user_id=user["email"],
+            metadata={"source": "manual"}
+        )
     
     # Generate embeddings
     if ctx.embedding_service:

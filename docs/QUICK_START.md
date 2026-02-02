@@ -261,7 +261,7 @@ Configure authentication and authorization declaratively:
 
 Both services become available via dependencies:
 - `get_embedding_service()` - Text chunking and embeddings
-- `get_memory_service()` - Persistent AI memory (Mem0)
+- `get_memory_service()` - Persistent AI memory (Mem0) with inject, delete, search, and update capabilities
 
 #### 5. WebSockets (`websockets`)
 

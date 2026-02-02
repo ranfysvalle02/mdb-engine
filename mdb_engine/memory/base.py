@@ -58,6 +58,36 @@ class BaseMemoryService(ABC):
         pass
 
     @abstractmethod
+    def inject(
+        self,
+        memory: str | dict[str, Any],
+        user_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        **kwargs,
+    ) -> dict[str, Any]:
+        """
+        Manually inject a memory without LLM inference.
+
+        This method allows direct insertion of memories without going through
+        the inference pipeline. Useful for manually adding facts, preferences,
+        or other structured data.
+
+        Args:
+            memory: Memory content as a string or dict with memory/text/content key
+            user_id: User ID for scoping (optional but recommended)
+            metadata: Additional metadata to store with the memory
+            **kwargs: Additional provider-specific arguments
+
+        Returns:
+            Created memory object with ID and metadata
+
+        Raises:
+            MemoryServiceError: If injection operation fails
+            ValueError: If memory content is invalid or empty
+        """
+        pass
+
+    @abstractmethod
     def get_all(
         self,
         user_id: str | None = None,

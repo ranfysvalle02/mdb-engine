@@ -191,6 +191,31 @@
         font-size: 16px;
     }
 
+    .memory-explorer-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 12px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid var(--mongodb-border);
+    }
+
+    .memory-explorer-actions {
+        display: flex;
+        gap: 6px;
+    }
+
+    .inject-btn {
+        background: rgba(0, 237, 100, 0.1);
+        border-color: var(--mongodb-green);
+        color: var(--mongodb-green);
+    }
+
+    .inject-btn:hover {
+        background: var(--mongodb-green);
+        color: var(--mongodb-bg);
+    }
+
     .memory-item {
         padding: 10px;
         margin-bottom: 8px;
@@ -302,11 +327,13 @@
         border-radius: 4px;
         cursor: pointer;
         transition: all 0.2s;
+        color: var(--mongodb-text);
     }
 
     .refresh-memories-btn:hover {
         background: var(--mongodb-border);
         border-color: var(--mongodb-green);
+        transform: scale(1.05);
     }
 
     /* Mem0 Activity Log */
@@ -423,9 +450,16 @@
         border-color: var(--mongodb-green);
     }
 
+    .memory-action-btn.delete {
+        background: rgba(239, 68, 68, 0.1);
+        border-color: #ef4444;
+        color: #ef4444;
+    }
+
     .memory-action-btn.delete:hover {
         background: #ef4444;
         border-color: #ef4444;
+        color: white;
     }
 
     /* Edit Memory Modal */
@@ -682,8 +716,11 @@
         <!-- Active Memory Context -->
         <div class="memory-panel">
             <div class="memory-panel-header">
-                <div class="memory-panel-title">Mem0 Active Context</div>
-                <button class="refresh-memories-btn" onclick="manualRefreshMemories()" title="Refresh memories">🔄</button>
+                <div class="memory-panel-title">Memory Explorer</div>
+                <div class="memory-explorer-actions">
+                    <button class="refresh-memories-btn inject-btn" onclick="showInjectMemoryModal()" title="Inject Memory (Add without LLM inference)">💉</button>
+                    <button class="refresh-memories-btn" onclick="manualRefreshMemories()" title="Refresh memories">🔄</button>
+                </div>
             </div>
 
             <!-- Metadata Filters -->
@@ -721,6 +758,48 @@
     </div>
 </div>
 
+<!-- Inject Memory Modal -->
+<div id="inject-memory-modal" class="modal-overlay" onclick="if(event.target.id === 'inject-memory-modal') closeInjectModal()">
+    <div class="modal-content" onclick="event.stopPropagation()">
+        <div class="modal-header">
+            <h3 class="modal-title">💉 Inject Memory</h3>
+            <button class="modal-close" onclick="closeInjectModal()">&times;</button>
+        </div>
+        <form id="inject-memory-form" onsubmit="injectMemory(event)">
+            <div class="modal-form-group">
+                <label class="modal-label" for="inject-memory-text">Memory Content</label>
+                <textarea 
+                    id="inject-memory-text" 
+                    class="modal-textarea" 
+                    name="memory"
+                    required
+                    placeholder="Enter memory content to inject (e.g., 'User prefers dark mode', 'Project deadline is Friday')..."
+                ></textarea>
+                <small style="display: block; margin-top: 6px; opacity: 0.7; font-size: 12px;">
+                    This will be stored directly without LLM inference. Use for facts, preferences, or structured data.
+                </small>
+            </div>
+            <div class="modal-form-group">
+                <label class="modal-label" for="inject-memory-metadata">Metadata (Optional)</label>
+                <input
+                    type="text"
+                    id="inject-memory-metadata"
+                    class="modal-textarea"
+                    placeholder='JSON format: {"source": "manual", "category": "preference"}'
+                    style="min-height: 40px; font-family: monospace; font-size: 12px;"
+                >
+                <small style="display: block; margin-top: 6px; opacity: 0.7; font-size: 12px;">
+                    Optional metadata as JSON object
+                </small>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="modal-btn modal-btn-secondary" onclick="closeInjectModal()">Cancel</button>
+                <button type="submit" class="modal-btn modal-btn-primary">💉 Inject Memory</button>
+            </div>
+        </form>
+    </div>
+</div>
+
 <!-- Edit Memory Modal -->
 <div id="edit-memory-modal" class="modal-overlay" onclick="if(event.target.id === 'edit-memory-modal') closeEditModal()">
     <div class="modal-content" onclick="event.stopPropagation()">
@@ -740,7 +819,7 @@
                 ></textarea>
             </div>
             <div class="modal-actions">
-                <button type="button" class="modal-btn modal-btn-danger" onclick="deleteMemory()">Delete</button>
+                <button type="button" class="modal-btn modal-btn-danger" onclick="deleteMemory()">🗑️ Delete</button>
                 <button type="button" class="modal-btn modal-btn-secondary" onclick="closeEditModal()">Cancel</button>
                 <button type="submit" class="modal-btn modal-btn-primary">Save Changes</button>
             </div>
@@ -1094,7 +1173,7 @@ function displayMemories(memories) {
                 ${scoreHtml}
                 <div class="memory-actions">
                     <button class="memory-action-btn" onclick="event.stopPropagation(); showMemoryDetails('${memoryId}')" title="Edit">✏️</button>
-                    <button class="memory-action-btn delete" onclick="event.stopPropagation(); deleteMemory('${memoryId}')" title="Delete">🗑️</button>
+                    <button class="memory-action-btn delete" onclick="event.stopPropagation(); deleteMemory('${memoryId}')" title="Delete Memory">🗑️</button>
                 </div>
                 <div onclick="showMemoryDetails('${memoryId}')" style="cursor: pointer;">
                     <div><span class="memory-icon">💭</span>${displayText}</div>
@@ -1129,6 +1208,79 @@ function showMemoryDetails(memoryId) {
 
     // Show modal
     document.getElementById('edit-memory-modal').classList.add('show');
+}
+
+// Show inject memory modal
+function showInjectMemoryModal() {
+    document.getElementById('inject-memory-modal').classList.add('show');
+    document.getElementById('inject-memory-text').focus();
+}
+
+// Close inject modal
+function closeInjectModal() {
+    document.getElementById('inject-memory-modal').classList.remove('show');
+    document.getElementById('inject-memory-form').reset();
+}
+
+// Inject memory
+async function injectMemory(event) {
+    event.preventDefault();
+    
+    const memoryText = document.getElementById('inject-memory-text').value.trim();
+    const metadataInput = document.getElementById('inject-memory-metadata').value.trim();
+
+    if (!memoryText) {
+        alert('Memory content is required');
+        return;
+    }
+
+    let metadata = null;
+    if (metadataInput) {
+        try {
+            metadata = JSON.parse(metadataInput);
+        } catch (e) {
+            alert('Invalid JSON format for metadata. Please use valid JSON or leave empty.');
+            return;
+        }
+    }
+
+    try {
+        const response = await fetch('/api/memories/inject', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                memory: memoryText,
+                metadata: metadata
+            })
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            const errorMsg = result.error || `HTTP ${response.status}: ${response.statusText}`;
+            addActivityLog('error', `Failed to inject memory: ${errorMsg}`, false);
+            alert(`Failed to inject memory: ${errorMsg}`);
+            return;
+        }
+
+        if (result.success) {
+            addActivityLog('store', `Memory injected successfully: "${memoryText.substring(0, 50)}${memoryText.length > 50 ? '...' : ''}"`, true);
+            closeInjectModal();
+            // Refresh memories to show the new one
+            refreshMemories();
+        } else {
+            const errorMsg = result.error || 'Unknown error';
+            addActivityLog('error', `Failed to inject memory: ${errorMsg}`, false);
+            alert(`Failed to inject memory: ${errorMsg}`);
+        }
+    } catch (error) {
+        console.error('Error injecting memory:', error);
+        const errorMsg = error.message || 'Network error or server unavailable';
+        addActivityLog('error', `Error injecting memory: ${errorMsg}`, false);
+        alert(`Error injecting memory: ${errorMsg}`);
+    }
 }
 
 // Close edit modal

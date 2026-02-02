@@ -15,7 +15,7 @@ from .commands.validate import validate
 
 
 @click.group()
-@click.version_option(version="0.7.4", prog_name="mdb")
+@click.version_option(version="0.7.5", prog_name="mdb")
 def cli() -> None:
     """
     MDB_ENGINE CLI - Manifest management tool.

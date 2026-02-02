@@ -16,6 +16,14 @@ The memory service now uses an abstract base class pattern, enabling future memo
 - **📝 Type Safety**: Better IDE support and type checking with abstract base class
 - **🎯 Consistent API**: All memory providers implement the same interface
 
+### v0.7.5 Enhancements
+
+**Memory Injection and Enhanced Delete Capabilities!**
+
+- **💉 Inject Method**: New `inject()` method for manual memory insertion without LLM inference - perfect for adding facts, preferences, or structured data directly
+- **🗑️ Enhanced Delete**: Comprehensive delete functionality with improved documentation and user experience
+- **🧠 Memory Explorer UI**: Added memory explorer interface in chit_chat example with inject and delete buttons
+
 ### v0.7.4 Enhancements
 
 **Enhanced Mem0 Integration - Production Ready!**
@@ -169,6 +177,45 @@ memories = await memory_service.add_all(
 )
 ```
 
+### Inject Memory (Manual Insertion)
+
+Manually inject memories without LLM inference. This is useful when you want to directly add facts, preferences, or structured data without going through the inference pipeline:
+
+```python
+# Inject memory as a string
+memory = await memory_service.inject(
+    memory="The user prefers dark mode interfaces",
+    user_id="user123",
+    metadata={"source": "manual", "category": "preference"}
+)
+
+# Inject memory as a dict
+memory = await memory_service.inject(
+    memory={"memory": "Project deadline is next Friday", "category": "work"},
+    user_id="user123",
+    metadata={"source": "manual", "type": "deadline"}
+)
+
+# Returns: {"id": "...", "memory": "...", "metadata": {...}, ...}
+```
+
+**Key Differences from `add()`:**
+- **`inject()`**: Direct insertion without LLM inference (faster, no API costs)
+- **`add()`**: Uses LLM inference to extract facts from messages (slower, costs API calls)
+- **`inject()`**: Returns a single memory dict
+- **`add()`**: Returns a list of extracted memories
+
+**When to use `inject()`:**
+- Adding known facts or preferences directly
+- Importing structured data
+- When you want to avoid LLM inference costs
+- When you have pre-formatted memory content
+
+**When to use `add()`:**
+- Extracting memories from conversations
+- When you want the LLM to identify key facts
+- Processing unstructured text into memories
+
 ### Search Memories
 
 Semantic search across stored memories:
@@ -278,15 +325,47 @@ updated = memory_service.update(
 
 ### Delete Memory
 
-Remove memories:
+Remove memories from storage. Both methods return `True` on success, `False` on failure:
 
 ```python
-# Delete single memory
-await memory_service.delete(memory_id="memory_123", user_id="user123")
+# Delete single memory by ID
+success = await memory_service.delete(memory_id="memory_123", user_id="user123")
+if success:
+    print("Memory deleted successfully")
+else:
+    print("Failed to delete memory (may not exist)")
 
-# Delete all memories for user
-await memory_service.delete_all(user_id="user123")
+# Delete all memories for a user (use with caution!)
+success = await memory_service.delete_all(user_id="user123")
+if success:
+    print("All memories deleted successfully")
+
+# Delete with error handling
+try:
+    success = await memory_service.delete(memory_id="memory_123", user_id="user123")
+    if not success:
+        logger.warning(f"Memory {memory_id} not found or already deleted")
+except Mem0MemoryServiceError as e:
+    logger.error(f"Error deleting memory: {e}")
 ```
+
+**Key Features:**
+- **User Scoping**: Both methods respect `user_id` for security
+- **Safe Deletion**: Returns `False` if memory doesn't exist (doesn't raise exception)
+- **Bulk Deletion**: `delete_all()` removes all memories for a user
+- **Idempotent**: Safe to call multiple times (returns `False` if already deleted)
+
+**When to use `delete()`:**
+- Removing a specific memory by ID
+- Cleaning up outdated or incorrect memories
+- User-initiated memory removal
+
+**When to use `delete_all()`:**
+- Resetting user memory (e.g., account deletion)
+- Clearing test data
+- Bulk cleanup operations
+
+**Note**: Deletion is permanent and cannot be undone. Consider implementing soft deletes if you need to recover deleted memories.
 
 ### Bucket Organization
 
@@ -481,6 +560,7 @@ memory_service = get_memory_service(
 #### Methods
 
 - `add(messages, user_id, metadata=None, bucket_id=None, bucket_type=None, store_raw_content=False, raw_content=None)` - Add single memory with optional bucket and raw content storage
+- `inject(memory, user_id, metadata=None)` - Manually inject a memory without LLM inference
 - `add_with_raw_content(messages, raw_content, user_id, bucket_id=None, bucket_type=None)` - Store both extracted facts and raw content
 - `get_buckets(user_id, bucket_type=None, limit=None)` - Get all buckets for a user
 - `get_bucket_memories(bucket_id, user_id, include_raw_content=False, limit=None)` - Get all memories in a bucket

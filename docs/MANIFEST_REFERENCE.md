@@ -402,6 +402,14 @@ Enhanced token management with refresh tokens, sessions, and security:
 
 **Note**: Mem0 uses environment variables for LLM/embedding configuration. Set `OPENAI_API_KEY` or `AZURE_OPENAI_API_KEY`/`AZURE_OPENAI_ENDPOINT` in your `.env` file.
 
+**Memory Service Operations** (v0.7.5+):
+- `add()` - Store memories with LLM inference (extracts facts from conversations)
+- `inject()` - Manually inject memories without LLM inference (for facts, preferences, structured data)
+- `search()` - Semantic search across memories
+- `get()` / `get_all()` - Retrieve memories
+- `update()` - Update memory content and/or metadata
+- `delete()` / `delete_all()` - Delete memories
+
 ---
 
 ## WebSockets

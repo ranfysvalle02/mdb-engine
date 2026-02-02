@@ -931,6 +931,100 @@ async def get_memory(request: Request, memory_id: str):
     return JSONResponse({"success": True, "memory": normalized_memory})
 
 
+@app.post("/api/memories/inject", response_class=JSONResponse)
+@require_auth()
+async def inject_memory(request: Request):
+    """Manually inject a memory without LLM inference"""
+    app_user = await get_current_app_user(request)
+
+    if not app_user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    memory_service = engine.get_memory_service(APP_SLUG)
+    if not memory_service:
+        return JSONResponse(
+            {
+                "success": False,
+                "error": "Memory service not available",
+                "memory": None,
+            },
+            status_code=503,
+        )
+
+    user_id = str(app_user["_id"])
+
+    try:
+        body = await request.json()
+        memory_content = body.get("memory")
+        metadata = body.get("metadata")
+
+        if not memory_content:
+            raise HTTPException(
+                status_code=400, detail="Missing 'memory' field in request body"
+            )
+
+        logger.info(
+            f"💉 Injecting memory for user {user_id}",
+            extra={"user_id": user_id, "has_metadata": bool(metadata)},
+        )
+
+        # Inject memory without inference
+        injected_memory = await asyncio.to_thread(
+            memory_service.inject,
+            memory=memory_content,
+            user_id=user_id,
+            metadata=metadata,
+        )
+
+        if not injected_memory:
+            return JSONResponse(
+                {
+                    "success": False,
+                    "error": "Failed to inject memory",
+                    "memory": None,
+                },
+                status_code=500,
+            )
+
+        # Normalize memory format
+        # Service already normalizes responses from Mem0's payload structure
+        if isinstance(injected_memory, dict):
+            # Service normalizes responses - check standard fields
+            memory_text = (
+                injected_memory.get("memory")
+                or injected_memory.get("text")
+                or str(injected_memory)
+            )
+            normalized_memory = {
+                "memory": memory_text,
+                "id": injected_memory.get("id"),  # Service normalizes _id to id
+                "metadata": injected_memory.get("metadata", metadata or {}),
+                "user_id": injected_memory.get("user_id", user_id),
+            }
+        else:
+            normalized_memory = {"memory": str(injected_memory), "id": None}
+
+        logger.info(
+            f"✅ Successfully injected memory with id={normalized_memory.get('id')} "
+            f"for user {user_id}"
+        )
+
+        return JSONResponse({"success": True, "memory": normalized_memory})
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+    except Exception as e:
+        logger.exception(f"Error injecting memory: {e}")
+        return JSONResponse(
+            {
+                "success": False,
+                "error": f"Failed to inject memory: {str(e)}",
+                "memory": None,
+            },
+            status_code=500,
+        )
+
+
 @app.put("/api/memories/{memory_id}", response_class=JSONResponse)
 @require_auth()
 async def update_memory(request: Request, memory_id: str):

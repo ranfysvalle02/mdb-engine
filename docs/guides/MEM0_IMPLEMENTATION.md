@@ -345,14 +345,78 @@ If you're upgrading from an older version that used Mem0's API directly:
 
 When testing the memory service:
 
-- [ ] Verify memory creation works (`add()`)
+- [ ] Verify memory creation works (`add()` with LLM inference)
+- [ ] Verify memory injection works (`inject()` without LLM inference)
 - [ ] Verify memory retrieval works (`get()`, `get_all()`)
 - [ ] Verify memory updates work (`update()` with content)
 - [ ] Verify metadata updates work (`update()` with metadata only)
 - [ ] Verify memory search works (`search()`)
-- [ ] Verify memory deletion works (`delete()`)
+- [ ] Verify memory deletion works (`delete()` single memory)
+- [ ] Verify bulk deletion works (`delete_all()`)
 - [ ] Verify user_id filtering works correctly
 - [ ] Verify normalized return format is consistent
+
+---
+
+## v0.7.5 Enhancements: Inject and Delete Operations
+
+### Manual Memory Injection (`inject()`)
+
+The `inject()` method allows you to manually insert memories without LLM inference. This is useful for:
+- **Facts**: Directly storing known facts (e.g., "User prefers dark mode")
+- **Preferences**: User preferences and settings
+- **Structured Data**: Pre-formatted information that doesn't need extraction
+
+**Key Differences from `add()`:**
+- `add()`: Uses LLM inference to extract facts from conversations
+- `inject()`: Stores content directly without LLM processing (faster, no API costs)
+
+**Example:**
+```python
+# Inject a memory directly (no LLM inference)
+injected = memory_service.inject(
+    memory="User prefers dark mode interfaces",
+    user_id="user123",
+    metadata={"source": "manual", "category": "preference"}
+)
+```
+
+**Implementation Notes:**
+- Calls `add()` internally with `infer=False` to disable LLM inference
+- Accepts both string and dict formats for memory content
+- Normalizes input to ensure consistent storage format
+- Returns normalized memory structure
+
+### Memory Deletion (`delete()` and `delete_all()`)
+
+Memory deletion operations provide full control over memory lifecycle:
+
+**Single Memory Deletion:**
+```python
+# Delete a specific memory
+success = memory_service.delete(
+    memory_id="memory_123",
+    user_id="user123"
+)
+```
+
+**Bulk Deletion:**
+```python
+# Delete all memories for a user (use with caution!)
+success = memory_service.delete_all(user_id="user123")
+```
+
+**Security Considerations:**
+- Both methods verify `user_id` to prevent unauthorized deletions
+- `delete()` checks that the memory belongs to the specified user
+- `delete_all()` only deletes memories for the specified user
+- Returns `True` on success, `False` if memory not found
+
+**Implementation Notes:**
+- Uses direct MongoDB access for reliable deletion
+- Verifies user ownership before deletion
+- Handles Mem0's internal structure (`_id`, `payload`)
+- Returns boolean success status
 
 ---
 
@@ -511,5 +575,5 @@ Our hybrid approach provides flexibility to adapt while maintaining reliability.
 
 ---
 
-**Last Updated**: v0.7.4  
+**Last Updated**: v0.7.5  
 **Maintainer**: MDB Engine Team

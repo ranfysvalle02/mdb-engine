@@ -8,7 +8,9 @@ A beautiful AI chat application with persistent memory capabilities, demonstrati
 - **Persistent Memory**: Conversations are automatically stored and remembered using Mem0
 - **Semantic Search**: Find relevant memories from past conversations using semantic search
 - **Context-Aware Responses**: AI responses are enhanced with relevant memories from your conversation history
-- **Memory Management**: View, search, and manage all your memories through an intuitive UI
+- **Memory Explorer UI**: Interactive memory management with inject (💉) and delete (🗑️) capabilities
+- **Manual Memory Injection**: Inject memories directly without LLM inference for facts, preferences, or structured data
+- **Memory Management**: View, search, edit, inject, and delete all your memories through an intuitive UI
 - **Real-Time Updates**: WebSocket support for live memory updates and activity logs
 
 ### 💬 Conversation Features
@@ -108,8 +110,9 @@ uvicorn web:app --host 0.0.0.0 --port 8000 --reload
 - `GET /api/memories` - Get all memories for current user
 - `GET /api/memories/search?query={query}` - Search memories semantically
 - `GET /api/memories/{memory_id}` - Get a specific memory
+- `POST /api/memories/inject` - Manually inject a memory without LLM inference (💉)
 - `PUT /api/memories/{memory_id}` - Update a memory
-- `DELETE /api/memories/{memory_id}` - Delete a memory
+- `DELETE /api/memories/{memory_id}` - Delete a memory (🗑️)
 - `DELETE /api/memories` - Delete all memories for current user
 - `GET /api/memories/stats` - Get memory statistics
 
@@ -155,6 +158,27 @@ curl "http://localhost:8000/api/memories/search?query=travel%20plans" \
 ```bash
 curl "http://localhost:8000/api/memories/stats" \
   -H "Cookie: your-session-cookie"
+```
+
+### Inject Memory (Manual Insertion)
+
+```bash
+curl -X POST "http://localhost:8000/api/memories/inject" \
+  -H "Content-Type: application/json" \
+  -H "Cookie: your-session-cookie; csrf_token=your-csrf-token" \
+  -H "X-CSRF-Token: your-csrf-token" \
+  -d '{
+    "memory": "User prefers dark mode interfaces",
+    "metadata": {"source": "manual", "category": "preference"}
+  }'
+```
+
+### Delete Memory
+
+```bash
+curl -X DELETE "http://localhost:8000/api/memories/{memory_id}" \
+  -H "Cookie: your-session-cookie; csrf_token=your-csrf-token" \
+  -H "X-CSRF-Token: your-csrf-token"
 ```
 
 ## Architecture

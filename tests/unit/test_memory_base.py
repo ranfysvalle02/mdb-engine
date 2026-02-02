@@ -26,6 +26,7 @@ class TestBaseMemoryService:
         abstract_methods = BaseMemoryService.__abstractmethods__
         expected_methods = {
             "add",
+            "inject",
             "get_all",
             "search",
             "get",
@@ -105,6 +106,9 @@ class TestBaseMemoryService:
             def add(self, messages, user_id=None, metadata=None, **kwargs):
                 return []
 
+            def inject(self, memory, user_id=None, metadata=None, **kwargs):
+                return {"id": "test", "memory": memory}
+
             def get_all(self, user_id=None, limit=100, filters=None, **kwargs):
                 return []
 
@@ -158,6 +162,12 @@ class TestBaseMemoryService:
         assert "query" in search_sig.parameters
         assert "user_id" in search_sig.parameters
         assert "limit" in search_sig.parameters
+
+        # Check inject method signature
+        inject_sig = inspect.signature(BaseMemoryService.inject)
+        assert "memory" in inject_sig.parameters
+        assert "user_id" in inject_sig.parameters
+        assert "metadata" in inject_sig.parameters
 
         # Check update method signature
         update_sig = inspect.signature(BaseMemoryService.update)

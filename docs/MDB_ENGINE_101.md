@@ -851,6 +851,8 @@ embeddings = await embedding_service.embed(["Text 1", "Text 2"])
 
 **Architecture**: Uses an abstract base class pattern (`BaseMemoryService`) for extensibility. Mem0 is the default implementation, but the architecture supports future memory providers.
 
+**v0.7.5 Enhancements**: Added `inject()` method for manual memory insertion without LLM inference, and enhanced delete functionality.
+
 **v0.7.4 Enhancements**: Enhanced hybrid update pattern with direct MongoDB access for reliable metadata updates and consistent data retrieval. Properly handles Mem0's MongoDB structure (`_id`, `payload`) automatically.
 
 **Manifest Configuration:**
@@ -880,7 +882,7 @@ export AZURE_OPENAI_ENDPOINT="https://..."
 # Get memory service (automatically configured from manifest)
 memory_service = engine.get_memory_service("my_app")
 
-# Add memory from conversation
+# Add memory from conversation (with LLM inference)
 memory = await memory_service.add(
     messages=[
         {"role": "user", "content": "I love Python programming"},
@@ -888,6 +890,15 @@ memory = await memory_service.add(
     ],
     user_id="user123"
 )
+
+# Inject memory manually (without LLM inference)
+# Useful for directly adding facts, preferences, or structured data
+injected_memory = await memory_service.inject(
+    memory="User prefers dark mode interfaces",
+    user_id="user123",
+    metadata={"source": "manual", "category": "preference"}
+)
+# Returns: {"id": "...", "memory": "...", "metadata": {...}, ...}
 
 # Search memories
 memories = await memory_service.search(
@@ -901,7 +912,7 @@ all_memories = await memory_service.get_all(user_id="user123")
 # Returns normalized format: [{"id": "...", "memory": "...", "metadata": {...}, ...}]
 
 # Update memory (hybrid: content via Mem0, metadata via MongoDB)
-# v0.7.4: Enhanced hybrid update pattern with direct MongoDB access
+# v0.7.4+: Enhanced hybrid update pattern with direct MongoDB access
 updated = await memory_service.update(
     memory_id=memory["id"],
     user_id="user123",
@@ -920,8 +931,13 @@ updated = await memory_service.update(
     metadata={"priority": "high", "tags": ["important"]}
 )
 
-# Delete memory
-await memory_service.delete(memory_id=memory["id"])
+# Delete single memory
+success = await memory_service.delete(memory_id=memory["id"], user_id="user123")
+# Returns True if deleted, False if not found
+
+# Delete all memories for a user (use with caution!)
+success = await memory_service.delete_all(user_id="user123")
+# Returns True if successful, False otherwise
 ```
 
 **Integration Example:**

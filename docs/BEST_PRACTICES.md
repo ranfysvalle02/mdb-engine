@@ -329,9 +329,11 @@ async def remember(
     if not memory:
         raise HTTPException(503, "Memory service not configured")
     
-    result = memory.add(
-        messages=[{"role": "user", "content": content}],
+    # Use add() for LLM inference, inject() for direct insertion
+    result = memory.inject(
+        memory=content,
         user_id=user_id,
+        metadata={"source": "manual"}
     )
     return {"stored": True, "memory_id": result.get("id")}
 
@@ -350,6 +352,38 @@ async def recall(
         "memories": [r.get("memory") for r in results if r.get("memory")],
         "configured": True,
     }
+
+@app.post("/inject-memory")
+async def inject_memory(
+    content: str,
+    user_id: str,
+    metadata: dict = None,
+    memory=Depends(get_memory_service),
+):
+    """Manually inject a memory without LLM inference."""
+    if not memory:
+        raise HTTPException(503, "Memory service not configured")
+    
+    # Use inject() for direct insertion (no LLM inference)
+    result = memory.inject(
+        memory=content,
+        user_id=user_id,
+        metadata=metadata or {},
+    )
+    return {"injected": True, "memory_id": result.get("id")}
+
+@app.delete("/memory/{memory_id}")
+async def delete_memory(
+    memory_id: str,
+    user_id: str,
+    memory=Depends(get_memory_service),
+):
+    """Delete a specific memory."""
+    if not memory:
+        raise HTTPException(503, "Memory service not configured")
+    
+    success = memory.delete(memory_id=memory_id, user_id=user_id)
+    return {"deleted": success, "memory_id": memory_id}
 ```
 
 ---
