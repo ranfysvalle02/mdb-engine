@@ -472,19 +472,58 @@ async def _validate_websocket_origin_in_handler(websocket: Any, app_slug: str) -
 
         # Normalize origin for comparison
         def normalize_origin(orig: str) -> str:
-            """Normalize origin handling localhost variants."""
+            """
+            Normalize origin handling localhost variants and protocol differences.
+
+            Handles:
+            - Protocol conversion: ws/wss -> http/https (browsers send http/https)
+            - Localhost normalization: 127.0.0.1, 0.0.0.0, ::1 -> localhost
+            - Docker IP normalization: container IPs -> localhost (in development)
+            - Port normalization: removes :80 and :443
+            """
             if not orig:
                 return orig
+            import os
             import re
 
-            normalized = re.sub(
-                r"://(0\.0\.0\.0|127\.0\.0\.1|localhost|::1)",
-                "://localhost",
-                orig.lower(),
-                flags=re.IGNORECASE,
+            normalized = orig.lower()
+
+            # Normalize protocol: convert ws/wss to http/https for comparison
+            # WebSocket origins come as http/https from browsers, but configs may use ws/wss
+            normalized = re.sub(r"^ws://", "http://", normalized)
+            normalized = re.sub(r"^wss://", "https://", normalized)
+
+            # Check if we're in development/Docker environment
+            is_dev = (
+                os.getenv("ENVIRONMENT", "").lower() in ["development", "dev"]
+                or os.getenv("G_NOME_ENV", "").lower() in ["development", "dev"]
+                or os.path.exists("/.dockerenv")  # Docker container indicator
             )
+
+            # Normalize localhost variants
+            # In development/Docker, also normalize common Docker IP ranges to localhost
+            if is_dev:
+                # Match localhost, 127.0.0.1, 0.0.0.0, ::1, and Docker container IPs
+                # Docker typically uses 172.17.0.0/16 or 172.20.0.0/16
+                normalized = re.sub(
+                    r"://(0\.0\.0\.0|127\.0\.0\.1|localhost|::1|172\.(17|20)\.\d+\.\d+)",
+                    "://localhost",
+                    normalized,
+                    flags=re.IGNORECASE,
+                )
+            else:
+                # Production: only normalize standard localhost variants
+                normalized = re.sub(
+                    r"://(0\.0\.0\.0|127\.0\.0\.1|localhost|::1)",
+                    "://localhost",
+                    normalized,
+                    flags=re.IGNORECASE,
+                )
+
+            # Remove default ports
             normalized = re.sub(r":80$", "", normalized)
             normalized = re.sub(r":443$", "", normalized)
+
             return normalized.rstrip("/")
 
         normalized_origin = normalize_origin(origin)

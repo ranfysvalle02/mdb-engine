@@ -3,7 +3,6 @@ Unit tests for Memory Service update functionality.
 
 Tests the update method implementation including:
 - Mem0's built-in update method usage
-- Fallback to direct MongoDB updates
 - Content and metadata updates
 - Error handling and edge cases
 - Input validation
@@ -91,9 +90,10 @@ class TestMemoryServiceUpdate:
         memory_service.memory.update.assert_called_once()
         call_kwargs = memory_service.memory.update.call_args[1]
         assert call_kwargs["memory_id"] == "memory_123"
-        assert call_kwargs["text"] == "I love Python programming"
-        assert call_kwargs["metadata"] == {"updated": True}
-        assert call_kwargs["user_id"] == "user_123"
+        assert call_kwargs["data"] == "I love Python programming"
+        # Mem0 update() doesn't support metadata parameter
+        assert "metadata" not in call_kwargs
+        assert "user_id" not in call_kwargs or call_kwargs.get("user_id") is None
 
     def test_update_content_only(self, memory_service, existing_memory):
         """Test updating only content (no metadata)."""
@@ -115,8 +115,8 @@ class TestMemoryServiceUpdate:
         assert result is not None
         assert result["memory"] == "Updated content"
         call_kwargs = memory_service.memory.update.call_args[1]
-        assert call_kwargs["text"] == "Updated content"
-        assert "metadata" not in call_kwargs or call_kwargs["metadata"] is None
+        assert call_kwargs["data"] == "Updated content"
+        assert "metadata" not in call_kwargs
 
     def test_update_metadata_only(self, memory_service, existing_memory):
         """Test updating only metadata (no content change)."""
@@ -131,8 +131,9 @@ class TestMemoryServiceUpdate:
 
         assert result is not None
         call_kwargs = memory_service.memory.update.call_args[1]
-        assert call_kwargs["metadata"] == {"category": "updated"}
-        assert "text" not in call_kwargs or call_kwargs["text"] is None
+        # Mem0 update() doesn't support metadata parameter
+        assert "metadata" not in call_kwargs
+        assert "data" not in call_kwargs or call_kwargs["data"] is None
 
     def test_update_memory_not_found(self, memory_service):
         """Test update when memory doesn't exist."""
@@ -156,7 +157,7 @@ class TestMemoryServiceUpdate:
             memory_service.update(memory_id=None, user_id="user_123", memory="content")  # type: ignore
 
     def test_update_with_data_parameter(self, memory_service, existing_memory):
-        """Test update using 'data' parameter for backward compatibility."""
+        """Test update using 'data' parameter as alternative to 'memory' parameter."""
         memory_service.get = MagicMock(return_value=existing_memory)
         memory_service.memory.update = MagicMock(return_value=existing_memory)
 
@@ -168,7 +169,7 @@ class TestMemoryServiceUpdate:
 
         assert result is not None
         call_kwargs = memory_service.memory.update.call_args[1]
-        assert call_kwargs["text"] == "Updated via data parameter"
+        assert call_kwargs["data"] == "Updated via data parameter"
 
     def test_update_with_messages_parameter(self, memory_service, existing_memory):
         """Test update using 'messages' parameter."""
@@ -183,7 +184,7 @@ class TestMemoryServiceUpdate:
 
         assert result is not None
         call_kwargs = memory_service.memory.update.call_args[1]
-        assert call_kwargs["text"] == "Updated via messages"
+        assert call_kwargs["data"] == "Updated via messages"
 
     def test_update_mem0_method_fails_raises_error(self, memory_service, existing_memory):
         """Test that update raises error when Mem0's update fails."""
@@ -198,26 +199,36 @@ class TestMemoryServiceUpdate:
                 memory="Updated content",
             )
 
-    def test_update_mem0_returns_none_returns_none(self, memory_service, existing_memory):
-        """Test that update returns None when Mem0's update returns None."""
+    def test_update_mem0_returns_none_calls_get(self, memory_service, existing_memory):
+        """Test that update calls get() when Mem0's update returns None."""
         memory_service.get = MagicMock(return_value=existing_memory)
         memory_service.memory.update = MagicMock(return_value=None)
 
-        # Should return None when Mem0 update returns None (no fallback)
+        # New implementation calls get() when update returns None
         result = memory_service.update(
             memory_id="memory_123",
             user_id="user_123",
             memory="Updated content",
         )
 
-        assert result is None
+        # Should return result from get() (called once in update method, once when result is None)
+        assert result == existing_memory
+        # get() is called once in update() to check if memory exists,
+        # and once when update returns None
+        assert memory_service.get.call_count >= 1
+        # Verify get() was called with memory_id at least once
+        get_calls = [
+            call
+            for call in memory_service.get.call_args_list
+            if call[1].get("memory_id") == "memory_123"
+        ]
+        assert len(get_calls) >= 1
 
     def test_update_normalizes_content_input(self, memory_service, existing_memory):
         """Test that content input is properly normalized."""
         memory_service.get = MagicMock(return_value=existing_memory)
         memory_service.memory.update = MagicMock(return_value=existing_memory)
 
-        # Test with whitespace
         memory_service.update(
             memory_id="memory_123",
             user_id="user_123",
@@ -225,7 +236,7 @@ class TestMemoryServiceUpdate:
         )
 
         call_kwargs = memory_service.memory.update.call_args[1]
-        assert call_kwargs["text"] == "Updated content"
+        assert call_kwargs["data"] == "Updated content"  # Whitespace normalized
 
     def test_update_metadata_merging(self, memory_service, existing_memory):
         """Test that metadata is properly merged (not replaced)."""
@@ -245,9 +256,44 @@ class TestMemoryServiceUpdate:
         )
 
         assert result is not None
-        # Mem0 handles merging, so we just verify it was called with the new metadata
         call_kwargs = memory_service.memory.update.call_args[1]
-        assert call_kwargs["metadata"] == {"updated": True}
+        # Mem0 update() doesn't support metadata parameter
+        assert "metadata" not in call_kwargs
+
+    def test_update_without_user_id(self, memory_service, existing_memory):
+        """Test update when user_id is None (non-SSO use case)."""
+        memory_service.get = MagicMock(return_value=existing_memory)
+        memory_service.memory.update = MagicMock(return_value=existing_memory)
+
+        result = memory_service.update(
+            memory_id="memory_123",
+            user_id=None,  # No user_id provided (non-SSO use case)
+            memory="Updated content",
+            metadata={"category": "test"},
+        )
+
+        assert result is not None
+        call_kwargs = memory_service.memory.update.call_args[1]
+        # Mem0 update() doesn't support metadata parameter
+        assert "metadata" not in call_kwargs
+        assert "user_id" not in call_kwargs or call_kwargs.get("user_id") is None
+
+    def test_update_without_user_id_no_metadata(self, memory_service, existing_memory):
+        """Test update when user_id is None and no metadata provided (non-SSO use case)."""
+        memory_service.get = MagicMock(return_value=existing_memory)
+        memory_service.memory.update = MagicMock(return_value=existing_memory)
+
+        result = memory_service.update(
+            memory_id="memory_123",
+            user_id=None,  # No user_id provided (non-SSO use case)
+            memory="Updated content",
+        )
+
+        assert result is not None
+        call_kwargs = memory_service.memory.update.call_args[1]
+        # Mem0 update() doesn't support metadata parameter
+        assert "metadata" not in call_kwargs
+        assert "user_id" not in call_kwargs or call_kwargs.get("user_id") is None
 
 
 class TestMemoryServiceUpdateErrorHandling:
@@ -258,8 +304,8 @@ class TestMemoryServiceUpdateErrorHandling:
         memory_service.get = MagicMock(return_value=existing_memory)
         memory_service.memory.update = MagicMock(side_effect=TypeError("Invalid type"))
 
-        # TypeError should be caught and wrapped in Mem0MemoryServiceError
-        with pytest.raises(Mem0MemoryServiceError):
+        # TypeError should be wrapped in Mem0MemoryServiceError
+        with pytest.raises(Mem0MemoryServiceError, match="Update failed"):
             memory_service.update(
                 memory_id="memory_123",
                 user_id="user_123",
@@ -308,7 +354,7 @@ class TestMemoryServiceUpdateEdgeCases:
 
         # Should not update content if it's empty
         call_kwargs = memory_service.memory.update.call_args[1]
-        assert "text" not in call_kwargs or call_kwargs["text"] is None
+        assert "data" not in call_kwargs or call_kwargs["data"] is None
 
     def test_update_preserves_memory_id(self, memory_service, existing_memory):
         """Test that memory ID is always preserved."""
@@ -339,7 +385,7 @@ class TestMemoryServiceUpdateEdgeCases:
         )
 
         assert result is not None
-        # Should only update timestamp
+        # Should only update timestamp (no content or metadata)
         call_kwargs = memory_service.memory.update.call_args[1]
-        assert "text" not in call_kwargs or call_kwargs["text"] is None
-        assert "metadata" not in call_kwargs or call_kwargs["metadata"] is None
+        assert "data" not in call_kwargs or call_kwargs["data"] is None
+        assert "metadata" not in call_kwargs

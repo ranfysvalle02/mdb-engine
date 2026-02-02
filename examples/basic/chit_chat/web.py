@@ -971,28 +971,60 @@ async def update_memory(request: Request, memory_id: str):
     if not data:
         raise HTTPException(status_code=400, detail="Missing 'data' field in request body")
 
-    updated_memory = await asyncio.to_thread(
-        memory_service.update, memory_id=memory_id, data=data, user_id=user_id, metadata=metadata
+    logger.info(
+        f"🔄 Updating memory {memory_id} for user {user_id}",
+        extra={"memory_id": memory_id, "user_id": user_id, "has_metadata": bool(metadata)},
     )
 
-    # Normalize memory format
-    if isinstance(updated_memory, dict):
-        memory_text = (
-            updated_memory.get("memory")
-            or updated_memory.get("data", {}).get("memory")
-            or updated_memory.get("text")
-            or str(updated_memory)
+    try:
+        updated_memory = await asyncio.to_thread(
+            memory_service.update, memory_id=memory_id, data=data, user_id=user_id, metadata=metadata
         )
-        normalized_memory = {
-            "memory": memory_text,
-            "id": updated_memory.get("id") or updated_memory.get("_id") or memory_id,
-            "metadata": updated_memory.get("metadata", metadata or {}),
-            "user_id": updated_memory.get("user_id", user_id),
-        }
-    else:
-        normalized_memory = {"memory": str(updated_memory), "id": memory_id}
 
-    return JSONResponse({"success": True, "memory": normalized_memory})
+        logger.debug(
+            f"Memory update result for {memory_id}: {type(updated_memory)}, "
+            f"is_none={updated_memory is None}"
+        )
+
+        # Handle case where memory is not found (update returns None)
+        if updated_memory is None:
+            return JSONResponse(
+                {
+                    "success": False,
+                    "error": f"Memory {memory_id} not found or could not be updated",
+                    "memory": None,
+                },
+                status_code=404,
+            )
+
+        # Normalize memory format
+        if isinstance(updated_memory, dict):
+            memory_text = (
+                updated_memory.get("memory")
+                or updated_memory.get("data", {}).get("memory")
+                or updated_memory.get("text")
+                or str(updated_memory)
+            )
+            normalized_memory = {
+                "memory": memory_text,
+                "id": updated_memory.get("id") or updated_memory.get("_id") or memory_id,
+                "metadata": updated_memory.get("metadata", metadata or {}),
+                "user_id": updated_memory.get("user_id", user_id),
+            }
+        else:
+            normalized_memory = {"memory": str(updated_memory), "id": memory_id}
+
+        return JSONResponse({"success": True, "memory": normalized_memory})
+    except Exception as e:
+        logger.exception(f"Error updating memory {memory_id}: {e}")
+        return JSONResponse(
+            {
+                "success": False,
+                "error": f"Failed to update memory: {str(e)}",
+                "memory": None,
+            },
+            status_code=500,
+        )
 
 
 @app.delete("/api/memories/{memory_id}", response_class=JSONResponse)

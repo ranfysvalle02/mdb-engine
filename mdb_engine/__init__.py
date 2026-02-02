@@ -81,15 +81,7 @@ from .repositories import Entity, MongoRepository, Repository, UnitOfWork
 # Utilities
 from .utils import clean_mongo_doc, clean_mongo_docs
 
-__version__ = (
-    "0.7.2"  # Memory service update functionality
-    # - ADDED: Memory service update() method for in-place memory updates
-    # - ADDED: Support for updating memory content and metadata while preserving IDs
-    # - ADDED: Automatic embedding recomputation via Mem0's update method
-    # - ADDED: Comprehensive unit tests for memory update functionality (17 tests)
-    # - ENHANCED: Memory service now uses Mem0's native update method exclusively
-    # - REMOVED: Direct MongoDB update fallback (simplified implementation)
-)
+__version__ = "0.7.3"
 
 __all__ = [
     # Core Engine

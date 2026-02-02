@@ -6,20 +6,6 @@
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](https://opensource.org/licenses/AGPL-3.0)
 
-## 🎉 What's New in v0.7.0
-
-**FastAPI Native WebSocket Support**: MDB-Engine now uses FastAPI's `APIRouter` approach for WebSocket registration in both single-app and multi-app modes. This provides:
-
-- ✅ **Full FastAPI Feature Support**: Dependency injection, OpenAPI documentation, request/response models
-- ✅ **Consistency**: Same registration pattern across single-app and multi-app modes  
-- ✅ **Best Practices**: Follows FastAPI's recommended WebSocket registration patterns
-- ✅ **Better Maintainability**: Uses FastAPI abstractions instead of low-level Starlette APIs
-- ✅ **Route Priority**: WebSocket routes registered before mounted apps ensure proper routing
-
-**Value**: This change ensures WebSocket endpoints benefit from all FastAPI features, making your code more maintainable and consistent with FastAPI best practices.
-
----
-
 ## 🎯 manifest.json: The Key to Everything
 
 **`manifest.json` is the foundation of your application.** It's a single configuration file that defines your app's identity, data structure, authentication, indexes, and services. Everything flows from this file.

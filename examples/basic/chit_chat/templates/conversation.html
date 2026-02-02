@@ -392,6 +392,181 @@
         flex-wrap: wrap;
     }
 
+    .memory-actions {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        display: flex;
+        gap: 4px;
+        opacity: 0;
+        transition: opacity 0.2s;
+    }
+
+    .memory-item:hover .memory-actions {
+        opacity: 1;
+    }
+
+    .memory-action-btn {
+        background: var(--mongodb-bg-secondary);
+        border: 1px solid var(--mongodb-border);
+        border-radius: 4px;
+        padding: 4px 8px;
+        cursor: pointer;
+        font-size: 11px;
+        color: var(--mongodb-text);
+        transition: all 0.2s;
+    }
+
+    .memory-action-btn:hover {
+        background: var(--mongodb-green);
+        color: white;
+        border-color: var(--mongodb-green);
+    }
+
+    .memory-action-btn.delete:hover {
+        background: #ef4444;
+        border-color: #ef4444;
+    }
+
+    /* Edit Memory Modal */
+    .modal-overlay {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.5);
+        z-index: 1000;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .modal-overlay.show {
+        display: flex;
+    }
+
+    .modal-content {
+        background: var(--mongodb-bg);
+        border: 1px solid var(--mongodb-border);
+        border-radius: 8px;
+        padding: 24px;
+        max-width: 600px;
+        width: 90%;
+        max-height: 80vh;
+        overflow-y: auto;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    .modal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px;
+        padding-bottom: 12px;
+        border-bottom: 1px solid var(--mongodb-border);
+    }
+
+    .modal-title {
+        font-size: 20px;
+        font-weight: 600;
+    }
+
+    .modal-close {
+        background: none;
+        border: none;
+        font-size: 24px;
+        cursor: pointer;
+        color: var(--mongodb-text);
+        opacity: 0.7;
+        padding: 0;
+        width: 32px;
+        height: 32px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .modal-close:hover {
+        opacity: 1;
+    }
+
+    .modal-form-group {
+        margin-bottom: 16px;
+    }
+
+    .modal-label {
+        display: block;
+        margin-bottom: 8px;
+        font-weight: 500;
+        font-size: 14px;
+    }
+
+    .modal-textarea {
+        width: 100%;
+        min-height: 120px;
+        padding: 12px;
+        border: 1px solid var(--mongodb-border);
+        border-radius: 6px;
+        font-family: inherit;
+        font-size: 14px;
+        resize: vertical;
+        background: var(--mongodb-bg-secondary);
+        color: var(--mongodb-text);
+    }
+
+    .modal-textarea:focus {
+        outline: none;
+        border-color: var(--mongodb-green);
+    }
+
+    .modal-actions {
+        display: flex;
+        gap: 12px;
+        justify-content: flex-end;
+        margin-top: 24px;
+        padding-top: 16px;
+        border-top: 1px solid var(--mongodb-border);
+    }
+
+    .modal-btn {
+        padding: 10px 20px;
+        border: none;
+        border-radius: 6px;
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+
+    .modal-btn-primary {
+        background: var(--mongodb-green);
+        color: white;
+    }
+
+    .modal-btn-primary:hover {
+        background: #059669;
+    }
+
+    .modal-btn-secondary {
+        background: var(--mongodb-bg-secondary);
+        color: var(--mongodb-text);
+        border: 1px solid var(--mongodb-border);
+    }
+
+    .modal-btn-secondary:hover {
+        background: var(--mongodb-bg-tertiary);
+    }
+
+    .modal-btn-danger {
+        background: #ef4444;
+        color: white;
+    }
+
+    .modal-btn-danger:hover {
+        background: #dc2626;
+    }
+
     .metadata-tag {
         padding: 2px 6px;
         background: var(--mongodb-bg-secondary);
@@ -543,6 +718,33 @@
                 <div class="empty-memory-state">No activity yet. Start a conversation to see Mem0 in action!</div>
             </div>
         </div>
+    </div>
+</div>
+
+<!-- Edit Memory Modal -->
+<div id="edit-memory-modal" class="modal-overlay" onclick="if(event.target.id === 'edit-memory-modal') closeEditModal()">
+    <div class="modal-content" onclick="event.stopPropagation()">
+        <div class="modal-header">
+            <h3 class="modal-title">Edit Memory</h3>
+            <button class="modal-close" onclick="closeEditModal()">&times;</button>
+        </div>
+        <form id="edit-memory-form" onsubmit="updateMemory(event)">
+            <div class="modal-form-group">
+                <label class="modal-label" for="edit-memory-text">Memory Content</label>
+                <textarea 
+                    id="edit-memory-text" 
+                    class="modal-textarea" 
+                    name="memory"
+                    required
+                    placeholder="Enter memory content..."
+                ></textarea>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="modal-btn modal-btn-danger" onclick="deleteMemory()">Delete</button>
+                <button type="button" class="modal-btn modal-btn-secondary" onclick="closeEditModal()">Cancel</button>
+                <button type="submit" class="modal-btn modal-btn-primary">Save Changes</button>
+            </div>
+        </form>
     </div>
 </div>
 
@@ -698,6 +900,9 @@ function startPollingFallback() {
 window.addEventListener('load', () => {
     scrollToBottom();
 
+    // Store full memory objects for editing
+    window.memoriesStore = {};
+
     // Load memories immediately
     refreshMemories();
 
@@ -735,6 +940,11 @@ async function refreshMemories(metadataFilter = null, retryAttempt = 0, isRetry 
 
                 if (memories.length > 0) {
                     console.log(`[Memory Refresh] Successfully loaded ${memories.length} memories`);
+                    // Store full memory objects for editing
+                    memories.forEach(mem => {
+                        const memId = mem.id || mem._id || `mem-${memories.indexOf(mem)}`;
+                        window.memoriesStore[memId] = mem;
+                    });
                     displayMemories(memories);
                     // Reset retry state on success
                     memoryRefreshRetryCount = 0;
@@ -880,19 +1090,143 @@ function displayMemories(memories) {
         ).join('');
 
         return `
-            <div class="memory-item ${isActive ? 'active' : ''}" title="${memoryText.replace(/"/g, '&quot;')}" onclick="showMemoryDetails('${memoryId}')">
+            <div class="memory-item ${isActive ? 'active' : ''}" title="${memoryText.replace(/"/g, '&quot;')}">
                 ${scoreHtml}
-                <div><span class="memory-icon">💭</span>${displayText}</div>
-                ${metadataTags ? `<div class="memory-metadata">${metadataTags}</div>` : ''}
+                <div class="memory-actions">
+                    <button class="memory-action-btn" onclick="event.stopPropagation(); showMemoryDetails('${memoryId}')" title="Edit">✏️</button>
+                    <button class="memory-action-btn delete" onclick="event.stopPropagation(); deleteMemory('${memoryId}')" title="Delete">🗑️</button>
+                </div>
+                <div onclick="showMemoryDetails('${memoryId}')" style="cursor: pointer;">
+                    <div><span class="memory-icon">💭</span>${displayText}</div>
+                    ${metadataTags ? `<div class="memory-metadata">${metadataTags}</div>` : ''}
+                </div>
             </div>
         `;
     }).join('');
 }
 
-// Show memory details (for future enhancement)
+// Show memory details and open edit modal
 function showMemoryDetails(memoryId) {
-    // Could open a modal or expand to show full details
-    console.log('Memory details for:', memoryId);
+    const memory = window.memoriesStore[memoryId];
+    if (!memory) {
+        console.error('Memory not found:', memoryId);
+        return;
+    }
+
+    // Extract memory text
+    let memoryText = memory.memory || memory.text || '';
+    if (!memoryText && memory.data) {
+        if (typeof memory.data === 'object' && memory.data !== null) {
+            memoryText = memory.data.memory || memory.data.text || '';
+        } else if (typeof memory.data === 'string') {
+            memoryText = memory.data;
+        }
+    }
+
+    // Set form values
+    document.getElementById('edit-memory-text').value = memoryText;
+    document.getElementById('edit-memory-form').dataset.memoryId = memoryId;
+
+    // Show modal
+    document.getElementById('edit-memory-modal').classList.add('show');
+}
+
+// Close edit modal
+function closeEditModal() {
+    document.getElementById('edit-memory-modal').classList.remove('show');
+    document.getElementById('edit-memory-form').reset();
+    delete document.getElementById('edit-memory-form').dataset.memoryId;
+}
+
+// Update memory
+async function updateMemory(event) {
+    event.preventDefault();
+    
+    const form = document.getElementById('edit-memory-form');
+    const memoryId = form.dataset.memoryId;
+    const memoryText = document.getElementById('edit-memory-text').value.trim();
+
+    if (!memoryId || !memoryText) {
+        alert('Memory ID and content are required');
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/memories/${memoryId}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                data: memoryText
+            })
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            // Handle HTTP error status codes
+            const errorMsg = result.error || `HTTP ${response.status}: ${response.statusText}`;
+            addActivityLog('error', `Failed to update memory: ${errorMsg}`, true);
+            alert(`Failed to update memory: ${errorMsg}`);
+            return;
+        }
+
+        if (result.success) {
+            addActivityLog('success', 'Memory updated successfully', true);
+            closeEditModal();
+            // Refresh memories to show updated content
+            refreshMemories();
+        } else {
+            const errorMsg = result.error || 'Unknown error';
+            addActivityLog('error', `Failed to update memory: ${errorMsg}`, true);
+            alert(`Failed to update memory: ${errorMsg}`);
+        }
+    } catch (error) {
+        console.error('Error updating memory:', error);
+        const errorMsg = error.message || 'Network error or server unavailable';
+        addActivityLog('error', `Error updating memory: ${errorMsg}`, true);
+        alert(`Error updating memory: ${errorMsg}`);
+    }
+}
+
+// Delete memory
+async function deleteMemory(memoryId) {
+    if (!memoryId) {
+        // If called from modal, get from form
+        const form = document.getElementById('edit-memory-form');
+        memoryId = form.dataset.memoryId;
+    }
+
+    if (!memoryId) {
+        console.error('Memory ID required for deletion');
+        return;
+    }
+
+    if (!confirm('Are you sure you want to delete this memory? This action cannot be undone.')) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/memories/${memoryId}`, {
+            method: 'DELETE'
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            addActivityLog('success', 'Memory deleted successfully', true);
+            // Close modal if open
+            closeEditModal();
+            // Refresh memories to remove deleted item
+            refreshMemories();
+        } else {
+            addActivityLog('error', `Failed to delete memory: ${result.message || 'Unknown error'}`, true);
+        }
+    } catch (error) {
+        console.error('Error deleting memory:', error);
+        addActivityLog('error', `Error deleting memory: ${error.message}`, true);
+    }
 }
 
 // Manual refresh function

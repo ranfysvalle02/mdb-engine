@@ -268,10 +268,13 @@ class Mem0MemoryService:
         if isinstance(messages, str):
             messages = [{"role": "user", "content": messages}]
 
-        # Merge metadata
         final_metadata = dict(metadata) if metadata else {}
 
         # CRITICAL: Database indexing relies on these fields being in metadata
+        # Include user_id in metadata ONLY if provided (supports non-SSO use cases)
+        if user_id:
+            final_metadata["user_id"] = str(user_id)
+
         if bucket_id:
             final_metadata["bucket_id"] = bucket_id
             final_metadata["context_id"] = bucket_id  # Backwards compatibility
@@ -279,7 +282,6 @@ class Mem0MemoryService:
         if bucket_type:
             final_metadata["bucket_type"] = bucket_type
 
-        # Store raw_content in metadata if provided (metadata convenience)
         if raw_content:
             final_metadata["raw_content"] = raw_content
 
@@ -502,12 +504,12 @@ class Mem0MemoryService:
             memory_id: The ID of the memory to update (required)
             user_id: The user ID who owns the memory (for scoping and security)
             memory: New memory content as a string (optional)
-            data: Alternative parameter name for memory content (backward compatibility).
+            data: Alternative parameter name for memory content.
                   Can be a string or dict with 'memory'/'text'/'content' key.
             messages: Alternative way to provide content as messages (optional).
                       Can be a string or list of dicts with 'content' key.
-            metadata: Metadata updates to merge with existing metadata (optional).
-                     Merged, not replaced - existing keys are preserved unless overridden.
+            metadata: Metadata updates (optional, but NOT SUPPORTED by Mem0 update API).
+                     This parameter is accepted for API consistency but will be ignored.
             **kwargs: Additional arguments passed to Mem0 operations
 
         Returns:
@@ -535,16 +537,14 @@ class Mem0MemoryService:
             )
             ```
         """
-        # Input validation
         if not memory_id or not isinstance(memory_id, str) or not memory_id.strip():
             raise ValueError("memory_id is required and must be a non-empty string")
 
         try:
-            # Normalize data parameter (backward compatibility)
+            # Normalize data parameter (alternative to memory parameter)
             normalized_memory = self._normalize_content_input(memory, data, messages)
             normalized_metadata = self._normalize_metadata_input(metadata, data)
 
-            # Verify memory exists before attempting update
             existing_memory = self.get(memory_id=memory_id, user_id=user_id, **kwargs)
             if not existing_memory:
                 logger.warning(
@@ -675,46 +675,21 @@ class Mem0MemoryService:
         """
         Update memory using Mem0's built-in update method.
 
-        This is the primary update path. Mem0's update method handles:
-        - In-place updates preserving memory ID and created_at timestamp
-        - Automatic embedding recomputation when content changes
-        - Metadata merging
-        - User scoping for security
+        Note: Mem0's update() only supports content updates (text parameter).
+        Metadata updates are not supported by the Mem0 API.
 
         Args:
             memory_id: Memory ID to update
-            user_id: User ID for scoping
+            user_id: User ID for scoping (not used in update call)
             memory: New memory content (normalized)
-            metadata: Metadata to merge (normalized)
+            metadata: Metadata to merge (ignored - not supported by Mem0 update API)
             **kwargs: Additional arguments passed to Mem0
 
         Returns:
             Updated memory dict or None if not found
-
-        Raises:
-            Various exceptions from Mem0 if update fails
         """
-        # Build update parameters matching Mem0's API
-        # Mem0's update method signature:
-        # update(memory_id, text=None, metadata=None, user_id=None, **kwargs)
-        update_kwargs: dict[str, Any] = {"memory_id": memory_id}
-
-        # Add user_id for scoping (Mem0 supports this)
-        if user_id:
-            update_kwargs["user_id"] = str(user_id)
-
-        # Add text/content if provided
-        # Mem0 uses "text" parameter for content
-        if memory:
-            update_kwargs["text"] = memory
-
-        # Add metadata if provided
-        # Mem0 merges metadata automatically
-        if metadata is not None:
-            update_kwargs["metadata"] = metadata
-
-        # Pass through any additional kwargs
-        update_kwargs.update(kwargs)
+        # Filter out user_id from kwargs to prevent passing it as a direct parameter
+        filtered_kwargs = {k: v for k, v in kwargs.items() if k != "user_id"}
 
         logger.debug(
             f"Calling mem0.update() for memory_id={memory_id}",
@@ -726,24 +701,29 @@ class Mem0MemoryService:
             },
         )
 
-        # Call Mem0's update method directly
-        # This handles all the complexity: embedding recomputation, ID preservation, etc.
+        if metadata:
+            logger.warning(
+                f"Metadata update requested for memory {memory_id} but Mem0 update() "
+                f"does not support metadata parameter. Metadata will not be updated."
+            )
+
+        update_kwargs = {"memory_id": memory_id}
+        if memory:
+            update_kwargs["data"] = memory
+        update_kwargs.update(filtered_kwargs)
+
         result = self.memory.update(**update_kwargs)
 
-        # Normalize result format
-        # Mem0 may return dict, list, or other formats
+        # Note: Mem0's update() doesn't support metadata parameter
+        # Metadata updates would require direct MongoDB access, which we avoid
+
+        # Normalize result to dict
         if isinstance(result, dict):
             return result
         elif isinstance(result, list) and len(result) > 0:
-            # If list, return first item
             return result[0] if isinstance(result[0], dict) else None
         else:
-            # If result is None or unexpected format, return None to trigger fallback
-            logger.debug(
-                f"Mem0 update returned unexpected format: {type(result)}",
-                extra={"memory_id": memory_id},
-            )
-            return None
+            return self.get(memory_id=memory_id)
 
     def _normalize_result(self, result: Any) -> list[dict[str, Any]]:
         """Normalize Mem0's return type (dict vs list)."""
