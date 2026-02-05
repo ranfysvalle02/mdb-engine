@@ -139,6 +139,12 @@ class TestSeedInitialData:
     @pytest.mark.asyncio
     async def test_seed_handles_datetime_strings(self, mock_mongo_collection):
         """Test that seeding converts datetime strings to datetime objects."""
+        # Check if dateutil is available before trying to patch it
+        try:
+            from dateutil.parser import parse as parse_date_real
+        except ImportError:
+            pytest.skip("dateutil not available")
+
         mock_db = MagicMock()
         mock_db.app_seeding_metadata = mock_mongo_collection
         mock_db.test_collection = mock_mongo_collection
@@ -151,13 +157,7 @@ class TestSeedInitialData:
 
         with patch("dateutil.parser.parse") as mock_parse:
             # Mock dateutil.parser.parse
-            try:
-                from dateutil.parser import parse as parse_date_real
-
-                mock_parse.side_effect = parse_date_real
-            except ImportError:
-                # If dateutil not available, skip this test
-                pytest.skip("dateutil not available")
+            mock_parse.side_effect = parse_date_real
 
             await seed_initial_data(mock_db, "test_app", initial_data)
 
