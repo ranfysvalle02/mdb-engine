@@ -409,7 +409,7 @@ async def health():
 |---------|-------------|------------|
 | **Authentication** | JWT + Casbin/OSO RBAC | [Auth Guide](https://github.com/ranfysvalle02/mdb-engine/blob/main/docs/AUTHZ.md) |
 | **Vector Search** | Atlas Vector Search + embeddings | [RAG Example](https://github.com/ranfysvalle02/mdb-engine/tree/main/examples/basic/interactive_rag) |
-| **Memory Service** | Persistent AI memory with Mem0 | [Chat Example](https://github.com/ranfysvalle02/mdb-engine/tree/main/examples/basic/chit_chat) |
+| **Memory Service** | Persistent AI memory with MongoDB Atlas Vector Search | [Chat Example](https://github.com/ranfysvalle02/mdb-engine/tree/main/examples/basic/chit_chat) |
 | **WebSockets** | Real-time updates from manifest | [Docs](https://github.com/ranfysvalle02/mdb-engine/blob/main/docs/ARCHITECTURE.md) |
 | **Multi-App** | Secure cross-app data access | [Multi-App Example](https://github.com/ranfysvalle02/mdb-engine/tree/main/examples/advanced/multi_app) |
 | **SSO** | Shared auth across apps | [Shared Auth Example](https://github.com/ranfysvalle02/mdb-engine/tree/main/examples/advanced/multi_app_shared) |

@@ -22,5 +22,5 @@ select = E,W,F,B,C,I
 # Per-file ignores
 per-file-ignores =
     __init__.py:F401
-    tests/*:D
+    tests/*:D,SLF001
     examples/*:D

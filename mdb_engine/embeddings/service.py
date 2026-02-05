@@ -217,7 +217,7 @@ class AzureOpenAIEmbeddingProvider(BaseEmbeddingProvider):
 
 def _detect_provider_from_env() -> str:
     """
-    Detect provider from environment variables (same logic as mem0).
+    Detect provider from environment variables.
 
     Returns:
         "azure" if Azure OpenAI credentials are present, otherwise "openai"
@@ -715,7 +715,7 @@ def get_embedding_service(
     """
     Create EmbeddingService instance with auto-detected or provided embedding provider.
 
-    Auto-detects OpenAI or AzureOpenAI from environment variables (same logic as mem0).
+    Auto-detects OpenAI or AzureOpenAI from environment variables.
     Requires either OPENAI_API_KEY or AZURE_OPENAI_API_KEY + AZURE_OPENAI_ENDPOINT.
 
     Args:

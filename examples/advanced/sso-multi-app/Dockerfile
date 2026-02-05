@@ -30,6 +30,8 @@ COPY mdb_engine ./mdb_engine
 # Install mdb_engine with Casbin support (required for authorization)
 RUN echo "=== Installing mdb-engine with Casbin support ===" && \
     pip install --no-cache-dir ".[casbin]" && \
+    echo "=== Installing pymongo encryption support (for CSFLE) ===" && \
+    pip install --no-cache-dir "pymongo[encryption]" && \
     echo "=== Installing web dependencies ===" && \
     pip install --no-cache-dir uvicorn[standard] fastapi jinja2 python-multipart && \
     echo "=== Installing app-specific dependencies ===" && \
@@ -43,6 +45,8 @@ RUN echo "=== Installing mdb-engine with Casbin support ===" && \
     echo "=== Verifying Casbin installation ===" && \
     python -c "import casbin; print('✓ Casbin imported successfully')" && \
     python -c "from casbin_motor_adapter import Adapter; print('✓ Casbin Adapter imported successfully')" && \
+    echo "=== Verifying CSFLE support ===" && \
+    python -c "from pymongo.encryption_options import AutoEncryptionOpts; print('✓ PyMongo encryption support available')" && \
     echo "=== Verifying Finviz installation ===" && \
     python -c "from finvizfinance.screener.overview import Overview; print('✓ Finviz imported successfully')" || \
     (echo "WARNING: Finviz not available, price lookups will use fallback" && true) && \
@@ -64,10 +68,31 @@ FROM python:3.11-slim
 ARG APP_USER=appuser
 ARG APP_UID=1000
 ARG APP_GID=1000
+ARG MONGODB_CRYPT_VERSION=8.0.0
 
 # Create non-root user for security
 RUN groupadd -r -g ${APP_GID} ${APP_USER} && \
     useradd -r -u ${APP_UID} -g ${APP_GID} -d /app -s /bin/bash ${APP_USER}
+
+# Install runtime dependencies including curl for CSFLE library download
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Download MongoDB crypt_shared library for CSFLE support
+RUN mkdir -p /opt/mongodb/lib && \
+    ARCH=$(dpkg --print-architecture) && \
+    if [ "$ARCH" = "amd64" ]; then ARCH="x86_64"; fi && \
+    if [ "$ARCH" = "arm64" ]; then ARCH="aarch64"; fi && \
+    echo "Downloading crypt_shared for architecture: $ARCH" && \
+    curl -L -o /tmp/mongo_crypt.tgz \
+    "https://downloads.mongodb.com/linux/mongo_crypt_shared_v1-linux-${ARCH}-enterprise-ubuntu2204-${MONGODB_CRYPT_VERSION}.tgz" && \
+    tar -xzf /tmp/mongo_crypt.tgz -C /tmp && \
+    find /tmp -name "mongo_crypt_v1.so" -exec cp {} /opt/mongodb/lib/ \; && \
+    chmod 755 /opt/mongodb/lib/mongo_crypt_v1.so && \
+    rm -rf /tmp/mongo_crypt* && \
+    echo "✓ MongoDB crypt_shared library installed at /opt/mongodb/lib/mongo_crypt_v1.so"
 
 # Set working directory
 WORKDIR /app
@@ -78,12 +103,23 @@ COPY --from=builder --chown=${APP_USER}:${APP_USER} /opt/venv /opt/venv
 # Copy example apps with proper ownership (including templates)
 COPY --chown=${APP_USER}:${APP_USER} examples/advanced/sso-multi-app/apps ./apps
 
+# Copy entrypoint script for CSFLE key management
+COPY --chown=${APP_USER}:${APP_USER} examples/advanced/sso-multi-app/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+# Copy CSFLE validation script
+COPY --chown=${APP_USER}:${APP_USER} scripts/validate_csfle.py /app/scripts/validate_csfle.py
+RUN chmod +x /app/scripts/validate_csfle.py
+
+# Create directory for CSFLE key persistence (can be mounted as volume)
+RUN mkdir -p /data/csfle && chown ${APP_USER}:${APP_USER} /data/csfle
+
 # Set environment variables
 ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    CRYPT_SHARED_LIB_PATH=/opt/mongodb/lib/mongo_crypt_v1.so
 
 # Verify mdb_engine is installed and importable before switching user
 RUN echo "=== Verifying installation in runtime stage ===" && \
@@ -94,6 +130,10 @@ RUN echo "=== Verifying installation in runtime stage ===" && \
     echo "=== Verifying Casbin dependencies ===" && \
     python -c "import casbin; print('✓ Casbin imported successfully')" && \
     python -c "from casbin_motor_adapter import Adapter; print('✓ Casbin Adapter imported successfully')" && \
+    echo "=== Verifying CSFLE support ===" && \
+    python -c "from pymongo.encryption_options import AutoEncryptionOpts; print('✓ PyMongo encryption support available')" && \
+    python -c "from mdb_engine.core.csfle import is_csfle_available; print(f'✓ CSFLE available: {is_csfle_available()}')" && \
+    test -f /opt/mongodb/lib/mongo_crypt_v1.so && echo "✓ crypt_shared library found at /opt/mongodb/lib/mongo_crypt_v1.so" && \
     echo "=== Verifying google-genai installation ===" && \
     python -c "from google import genai; print('✓ google-genai imported successfully')" && \
     python -c "from google.genai import types; print('✓ google.genai.types imported successfully')" && \

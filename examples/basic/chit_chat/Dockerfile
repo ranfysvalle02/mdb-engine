@@ -35,8 +35,9 @@ RUN echo "=== Installing mdb-engine ===" && \
     pip install --no-cache-dir uvicorn[standard] jinja2 python-multipart websockets python-dotenv && \
     echo "=== Installing LLM dependencies ===" && \
     pip install --no-cache-dir instructor pydantic pydantic-settings tenacity semantic-text-splitter && \
-    echo "=== Installing memory dependencies ===" && \
-    pip install --no-cache-dir mem0ai && \
+    echo "=== Memory service uses built-in mdb-engine implementation ===" && \
+    echo "=== Installing authorization dependencies ===" && \
+    pip install --no-cache-dir casbin casbin-motor-adapter && \
     echo "=== Installation complete ===" && \
     pip show mdb-engine
 
@@ -70,11 +71,7 @@ COPY --chown=${APP_USER}:${APP_USER} examples/basic/chit_chat/templates ./templa
 # Set environment variables
 ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    MEM0_DIR=/tmp/.mem0
-
-# Create mem0 directory with proper permissions
-RUN mkdir -p /tmp/.mem0 && chmod 777 /tmp/.mem0
+    PYTHONDONTWRITEBYTECODE=1
 
 # Switch to non-root user
 USER ${APP_USER}

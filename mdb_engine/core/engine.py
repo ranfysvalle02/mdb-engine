@@ -45,6 +45,7 @@ if TYPE_CHECKING:
     from fastapi import FastAPI
 
     from ..auth import AuthorizationProvider
+    from .csfle import CSFLEConfig
     from .types import ManifestDict
 
 # Import engine components
@@ -107,6 +108,8 @@ class MongoDBEngine:
         # Optional Ray support
         enable_ray: bool = False,
         ray_namespace: str = "modular_labs",
+        # Optional CSFLE support
+        csfle_config: Optional["CSFLEConfig"] = None,
     ) -> None:
         """
         Initialize the MongoDB Engine.
@@ -122,6 +125,9 @@ class MongoDBEngine:
                 Default: False. Only activates if Ray is installed.
             ray_namespace: Ray namespace for actor isolation.
                 Default: "modular_labs"
+            csfle_config: Optional CSFLE configuration for field-level encryption.
+                Use build_csfle_config_from_manifests() to build from manifest files,
+                or CSFLEConfig.from_memory_config() for simple memory encryption.
         """
         self.mongo_uri = mongo_uri
         self.db_name = db_name
@@ -129,6 +135,7 @@ class MongoDBEngine:
         self.authz_provider = authz_provider
         self.max_pool_size = max_pool_size
         self.min_pool_size = min_pool_size
+        self.csfle_config = csfle_config
 
         # Ray configuration (optional)
         self.enable_ray = enable_ray
@@ -141,6 +148,7 @@ class MongoDBEngine:
             db_name=db_name,
             max_pool_size=max_pool_size,
             min_pool_size=min_pool_size,
+            csfle_config=csfle_config,
         )
 
         # Validators
@@ -236,6 +244,7 @@ class MongoDBEngine:
             mongo_uri=self.mongo_uri,
             db_name=self.db_name,
             get_scoped_db_fn=self.get_scoped_db,
+            connection_manager=self._connection_manager,
         )
 
         # Initialize Ray if enabled
@@ -646,9 +655,21 @@ class MongoDBEngine:
             if self._service_initializer:
                 await self._service_initializer.seed_initial_data(slug, initial_data)
 
+        async def initialize_graph_callback(slug: str, graph_config: dict[str, Any]) -> None:
+            if self._service_initializer:
+                # Pass llm_config from manifest so services can inherit the LLM model
+                llm_config = manifest.get("llm_config")
+                await self._service_initializer.initialize_graph_service(
+                    slug, graph_config, llm_config=llm_config
+                )
+
         async def initialize_memory_callback(slug: str, memory_config: dict[str, Any]) -> None:
             if self._service_initializer:
-                await self._service_initializer.initialize_memory_service(slug, memory_config)
+                # Pass llm_config from manifest so services can inherit the LLM model
+                llm_config = manifest.get("llm_config")
+                await self._service_initializer.initialize_memory_service(
+                    slug, memory_config, llm_config=llm_config
+                )
 
         async def register_websockets_callback(
             slug: str, websockets_config: dict[str, Any]
@@ -671,6 +692,7 @@ class MongoDBEngine:
             manifest=manifest,
             create_indexes_callback=create_indexes_callback if create_indexes else None,
             seed_data_callback=seed_data_callback,
+            initialize_graph_callback=initialize_graph_callback,
             initialize_memory_callback=initialize_memory_callback,
             register_websockets_callback=register_websockets_callback,
             setup_observability_callback=setup_observability_callback,
@@ -774,33 +796,40 @@ class MongoDBEngine:
         for endpoint_name, endpoint_config in websockets_config.items():
             path = endpoint_config.get("path", f"/{endpoint_name}")
 
-            # Handle auth configuration - use app's auth_policy as default
-            # Support both new nested format and old top-level format for backward compatibility
+            # Handle auth configuration - check endpoint config first, then app-level auth_policy
             auth_config = endpoint_config.get("auth", {})
             if isinstance(auth_config, dict) and "required" in auth_config:
                 require_auth = auth_config.get("required", True)
             elif "require_auth" in endpoint_config:
-                # Backward compatibility: if "require_auth" is at top level
                 require_auth = endpoint_config.get("require_auth", True)
             else:
-                # Default: use app's auth_policy if available, otherwise require auth
-                app_config = self.get_app(slug)
-                if app_config and "auth_policy" in app_config:
-                    require_auth = app_config["auth_policy"].get("required", True)
-                else:
-                    require_auth = True  # Secure default
+                # Fallback to app's auth_policy if available (from app registration manager)
+                try:
+                    if self._app_registration_manager:
+                        manifest = self._app_registration_manager.get_app(slug)
+                        if manifest and "auth_policy" in manifest:
+                            require_auth = manifest["auth_policy"].get("required", True)
+                        else:
+                            require_auth = True
+                    else:
+                        require_auth = True
+                except (AttributeError, KeyError, TypeError):
+                    # Default: require auth (secure default)
+                    require_auth = True
 
             ping_interval = endpoint_config.get("ping_interval", 30)
 
             # Create the endpoint handler with app isolation
             # Note: Apps can register message handlers later using register_message_handler()
+            # SECURITY: Ticket-based auth is always attempted first (even if require_auth=False)
+            # This enables user-scoped broadcasting while still allowing anonymous connections
             try:
                 handler = create_websocket_endpoint(
                     app_slug=slug,
                     path=path,
                     endpoint_name=endpoint_name,  # Pass endpoint name for handler lookup
                     handler=None,  # Handlers registered via register_message_handler()
-                    require_auth=require_auth,
+                    require_auth=require_auth,  # allow_anonymous handled in auth function
                     ping_interval=ping_interval,
                 )
                 print(
@@ -908,6 +937,33 @@ class MongoDBEngine:
             raise RuntimeError("MongoDBEngine not initialized. Call initialize() first.")
         return await self._app_registration_manager.get_manifest(slug)
 
+    def get_graph_service(self, slug: str) -> Any | None:
+        """
+        Get graph service for an app (returns BaseGraphService instance).
+
+        Args:
+            slug: App slug
+
+        Returns:
+            BaseGraphService instance if graph is enabled for this app, None otherwise
+
+        Example:
+            ```python
+            graph_service = engine.get_graph_service("my_app")
+            if graph_service:
+                # Add nodes
+                graph_service.upsert_node(
+                    "person:alex", "person", "Alex",
+                    properties={"occupation": "Engineer"}
+                )
+                # Traverse
+                network = graph_service.traverse("person:alex", max_depth=2)
+            ```
+        """
+        if self._service_initializer:
+            return self._service_initializer.get_graph_service(slug)
+        return None
+
     def get_memory_service(self, slug: str) -> Any | None:
         """
         Get memory service for an app (returns BaseMemoryService instance).
@@ -916,7 +972,7 @@ class MongoDBEngine:
             slug: App slug
 
         Returns:
-            BaseMemoryService instance (currently Mem0MemoryService) if memory is enabled
+            BaseMemoryService instance (currently CustomMemoryService) if memory is enabled
             for this app, None otherwise
 
         Example:
@@ -956,6 +1012,226 @@ class MongoDBEngine:
         from ..embeddings.dependencies import get_embedding_service_for_app
 
         return get_embedding_service_for_app(slug, self)
+
+    async def export_user_data(
+        self,
+        user_identifier: str,
+        identifier_type: str = "email",
+        app_slug: str | None = None,
+        format: str = "json",
+    ) -> dict[str, Any]:
+        """
+        Export all user data for GDPR compliance (Right to Access - Article 15).
+
+        Discovers and exports all user data across collections including:
+        - User collections (users, shared_users, user_sessions, token_blacklist)
+        - Application data (chat_history, memories, custom collections)
+        - Authorization data (casbin_policies, oso_facts, WebSocket sessions)
+
+        Args:
+            user_identifier: User email or user_id
+            identifier_type: Type of identifier ("email" or "user_id")
+            app_slug: Optional app slug to scope export to specific app
+            format: Export format ("json", "csv", or "report")
+
+        Returns:
+            Dictionary with exported data and metadata:
+            - data: Dictionary mapping collection names to lists of documents
+            - metadata: Export metadata (date, format, collections, counts)
+            - report: Human-readable report (if format="report")
+
+        Example:
+            ```python
+            # Export user data in JSON format
+            export_data = await engine.export_user_data(
+                user_identifier="user@example.com",
+                identifier_type="email",
+                format="json"
+            )
+
+            # Export scoped to specific app
+            export_data = await engine.export_user_data(
+                user_identifier="user123",
+                identifier_type="user_id",
+                app_slug="my_app"
+            )
+            ```
+        """
+        if not self._connection_manager or not self._connection_manager.initialized:
+            raise RuntimeError("MongoDBEngine not initialized. Call initialize() first.")
+
+        from ..gdpr import DataExportService
+
+        db = self._connection_manager.mongo_db
+        export_service = DataExportService(db)
+
+        return await export_service.export_user_data(
+            user_identifier=user_identifier,
+            identifier_type=identifier_type,
+            app_slug=app_slug,
+            format=format,
+        )
+
+    async def delete_user_data(
+        self,
+        user_identifier: str,
+        identifier_type: str = "email",
+        app_slug: str | None = None,
+        anonymize: bool = False,
+        soft_delete: bool = False,
+    ) -> dict[str, Any]:
+        """
+        Delete user data for GDPR compliance (Right to Erasure - Article 17).
+
+        Deletes or anonymizes user data across all collections and services.
+        Supports three deletion strategies:
+        - Hard delete: Permanently removes data (default - GDPR compliant)
+        - Soft delete: Marks data as deleted (for legal retention)
+        - Anonymization: Replaces identifiers with anonymous values
+
+        Args:
+            user_identifier: User email or user_id
+            identifier_type: Type of identifier ("email" or "user_id")
+            app_slug: Optional app slug to scope deletion to specific app
+            anonymize: If True, anonymize instead of delete
+            soft_delete: If True, mark as deleted (for legal retention).
+                Default is False (hard delete) for GDPR compliance.
+                Use True only when legal retention requirements apply.
+                Ignored if anonymize=True.
+
+        Returns:
+            Dictionary with deletion results:
+            - collections_processed: List of collections processed
+            - documents_deleted: Count of hard-deleted documents
+            - documents_anonymized: Count of anonymized documents
+            - documents_soft_deleted: Count of soft-deleted documents
+            - errors: List of errors encountered
+            - deleted_at: Timestamp of deletion
+
+        Example:
+            ```python
+            # Hard delete user data (default - GDPR compliant)
+            result = await engine.delete_user_data(
+                user_identifier="user@example.com",
+                identifier_type="email"
+            )
+
+            # Soft delete user data (for legal retention requirements)
+            result = await engine.delete_user_data(
+                user_identifier="user123",
+                identifier_type="user_id",
+                soft_delete=True
+            )
+
+            # Anonymize user data (replace with anonymous identifiers)
+            result = await engine.delete_user_data(
+                user_identifier="user@example.com",
+                anonymize=True
+            )
+            ```
+        """
+        if not self._connection_manager or not self._connection_manager.initialized:
+            raise RuntimeError("MongoDBEngine not initialized. Call initialize() first.")
+
+        from ..gdpr import DataDeletionService
+
+        db = self._connection_manager.mongo_db
+        deletion_service = DataDeletionService(db)
+
+        # Get memory service if app_slug provided
+        memory_service = None
+        if app_slug:
+            memory_service = self.get_memory_service(app_slug)
+
+        # Get chat history collection if app_slug provided
+        # Note: ScopedCollectionWrapper implements the same interface as AsyncIOMotorCollection
+        # so we can use it directly. The deletion service checks with `is not None` to avoid
+        # truthiness issues with collection objects.
+        chat_history_collection = None
+        if app_slug:
+            try:
+                scoped_db = self.get_scoped_db(app_slug)
+                # Try to get chat_history collection from scoped db
+                # The wrapper works fine - it implements the same interface
+                if hasattr(scoped_db, "chat_history"):
+                    chat_history_collection = scoped_db.chat_history
+                elif hasattr(scoped_db, "__getitem__"):
+                    # Fallback to __getitem__ if attribute access doesn't work
+                    chat_history_collection = scoped_db["chat_history"]
+            except (PyMongoError, AttributeError, TypeError, KeyError) as e:
+                logger.warning(f"Could not get chat_history collection: {e}")
+                chat_history_collection = None
+
+        return await deletion_service.delete_user_data(
+            user_identifier=user_identifier,
+            identifier_type=identifier_type,
+            app_slug=app_slug,
+            anonymize=anonymize,
+            soft_delete=soft_delete,
+            memory_service=memory_service,
+            chat_history_collection=chat_history_collection,
+        )
+
+    async def update_user_data(
+        self,
+        user_identifier: str,
+        updates: dict[str, Any],
+        identifier_type: str = "email",
+        app_slug: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Update user data for GDPR compliance (Right to Rectification - Article 16).
+
+        Updates user data across all collections containing user information.
+        Validates updates before applying and adds audit fields.
+
+        Args:
+            user_identifier: User email or user_id
+            updates: Dictionary of field updates to apply
+            identifier_type: Type of identifier ("email" or "user_id")
+            app_slug: Optional app slug to scope updates to specific app
+
+        Returns:
+            Dictionary with update results:
+            - collections_processed: List of collections updated
+            - documents_updated: Count of updated documents
+            - errors: List of errors encountered
+            - updated_at: Timestamp of update
+
+        Example:
+            ```python
+            # Update user email across all collections
+            result = await engine.update_user_data(
+                user_identifier="old@example.com",
+                updates={"email": "new@example.com"},
+                identifier_type="email"
+            )
+
+            # Update multiple fields
+            result = await engine.update_user_data(
+                user_identifier="user123",
+                updates={
+                    "name": "New Name",
+                    "role": "admin"
+                },
+                identifier_type="user_id"
+            )
+            ```
+        """
+        if not self._connection_manager or not self._connection_manager.initialized:
+            raise RuntimeError("MongoDBEngine not initialized. Call initialize() first.")
+
+        from ..gdpr import DataRectificationService
+
+        db = self._connection_manager.mongo_db
+        rectification_service = DataRectificationService(db)
+
+        return await rectification_service.update_user_data(
+            user_identifier=user_identifier,
+            updates=updates,
+            identifier_type=identifier_type,
+            app_slug=app_slug,
+        )
 
     @property
     def apps(self) -> dict[str, Any]:
@@ -1230,6 +1506,360 @@ class MongoDBEngine:
                 if hasattr(app.state, "websocket_ticket_store"):
                     app.state.websocket_ticket_store = self._websocket_ticket_store
 
+    async def _initialize_auth_provider(
+        self,
+        engine: "MongoDBEngine",
+        app: "FastAPI",
+        slug: str,
+        app_manifest: dict[str, Any],
+        auth_config: dict[str, Any],
+    ) -> None:
+        """Initialize authorization provider from manifest config."""
+        try:
+            logger.info(
+                f"🔍 Checking auth config for '{slug}': "
+                f"auth_config keys={list(auth_config.keys())}"
+            )
+            auth_policy = auth_config.get("policy", {})
+            logger.info(f"🔍 Auth policy for '{slug}': {auth_policy}")
+            authz_provider_type = auth_policy.get("provider")
+            logger.info(f"🔍 Authz provider type for '{slug}': {authz_provider_type}")
+        except (KeyError, AttributeError, TypeError) as e:
+            logger.exception(f"❌ Error reading auth config for '{slug}': {e}")
+            authz_provider_type = None
+
+        if authz_provider_type == "oso":
+            await self._initialize_oso_provider(engine, app, slug, app_manifest)
+        elif authz_provider_type == "casbin":
+            await self._initialize_casbin_provider(engine, app, slug, app_manifest)
+        elif authz_provider_type is None and auth_policy:
+            await self._initialize_casbin_provider_default(engine, app, slug, app_manifest)
+        elif authz_provider_type:
+            logger.warning(
+                f"⚠️  Unknown authz provider type '{authz_provider_type}' for '{slug}' - "
+                f"skipping initialization"
+            )
+
+    async def _initialize_oso_provider(
+        self,
+        engine: "MongoDBEngine",
+        app: "FastAPI",
+        slug: str,
+        app_manifest: dict[str, Any],
+    ) -> None:
+        """Initialize OSO Cloud provider."""
+        try:
+            from ..auth.oso_factory import initialize_oso_from_manifest
+
+            authz_provider = await initialize_oso_from_manifest(engine, slug, app_manifest)
+            if authz_provider:
+                app.state.authz_provider = authz_provider
+                logger.info(f"✅ OSO Cloud provider auto-initialized for '{slug}'")
+            else:
+                logger.warning(
+                    f"⚠️  OSO provider not initialized for '{slug}' - "
+                    "check OSO_AUTH and OSO_URL environment variables"
+                )
+        except ImportError as e:
+            logger.warning(
+                f"⚠️  OSO Cloud SDK not available for '{slug}': {e}. "
+                "Install with: pip install oso-cloud"
+            )
+        except (ValueError, TypeError, RuntimeError, AttributeError, KeyError) as e:
+            logger.exception(f"❌ Failed to initialize OSO provider for '{slug}': {e}")
+
+    async def _initialize_casbin_provider(
+        self,
+        engine: "MongoDBEngine",
+        app: "FastAPI",
+        slug: str,
+        app_manifest: dict[str, Any],
+    ) -> None:
+        """Initialize Casbin provider."""
+        logger.info(f"🔧 Initializing Casbin provider for '{slug}'...")
+        try:
+            from ..auth.casbin_factory import initialize_casbin_from_manifest
+
+            logger.debug(f"Calling initialize_casbin_from_manifest for '{slug}'")
+            authz_provider = await initialize_casbin_from_manifest(engine, slug, app_manifest)
+            logger.debug(f"initialize_casbin_from_manifest returned: {authz_provider is not None}")
+            if authz_provider:
+                app.state.authz_provider = authz_provider
+                logger.info(
+                    f"✅ Casbin provider auto-initialized for '{slug}' " f"and set on app.state"
+                )
+                logger.info(
+                    f"✅ Provider type: {type(authz_provider).__name__}, "
+                    f"initialized: {getattr(authz_provider, '_initialized', 'unknown')}"
+                )
+                # Verify it's actually set
+                if hasattr(app.state, "authz_provider") and app.state.authz_provider:
+                    logger.info("✅ Verified: app.state.authz_provider is set and not None")
+                else:
+                    logger.error(
+                        "❌ CRITICAL: app.state.authz_provider was set but is now "
+                        "None or missing!"
+                    )
+            else:
+                logger.error(
+                    f"❌ Casbin provider initialization returned None for '{slug}' - "
+                    f"check logs above for errors"
+                )
+                logger.error(f"❌ This means authorization will NOT work for '{slug}'")
+        except ImportError as e:
+            logger.warning(
+                f"❌ Casbin not available for '{slug}': {e}. "
+                "Install with: pip install mdb-engine[casbin]"
+            )
+        except (ValueError, TypeError, RuntimeError, AttributeError, KeyError) as e:
+            logger.exception(f"❌ Failed to initialize Casbin provider for '{slug}': {e}")
+            logger.error(  # noqa: TRY400
+                f"❌ This means authorization will NOT work for '{slug}' - "
+                f"app.state.authz_provider will remain None"
+            )
+        except (
+            RuntimeError,
+            ValueError,
+            AttributeError,
+            TypeError,
+            ConnectionError,
+            OSError,
+        ) as e:
+            logger.exception(f"❌ Unexpected error initializing Casbin provider for '{slug}': {e}")
+            logger.error(  # noqa: TRY400
+                f"❌ This means authorization will NOT work for '{slug}' - "
+                f"app.state.authz_provider will remain None"
+            )
+
+    async def _initialize_casbin_provider_default(
+        self,
+        engine: "MongoDBEngine",
+        app: "FastAPI",
+        slug: str,
+        app_manifest: dict[str, Any],
+    ) -> None:
+        """Initialize Casbin provider as default when no provider specified."""
+        logger.info(
+            f"⚠️  No provider specified in auth.policy for '{slug}', " f"defaulting to Casbin"
+        )
+        try:
+            from ..auth.casbin_factory import initialize_casbin_from_manifest
+
+            authz_provider = await initialize_casbin_from_manifest(engine, slug, app_manifest)
+            if authz_provider:
+                app.state.authz_provider = authz_provider
+                logger.info(f"✅ Casbin provider auto-initialized for '{slug}' (default)")
+            else:
+                logger.warning(
+                    f"⚠️  Casbin provider not initialized for '{slug}' " f"(default attempt failed)"
+                )
+        except ImportError as e:
+            logger.warning(
+                f"⚠️  Casbin not available for '{slug}': {e}. "
+                "Install with: pip install mdb-engine[casbin]"
+            )
+        except (
+            ValueError,
+            TypeError,
+            RuntimeError,
+            AttributeError,
+            KeyError,
+        ) as e:
+            logger.exception(f"❌ Failed to initialize Casbin provider for '{slug}' (default): {e}")
+
+    async def _handle_auth_mode(
+        self,
+        engine: "MongoDBEngine",
+        app: "FastAPI",
+        slug: str,
+        app_manifest: dict[str, Any],
+        auth_mode: str,
+        is_sub_app: bool,
+    ) -> None:
+        """Handle authentication mode initialization (shared vs app)."""
+        if auth_mode == "shared":
+            logger.info(f"Shared auth mode for '{slug}' - SSO enabled")
+            # Initialize shared user pool and set on app.state
+            # Middleware was already added at app creation time (lazy version)
+            # For sub-apps, check if parent already initialized user pool
+            if is_sub_app:
+                # Check if parent app has user_pool (set by parent's initialization)
+                # If not, initialize it (shouldn't happen, but handle gracefully)
+                if not hasattr(app.state, "user_pool") or app.state.user_pool is None:
+                    logger.warning(
+                        f"Sub-app '{slug}' uses shared auth but user_pool not found. "
+                        "Initializing now (parent should have initialized it)."
+                    )
+                    await self._initialize_shared_user_pool(app, app_manifest)
+                else:
+                    logger.debug(f"Sub-app '{slug}' using shared user_pool from parent app")
+            else:
+                await self._initialize_shared_user_pool(app, app_manifest)
+        else:
+            logger.info(f"Per-app auth mode for '{slug}'")
+            # Auto-retrieve app token for "app" mode
+            await engine.auto_retrieve_app_token(slug)
+
+    def _setup_middleware(
+        self,
+        app: "FastAPI",
+        slug: str,
+        auth_config: dict[str, Any],
+        auth_mode: str,
+        is_sub_app: bool,
+    ) -> None:
+        """Setup all middleware for the FastAPI app."""
+        # Add request scope middleware (innermost layer - runs first on request)
+        self._add_request_scope_middleware(app, slug)
+
+        # Add rate limiting middleware FIRST (outermost layer)
+        self._add_rate_limit_middleware(app, slug, auth_config, auth_mode)
+
+        # Add shared auth middleware (after rate limiting)
+        if auth_mode == "shared":
+            self._add_shared_auth_middleware(app, slug, auth_config)
+
+        # Add CSRF middleware (after auth - auto-enabled for shared mode)
+        self._add_csrf_middleware(app, slug, auth_config, auth_mode, is_sub_app)
+
+        # Add security middleware (HSTS, headers)
+        self._add_security_middleware(app, slug, auth_config, auth_mode)
+
+    def _add_request_scope_middleware(self, app: "FastAPI", slug: str) -> None:
+        """Add request scope middleware for DI."""
+        from starlette.middleware.base import BaseHTTPMiddleware
+
+        from ..di import ScopeManager
+
+        class RequestScopeMiddleware(BaseHTTPMiddleware):
+            """Middleware that manages request-scoped DI instances."""
+
+            async def dispatch(self, request, call_next):
+                ScopeManager.begin_request()
+                try:
+                    response = await call_next(request)
+                    return response
+                finally:
+                    ScopeManager.end_request()
+
+        app.add_middleware(RequestScopeMiddleware)
+        logger.debug(f"RequestScopeMiddleware added for '{slug}'")
+
+    def _add_rate_limit_middleware(
+        self,
+        app: "FastAPI",
+        slug: str,
+        auth_config: dict[str, Any],
+        auth_mode: str,
+    ) -> None:
+        """Add rate limiting middleware."""
+        rate_limits_config = auth_config.get("rate_limits", {})
+        if rate_limits_config or auth_mode == "shared":
+            from ..auth.rate_limiter import create_rate_limit_middleware
+
+            rate_limit_middleware = create_rate_limit_middleware(manifest_auth=auth_config)
+            app.add_middleware(rate_limit_middleware)
+            logger.info(
+                f"AuthRateLimitMiddleware added for '{slug}' "
+                f"(endpoints: {list(rate_limits_config.keys()) or 'defaults'})"
+            )
+
+    def _add_shared_auth_middleware(
+        self, app: "FastAPI", slug: str, auth_config: dict[str, Any]
+    ) -> None:
+        """Add shared auth middleware."""
+        from ..auth.shared_middleware import create_shared_auth_middleware_lazy
+
+        middleware_class = create_shared_auth_middleware_lazy(
+            app_slug=slug,
+            manifest_auth=auth_config,
+        )
+        app.add_middleware(middleware_class)
+        logger.info(
+            f"LazySharedAuthMiddleware added for '{slug}' "
+            f"(require_role={auth_config.get('require_role')})"
+        )
+
+    def _add_csrf_middleware(
+        self,
+        app: "FastAPI",
+        slug: str,
+        auth_config: dict[str, Any],
+        auth_mode: str,
+        is_sub_app: bool,
+    ) -> None:
+        """Add CSRF middleware."""
+        csrf_config = auth_config.get("csrf_protection", True if auth_mode == "shared" else False)
+        if csrf_config and not is_sub_app:  # Don't add CSRF to child apps
+            from ..auth.csrf import create_csrf_middleware
+
+            # Ensure /auth/ticket is always exempt from CSRF
+            # (it handles its own auth via ticket validation)
+            # This is critical for WebSocket authentication in SSO multi-app setups
+            TICKET_ENDPOINT = "/auth/ticket"
+
+            # Add ticket endpoint to public routes (fallback for boolean csrf_config)
+            public_routes = auth_config.get("public_routes", []) or []
+            public_routes_with_ticket = list(public_routes)
+            if TICKET_ENDPOINT not in public_routes_with_ticket:
+                public_routes_with_ticket.append(TICKET_ENDPOINT)
+
+            # Create a copy of auth_config to avoid mutating the original
+            csrf_config_with_routes = {
+                **auth_config,
+                "public_routes": public_routes_with_ticket,
+            }
+
+            # If csrf_protection is an object with exempt_routes, ensure /auth/ticket is included
+            # This handles the case where exempt_routes is explicitly set in the manifest
+            if isinstance(csrf_config, dict):
+                exempt_routes = csrf_config.get("exempt_routes")
+                if exempt_routes is None:
+                    # No exempt_routes specified, use public_routes as fallback
+                    exempt_routes = public_routes_with_ticket
+                else:
+                    # exempt_routes exists, ensure /auth/ticket is included
+                    exempt_routes = list(exempt_routes) if exempt_routes else []
+                    if TICKET_ENDPOINT not in exempt_routes:
+                        exempt_routes.append(TICKET_ENDPOINT)
+
+                # Update the csrf_protection config with merged exempt_routes
+                csrf_config_with_routes["csrf_protection"] = {
+                    **csrf_config,
+                    "exempt_routes": exempt_routes,
+                }
+
+            csrf_middleware = create_csrf_middleware(manifest_auth=csrf_config_with_routes)
+            app.add_middleware(csrf_middleware)
+            logger.info(f"CSRFMiddleware added for '{slug}'")
+        elif csrf_config and is_sub_app:
+            logger.debug(
+                f"CSRFMiddleware skipped for child app '{slug}' - "
+                f"parent app handles CSRF protection for WebSocket routes"
+            )
+
+    def _add_security_middleware(
+        self,
+        app: "FastAPI",
+        slug: str,
+        auth_config: dict[str, Any],
+        auth_mode: str,
+    ) -> None:
+        """Add security middleware (HSTS, headers)."""
+        security_config = auth_config.get("security", {})
+        hsts_config = security_config.get("hsts", {})
+        if hsts_config.get("enabled", True) or auth_mode == "shared":
+            from ..auth.middleware import SecurityMiddleware
+
+            app.add_middleware(
+                SecurityMiddleware,
+                require_https=False,  # HSTS handles this in production
+                csrf_protection=False,  # Handled by CSRFMiddleware above
+                security_headers=True,
+                hsts_config=hsts_config,
+            )
+            logger.info(f"SecurityMiddleware added for '{slug}'")
+
     def create_app(
         self,
         slug: str,
@@ -1359,173 +1989,10 @@ class MongoDBEngine:
                 logger.info(f"Single-app mode for '{slug}'")
 
             # Handle auth based on mode
-            if auth_mode == "shared":
-                logger.info(f"Shared auth mode for '{slug}' - SSO enabled")
-                # Initialize shared user pool and set on app.state
-                # Middleware was already added at app creation time (lazy version)
-                # For sub-apps, check if parent already initialized user pool
-                if is_sub_app:
-                    # Check if parent app has user_pool (set by parent's initialization)
-                    # If not, initialize it (shouldn't happen, but handle gracefully)
-                    if not hasattr(app.state, "user_pool") or app.state.user_pool is None:
-                        logger.warning(
-                            f"Sub-app '{slug}' uses shared auth but user_pool not found. "
-                            "Initializing now (parent should have initialized it)."
-                        )
-                        await self._initialize_shared_user_pool(app, app_manifest)
-                    else:
-                        logger.debug(f"Sub-app '{slug}' using shared user_pool from parent app")
-                else:
-                    await self._initialize_shared_user_pool(app, app_manifest)
-            else:
-                logger.info(f"Per-app auth mode for '{slug}'")
-                # Auto-retrieve app token for "app" mode
-                await engine.auto_retrieve_app_token(slug)
+            await self._handle_auth_mode(engine, app, slug, app_manifest, auth_mode, is_sub_app)
 
             # Auto-initialize authorization provider from manifest config
-            try:
-                logger.info(
-                    f"🔍 Checking auth config for '{slug}': "
-                    f"auth_config keys={list(auth_config.keys())}"
-                )
-                auth_policy = auth_config.get("policy", {})
-                logger.info(f"🔍 Auth policy for '{slug}': {auth_policy}")
-                authz_provider_type = auth_policy.get("provider")
-                logger.info(f"🔍 Authz provider type for '{slug}': {authz_provider_type}")
-            except (KeyError, AttributeError, TypeError) as e:
-                logger.exception(f"❌ Error reading auth config for '{slug}': {e}")
-                authz_provider_type = None
-
-            if authz_provider_type == "oso":
-                # Initialize OSO Cloud provider
-                try:
-                    from ..auth.oso_factory import initialize_oso_from_manifest
-
-                    authz_provider = await initialize_oso_from_manifest(engine, slug, app_manifest)
-                    if authz_provider:
-                        app.state.authz_provider = authz_provider
-                        logger.info(f"✅ OSO Cloud provider auto-initialized for '{slug}'")
-                    else:
-                        logger.warning(
-                            f"⚠️  OSO provider not initialized for '{slug}' - "
-                            "check OSO_AUTH and OSO_URL environment variables"
-                        )
-                except ImportError as e:
-                    logger.warning(
-                        f"⚠️  OSO Cloud SDK not available for '{slug}': {e}. "
-                        "Install with: pip install oso-cloud"
-                    )
-                except (ValueError, TypeError, RuntimeError, AttributeError, KeyError) as e:
-                    logger.exception(f"❌ Failed to initialize OSO provider for '{slug}': {e}")
-
-            elif authz_provider_type == "casbin":
-                # Initialize Casbin provider
-                logger.info(f"🔧 Initializing Casbin provider for '{slug}'...")
-                try:
-                    from ..auth.casbin_factory import initialize_casbin_from_manifest
-
-                    logger.debug(f"Calling initialize_casbin_from_manifest for '{slug}'")
-                    authz_provider = await initialize_casbin_from_manifest(
-                        engine, slug, app_manifest
-                    )
-                    logger.debug(
-                        f"initialize_casbin_from_manifest returned: {authz_provider is not None}"
-                    )
-                    if authz_provider:
-                        app.state.authz_provider = authz_provider
-                        logger.info(
-                            f"✅ Casbin provider auto-initialized for '{slug}' "
-                            f"and set on app.state"
-                        )
-                        logger.info(
-                            f"✅ Provider type: {type(authz_provider).__name__}, "
-                            f"initialized: {getattr(authz_provider, '_initialized', 'unknown')}"
-                        )
-                        # Verify it's actually set
-                        if hasattr(app.state, "authz_provider") and app.state.authz_provider:
-                            logger.info("✅ Verified: app.state.authz_provider is set and not None")
-                        else:
-                            logger.error(
-                                "❌ CRITICAL: app.state.authz_provider was set but is now "
-                                "None or missing!"
-                            )
-                    else:
-                        logger.error(
-                            f"❌ Casbin provider initialization returned None for '{slug}' - "
-                            f"check logs above for errors"
-                        )
-                        logger.error(f"❌ This means authorization will NOT work for '{slug}'")
-                except ImportError as e:
-                    # ImportError is expected if Casbin is not installed
-                    logger.warning(
-                        f"❌ Casbin not available for '{slug}': {e}. "
-                        "Install with: pip install mdb-engine[casbin]"
-                    )
-                except (ValueError, TypeError, RuntimeError, AttributeError, KeyError) as e:
-                    logger.exception(f"❌ Failed to initialize Casbin provider for '{slug}': {e}")
-                    # Informational message, not exception logging
-                    logger.error(  # noqa: TRY400
-                        f"❌ This means authorization will NOT work for '{slug}' - "
-                        f"app.state.authz_provider will remain None"
-                    )
-                except (
-                    RuntimeError,
-                    ValueError,
-                    AttributeError,
-                    TypeError,
-                    ConnectionError,
-                    OSError,
-                ) as e:
-                    # Catch specific exceptions that might occur during initialization
-                    logger.exception(
-                        f"❌ Unexpected error initializing Casbin provider for '{slug}': {e}"
-                    )
-                    # Informational message, not exception logging
-                    logger.error(  # noqa: TRY400
-                        f"❌ This means authorization will NOT work for '{slug}' - "
-                        f"app.state.authz_provider will remain None"
-                    )
-
-            elif authz_provider_type is None and auth_policy:
-                # Default to Casbin if provider not specified but auth.policy exists
-                logger.info(
-                    f"⚠️  No provider specified in auth.policy for '{slug}', "
-                    f"defaulting to Casbin"
-                )
-                try:
-                    from ..auth.casbin_factory import initialize_casbin_from_manifest
-
-                    authz_provider = await initialize_casbin_from_manifest(
-                        engine, slug, app_manifest
-                    )
-                    if authz_provider:
-                        app.state.authz_provider = authz_provider
-                        logger.info(f"✅ Casbin provider auto-initialized for '{slug}' (default)")
-                    else:
-                        logger.warning(
-                            f"⚠️  Casbin provider not initialized for '{slug}' "
-                            f"(default attempt failed)"
-                        )
-                except ImportError as e:
-                    logger.warning(
-                        f"⚠️  Casbin not available for '{slug}': {e}. "
-                        "Install with: pip install mdb-engine[casbin]"
-                    )
-                except (
-                    ValueError,
-                    TypeError,
-                    RuntimeError,
-                    AttributeError,
-                    KeyError,
-                ) as e:
-                    logger.exception(
-                        f"❌ Failed to initialize Casbin provider for '{slug}' (default): {e}"
-                    )
-            elif authz_provider_type:
-                logger.warning(
-                    f"⚠️  Unknown authz provider type '{authz_provider_type}' for '{slug}' - "
-                    f"skipping initialization"
-                )
+            await self._initialize_auth_provider(engine, app, slug, app_manifest, auth_config)
 
             # Auto-seed demo users if configured in manifest
             users_config = auth_config.get("users", {})
@@ -1538,6 +2005,7 @@ class MongoDBEngine:
                         db=db,
                         slug_id=slug,
                         config=app_manifest,
+                        connection_manager=self._connection_manager,
                     )
                     if demo_users:
                         logger.info(f"✅ Seeded {len(demo_users)} demo user(s) for '{slug}'")
@@ -1592,101 +2060,12 @@ class MongoDBEngine:
         # Create FastAPI app
         app = FastAPI(title=app_title, lifespan=lifespan, **fastapi_kwargs)
 
-        # Add request scope middleware (innermost layer - runs first on request)
-        # This sets up the DI request scope for each request
-        from starlette.middleware.base import BaseHTTPMiddleware
-
-        from ..di import ScopeManager
-
-        class RequestScopeMiddleware(BaseHTTPMiddleware):
-            """Middleware that manages request-scoped DI instances."""
-
-            async def dispatch(self, request, call_next):
-                ScopeManager.begin_request()
-                try:
-                    response = await call_next(request)
-                    return response
-                finally:
-                    ScopeManager.end_request()
-
-        app.add_middleware(RequestScopeMiddleware)
-        logger.debug(f"RequestScopeMiddleware added for '{slug}'")
-
-        # Add rate limiting middleware FIRST (outermost layer)
-        # This ensures rate limiting happens before auth validation
-        rate_limits_config = auth_config.get("rate_limits", {})
-        if rate_limits_config or auth_mode == "shared":
-            from ..auth.rate_limiter import create_rate_limit_middleware
-
-            rate_limit_middleware = create_rate_limit_middleware(
-                manifest_auth=auth_config,
-            )
-            app.add_middleware(rate_limit_middleware)
-            logger.info(
-                f"AuthRateLimitMiddleware added for '{slug}' "
-                f"(endpoints: {list(rate_limits_config.keys()) or 'defaults'})"
-            )
-
-        # Add shared auth middleware (after rate limiting)
-        # Uses lazy version that reads user_pool from app.state
-        if auth_mode == "shared":
-            from ..auth.shared_middleware import create_shared_auth_middleware_lazy
-
-            middleware_class = create_shared_auth_middleware_lazy(
-                app_slug=slug,
-                manifest_auth=auth_config,
-            )
-            app.add_middleware(middleware_class)
-            logger.info(
-                f"LazySharedAuthMiddleware added for '{slug}' "
-                f"(require_role={auth_config.get('require_role')})"
-            )
-
         # NOTE: WebSocket ticket endpoint registration is moved to lifespan context manager
         # (after engine.initialize()) because ticket store is only available after initialization.
         # This ensures consistency with create_multi_app() behavior.
 
-        # Add CSRF middleware (after auth - auto-enabled for shared mode)
-        # CSRF protection is enabled by default for shared auth mode
-        # SKIP for sub-apps in multi-app setups - parent app handles CSRF
-        csrf_config = auth_config.get("csrf_protection", True if auth_mode == "shared" else False)
-        if csrf_config and not is_sub_app:  # Don't add CSRF to child apps
-            from ..auth.csrf import create_csrf_middleware
-
-            # Add ticket endpoint to public routes (it handles its own auth)
-            public_routes = auth_config.get("public_routes", [])
-            public_routes_with_ticket = list(public_routes) + ["/auth/ticket"]
-
-            csrf_config_with_routes = {
-                **auth_config,
-                "public_routes": public_routes_with_ticket,
-            }
-
-            csrf_middleware = create_csrf_middleware(
-                manifest_auth=csrf_config_with_routes,
-            )
-            app.add_middleware(csrf_middleware)
-            logger.info(f"CSRFMiddleware added for '{slug}'")
-        elif csrf_config and is_sub_app:
-            logger.debug(
-                f"CSRFMiddleware skipped for child app '{slug}' - "
-                f"parent app handles CSRF protection for WebSocket routes"
-            )
-
-        # Add security middleware (HSTS, headers)
-        security_config = auth_config.get("security", {})
-        hsts_config = security_config.get("hsts", {})
-        if hsts_config.get("enabled", True) or auth_mode == "shared":
-            from ..auth.middleware import SecurityMiddleware
-
-            app.add_middleware(
-                SecurityMiddleware,
-                require_https=False,  # HSTS handles this in production
-                csrf_protection=False,  # Handled by CSRFMiddleware above
-                security_headers=True,
-                hsts_config=hsts_config,
-            )
-            logger.info(f"SecurityMiddleware added for '{slug}'")
+        # Setup all middleware
+        self._setup_middleware(app, slug, auth_config, auth_mode, is_sub_app)
 
         logger.debug(f"FastAPI app created for '{slug}'")
 
@@ -2404,68 +2783,107 @@ class MongoDBEngine:
             slug: str,
         ) -> None:
             """Merge CORS config from child app to parent app."""
+            from ..auth.cors_utils import validate_cors_config
+
             child_cors = None
-            if hasattr(child_app.state, "cors_config"):
-                child_cors = child_app.state.cors_config
-            else:
-                # CORS config might not be set yet (lifespan runs asynchronously)
-                # Get it from manifest directly
-                cors_config_from_manifest = child_manifest.get("cors", {})
-                if cors_config_from_manifest:
-                    from ..auth.config_helpers import (
-                        CORS_DEFAULTS,
-                        merge_config_with_defaults,
-                    )
-
-                    child_cors = merge_config_with_defaults(
-                        cors_config_from_manifest, CORS_DEFAULTS
-                    )
-                    # Also set it on child app state for future reference
-                    child_app.state.cors_config = child_cors
-
-            if child_cors:
-                if hasattr(parent_app.state, "cors_config"):
-                    # Merge child CORS into parent (child takes precedence for its routes)
-                    parent_cors = parent_app.state.cors_config
-                    # Merge allow_origins lists
-                    child_origins = child_cors.get("allow_origins", [])
-                    parent_origins = parent_cors.get("allow_origins", [])
-
-                    # CRITICAL: Handle wildcard origins correctly
-                    # If any child or parent has wildcard, merged config gets wildcard
-                    if "*" in child_origins:
-                        merged_origins = ["*"]  # Wildcard takes precedence
-                    elif "*" in parent_origins:
-                        merged_origins = ["*"]  # Keep wildcard if already set
-                    else:
-                        # Merge unique origins
-                        merged_origins = list(set(parent_origins + child_origins))
-                        if not merged_origins:
-                            merged_origins = ["*"]  # Default to wildcard if empty
-
-                    # CRITICAL: If ANY child app requires credentials, parent must allow them
-                    # This is essential for SSO cookie-based authentication
-                    child_requires_credentials = child_cors.get("allow_credentials", False)
-                    parent_allows_credentials = parent_cors.get("allow_credentials", False)
-                    merged_allow_credentials = (
-                        child_requires_credentials or parent_allows_credentials
-                    )
-
-                    parent_app.state.cors_config = {
-                        **parent_cors,
-                        **child_cors,
-                        "allow_origins": merged_origins,
-                        # If ANY child requires credentials, parent gets True (for SSO)
-                        "allow_credentials": merged_allow_credentials,
-                    }
+            try:
+                if hasattr(child_app.state, "cors_config"):
+                    child_cors = child_app.state.cors_config
                 else:
-                    # Parent has no CORS config, use child's
-                    parent_app.state.cors_config = child_cors
-                logger.info(
-                    f"✅ Merged CORS config from '{slug}': "
-                    f"origins={parent_app.state.cors_config.get('allow_origins')}, "
-                    f"credentials={parent_app.state.cors_config.get('allow_credentials')}"
+                    cors_config_from_manifest = child_manifest.get("cors", {})
+                    if cors_config_from_manifest:
+                        from ..auth.config_helpers import (
+                            CORS_DEFAULTS,
+                            merge_config_with_defaults,
+                        )
+
+                        child_cors = merge_config_with_defaults(
+                            cors_config_from_manifest, CORS_DEFAULTS
+                        )
+                        child_app.state.cors_config = child_cors
+            except (AttributeError, TypeError, KeyError, ValueError) as e:
+                logger.warning(
+                    f"Error reading CORS config from child app '{slug}': {e}",
+                    exc_info=True,
                 )
+                return
+
+            if not child_cors:
+                return
+
+            try:
+                validate_cors_config(child_cors, app_slug=slug)
+            except ValueError:
+                logger.exception(f"CORS config validation failed for '{slug}'")
+                raise
+
+            if hasattr(parent_app.state, "cors_config"):
+                parent_cors = parent_app.state.cors_config
+                child_origins = child_cors.get("allow_origins", [])
+                parent_origins = parent_cors.get("allow_origins", [])
+
+                child_enabled = child_cors.get("enabled", False)
+                parent_enabled = parent_cors.get("enabled", False)
+                merged_enabled = child_enabled or parent_enabled
+
+                child_requires_credentials = child_cors.get("allow_credentials", False)
+                parent_allows_credentials = parent_cors.get("allow_credentials", False)
+                merged_allow_credentials = child_requires_credentials or parent_allows_credentials
+
+                # Merge origins: if child requires credentials,
+                # we must use specific origins (not wildcard)
+                # If child has wildcard, use wildcard
+                # (but validation will fail if credentials=True)
+                # If parent has wildcard but child has specific origins,
+                # prefer child's origins if credentials required
+                if "*" in child_origins:
+                    merged_origins = ["*"]
+                elif "*" in parent_origins:
+                    # If child requires credentials, we must use specific origins
+                    # (wildcard + credentials is invalid)
+                    if child_requires_credentials and child_origins:
+                        merged_origins = child_origins
+                    else:
+                        merged_origins = ["*"]
+                else:
+                    merged_origins = list(set(parent_origins + child_origins))
+                    if not merged_origins:
+                        merged_origins = ["*"]
+
+                # Build merged config: start with parent, then overlay child
+                # (excluding keys we merge specially)
+                # Exclude allow_credentials and allow_origins from child_cors spread
+                # since we merge them specially
+                child_cors_filtered = {
+                    k: v
+                    for k, v in child_cors.items()
+                    if k not in ("allow_credentials", "allow_origins", "enabled")
+                }
+
+                merged_config = {
+                    **parent_cors,
+                    **child_cors_filtered,
+                    "enabled": merged_enabled,
+                    "allow_origins": merged_origins,
+                    "allow_credentials": merged_allow_credentials,
+                }
+
+                try:
+                    validate_cors_config(merged_config, app_slug=slug)
+                except ValueError:
+                    logger.exception(f"CORS config merge validation failed for '{slug}'")
+                    raise
+
+                parent_app.state.cors_config = merged_config
+            else:
+                parent_app.state.cors_config = child_cors
+
+            logger.info(
+                f"Merged CORS config from '{slug}': "
+                f"origins={parent_app.state.cors_config.get('allow_origins')}, "
+                f"credentials={parent_app.state.cors_config.get('allow_credentials')}, "
+                f"enabled={parent_app.state.cors_config.get('enabled')}"
+            )
 
         async def _register_websocket_routes(
             parent_app: "FastAPI",
@@ -3340,41 +3758,20 @@ class MongoDBEngine:
                 """
 
                 async def dispatch(self, request: Request, call_next):
-                    # Read CORS config from app.state (may have been merged from child apps)
+                    from ..auth.cors_utils import is_origin_allowed
+
                     cors_config = getattr(request.app.state, "cors_config", {})
 
-                    # CRITICAL: Log WebSocket upgrade requests to see if CORS
-                    # is intercepting them
-                    upgrade_header = request.headers.get("upgrade", "").lower()
-                    if upgrade_header == "websocket" or "websocket" in request.url.path.lower():
-                        import sys
-
-                        print(
-                            f"🌐 [CORS MIDDLEWARE] WebSocket upgrade: "
-                            f"{request.method} {request.url.path}, "
-                            f"origin={request.headers.get('origin')}, "
-                            f"cors_enabled={cors_config.get('enabled', False)}",
-                            file=sys.stderr,
-                            flush=True,
-                        )
-
                     if not cors_config.get("enabled", False):
-                        # CORS not enabled, pass through
                         return await call_next(request)
 
-                    # Handle preflight OPTIONS request
+                    origin = request.headers.get("origin")
+                    allowed_origins = cors_config.get("allow_origins", ["*"])
+                    allow_credentials = cors_config.get("allow_credentials", False)
+
+                    origin_allowed = is_origin_allowed(origin, allowed_origins)
+
                     if request.method == "OPTIONS":
-                        origin = request.headers.get("origin")
-                        allowed_origins = cors_config.get("allow_origins", ["*"])
-                        allow_credentials = cors_config.get("allow_credentials", False)
-
-                        # Check if origin is allowed
-                        origin_allowed = False
-                        if "*" in allowed_origins:
-                            origin_allowed = True
-                        elif origin in allowed_origins:
-                            origin_allowed = True
-
                         if origin_allowed:
                             headers = {
                                 "Access-Control-Allow-Methods": ", ".join(
@@ -3395,23 +3792,9 @@ class MongoDBEngine:
                                 headers["Access-Control-Expose-Headers"] = ", ".join(expose_headers)
 
                             return Response(status_code=200, headers=headers)
-                        else:
-                            return Response(status_code=403)
+                        return Response(status_code=403)
 
-                    # Handle actual request
                     response = await call_next(request)
-
-                    # Add CORS headers to response
-                    origin = request.headers.get("origin")
-                    allowed_origins = cors_config.get("allow_origins", ["*"])
-                    allow_credentials = cors_config.get("allow_credentials", False)
-
-                    # Check if origin is allowed
-                    origin_allowed = False
-                    if "*" in allowed_origins:
-                        origin_allowed = True
-                    elif origin and origin in allowed_origins:
-                        origin_allowed = True
 
                     if origin_allowed:
                         if origin:
@@ -4184,3 +4567,176 @@ class MongoDBEngine:
             Cached app token or None
         """
         return self._app_token_cache.get(slug)
+
+
+# ============================================================================
+# CSFLE UTILITY FUNCTIONS
+# ============================================================================
+
+
+def build_csfle_config_from_manifests(
+    manifests: list[dict[str, Any]] | None = None,
+    manifest_paths: list[Path] | None = None,
+    manifests_dir: Path | None = None,
+) -> "CSFLEConfig | None":
+    """
+    Build a combined CSFLEConfig from multiple manifests.
+
+    This utility function scans manifests for encryption configuration
+    (both memory_config.encrypted and encrypted_fields) and builds a
+    single CSFLEConfig that can be passed to MongoDBEngine.
+
+    Args:
+        manifests: List of manifest dictionaries (already parsed)
+        manifest_paths: List of paths to manifest.json files
+        manifests_dir: Directory containing manifest.json files to scan
+
+    Returns:
+        Combined CSFLEConfig, or None if no encryption is configured
+
+    Example:
+        # From manifest directory
+        config = build_csfle_config_from_manifests(
+            manifests_dir=Path("./apps")
+        )
+        engine = MongoDBEngine(
+            mongo_uri=...,
+            db_name=...,
+            csfle_config=config
+        )
+
+        # From specific manifests
+        config = build_csfle_config_from_manifests(
+            manifest_paths=[
+                Path("./app1/manifest.json"),
+                Path("./app2/manifest.json"),
+            ]
+        )
+    """
+    import json
+
+    from .csfle import CSFLEConfig
+
+    all_manifests: list[tuple[str, dict[str, Any]]] = []
+
+    # Collect manifests from provided dictionaries
+    if manifests:
+        for manifest in manifests:
+            slug = manifest.get("slug", "unknown")
+            all_manifests.append((slug, manifest))
+
+    # Load manifests from paths
+    if manifest_paths:
+        for path in manifest_paths:
+            try:
+                with open(path) as f:
+                    manifest = json.load(f)
+                    slug = manifest.get("slug", path.stem)
+                    all_manifests.append((slug, manifest))
+            except (OSError, json.JSONDecodeError) as e:
+                logger.warning(f"Failed to load manifest from {path}: {e}")
+
+    # Scan directory for manifests
+    if manifests_dir and manifests_dir.exists():
+        for manifest_path in manifests_dir.rglob("manifest.json"):
+            try:
+                with open(manifest_path) as f:
+                    manifest = json.load(f)
+                    slug = manifest.get("slug", manifest_path.parent.name)
+                    # Avoid duplicates
+                    if not any(s == slug for s, _ in all_manifests):
+                        all_manifests.append((slug, manifest))
+            except (OSError, json.JSONDecodeError) as e:
+                logger.warning(f"Failed to load manifest from {manifest_path}: {e}")
+
+    if not all_manifests:
+        return None
+
+    # Build combined config
+    combined_config: CSFLEConfig | None = None
+
+    for slug, manifest in all_manifests:
+        app_config: CSFLEConfig | None = None
+
+        # Check for memory_config.encrypted
+        memory_config = manifest.get("memory_config", {})
+        if memory_config.get("encrypted", False):
+            app_config = CSFLEConfig.from_memory_config(memory_config, slug)
+            logger.info(f"Found memory encryption config for app '{slug}'")
+
+        # Check for encrypted_fields
+        encrypted_fields = manifest.get("encrypted_fields", {})
+        if encrypted_fields:
+            encryption_config = manifest.get("encryption_config", {})
+            fields_config = CSFLEConfig.from_encrypted_fields(
+                encrypted_fields, encryption_config, slug
+            )
+            if app_config:
+                app_config = app_config.merge_with(fields_config)
+            else:
+                app_config = fields_config
+            logger.info(
+                f"Found encrypted_fields config for app '{slug}': "
+                f"{list(encrypted_fields.keys())}"
+            )
+
+        # Merge into combined config
+        if app_config and app_config.enabled:
+            if combined_config:
+                combined_config = combined_config.merge_with(app_config)
+            else:
+                combined_config = app_config
+
+    if combined_config and combined_config.enabled:
+        logger.info(
+            f"Built combined CSFLE config: "
+            f"collections={list(combined_config.encrypted_collections.keys())}, "
+            f"kms_provider={combined_config.kms_provider}"
+        )
+
+    return combined_config
+
+
+def build_csfle_config_from_manifest(
+    manifest: dict[str, Any],
+    app_slug: str | None = None,
+) -> "CSFLEConfig | None":
+    """
+    Build CSFLEConfig from a single manifest.
+
+    Convenience function for single-app scenarios.
+
+    Args:
+        manifest: Manifest dictionary
+        app_slug: Optional app slug (uses manifest slug if not provided)
+
+    Returns:
+        CSFLEConfig or None if no encryption configured
+
+    Example:
+        manifest = json.load(open("manifest.json"))
+        config = build_csfle_config_from_manifest(manifest)
+        if config:
+            engine = MongoDBEngine(..., csfle_config=config)
+    """
+    from .csfle import CSFLEConfig
+
+    slug = app_slug or manifest.get("slug", "app")
+    config: CSFLEConfig | None = None
+
+    # Check memory_config.encrypted
+    memory_config = manifest.get("memory_config", {})
+    if memory_config.get("encrypted", False):
+        config = CSFLEConfig.from_memory_config(memory_config, slug)
+
+    # Check encrypted_fields
+    encrypted_fields = manifest.get("encrypted_fields", {})
+    if encrypted_fields:
+        encryption_config = manifest.get("encryption_config", {})
+        fields_config = CSFLEConfig.from_encrypted_fields(encrypted_fields, encryption_config, slug)
+        if config:
+            config = config.merge_with(fields_config)
+        else:
+            config = fields_config
+
+    return config if config and config.enabled else None

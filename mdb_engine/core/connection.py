@@ -2,13 +2,17 @@
 Connection management for MongoDB Engine.
 
 This module handles MongoDB connection initialization, shutdown, and
-connection pool configuration.
+connection pool configuration. Supports optional Client-Side Field Level
+Encryption (CSFLE) for automatic field encryption.
 
 This module is part of MDB_ENGINE - MongoDB Engine.
 """
 
+from __future__ import annotations
+
 import logging
 import time
+from typing import TYPE_CHECKING, Any
 
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError
@@ -23,6 +27,9 @@ from ..exceptions import InitializationError
 from ..observability import get_logger as get_contextual_logger
 from ..observability import record_operation
 
+if TYPE_CHECKING:
+    from .csfle import CSFLEConfig
+
 logger = logging.getLogger(__name__)
 contextual_logger = get_contextual_logger(__name__)
 
@@ -32,6 +39,7 @@ class ConnectionManager:
     Manages MongoDB connection lifecycle and configuration.
 
     Handles connection initialization, validation, and shutdown.
+    Supports optional Client-Side Field Level Encryption (CSFLE).
     """
 
     def __init__(
@@ -40,6 +48,7 @@ class ConnectionManager:
         db_name: str,
         max_pool_size: int = DEFAULT_MAX_POOL_SIZE,
         min_pool_size: int = DEFAULT_MIN_POOL_SIZE,
+        csfle_config: CSFLEConfig | None = None,
     ) -> None:
         """
         Initialize the connection manager.
@@ -49,16 +58,19 @@ class ConnectionManager:
             db_name: Database name
             max_pool_size: Maximum MongoDB connection pool size
             min_pool_size: Minimum MongoDB connection pool size
+            csfle_config: Optional CSFLE configuration for field-level encryption
         """
         self.mongo_uri = mongo_uri
         self.db_name = db_name
         self.max_pool_size = max_pool_size
         self.min_pool_size = min_pool_size
+        self.csfle_config = csfle_config
 
         # Connection state
         self._mongo_client: AsyncIOMotorClient | None = None
         self._mongo_db: AsyncIOMotorDatabase | None = None
         self._initialized: bool = False
+        self._csfle_enabled: bool = False
 
     async def initialize(self) -> None:
         """
@@ -89,17 +101,50 @@ class ConnectionManager:
         )
 
         try:
+            # Build client kwargs
+            client_kwargs: dict[str, Any] = {
+                "serverSelectionTimeoutMS": DEFAULT_SERVER_SELECTION_TIMEOUT_MS,
+                "appname": "MDB_ENGINE",
+                "maxPoolSize": self.max_pool_size,
+                "minPoolSize": self.min_pool_size,
+                "maxIdleTimeMS": DEFAULT_MAX_IDLE_TIME_MS,
+                "retryWrites": True,
+                "retryReads": True,
+            }
+
+            # Add CSFLE auto-encryption if configured
+            if self.csfle_config and self.csfle_config.enabled:
+                try:
+                    from .csfle import build_auto_encryption_opts
+
+                    auto_enc_opts = build_auto_encryption_opts(
+                        self.csfle_config, self.mongo_uri, self.db_name
+                    )
+                    if auto_enc_opts:
+                        client_kwargs["auto_encryption_opts"] = auto_enc_opts
+                        self._csfle_enabled = True
+                        contextual_logger.info(
+                            "CSFLE auto-encryption enabled",
+                            extra={
+                                "kms_provider": self.csfle_config.kms_provider,
+                                "encrypted_collections": list(
+                                    self.csfle_config.encrypted_collections.keys()
+                                ),
+                            },
+                        )
+                    else:
+                        contextual_logger.warning(
+                            "CSFLE requested but could not be configured. "
+                            "Continuing without field-level encryption."
+                        )
+                except (ValueError, TypeError, AttributeError, RuntimeError) as e:
+                    contextual_logger.warning(
+                        f"Failed to configure CSFLE: {e}. "
+                        f"Continuing without field-level encryption."
+                    )
+
             # Connect to MongoDB
-            self._mongo_client = AsyncIOMotorClient(
-                self.mongo_uri,
-                serverSelectionTimeoutMS=DEFAULT_SERVER_SELECTION_TIMEOUT_MS,
-                appname="MDB_ENGINE",
-                maxPoolSize=self.max_pool_size,
-                minPoolSize=self.min_pool_size,
-                maxIdleTimeMS=DEFAULT_MAX_IDLE_TIME_MS,
-                retryWrites=True,
-                retryReads=True,
-            )
+            self._mongo_client = AsyncIOMotorClient(self.mongo_uri, **client_kwargs)
 
             # Verify connection
             await self._mongo_client.admin.command("ping")
@@ -121,6 +166,7 @@ class ConnectionManager:
                 extra={
                     "db_name": self.db_name,
                     "pool_size": f"{self.min_pool_size}-{self.max_pool_size}",
+                    "csfle_enabled": self._csfle_enabled,
                     "duration_ms": round(duration_ms, 2),
                 },
             )
@@ -249,3 +295,8 @@ class ConnectionManager:
     def initialized(self) -> bool:
         """Check if connection is initialized."""
         return self._initialized
+
+    @property
+    def csfle_enabled(self) -> bool:
+        """Check if Client-Side Field Level Encryption is enabled."""
+        return self._csfle_enabled

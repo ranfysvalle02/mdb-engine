@@ -30,8 +30,10 @@ Welcome to the MDB Engine documentation. This directory contains comprehensive d
 
 ### Guides
 - **[Authorization Guide](AUTHZ.md)** - Authentication and authorization
+- **[Memory Service Guide](MEMORY_SERVICE.md)** ⭐ - Complete guide to the memory service with automatic index management
+- **[Cognitive Memory](COGNITIVE_MEMORY.md)** - Advanced cognitive memory features
+- **[Cognitive Architecture](COGNITIVE_ARCHITECTURE.md)** - STM + LTM memory architecture
 - **[Testing Guide](guides/testing.md)** - Comprehensive testing documentation
-- **[Mem0 Implementation Guide](guides/MEM0_IMPLEMENTATION.md)** - Why we use manual MongoDB access and Mem0 implementation details
 - **[Contributing Guide](../CONTRIBUTING.md)** - How to contribute to the project
 
 ### API Documentation
@@ -39,7 +41,6 @@ Welcome to the MDB Engine documentation. This directory contains comprehensive d
 
 ### Other Documentation
 - **[FAQ](FAQ.md)** - Frequently asked questions
-- **[Blog](blog.md)** - Blog posts and updates
 
 ## Quick Links
 

@@ -15,6 +15,9 @@ This document provides a comprehensive guide to every field available in `manife
 - [Authentication & Authorization](#authentication--authorization)
 - [Token Management](#token-management)
 - [AI Services](#ai-services)
+  - [Embedding Service](#embedding-service)
+  - [Memory Service](#memory-service)
+  - [Graph Service](#graph-service)
 - [WebSockets](#websockets)
 - [CORS](#cors)
 - [Observability](#observability)
@@ -159,6 +162,32 @@ Define indexes declaratively—they're created automatically on app registration
   }
 }
 ```
+
+---
+
+## Encryption (CSFLE)
+
+Configure Client-Side Field Level Encryption for any collection:
+
+```json
+{
+  "encrypted_fields": {
+    "payments": ["card_number", "cvv"],
+    "users": ["ssn"]
+  },
+  "encryption_config": {
+    "kms_provider": "local",
+    "key_vault_namespace": "encryption.__keyVault"
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `encrypted_fields` | `object<string, array<string>>` | Map of collection names to list of fields to encrypt |
+| `encryption_config` | `object` | Global encryption settings (KMS provider, etc.) |
+
+**See**: [CSFLE Setup Guide](guides/CSFLE_SETUP.md) for full documentation.
 
 ---
 
@@ -373,7 +402,7 @@ Enhanced token management with refresh tokens, sessions, and security:
 | `tokenizer_model` | `string` | `"gpt-3.5-turbo"` | Tokenizer model for counting tokens |
 | `default_embedding_model` | `string` | `"text-embedding-3-small"` | Default embedding model |
 
-### Memory Service (Mem0)
+### Memory Service
 
 ```json
 {
@@ -381,7 +410,6 @@ Enhanced token management with refresh tokens, sessions, and security:
     "enabled": true,
     "collection_name": "user_memories",
     "embedding_model_dims": 1536,
-    "enable_graph": true,
     "infer": true,
     "embedding_model": "text-embedding-3-small",
     "chat_model": "gpt-4o",
@@ -393,14 +421,88 @@ Enhanced token management with refresh tokens, sessions, and security:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `enabled` | `boolean` | `false` | Enable Mem0 memory service |
-| `collection_name` | `string` | `"{slug}_memories"` | Collection name for memories |
+| `enabled` | `boolean` | `false` | Enable memory service |
+| `collection_name` | `string` | `"{slug}_memories"` | Collection name for memories (will be prefixed with app slug automatically) |
 | `embedding_model_dims` | `integer` | `1536` | Embedding vector dimensions (128-4096) |
-| `enable_graph` | `boolean` | `false` | Enable knowledge graph construction |
 | `infer` | `boolean` | `true` | Infer memories from conversations |
 | `async_mode` | `boolean` | `true` | Process memories asynchronously |
+| `encrypted` | `boolean` | `false` | Enable Client-Side Field Level Encryption (CSFLE) for memory content |
+| `encryption` | `object` | - | Advanced encryption settings (see CSFLE guide) |
+| `embedding_model` | `string` | `"text-embedding-3-small"` | Embedding model name |
+| `chat_model` | `string` | `"gpt-4o"` | LLM model for fact extraction |
+| `index_name` | `string` | `"{collection_name}_vector_index"` | Vector search index name (auto-generated if not provided) |
 
-**Note**: Mem0 uses environment variables for LLM/embedding configuration. Set `OPENAI_API_KEY` or `AZURE_OPENAI_API_KEY`/`AZURE_OPENAI_ENDPOINT` in your `.env` file.
+**Note**: For GraphRAG (knowledge graph) functionality, use the top-level `graph_config` section. The Graph Service is now standalone and can be used independently or with the Memory Service.
+
+### Graph Service
+
+The Graph Service provides knowledge graph functionality with MongoDB `$graphLookup` for multi-hop traversal. **It is enabled by default** for all apps.
+
+**Default behavior** (no configuration needed):
+```json
+{
+  "schema_version": "2.0",
+  "slug": "my_app",
+  "name": "My App"
+}
+```
+
+**Disable graph** (opt-out):
+```json
+{
+  "graph_config": {
+    "enabled": false
+  }
+}
+```
+
+**Custom configuration**:
+```json
+{
+  "graph_config": {
+    "collection_name": "__kg",
+    "auto_extract": true,
+    "llm_model": "openai/gpt-4o",
+    "temperature": 0.0,
+    "default_max_depth": 2,
+    "vector_index_name": "graph_vector_index",
+    "embedding_dims": 1536,
+    "node_types": ["person", "interest", "event", "location", "organization", "product", "concept"]
+  }
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `boolean` | `true` | Enable Graph Service (enabled by default) |
+| `collection_name` | `string` | `"__kg"` | Collection for graph nodes (prefixed with app slug) |
+| `auto_extract` | `boolean` | `true` | Auto-extract nodes/relationships from text |
+| `llm_model` | `string` | (from llm_config) | LLM model for graph extraction |
+| `temperature` | `number` | `0.0` | Temperature for LLM extraction |
+| `default_max_depth` | `integer` | `2` | Default traversal depth (1-5) |
+| `vector_index_name` | `string` | `"graph_vector_index"` | Vector index name for hybrid search |
+| `embedding_dims` | `integer` | `1536` | Embedding dimensions |
+| `node_types` | `array` | (see default) | Allowed node types for extraction |
+
+**See**: [GRAPH_SERVICE.md](GRAPH_SERVICE.md) for full API documentation and [GRAPHRAG.md](GRAPHRAG.md) for GraphRAG concepts.
+
+**⚠️ Important: Automatic Index Management**
+
+The memory service **automatically creates and manages its own vector search index**. You do NOT need to (and should NOT) add memory collection indexes to `managed_indexes` in your manifest. The service will:
+
+1. **Auto-create the index** on startup with the correct configuration:
+   - Vector field: `embedding` (with dimensions from `embedding_model_dims`)
+   - Filter field: `user_id` (required for user-scoped queries)
+   - Similarity: `cosine`
+2. **Auto-generate the index name** as `{collection_name}_vector_index` (e.g., `my_app_user_memories_vector_index`)
+3. **Auto-update existing indexes** if they're missing the `user_id` filter
+4. **Ensure the index is queryable** before allowing searches
+
+The `user_id` filter is **required** for vector search queries that filter by user. The service automatically includes this in the index definition to ensure all queries work correctly.
+
+If you try to manually define vector search indexes for memory collections in `managed_indexes`, the engine will raise an error to prevent conflicts. The memory service has full control over its indexes to ensure consistency.
+
+**Note**: The memory service uses environment variables for LLM/embedding configuration. Set `OPENAI_API_KEY` or `AZURE_OPENAI_API_KEY`/`AZURE_OPENAI_ENDPOINT` in your `.env` file.
 
 **Memory Service Operations** (v0.7.5+):
 - `add()` - Store memories with LLM inference (extracts facts from conversations)
@@ -414,11 +516,11 @@ Enhanced token management with refresh tokens, sessions, and security:
 
 ## WebSockets
 
-Define real-time WebSocket endpoints with secure cookie-based authentication.
+Define real-time WebSocket endpoints with secure ticket-based authentication.
 
-**Security Note**: MDB-Engine uses **secure-by-default WebSocket authentication** with encrypted session keys. Session keys are generated on login, encrypted via envelope encryption, and stored in the `_mdb_engine_websocket_sessions` private collection.
+**Security Note**: MDB-Engine uses **ticket-based authentication** for WebSocket connections. Tickets are short-lived (10-second TTL), single-use UUIDs that are generated via the `/auth/ticket` endpoint and consumed immediately upon WebSocket connection. This provides secure, fast authentication without database lookups.
 
-**CSRF Protection**: By default, WebSocket connections require CSRF validation (`csrf_required: true`) using encrypted session keys. This provides defense-in-depth security. The CSRF requirement can be disabled per-endpoint via `auth.csrf_required: false` to use Origin validation + SameSite cookies only.
+**CSRF Protection**: By default, WebSocket connections use Origin validation + SameSite cookies for CSRF protection, which is sufficient for WebSocket security. The CSRF requirement can be enabled per-endpoint via `auth.csrf_required: true` for extra strict security requirements.
 
 ```json
 {
@@ -454,20 +556,34 @@ Define real-time WebSocket endpoints with secure cookie-based authentication.
 
 ### Authentication
 
-When `auth.required` is `true` (default), clients must authenticate using **httpOnly cookies**:
+When `auth.required` is `true` (default), clients must authenticate using **ticket-based authentication**:
 
 **Client Implementation:**
 ```javascript
-// No token needed - browser automatically sends httpOnly cookies
-// Ensure httpOnly cookie is set during authentication/login
-const ws = new WebSocket('wss://api.example.com/app1/ws');
+// Step 1: Get ticket from /auth/ticket endpoint (requires JWT cookie)
+const ticketResponse = await fetch('/auth/ticket', {
+  method: 'POST',
+  credentials: 'include', // Sends JWT cookie
+});
+const { ticket } = await ticketResponse.json();
+
+// Step 2: Connect WebSocket with ticket (must be done within 10 seconds)
+const ws = new WebSocket(`wss://api.example.com/app1/ws?ticket=${ticket}`);
 ```
 
+**Ticket Flow:**
+1. User logs in → JWT stored in httpOnly cookie
+2. Client requests ticket → `POST /auth/ticket` (sends JWT cookie)
+3. Server validates JWT → Generates one-time ticket (UUID, 10-second TTL)
+4. Client connects WebSocket → `ws://host/app/ws?ticket=<uuid>`
+5. Server validates & consumes ticket → WebSocket connection established
+
 **Security Benefits:**
-- ✅ XSS protection (tokens not accessible to JavaScript)
-- ✅ CSRF protection (Origin validation + SameSite cookies by default, optional CSRF cookie)
-- ✅ Avoids URL logging risks (token not in query params)
-- ✅ Browser-native support (standard WebSocket API)
+- ✅ Short-lived tickets (10-second TTL reduces attack window)
+- ✅ Single-use tickets (prevents replay attacks)
+- ✅ Fast validation (in-memory, no database lookups)
+- ✅ CSRF protection (Origin validation + SameSite cookies by default)
+- ✅ No encryption overhead (simpler than session keys)
 - ✅ Server validates token **before** accepting connection
 - ✅ Elegant multi-app support (parent app manages security, configurable per-endpoint)
 
@@ -485,7 +601,7 @@ Configure Cross-Origin Resource Sharing:
 {
   "cors": {
     "enabled": true,
-    "allow_origins": ["*"],
+    "allow_origins": ["http://localhost:3000", "https://yourdomain.com"],
     "allow_credentials": true,
     "allow_methods": ["GET", "POST", "PUT", "DELETE", "PATCH"],
     "allow_headers": ["*"],
@@ -498,12 +614,47 @@ Configure Cross-Origin Resource Sharing:
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `enabled` | `boolean` | `false` | Enable CORS |
-| `allow_origins` | `array<string>` | `["*"]` | Allowed origins (use `["*"]` for all) |
+| `allow_origins` | `array<string>` | `["*"]` | Allowed origins (use `["*"]` for all, but see warning below) |
 | `allow_credentials` | `boolean` | `false` | Allow credentials in CORS requests |
 | `allow_methods` | `array<string>` | `["GET", "POST", "PUT", "DELETE", "PATCH"]` | Allowed HTTP methods |
 | `allow_headers` | `array<string>` | `["*"]` | Allowed headers |
 | `expose_headers` | `array<string>` | - | Headers to expose to client |
 | `max_age` | `integer` | `3600` | Max age for preflight requests (seconds) |
+
+### Important CORS Warnings
+
+**⚠️ Wildcard Origins with Credentials**
+
+Browsers **reject** the combination of `allow_origins: ["*"]` with `allow_credentials: true`. This is a browser security restriction.
+
+**❌ Invalid Configuration:**
+```json
+{
+  "cors": {
+    "allow_origins": ["*"],
+    "allow_credentials": true
+  }
+}
+```
+
+**✅ Correct Configuration:**
+```json
+{
+  "cors": {
+    "allow_origins": [
+      "http://localhost:3000",
+      "https://yourdomain.com"
+    ],
+    "allow_credentials": true
+  }
+}
+```
+
+MDB Engine validates this configuration and will raise a `ValueError` during app initialization if detected.
+
+**See Also:**
+- [CORS Troubleshooting Guide](../guides/CORS_TROUBLESHOOTING.md) - Comprehensive CORS troubleshooting
+- [WebSocket Troubleshooting Guide](../guides/WEBSOCKET_TROUBLESHOOTING.md) - WebSocket-specific CORS issues
 
 ---
 

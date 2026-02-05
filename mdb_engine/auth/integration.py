@@ -96,15 +96,8 @@ async def get_auth_config(slug_id: str, engine) -> dict[str, Any]:
             logger.warning(f"Manifest not found for {slug_id}")
             return {}
 
-        # Extract auth configs - support both old and new format for backward compatibility
+        # Extract auth configs - use new auth.policy/auth.users format only
         auth_config = manifest.get("auth", {})
-
-        # Migrate old format if present
-        if "auth_policy" in manifest or "sub_auth" in manifest:
-            if "policy" not in auth_config and "auth_policy" in manifest:
-                auth_config["policy"] = manifest.get("auth_policy", {})
-            if "users" not in auth_config and "sub_auth" in manifest:
-                auth_config["users"] = manifest.get("sub_auth", {})
 
         config = {
             "token_management": manifest.get("token_management", {}),
@@ -216,8 +209,7 @@ async def _setup_demo_users(app: FastAPI, engine, slug_id: str, config: dict[str
                     db=db,
                     slug_id=slug_id,
                     config=config,
-                    mongo_uri=engine.mongo_uri,
-                    db_name=engine.db_name,
+                    connection_manager=engine.connection_manager,
                 )
                 if demo_users:
                     logger.info(
@@ -417,7 +409,14 @@ async def _setup_cors_and_observability(
     # Set up CORS middleware if enabled
     if app.state.cors_config.get("enabled", False):
         try:
-            # Check if CORS middleware already exists to avoid duplication
+            from ..auth.cors_utils import validate_cors_config
+
+            try:
+                validate_cors_config(app.state.cors_config, app_slug=slug_id)
+            except ValueError:
+                logger.exception(f"CORS config validation failed for {slug_id}")
+                raise
+
             if _has_cors_middleware(app):
                 logger.debug(f"CORS middleware already exists for {slug_id}, skipping addition")
             else:

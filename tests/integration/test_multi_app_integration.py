@@ -979,7 +979,7 @@ class TestWebSocketWithCORSCConfig:
             },
             "cors": {
                 "enabled": True,
-                "allow_origins": ["*"],
+                "allow_origins": ["http://localhost:3000", "http://localhost:8000"],
                 "allow_credentials": True,
                 "allow_methods": ["*"],
                 "allow_headers": ["*"],
@@ -1012,7 +1012,14 @@ class TestWebSocketWithCORSCConfig:
         async with app.router.lifespan_context(app):
             # Verify CORS config was merged from child app
             cors_config = app.state.cors_config
-            assert "*" in cors_config["allow_origins"], "Parent app should have wildcard origin"
+            # CORS config merges origins from child apps, not wildcard
+            assert cors_config["allow_origins"] == [
+                "http://localhost:3000",
+                "http://localhost:8000",
+            ], (
+                f"Parent app should have merged origins from child app, "
+                f"got: {cors_config['allow_origins']}"
+            )
             assert cors_config["allow_credentials"] is True, "Parent app should allow credentials"
 
             # Verify WebSocket route exists on parent app
@@ -1163,12 +1170,16 @@ class TestWebSocketWithCORSCConfig:
 
     @pytest.mark.asyncio
     async def test_cors_wildcard_merging(self, mongodb_connection_string, tmp_path):
-        """Test that CORS wildcard origins are merged correctly."""
+        """Test that CORS wildcard origins are merged correctly.
+
+        Note: Wildcard + credentials=True is invalid per CORS spec, so validation should fail.
+        If a child has wildcard + credentials=False, merged can be wildcard.
+        """
         import os
 
         from mdb_engine.core.engine import MongoDBEngine
 
-        # Create two manifests - one with wildcard, one with specific origins
+        # Create two manifests - one with wildcard (no credentials), one with specific origins
         manifest1 = {
             "schema_version": "2.0",
             "slug": "wildcard-app",
@@ -1177,7 +1188,7 @@ class TestWebSocketWithCORSCConfig:
             "cors": {
                 "enabled": True,
                 "allow_origins": ["*"],  # Wildcard should take precedence
-                "allow_credentials": True,
+                "allow_credentials": False,  # Must be False with wildcard
             },
         }
         manifest1_path = tmp_path / "manifest1.json"
@@ -1209,16 +1220,18 @@ class TestWebSocketWithCORSCConfig:
         )
 
         async with app.router.lifespan_context(app):
-            # Verify parent app's CORS config has wildcard (takes precedence)
+            # Verify parent app's CORS config has wildcard
+            # (takes precedence when no credentials conflict)
             cors_config = app.state.cors_config
             assert (
                 "*" in cors_config["allow_origins"]
             ), f"Wildcard should be in merged origins, got {cors_config['allow_origins']}"
-            assert cors_config["allow_origins"] == [
-                "*"
-            ], "Merged origins should be ['*'] when any child has wildcard"
-            # Credentials should be True (OR logic)
-            assert cors_config["allow_credentials"] is True
+            assert cors_config["allow_origins"] == ["*"], (
+                "Merged origins should be ['*'] when any child has wildcard "
+                "and no credentials conflict"
+            )
+            # Credentials should be False (OR logic, but both are False)
+            assert cors_config["allow_credentials"] is False
 
         await engine.shutdown()
 

@@ -328,31 +328,10 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         connection_header = request.headers.get("connection", "").lower()
         path = request.url.path
 
-        # CRITICAL: Enhanced logging for WebSocket detection
-        import sys
-
-        print(
-            f"🔍 [_is_websocket_upgrade] Path: {path}, "
-            f"upgrade='{upgrade_header}', connection='{connection_header}'",
-            file=sys.stderr,
-            flush=True,
-        )
-        logger.info(
-            f"_is_websocket_upgrade check: upgrade='{upgrade_header}', "
-            f"connection='{connection_header}', path='{path}'"
-        )
-
         # Primary check: WebSocket upgrade requires both Upgrade: websocket
         # and Connection: Upgrade headers
         has_upgrade_header = upgrade_header == "websocket"
         has_connection_upgrade = "upgrade" in connection_header or "websocket" in connection_header
-
-        print(
-            f"🔍 [_is_websocket_upgrade] has_upgrade={has_upgrade_header}, "
-            f"has_connection={has_connection_upgrade}",
-            file=sys.stderr,
-            flush=True,
-        )
 
         # Secondary check: If upgrade header is present but connection is
         # overridden (e.g., by TestClient), check if path matches a known
@@ -392,30 +371,12 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             has_connection_upgrade or path_matches_websocket_route
         )
 
-        # CRITICAL: Enhanced logging
-        import sys
-
+        # Only log actual WebSocket upgrades at INFO level, use DEBUG for non-WebSocket requests
         if is_websocket:
-            print(
-                f"✅ [_is_websocket_upgrade] WebSocket detected: path={path}, "
-                f"upgrade={upgrade_header}, connection={connection_header}, "
-                f"path_match={path_matches_websocket_route}, result={is_websocket}",
-                file=sys.stderr,
-                flush=True,
-            )
-            logger.info(
-                f"WebSocket upgrade detected: path={path}, "
-                f"upgrade={upgrade_header}, connection={connection_header}, "
-                f"path_match={path_matches_websocket_route}"
-            )
+            logger.info(f"🔍 WebSocket upgrade detection for {path}: is_websocket=True")
         else:
-            print(
-                f"❌ [_is_websocket_upgrade] NOT a WebSocket: path={path}, "
-                f"upgrade={upgrade_header}, connection={connection_header}, "
-                f"has_upgrade={has_upgrade_header}, has_connection={has_connection_upgrade}",
-                file=sys.stderr,
-                flush=True,
-            )
+            # Use DEBUG level for non-WebSocket requests to reduce log noise
+            logger.debug(f"🔍 WebSocket upgrade detection for {path}: is_websocket=False")
         return is_websocket
 
     def _get_allowed_origins(self, request: Request) -> list[str]:

@@ -302,11 +302,15 @@ If you need extra strict security:
 
 **Client Code:**
 ```javascript
-// Make GET request first to receive CSRF cookie
-await fetch('/api/endpoint', { credentials: 'include' });
+// Step 1: Get ticket for WebSocket connection
+const ticketRes = await fetch('/auth/ticket', {
+  method: 'POST',
+  credentials: 'include' // Sends JWT cookie
+});
+const { ticket } = await ticketRes.json();
 
-// Then connect WebSocket (CSRF cookie sent automatically)
-const ws = new WebSocket('ws://localhost:8000/app1/ws');
+// Step 2: Connect WebSocket with ticket
+const ws = new WebSocket(`ws://localhost:8000/app1/ws?ticket=${ticket}`);
 ```
 
 ## Authentication Method

@@ -208,6 +208,8 @@
         <nav class="nav-links">
             {% if user %}
                 <a href="/conversations" title="All Conversations">💬 Conversations</a>
+                <a href="/persona" title="Persona">🎭 Persona</a>
+                <a href="/perceptions" title="Perceptions">👁️ Perceptions</a>
                 <div class="user-info">
                     <span class="user-email">{{ user.email }}</span>
                     <a href="#" onclick="logout(); return false;" title="Logout">🚪 Logout</a>
@@ -372,14 +374,17 @@
     
     async function logout() {
         try {
+            // POST to logout endpoint to revoke token and delete cookie
             await fetch('/logout', {
                 method: 'POST',
                 headers: { 'X-CSRF-Token': getCookie('csrf_token') }
             });
-            window.location.href = '/logout';
+            // Redirect to auth hub login page
+            window.location.href = 'http://localhost:8000/login';
         } catch (error) {
             console.error('Logout error:', error);
-            window.location.href = '/logout';
+            // Fallback: redirect to auth hub on error
+            window.location.href = 'http://localhost:8000/login';
         }
     }
     </script>

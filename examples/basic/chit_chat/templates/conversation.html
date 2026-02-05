@@ -20,10 +20,13 @@
     }
 
     .memory-sidebar {
-        width: 320px;
+        width: 340px;
         display: flex;
         flex-direction: column;
         gap: 15px;
+        flex-shrink: 0;
+        height: calc(100vh - 200px);
+        overflow: hidden;
     }
 
     .conversation-header {
@@ -165,30 +168,126 @@
         border: 1px solid var(--mongodb-border);
         border-radius: 8px;
         padding: 15px;
-        max-height: 400px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+    }
+    
+    .memory-panel-content {
+        flex: 1;
         overflow-y: auto;
+        min-height: 0;
+        scrollbar-width: thin;
+        scrollbar-color: var(--mongodb-border) transparent;
+    }
+
+    .memory-panel-content::-webkit-scrollbar {
+        width: 6px;
+    }
+
+    .memory-panel-content::-webkit-scrollbar-track {
+        background: transparent;
+    }
+
+    .memory-panel-content::-webkit-scrollbar-thumb {
+        background: var(--mongodb-border);
+        border-radius: 3px;
+    }
+
+    .memory-panel-content::-webkit-scrollbar-thumb:hover {
+        background: var(--mongodb-green);
     }
 
     .memory-panel-header {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        margin-bottom: 12px;
-        padding-bottom: 10px;
-        border-bottom: 1px solid var(--mongodb-border);
+        margin-bottom: 15px;
+        padding-bottom: 12px;
+        border-bottom: 2px solid var(--mongodb-border);
     }
 
     .memory-panel-title {
         font-weight: 600;
-        font-size: 14px;
+        font-size: 15px;
         display: flex;
         align-items: center;
-        gap: 6px;
+        gap: 8px;
+        color: var(--mongodb-text);
     }
 
-    .memory-panel-title::before {
+
+    .memory-info-panel {
+        background: linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, rgba(16, 185, 129, 0.03) 100%);
+        border: 1px solid rgba(16, 185, 129, 0.2);
+        border-radius: 8px;
+        padding: 15px;
+        margin-bottom: 15px;
+        animation: slideDown 0.3s ease-out;
+    }
+
+    @keyframes slideDown {
+        from {
+            opacity: 0;
+            transform: translateY(-10px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    .memory-info-content h4 {
+        margin: 0 0 12px 0;
+        font-size: 14px;
+        color: var(--mongodb-text);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .memory-info-content ul {
+        margin: 0 0 12px 0;
+        padding-left: 20px;
+        font-size: 12px;
+        line-height: 1.8;
+        color: var(--mongodb-text-secondary);
+    }
+
+    .memory-info-content li {
+        margin-bottom: 6px;
+    }
+
+    .memory-info-content li strong {
+        color: var(--mongodb-text);
+    }
+
+    .memory-info-tip {
+        margin: 0;
+        padding: 10px;
+        background: rgba(16, 185, 129, 0.1);
+        border-left: 3px solid var(--mongodb-green);
+        border-radius: 4px;
+        font-size: 12px;
+        line-height: 1.6;
+        color: var(--mongodb-text);
+    }
+
+    .memory-info-tip strong {
+        color: var(--mongodb-green);
+    }
+
+    .active-context-panel .memory-panel-title::before {
+        content: "✨";
+        font-size: 18px;
+        filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.1));
+    }
+
+    .memory-explorer-panel .memory-panel-title::before {
         content: "🧠";
-        font-size: 16px;
+        font-size: 18px;
+        filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.1));
     }
 
     .memory-explorer-header {
@@ -209,31 +308,60 @@
         background: rgba(0, 237, 100, 0.1);
         border-color: var(--mongodb-green);
         color: var(--mongodb-green);
+        transition: all 0.2s ease;
     }
 
     .inject-btn:hover {
         background: var(--mongodb-green);
         color: var(--mongodb-bg);
+        transform: translateY(-1px);
+        box-shadow: 0 2px 4px rgba(0, 237, 100, 0.3);
     }
 
     .memory-item {
-        padding: 10px;
-        margin-bottom: 8px;
+        padding: 12px;
+        margin-bottom: 10px;
         background: var(--mongodb-bg-tertiary);
         border: 1px solid var(--mongodb-border);
-        border-radius: 6px;
+        border-radius: 8px;
         font-size: 13px;
-        line-height: 1.4;
+        line-height: 1.5;
         position: relative;
+        transition: all 0.2s ease;
+        cursor: pointer;
+    }
+
+    .memory-item:hover {
+        border-color: var(--mongodb-green);
+        background: var(--mongodb-bg-secondary);
+        transform: translateX(2px);
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
     }
 
     .memory-item.active {
         border-color: var(--mongodb-green);
-        background: rgba(16, 185, 129, 0.1);
+        border-width: 2px;
+        background: linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(16, 185, 129, 0.05) 100%);
+        box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
+    }
+
+    .memory-item.active::before {
+        content: "✨";
+        position: absolute;
+        top: 8px;
+        left: 8px;
+        font-size: 14px;
+        animation: pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.5; }
     }
 
     .memory-icon {
         margin-right: 6px;
+        font-size: 14px;
     }
 
     .stat-item {
@@ -260,19 +388,40 @@
     .memory-context-badge {
         display: inline-flex;
         align-items: center;
-        gap: 4px;
-        padding: 4px 8px;
-        background: rgba(16, 185, 129, 0.1);
-        border: 1px solid var(--mongodb-green);
-        border-radius: 12px;
+        gap: 5px;
+        padding: 5px 10px;
+        background: linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(16, 185, 129, 0.08) 100%);
+        border: 1.5px solid var(--mongodb-green);
+        border-radius: 16px;
         font-size: 11px;
+        font-weight: 600;
         color: var(--mongodb-green);
-        margin-left: 8px;
+        margin-left: 10px;
+        transition: all 0.2s ease;
+        cursor: help;
+    }
+
+    .memory-context-badge:hover {
+        background: linear-gradient(135deg, rgba(16, 185, 129, 0.25) 0%, rgba(16, 185, 129, 0.15) 100%);
+        transform: scale(1.05);
+        box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
     }
 
     .memory-context-badge::before {
         content: "🧠";
-        font-size: 12px;
+        font-size: 13px;
+        filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.1));
+    }
+
+    .memory-context-badge.memory-context-empty {
+        background: rgba(107, 114, 128, 0.1);
+        border-color: rgba(107, 114, 128, 0.3);
+        color: rgba(107, 114, 128, 0.8);
+    }
+
+    .memory-context-badge.memory-context-empty::before {
+        content: "💭";
+        opacity: 0.7;
     }
 
     .memory-storage-indicator {
@@ -314,9 +463,31 @@
 
     .empty-memory-state {
         text-align: center;
-        padding: 20px;
-        opacity: 0.6;
+        padding: 30px 20px;
+        opacity: 0.7;
         font-size: 13px;
+        color: var(--mongodb-text);
+        line-height: 1.6;
+    }
+
+    .empty-memory-state::before {
+        content: "💭";
+        display: block;
+        font-size: 32px;
+        margin-bottom: 12px;
+        opacity: 0.5;
+    }
+
+    .empty-memory-state.helpful {
+        background: rgba(16, 185, 129, 0.05);
+        border: 1px dashed rgba(16, 185, 129, 0.3);
+        border-radius: 8px;
+        padding: 25px;
+    }
+
+    .empty-memory-state.helpful::before {
+        content: "✨";
+        opacity: 0.8;
     }
 
     .refresh-memories-btn {
@@ -336,58 +507,7 @@
         transform: scale(1.05);
     }
 
-    /* Mem0 Activity Log */
-    .mem0-activity-log {
-        background: var(--mongodb-bg-secondary);
-        border: 1px solid var(--mongodb-border);
-        border-radius: 8px;
-        padding: 15px;
-        max-height: 300px;
-        overflow-y: auto;
-        margin-top: 15px;
-    }
-
-    .mem0-activity-title {
-        font-weight: 600;
-        font-size: 14px;
-        margin-bottom: 12px;
-        display: flex;
-        align-items: center;
-        gap: 6px;
-    }
-
-    .mem0-activity-title::before {
-        content: "⚡";
-        font-size: 16px;
-    }
-
-    .activity-item {
-        padding: 8px;
-        margin-bottom: 6px;
-        background: var(--mongodb-bg-tertiary);
-        border-left: 3px solid var(--mongodb-green);
-        border-radius: 4px;
-        font-size: 12px;
-        line-height: 1.4;
-    }
-
-    .activity-item.search {
-        border-left-color: #3b82f6;
-    }
-
-    .activity-item.store {
-        border-left-color: var(--mongodb-green);
-    }
-
-    .activity-item.extract {
-        border-left-color: #f59e0b;
-    }
-
-    .activity-time {
-        font-size: 10px;
-        opacity: 0.6;
-        margin-top: 4px;
-    }
+    /* Removed Memory Activity Log - not useful */
 
     /* Memory Details */
     .memory-item {
@@ -401,32 +521,39 @@
 
     .memory-score {
         position: absolute;
-        top: 8px;
-        right: 8px;
+        top: 10px;
+        right: 10px;
         font-size: 10px;
-        padding: 2px 6px;
-        background: rgba(16, 185, 129, 0.2);
-        border-radius: 10px;
+        font-weight: 600;
+        padding: 3px 8px;
+        background: linear-gradient(135deg, rgba(16, 185, 129, 0.2) 0%, rgba(16, 185, 129, 0.1) 100%);
+        border: 1px solid rgba(16, 185, 129, 0.3);
+        border-radius: 12px;
         color: var(--mongodb-green);
+        z-index: 1;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
     }
 
     .memory-metadata {
         font-size: 11px;
-        opacity: 0.7;
-        margin-top: 4px;
+        opacity: 0.75;
+        margin-top: 8px;
+        padding-top: 8px;
+        border-top: 1px solid rgba(0, 0, 0, 0.05);
         display: flex;
-        gap: 8px;
+        gap: 6px;
         flex-wrap: wrap;
     }
 
     .memory-actions {
         position: absolute;
-        top: 8px;
-        right: 8px;
+        top: 10px;
+        right: 10px;
         display: flex;
         gap: 4px;
         opacity: 0;
-        transition: opacity 0.2s;
+        transition: all 0.2s ease;
+        z-index: 2;
     }
 
     .memory-item:hover .memory-actions {
@@ -436,23 +563,29 @@
     .memory-action-btn {
         background: var(--mongodb-bg-secondary);
         border: 1px solid var(--mongodb-border);
-        border-radius: 4px;
-        padding: 4px 8px;
+        border-radius: 6px;
+        padding: 5px 9px;
         cursor: pointer;
-        font-size: 11px;
+        font-size: 12px;
         color: var(--mongodb-text);
-        transition: all 0.2s;
+        transition: all 0.2s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
     }
 
     .memory-action-btn:hover {
         background: var(--mongodb-green);
         color: white;
         border-color: var(--mongodb-green);
+        transform: scale(1.1);
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
     }
 
     .memory-action-btn.delete {
-        background: rgba(239, 68, 68, 0.1);
-        border-color: #ef4444;
+        background: rgba(239, 68, 68, 0.05);
+        border-color: rgba(239, 68, 68, 0.3);
         color: #ef4444;
     }
 
@@ -460,6 +593,7 @@
         background: #ef4444;
         border-color: #ef4444;
         color: white;
+        box-shadow: 0 2px 6px rgba(239, 68, 68, 0.3);
     }
 
     /* Edit Memory Modal */
@@ -490,6 +624,98 @@
         max-height: 80vh;
         overflow-y: auto;
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    .memory-explorer-modal-content {
+        max-width: 800px;
+        width: 95%;
+    }
+
+    .memory-explorer-body {
+        display: flex;
+        flex-direction: column;
+        gap: 15px;
+    }
+
+    .memory-explorer-toolbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding-bottom: 12px;
+        border-bottom: 1px solid var(--mongodb-border);
+    }
+
+    .active-context-panel {
+        flex: 0 0 auto;
+        max-height: 35%;
+        min-height: 200px;
+    }
+
+    .memory-explorer-panel {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        overflow: hidden;
+    }
+
+    .memory-explorer-content {
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+        min-height: 0;
+        overflow: hidden;
+    }
+
+    .memory-explorer-content.collapsed {
+        display: none;
+    }
+
+    .memory-explorer-list {
+        flex: 1;
+        overflow-y: auto;
+        min-height: 0;
+        padding-right: 4px;
+    }
+
+    .memory-action-icon {
+        background: var(--mongodb-bg-tertiary);
+        border: 1px solid var(--mongodb-border);
+        border-radius: 4px;
+        padding: 4px 8px;
+        cursor: pointer;
+        font-size: 14px;
+        transition: all 0.2s ease;
+        color: var(--mongodb-text);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        opacity: 0.8;
+    }
+
+    .memory-action-icon:hover {
+        background: var(--mongodb-green);
+        opacity: 1;
+        border-color: var(--mongodb-green);
+        color: white;
+        transform: scale(1.1);
+    }
+
+    .memory-search-input {
+        width: 100%;
+        padding: 8px 12px;
+        font-size: 12px;
+        background: var(--mongodb-bg-tertiary);
+        border: 1px solid var(--mongodb-border);
+        border-radius: 6px;
+        color: var(--mongodb-text);
+        transition: all 0.2s ease;
+    }
+
+    .memory-search-input:focus {
+        outline: none;
+        border-color: var(--mongodb-green);
+        box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.1);
     }
 
     .modal-header {
@@ -602,14 +828,24 @@
     }
 
     .metadata-tag {
-        padding: 2px 6px;
-        background: var(--mongodb-bg-secondary);
-        border-radius: 4px;
+        display: inline-block;
+        padding: 3px 8px;
+        background: rgba(16, 185, 129, 0.08);
+        border: 1px solid rgba(16, 185, 129, 0.2);
+        border-radius: 12px;
         font-size: 10px;
+        color: var(--mongodb-text);
+        transition: all 0.2s ease;
     }
 
-    /* Mem0 Operations Badge */
-    .mem0-ops-badge {
+    .metadata-tag:hover {
+        background: rgba(16, 185, 129, 0.15);
+        border-color: rgba(16, 185, 129, 0.4);
+        transform: translateY(-1px);
+    }
+
+    /* Memory Operations Badge */
+    .memory-ops-badge {
         display: inline-flex;
         align-items: center;
         gap: 4px;
@@ -622,9 +858,134 @@
         margin-left: 8px;
     }
 
-    .mem0-ops-badge::before {
+    .memory-ops-badge::before {
         content: "🔍";
         font-size: 12px;
+    }
+
+    /* Memory extraction pending indicator - animated to show background processing */
+    .memory-ops-badge.memory-extraction-pending {
+        background: rgba(16, 185, 129, 0.15);
+        border-color: var(--mongodb-green);
+        color: var(--mongodb-green);
+        animation: memoryExtractionPulse 1.5s ease-in-out infinite;
+    }
+    
+    .memory-ops-badge.memory-extraction-pending::before {
+        content: "";
+        font-size: 0;
+    }
+    
+    @keyframes memoryExtractionPulse {
+        0%, 100% { 
+            opacity: 1; 
+            border-color: var(--mongodb-green);
+        }
+        50% { 
+            opacity: 0.7; 
+            border-color: rgba(16, 185, 129, 0.8);
+        }
+    }
+
+    /* Extraction Status Indicator in Chat */
+    .extraction-status-container {
+        padding: 12px 20px;
+        animation: slideInUp 0.3s ease-out;
+    }
+    
+    @keyframes slideInUp {
+        from {
+            opacity: 0;
+            transform: translateY(20px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+    
+    .extraction-status-card {
+        background: rgba(0, 237, 100, 0.08);
+        border: 1px solid var(--mongodb-green);
+        border-radius: 12px;
+        padding: 16px;
+        max-width: 400px;
+        margin-left: auto;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    }
+    
+    .extraction-status-header {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 8px;
+    }
+    
+    .extraction-status-icon {
+        font-size: 20px;
+        animation: iconPulse 1s ease-in-out infinite;
+    }
+    
+    @keyframes iconPulse {
+        0%, 100% { transform: scale(1); }
+        50% { transform: scale(1.1); }
+    }
+    
+    .extraction-status-title {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--mongodb-text);
+        flex: 1;
+    }
+    
+    .extraction-status-progress {
+        font-size: 12px;
+        font-weight: 700;
+        color: var(--mongodb-green);
+        background: rgba(0, 237, 100, 0.15);
+        padding: 2px 8px;
+        border-radius: 10px;
+    }
+    
+    .extraction-status-message {
+        font-size: 14px;
+        margin-bottom: 10px;
+        color: var(--mongodb-green);
+    }
+    
+    .extraction-status-bar {
+        height: 4px;
+        background: var(--mongodb-bg-tertiary);
+        border-radius: 2px;
+        overflow: hidden;
+        margin-bottom: 8px;
+    }
+    
+    .extraction-status-bar-fill {
+        height: 100%;
+        background: var(--mongodb-green);
+        border-radius: 2px;
+        transition: width 0.3s ease-out;
+    }
+    
+    .extraction-previews {
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 1px solid var(--mongodb-border);
+    }
+    
+    .extraction-preview-item {
+        font-size: 12px;
+        color: var(--mongodb-text-secondary);
+        padding: 6px 10px;
+        margin-bottom: 4px;
+        background: var(--mongodb-bg-tertiary);
+        border-radius: 6px;
+        line-height: 1.4;
+    }
+    
+    .extraction-preview-item:last-child {
+        margin-bottom: 0;
     }
 
     /* Filter Controls */
@@ -634,6 +995,7 @@
         background: var(--mongodb-bg-tertiary);
         border-radius: 4px;
         font-size: 11px;
+        flex-shrink: 0;
     }
 
     .filter-group {
@@ -660,6 +1022,531 @@
         border-radius: 4px;
         font-size: 11px;
         color: var(--mongodb-text);
+    }
+
+    /* =========================================
+       COGNITIVE MEMORY EXPLORER - TAB STYLES
+       ========================================= */
+    
+    .memory-tabs {
+        display: flex;
+        gap: 2px;
+        background: var(--mongodb-bg-tertiary);
+        border-radius: 8px;
+        padding: 4px;
+        margin-bottom: 12px;
+        flex-shrink: 0;
+    }
+
+    .memory-tab {
+        flex: 1;
+        padding: 8px 4px;
+        border: none;
+        background: transparent;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 11px;
+        font-weight: 500;
+        color: var(--mongodb-text-secondary);
+        transition: all 0.2s ease;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 2px;
+    }
+
+    .memory-tab:hover {
+        background: var(--mongodb-bg-secondary);
+        color: var(--mongodb-text);
+    }
+
+    .memory-tab.active {
+        background: var(--mongodb-green);
+        color: white;
+        box-shadow: 0 2px 4px rgba(16, 185, 129, 0.3);
+    }
+
+    .memory-tab-icon {
+        font-size: 16px;
+    }
+
+    .memory-tab-label {
+        font-size: 9px;
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
+    }
+
+    .memory-tab-content {
+        display: none;
+        flex: 1;
+        overflow: hidden;
+        flex-direction: column;
+    }
+
+    .memory-tab-content.active {
+        display: flex;
+    }
+
+    /* =========================================
+       ENHANCED MEMORY CARDS - COGNITIVE METRICS
+       ========================================= */
+
+    .memory-item-enhanced {
+        padding: 12px;
+        margin-bottom: 10px;
+        background: var(--mongodb-bg-tertiary);
+        border: 1px solid var(--mongodb-border);
+        border-radius: 8px;
+        font-size: 13px;
+        position: relative;
+        transition: all 0.2s ease;
+        cursor: pointer;
+    }
+
+    .memory-item-enhanced:hover {
+        border-color: var(--mongodb-green);
+        transform: translateX(2px);
+    }
+
+    .memory-item-enhanced.weak {
+        border-left: 3px solid #ef4444;
+    }
+
+    .memory-item-enhanced.strong {
+        border-left: 3px solid var(--mongodb-green);
+    }
+
+    .memory-item-enhanced.medium {
+        border-left: 3px solid #f59e0b;
+    }
+
+    .memory-text {
+        margin-bottom: 8px;
+        line-height: 1.5;
+        color: var(--mongodb-text);
+    }
+
+    .memory-cognitive-metrics {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 6px;
+        margin-top: 8px;
+        padding-top: 8px;
+        border-top: 1px solid var(--mongodb-border);
+    }
+
+    .metric-item {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 10px;
+    }
+
+    .metric-label {
+        color: var(--mongodb-text-secondary);
+        min-width: 55px;
+    }
+
+    .metric-bar {
+        flex: 1;
+        height: 6px;
+        background: var(--mongodb-bg);
+        border-radius: 3px;
+        overflow: hidden;
+    }
+
+    .metric-fill {
+        height: 100%;
+        border-radius: 3px;
+        transition: width 0.3s ease;
+    }
+
+    .metric-fill.importance {
+        background: linear-gradient(90deg, #f59e0b, var(--mongodb-green));
+    }
+
+    .metric-fill.strength {
+        background: linear-gradient(90deg, #ef4444, #f59e0b, var(--mongodb-green));
+    }
+
+    .metric-fill.stability {
+        background: linear-gradient(90deg, #8b5cf6, #3b82f6);
+    }
+
+    .metric-value {
+        font-weight: 600;
+        min-width: 35px;
+        text-align: right;
+        color: var(--mongodb-text);
+    }
+
+    .memory-access-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        padding: 2px 6px;
+        background: rgba(59, 130, 246, 0.1);
+        border: 1px solid rgba(59, 130, 246, 0.3);
+        border-radius: 10px;
+        font-size: 9px;
+        color: #3b82f6;
+    }
+
+    .memory-category-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        padding: 2px 6px;
+        background: rgba(16, 185, 129, 0.1);
+        border: 1px solid rgba(16, 185, 129, 0.3);
+        border-radius: 10px;
+        font-size: 9px;
+        color: var(--mongodb-green);
+    }
+
+    .memory-badges {
+        display: flex;
+        gap: 4px;
+        flex-wrap: wrap;
+        margin-top: 6px;
+    }
+
+    /* =========================================
+       ANALYTICS DASHBOARD
+       ========================================= */
+
+    .analytics-dashboard {
+        padding: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        overflow-y: auto;
+    }
+
+    .analytics-card {
+        background: var(--mongodb-bg-tertiary);
+        border: 1px solid var(--mongodb-border);
+        border-radius: 8px;
+        padding: 12px;
+    }
+
+    .analytics-card-title {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--mongodb-text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 10px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .analytics-stat-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 8px;
+    }
+
+    .analytics-stat {
+        text-align: center;
+        padding: 10px;
+        background: var(--mongodb-bg);
+        border-radius: 6px;
+    }
+
+    .analytics-stat-value {
+        font-size: 20px;
+        font-weight: 700;
+        color: var(--mongodb-green);
+    }
+
+    .analytics-stat-label {
+        font-size: 10px;
+        color: var(--mongodb-text-secondary);
+        margin-top: 2px;
+    }
+
+    .analytics-stat.danger .analytics-stat-value {
+        color: #ef4444;
+    }
+
+    .analytics-stat.warning .analytics-stat-value {
+        color: #f59e0b;
+    }
+
+    .analytics-gauge {
+        height: 8px;
+        background: var(--mongodb-bg);
+        border-radius: 4px;
+        overflow: hidden;
+        margin: 8px 0;
+    }
+
+    .analytics-gauge-fill {
+        height: 100%;
+        background: var(--mongodb-green);
+        border-radius: 4px;
+        transition: width 0.5s ease;
+    }
+
+    .analytics-gauge-label {
+        display: flex;
+        justify-content: space-between;
+        font-size: 10px;
+        color: var(--mongodb-text-secondary);
+    }
+
+    .category-chart {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    }
+
+    .category-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .category-name {
+        font-size: 11px;
+        min-width: 80px;
+        color: var(--mongodb-text);
+    }
+
+    .category-bar {
+        flex: 1;
+        height: 12px;
+        background: var(--mongodb-bg);
+        border-radius: 6px;
+        overflow: hidden;
+    }
+
+    .category-bar-fill {
+        height: 100%;
+        border-radius: 6px;
+    }
+
+    .category-count {
+        font-size: 10px;
+        font-weight: 600;
+        min-width: 25px;
+        text-align: right;
+        color: var(--mongodb-text);
+    }
+
+    /* =========================================
+       COLD STORAGE TAB
+       ========================================= */
+
+    .cold-storage-list {
+        flex: 1;
+        overflow-y: auto;
+        padding: 8px;
+    }
+
+    .cold-storage-item {
+        padding: 10px;
+        margin-bottom: 8px;
+        background: var(--mongodb-bg-tertiary);
+        border: 1px solid var(--mongodb-border);
+        border-left: 3px solid #6b7280;
+        border-radius: 6px;
+        opacity: 0.8;
+    }
+
+    .cold-storage-item:hover {
+        opacity: 1;
+        border-color: var(--mongodb-green);
+    }
+
+    .cold-storage-text {
+        font-size: 12px;
+        color: var(--mongodb-text);
+        margin-bottom: 6px;
+    }
+
+    .cold-storage-meta {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 10px;
+        color: var(--mongodb-text-secondary);
+    }
+
+    .restore-btn {
+        padding: 4px 8px;
+        background: rgba(16, 185, 129, 0.1);
+        border: 1px solid var(--mongodb-green);
+        border-radius: 4px;
+        color: var(--mongodb-green);
+        font-size: 10px;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+
+    .restore-btn:hover {
+        background: var(--mongodb-green);
+        color: white;
+    }
+
+    .pruning-reason {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        padding: 2px 6px;
+        background: rgba(107, 114, 128, 0.1);
+        border-radius: 10px;
+        font-size: 9px;
+    }
+
+    /* =========================================
+       GRAPH EXPLORER TAB
+       ========================================= */
+
+    .graph-explorer {
+        padding: 12px;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+
+    .graph-stats-card {
+        background: var(--mongodb-bg-tertiary);
+        border: 1px solid var(--mongodb-border);
+        border-radius: 8px;
+        padding: 12px;
+    }
+
+    .graph-stats-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+    }
+
+    .graph-stat {
+        text-align: center;
+        padding: 8px;
+        background: var(--mongodb-bg);
+        border-radius: 6px;
+    }
+
+    .graph-stat-value {
+        font-size: 18px;
+        font-weight: 700;
+        color: #3b82f6;
+    }
+
+    .graph-stat-label {
+        font-size: 9px;
+        color: var(--mongodb-text-secondary);
+    }
+
+    .graph-filter {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        margin-bottom: 8px;
+    }
+
+    .graph-filter-select {
+        flex: 1;
+        padding: 6px 10px;
+        background: var(--mongodb-bg-tertiary);
+        border: 1px solid var(--mongodb-border);
+        border-radius: 4px;
+        font-size: 11px;
+        color: var(--mongodb-text);
+    }
+
+    .graph-nodes-list {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .graph-node {
+        padding: 10px;
+        background: var(--mongodb-bg-tertiary);
+        border: 1px solid var(--mongodb-border);
+        border-radius: 6px;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+
+    .graph-node:hover {
+        border-color: #3b82f6;
+        transform: translateX(2px);
+    }
+
+    .graph-node-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 6px;
+    }
+
+    .graph-node-type {
+        padding: 2px 6px;
+        background: rgba(59, 130, 246, 0.1);
+        border-radius: 10px;
+        font-size: 9px;
+        color: #3b82f6;
+        text-transform: uppercase;
+    }
+
+    .graph-node-name {
+        font-weight: 600;
+        color: var(--mongodb-text);
+        font-size: 13px;
+    }
+
+    .graph-node-edges {
+        font-size: 10px;
+        color: var(--mongodb-text-secondary);
+    }
+
+    .graph-edge-tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        padding: 2px 6px;
+        background: var(--mongodb-bg);
+        border-radius: 10px;
+        margin-right: 4px;
+        margin-bottom: 4px;
+    }
+
+    /* Node type colors */
+    .graph-node-type.person { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
+    .graph-node-type.interest { background: rgba(16, 185, 129, 0.1); color: var(--mongodb-green); }
+    .graph-node-type.event { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
+    .graph-node-type.location { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
+    .graph-node-type.organization { background: rgba(139, 92, 246, 0.1); color: #8b5cf6; }
+
+    .empty-tab-state {
+        text-align: center;
+        padding: 30px 20px;
+        color: var(--mongodb-text-secondary);
+        font-size: 12px;
+    }
+
+    .empty-tab-state-icon {
+        font-size: 32px;
+        margin-bottom: 10px;
+        opacity: 0.5;
+    }
+
+    .loading-spinner {
+        display: inline-block;
+        width: 16px;
+        height: 16px;
+        border: 2px solid var(--mongodb-border);
+        border-top-color: var(--mongodb-green);
+        border-radius: 50%;
+        animation: spin 0.6s linear infinite;
     }
 </style>
 {% endblock %}
@@ -714,84 +1601,233 @@
     <!-- Memory Sidebar -->
     <div class="memory-sidebar">
         <!-- Active Memory Context -->
-        <div class="memory-panel">
+        <div class="memory-panel active-context-panel">
             <div class="memory-panel-header">
-                <div class="memory-panel-title">Memory Explorer</div>
-                <div class="memory-explorer-actions">
-                    <button class="refresh-memories-btn inject-btn" onclick="showInjectMemoryModal()" title="Inject Memory (Add without LLM inference)">💉</button>
-                    <button class="refresh-memories-btn" onclick="manualRefreshMemories()" title="Refresh memories">🔄</button>
-                </div>
+                <div class="memory-panel-title">Active Context</div>
             </div>
-
-            <!-- Metadata Filters -->
-            <div class="memory-filters" id="memory-filters">
-                <div class="filter-group">
-                    <span class="filter-label">Filter by:</span>
-                    <select class="filter-select" id="metadata-filter" onchange="applyMetadataFilter()">
-                        <option value="">All memories</option>
-                        <option value="conversations_app">From conversations</option>
-                    </select>
-                </div>
-            </div>
-
-            <div style="margin-bottom: 10px;">
-                <input
-                    type="text"
-                    id="memory-search-input"
-                    placeholder="Semantic search memories..."
-                    style="width: 100%; padding: 6px; font-size: 12px; background: var(--mongodb-bg-tertiary); border: 1px solid var(--mongodb-border); border-radius: 4px; color: var(--mongodb-text);"
-                    onkeyup="searchMemories(event)"
-                >
-            </div>
-            <div id="memory-context-list">
-                <div class="empty-memory-state">No active memories yet. Start chatting to build context!</div>
+            <div class="memory-panel-content" id="active-context-list">
+                <div class="empty-memory-state helpful">No active context yet.<br>Send a message to see memories in use!</div>
             </div>
         </div>
 
-        <!-- Mem0 Activity Log -->
-        <div class="mem0-activity-log">
-            <div class="mem0-activity-title">Mem0 Activity Log</div>
-            <div id="activity-log-content">
-                <div class="empty-memory-state">No activity yet. Start a conversation to see Mem0 in action!</div>
+        <!-- Cognitive Memory Explorer (Tabbed) -->
+        <div class="memory-panel memory-explorer-panel">
+            <div class="memory-panel-header">
+                <div class="memory-panel-title">Cognitive Memory Explorer</div>
+                <div class="memory-explorer-actions">
+                    <button class="memory-action-icon" onclick="showInjectMemoryModal()" title="Inject Memory">💉</button>
+                    <button class="memory-action-icon" onclick="refreshCurrentTab()" title="Refresh">🔄</button>
+                </div>
+            </div>
+            
+            <!-- Tab Navigation -->
+            <div class="memory-tabs">
+                <button class="memory-tab active" onclick="switchMemoryTab('memories')" data-tab="memories">
+                    <span class="memory-tab-icon">💭</span>
+                    <span class="memory-tab-label">Memories</span>
+                </button>
+                <button class="memory-tab" onclick="switchMemoryTab('analytics')" data-tab="analytics">
+                    <span class="memory-tab-icon">📊</span>
+                    <span class="memory-tab-label">Analytics</span>
+                </button>
+                <button class="memory-tab" onclick="switchMemoryTab('cold')" data-tab="cold">
+                    <span class="memory-tab-icon">❄️</span>
+                    <span class="memory-tab-label">Cold</span>
+                </button>
+                <button class="memory-tab" onclick="switchMemoryTab('graph')" data-tab="graph">
+                    <span class="memory-tab-icon">🕸️</span>
+                    <span class="memory-tab-label">Graph</span>
+                </button>
+            </div>
+
+            <div id="memory-explorer-content" class="memory-explorer-content">
+                <!-- ===== MEMORIES TAB ===== -->
+                <div class="memory-tab-content active" id="tab-memories">
+                    <!-- Search Input -->
+                    <div style="margin-bottom: 10px; flex-shrink: 0;">
+                        <input
+                            type="text"
+                            id="memory-search-input"
+                            placeholder="🔍 Search memories semantically..."
+                            class="memory-search-input"
+                            onkeyup="searchMemories(event)"
+                        >
+                    </div>
+                    
+                    <!-- Filters -->
+                    <div class="memory-filters" id="memory-filters">
+                        <div class="filter-group">
+                            <span class="filter-label">Filter:</span>
+                            <select class="filter-select" id="metadata-filter" onchange="applyMetadataFilter()">
+                                <option value="">All memories</option>
+                                <option value="conversations_app">From conversations</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Memory List -->
+                    <div id="memory-explorer-list" class="memory-explorer-list">
+                        <div class="empty-memory-state helpful">No memories yet.<br>Start chatting to build context!</div>
+                    </div>
+                </div>
+
+                <!-- ===== ANALYTICS TAB ===== -->
+                <div class="memory-tab-content" id="tab-analytics">
+                    <div class="analytics-dashboard" id="analytics-dashboard">
+                        <div class="empty-tab-state">
+                            <div class="empty-tab-state-icon">📊</div>
+                            <div>Loading analytics...</div>
+                            <div class="loading-spinner" style="margin-top: 10px;"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ===== COLD STORAGE TAB ===== -->
+                <div class="memory-tab-content" id="tab-cold">
+                    <div class="cold-storage-list" id="cold-storage-list">
+                        <div class="empty-tab-state">
+                            <div class="empty-tab-state-icon">❄️</div>
+                            <div>Loading cold storage...</div>
+                            <div class="loading-spinner" style="margin-top: 10px;"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ===== GRAPH EXPLORER TAB ===== -->
+                <div class="memory-tab-content" id="tab-graph">
+                    <div class="graph-explorer" id="graph-explorer">
+                        <div class="empty-tab-state">
+                            <div class="empty-tab-state-icon">🕸️</div>
+                            <div>Loading knowledge graph...</div>
+                            <div class="loading-spinner" style="margin-top: 10px;"></div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
 </div>
 
-<!-- Inject Memory Modal -->
+<!-- Inject Memory Modal - Enhanced with Categories and Importance -->
 <div id="inject-memory-modal" class="modal-overlay" onclick="if(event.target.id === 'inject-memory-modal') closeInjectModal()">
-    <div class="modal-content" onclick="event.stopPropagation()">
+    <div class="modal-content" onclick="event.stopPropagation()" style="max-width: 550px;">
         <div class="modal-header">
             <h3 class="modal-title">💉 Inject Memory</h3>
             <button class="modal-close" onclick="closeInjectModal()">&times;</button>
         </div>
         <form id="inject-memory-form" onsubmit="injectMemory(event)">
             <div class="modal-form-group">
-                <label class="modal-label" for="inject-memory-text">Memory Content</label>
+                <label class="modal-label" for="inject-memory-text">Memory Content *</label>
                 <textarea 
                     id="inject-memory-text" 
                     class="modal-textarea" 
                     name="memory"
                     required
-                    placeholder="Enter memory content to inject (e.g., 'User prefers dark mode', 'Project deadline is Friday')..."
+                    rows="3"
+                    placeholder="Enter memory content (e.g., 'User prefers dark mode', 'Project deadline is Friday')..."
                 ></textarea>
                 <small style="display: block; margin-top: 6px; opacity: 0.7; font-size: 12px;">
-                    This will be stored directly without LLM inference. Use for facts, preferences, or structured data.
+                    Stored directly without LLM processing. Use for facts, preferences, or structured data.
                 </small>
             </div>
+            
+            <!-- Category Selection -->
             <div class="modal-form-group">
-                <label class="modal-label" for="inject-memory-metadata">Metadata (Optional)</label>
-                <input
-                    type="text"
-                    id="inject-memory-metadata"
-                    class="modal-textarea"
-                    placeholder='JSON format: {"source": "manual", "category": "preference"}'
-                    style="min-height: 40px; font-family: monospace; font-size: 12px;"
-                >
-                <small style="display: block; margin-top: 6px; opacity: 0.7; font-size: 12px;">
-                    Optional metadata as JSON object
-                </small>
+                <label class="modal-label" for="inject-category">Category</label>
+                <div class="category-grid" id="category-grid">
+                    <button type="button" class="category-btn" data-category="biographical" onclick="selectCategory(this)">
+                        <span class="category-icon">👤</span>
+                        <span class="category-name">Biographical</span>
+                    </button>
+                    <button type="button" class="category-btn" data-category="preferences" onclick="selectCategory(this)">
+                        <span class="category-icon">❤️</span>
+                        <span class="category-name">Preferences</span>
+                    </button>
+                    <button type="button" class="category-btn" data-category="temporal" onclick="selectCategory(this)">
+                        <span class="category-icon">📅</span>
+                        <span class="category-name">Temporal</span>
+                    </button>
+                    <button type="button" class="category-btn" data-category="relational" onclick="selectCategory(this)">
+                        <span class="category-icon">👥</span>
+                        <span class="category-name">Relational</span>
+                    </button>
+                    <button type="button" class="category-btn" data-category="work" onclick="selectCategory(this)">
+                        <span class="category-icon">💼</span>
+                        <span class="category-name">Work</span>
+                    </button>
+                    <button type="button" class="category-btn" data-category="health" onclick="selectCategory(this)">
+                        <span class="category-icon">🏥</span>
+                        <span class="category-name">Health</span>
+                    </button>
+                    <button type="button" class="category-btn" data-category="finance" onclick="selectCategory(this)">
+                        <span class="category-icon">💰</span>
+                        <span class="category-name">Finance</span>
+                    </button>
+                    <button type="button" class="category-btn selected" data-category="general" onclick="selectCategory(this)">
+                        <span class="category-icon">📝</span>
+                        <span class="category-name">General</span>
+                    </button>
+                </div>
+                <input type="hidden" id="inject-category" value="general">
             </div>
+            
+            <!-- Importance Slider -->
+            <div class="modal-form-group">
+                <label class="modal-label" for="inject-importance">
+                    Importance: <span id="importance-value" style="font-weight: bold; color: var(--primary-color);">0.5</span>
+                </label>
+                <input 
+                    type="range" 
+                    id="inject-importance" 
+                    min="0.1" 
+                    max="1.0" 
+                    step="0.1" 
+                    value="0.5"
+                    class="importance-slider"
+                    oninput="updateImportanceDisplay(this.value)"
+                >
+                <div style="display: flex; justify-content: space-between; font-size: 11px; opacity: 0.6; margin-top: 4px;">
+                    <span>Low (0.1)</span>
+                    <span>Medium (0.5)</span>
+                    <span>High (1.0)</span>
+                </div>
+            </div>
+            
+            <!-- Advanced Options (Collapsible) -->
+            <details class="advanced-options">
+                <summary style="cursor: pointer; font-weight: 500; margin-bottom: 12px; color: var(--primary-color);">
+                    ⚙️ Advanced Options
+                </summary>
+                <div class="modal-form-group">
+                    <label class="modal-label" for="inject-bucket-id">Bucket ID (Optional)</label>
+                    <input
+                        type="text"
+                        id="inject-bucket-id"
+                        class="modal-input"
+                        placeholder="Auto-generated from category if empty"
+                    >
+                </div>
+                <div class="modal-form-group">
+                    <label class="modal-label" for="inject-bucket-type">Bucket Type</label>
+                    <select id="inject-bucket-type" class="modal-input">
+                        <option value="general">General</option>
+                        <option value="category" selected>Category</option>
+                        <option value="conversation">Conversation</option>
+                        <option value="file">File</option>
+                    </select>
+                </div>
+                <div class="modal-form-group">
+                    <label class="modal-label" for="inject-memory-metadata">Custom Metadata (JSON)</label>
+                    <input
+                        type="text"
+                        id="inject-memory-metadata"
+                        class="modal-input"
+                        placeholder='{"verified": true, "source": "user_input"}'
+                        style="font-family: monospace; font-size: 12px;"
+                    >
+                </div>
+            </details>
+            
             <div class="modal-actions">
                 <button type="button" class="modal-btn modal-btn-secondary" onclick="closeInjectModal()">Cancel</button>
                 <button type="submit" class="modal-btn modal-btn-primary">💉 Inject Memory</button>
@@ -799,6 +1835,99 @@
         </form>
     </div>
 </div>
+
+<style>
+/* Category Grid Styles */
+.category-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.category-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 10px 6px;
+    border: 2px solid var(--border-color, #ddd);
+    border-radius: 8px;
+    background: var(--bg-secondary, #f8f9fa);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.category-btn:hover {
+    border-color: var(--primary-color, #4a9eff);
+    background: var(--bg-hover, #e9ecef);
+}
+
+.category-btn.selected {
+    border-color: var(--primary-color, #4a9eff);
+    background: var(--primary-light, #e3f2fd);
+}
+
+.category-icon {
+    font-size: 20px;
+    margin-bottom: 4px;
+}
+
+.category-name {
+    font-size: 11px;
+    font-weight: 500;
+    text-align: center;
+}
+
+/* Importance Slider */
+.importance-slider {
+    width: 100%;
+    height: 8px;
+    border-radius: 4px;
+    background: linear-gradient(to right, #4caf50 0%, #ffeb3b 50%, #f44336 100%);
+    outline: none;
+    -webkit-appearance: none;
+    margin-top: 8px;
+}
+
+.importance-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: white;
+    border: 3px solid var(--primary-color, #4a9eff);
+    cursor: pointer;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+.importance-slider::-moz-range-thumb {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: white;
+    border: 3px solid var(--primary-color, #4a9eff);
+    cursor: pointer;
+}
+
+/* Advanced Options */
+.advanced-options {
+    margin-top: 16px;
+    padding: 12px;
+    background: var(--bg-secondary, #f8f9fa);
+    border-radius: 8px;
+    border: 1px solid var(--border-color, #ddd);
+}
+
+.advanced-options summary {
+    user-select: none;
+}
+
+.advanced-options[open] summary {
+    margin-bottom: 16px;
+}
+</style>
+
+<!-- Memory Explorer Modal removed - now using inline explorer in sidebar -->
 
 <!-- Edit Memory Modal -->
 <div id="edit-memory-modal" class="modal-overlay" onclick="if(event.target.id === 'edit-memory-modal') closeEditModal()">
@@ -817,11 +1946,14 @@
                     required
                     placeholder="Enter memory content..."
                 ></textarea>
+                <small style="display: block; margin-top: 6px; opacity: 0.7; font-size: 12px;">
+                    Update the memory content. Existing metadata is preserved automatically.
+                </small>
             </div>
             <div class="modal-actions">
-                <button type="button" class="modal-btn modal-btn-danger" onclick="deleteMemory()">🗑️ Delete</button>
-                <button type="button" class="modal-btn modal-btn-secondary" onclick="closeEditModal()">Cancel</button>
-                <button type="submit" class="modal-btn modal-btn-primary">Save Changes</button>
+                <button type="button" id="edit-delete-btn" class="modal-btn modal-btn-danger" onclick="deleteMemory()">🗑️ Delete</button>
+                <button type="button" id="edit-cancel-btn" class="modal-btn modal-btn-secondary" onclick="closeEditModal()">Cancel</button>
+                <button type="submit" id="edit-save-btn" class="modal-btn modal-btn-primary">Save Changes</button>
             </div>
         </form>
     </div>
@@ -858,18 +1990,60 @@ let memoryWebSocket = null;
 let wsReconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 5;
 
-function connectMemoryWebSocket() {
+async function getWebSocketTicket() {
     try {
-        // Get WebSocket URL - mdb-engine WebSocket configured to allow anonymous
-        // Cookies are sent automatically by browser (HttpOnly cookies work for WebSocket)
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${protocol}//${window.location.host}/ws`;
+        // Just try to get the ticket - let the server handle authentication
+        // This matches the advanced example pattern
+        const response = await fetch('/auth/ticket', {
+            method: 'POST',
+            credentials: 'include', // Sends JWT cookie automatically
+        });
+        
+        if (!response.ok) {
+            if (response.status === 401) {
+                console.log('[WebSocket] Authentication required - user not logged in');
+                return null;
+            }
+            console.error('[WebSocket] Failed to get ticket:', response.status, response.statusText);
+            return null;
+        }
+        
+        const data = await response.json();
+        if (!data.ticket) {
+            console.error('[WebSocket] Ticket response missing ticket field:', data);
+            return null;
+        }
+        console.log('[WebSocket] ✅ Ticket obtained successfully');
+        return data.ticket;
+    } catch (error) {
+        console.error('[WebSocket] Error getting ticket:', error);
+        return null;
+    }
+}
 
-        console.log('Connecting to memory WebSocket:', wsUrl);
+async function connectMemoryWebSocket() {
+    try {
+        // Get WebSocket ticket for authentication (ticket-based auth)
+        // Just try it - if it fails, we'll fall back to polling
+        console.log('[WebSocket] 🔐 Getting authentication ticket...');
+        const ticket = await getWebSocketTicket();
+        
+        if (!ticket) {
+            console.log('[WebSocket] No ticket available - falling back to polling');
+            addActivityLog('search', 'WebSocket unavailable - using polling', false);
+            startPollingFallback();
+            return;
+        }
+        
+        // Connect with ticket authentication
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/ws?ticket=${ticket}`;
+
+        console.log('[WebSocket] 🔌 Connecting with ticket authentication...');
         memoryWebSocket = new WebSocket(wsUrl);
 
         memoryWebSocket.onopen = () => {
-            console.log('Memory WebSocket connected');
+            console.log('[WebSocket] ✅ Connected successfully with ticket authentication');
             wsReconnectAttempts = 0;
             addActivityLog('search', 'WebSocket connected for real-time updates', true);
         };
@@ -877,9 +2051,10 @@ function connectMemoryWebSocket() {
         memoryWebSocket.onmessage = (event) => {
             try {
                 const data = JSON.parse(event.data);
+                console.log('[WebSocket] 📨 Raw message received:', data);
                 handleWebSocketMessage(data);
             } catch (error) {
-                console.error('Failed to parse WebSocket message:', error);
+                console.error('[WebSocket] ❌ Failed to parse WebSocket message:', error, 'Raw data:', event.data);
             }
         };
 
@@ -887,18 +2062,18 @@ function connectMemoryWebSocket() {
             console.error('WebSocket error:', error);
         };
 
-        memoryWebSocket.onclose = () => {
-            console.log('Memory WebSocket disconnected');
+        memoryWebSocket.onclose = (event) => {
+            console.log('[WebSocket] Disconnected:', event.code, event.reason);
             memoryWebSocket = null;
 
-            // Attempt to reconnect
+            // Attempt to reconnect (will get a new ticket each time)
             if (wsReconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
                 wsReconnectAttempts++;
                 const delay = Math.min(1000 * Math.pow(2, wsReconnectAttempts), 10000); // Exponential backoff, max 10s
-                console.log(`Reconnecting WebSocket in ${delay}ms (attempt ${wsReconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
+                console.log(`[WebSocket] Reconnecting in ${delay}ms (attempt ${wsReconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
                 setTimeout(connectMemoryWebSocket, delay);
             } else {
-                console.error('Max WebSocket reconnect attempts reached');
+                console.error('[WebSocket] Max reconnect attempts reached');
                 addActivityLog('search', 'WebSocket connection lost - using polling fallback', false);
                 // Fallback to polling if WebSocket fails
                 startPollingFallback();
@@ -920,25 +2095,51 @@ function handleWebSocketMessage(data) {
                 addActivityLog('search', 'WebSocket connected for real-time updates', true);
                 break;
 
-            case 'memory_stored':
-                console.log('[WebSocket] Memory stored event:', data);
-                addActivityLog('store', data.message || `Mem0 extracted ${data.memory_count || 0} memories`, true);
+            case 'memory_progress':
+                // Handle granular progress updates
+                console.log('📊 Memory progress:', data.stage, data.message, `${data.progress}%`);
+                updateExtractionStatusInChat(data);
+                break;
 
-                // If memory data is included, update UI immediately
+            case 'memory_extraction_status':
+                // Handle step-by-step status updates from background extraction
+                // DISABLED - We use memory_progress now to avoid duplicates
+                // console.log('🧠 Memory extraction status:', data.stage, data.message, `${data.progress}%`);
+                // updateExtractionStatusInChat(data);
+                // addActivityLog('info', data.message, false);
+                break;
+
+            case 'memory_stored':
+                console.log('[WebSocket] ✅ Memory stored event received:', data);
+                console.log('[WebSocket] 📊 Memory data:', {
+                    memory_count: data.memory_count,
+                    new_memories_count: data.new_memories?.length || 0,
+                    all_memories_count: data.all_memories?.length || 0,
+                    user_id: data.user_id,
+                    message: data.message
+                });
+                
+                // Remove extraction status indicator when complete
+                removeExtractionStatusFromChat();
+                
+                const memoryCount = data.memory_count || data.new_memories?.length || 0;
+                addActivityLog('success', data.message || `Memory service extracted ${memoryCount} memories`, true);
+
+                // ALWAYS refresh the memory explorer when memories are stored
+                // Use a delay to ensure DB write has completed
+                console.log('[WebSocket] ⏳ Scheduling memory explorer refresh in 800ms...');
+                setTimeout(() => {
+                    console.log('[WebSocket] 🔄 Executing memory explorer refresh now');
+                    const filter = document.getElementById('metadata-filter')?.value || null;
+                    refreshMemoryExplorer(filter);
+                }, 800); // Delay to ensure DB write completes
+                
+                // If memory data is included, also update UI immediately for instant feedback
                 if (data.all_memories && Array.isArray(data.all_memories) && data.all_memories.length > 0) {
-                    console.log('[WebSocket] Updating memories immediately from WebSocket data');
+                    console.log('[WebSocket] 📦 Updating memories immediately from WebSocket data:', data.all_memories.length, 'memories');
                     displayMemories(data.all_memories);
                 } else {
-                    // Fallback: refresh memories if data not included
-                    isWaitingForNewMemories = true;
-                    memoryRefreshRetryCount = 0;
-
-                    // Shorter delay since we're already waiting 0.3s on backend
-                    setTimeout(() => {
-                        console.log('[WebSocket] Refreshing memories after memory_stored event (0.5s delay)');
-                        const filter = document.getElementById('metadata-filter')?.value || null;
-                        refreshMemories(filter, 0, false);
-                    }, 500); // Reduced delay for faster updates
+                    console.warn('[WebSocket] ⚠️ memory_stored event received but all_memories is empty or missing');
                 }
                 break;
 
@@ -968,12 +2169,20 @@ function handleWebSocketMessage(data) {
 
 function startPollingFallback() {
     // Fallback polling if WebSocket fails
-    console.log('Starting polling fallback for memory updates');
-    setInterval(() => {
+    console.log('[WebSocket] Starting polling fallback for memory updates');
+    // Clear any existing interval
+    if (window.memoryPollingInterval) {
+        clearInterval(window.memoryPollingInterval);
+    }
+    window.memoryPollingInterval = setInterval(() => {
+        // Always refresh explorer (it's always visible now, not in a modal)
         const filter = document.getElementById('metadata-filter')?.value || null;
-        refreshMemories(filter);
+        refreshMemoryExplorer(filter);
     }, 10000); // Poll every 10 seconds as fallback
 }
+
+// Server-side persisted active context (from last message in this conversation)
+const serverActiveContext = {{ last_active_context | tojson | safe }};
 
 // Scroll to bottom on load
 window.addEventListener('load', () => {
@@ -982,8 +2191,14 @@ window.addEventListener('load', () => {
     // Store full memory objects for editing
     window.memoriesStore = {};
 
-    // Load memories immediately
-    refreshMemories();
+    // Restore active context from server-side database (true persistence across devices)
+    if (serverActiveContext && Array.isArray(serverActiveContext) && serverActiveContext.length > 0) {
+        console.log('[Active Context] Restoring', serverActiveContext.length, 'memories from database');
+        displayActiveContext(serverActiveContext);
+    }
+
+    // Load explorer on page load (inline, always visible)
+    refreshMemoryExplorer();
 
     // Connect to WebSocket for real-time updates
     connectMemoryWebSocket();
@@ -1024,7 +2239,8 @@ async function refreshMemories(metadataFilter = null, retryAttempt = 0, isRetry 
                         const memId = mem.id || mem._id || `mem-${memories.indexOf(mem)}`;
                         window.memoriesStore[memId] = mem;
                     });
-                    displayMemories(memories);
+                // Update explorer
+                displayMemories(memories);
                     // Reset retry state on success
                     memoryRefreshRetryCount = 0;
                     isWaitingForNewMemories = false;
@@ -1042,8 +2258,11 @@ async function refreshMemories(metadataFilter = null, retryAttempt = 0, isRetry 
                         }, delay);
                     } else {
                         // Show empty state if no memories and not retrying
-                        if (!searchInput || !searchInput.value.trim()) {
-                            container.innerHTML = '<div class="empty-memory-state">No memories yet. Start chatting to build context!</div>';
+                        // Note: refreshMemories is now only for explorer, active context is updated via sendMessage
+                        const explorerContainer = document.getElementById('memory-explorer-list');
+                        const searchInput = document.getElementById('memory-search-input');
+                        if (explorerContainer && (!searchInput || !searchInput.value.trim())) {
+                            explorerContainer.innerHTML = '<div class="empty-memory-state helpful">No memories yet.<br>Start chatting to build context!</div>';
                         }
                         // Reset retry state
                         if (retryAttempt >= MAX_MEMORY_RETRY_ATTEMPTS) {
@@ -1055,25 +2274,29 @@ async function refreshMemories(metadataFilter = null, retryAttempt = 0, isRetry 
                 }
             } else {
                 console.error('[Memory Refresh] Failed to get memories:', data);
-                const container = document.getElementById('memory-context-list');
-                container.innerHTML = '<div class="empty-memory-state">Error loading memories</div>';
+                const explorerContainer = document.getElementById('memory-explorer-list');
+                if (explorerContainer) {
+                    explorerContainer.innerHTML = '<div class="empty-memory-state">Error loading memories</div>';
+                }
                 // Reset retry state on error
                 isWaitingForNewMemories = false;
                 memoryRefreshRetryCount = 0;
             }
         } else {
             console.error('[Memory Refresh] Failed to fetch memories:', response.status, response.statusText);
-            const container = document.getElementById('memory-context-list');
-            container.innerHTML = '<div class="empty-memory-state">Error loading memories</div>';
+            const explorerContainer = document.getElementById('memory-explorer-list');
+            if (explorerContainer && document.getElementById('memory-explorer-modal').classList.contains('show')) {
+                explorerContainer.innerHTML = '<div class="empty-memory-state">Error loading memories</div>';
+            }
             // Reset retry state on error
             isWaitingForNewMemories = false;
             memoryRefreshRetryCount = 0;
         }
     } catch (error) {
         console.error('[Memory Refresh] Failed to refresh memories:', error);
-        const container = document.getElementById('memory-context-list');
-        if (container) {
-            container.innerHTML = '<div class="empty-memory-state">Error loading memories</div>';
+        const explorerContainer = document.getElementById('memory-explorer-list');
+        if (explorerContainer && document.getElementById('memory-explorer-modal').classList.contains('show')) {
+            explorerContainer.innerHTML = '<div class="empty-memory-state">Error loading memories</div>';
         }
         // Reset retry state on error
         isWaitingForNewMemories = false;
@@ -1081,68 +2304,70 @@ async function refreshMemories(metadataFilter = null, retryAttempt = 0, isRetry 
     }
 }
 
-// Display memories in the context panel
-function displayMemories(memories) {
-    const container = document.getElementById('memory-context-list');
+// Display active context (memories used for current response)
+// Note: Active context is persisted server-side in the conversation document,
+// not in localStorage. This ensures true persistence across devices and browsers.
+function displayActiveContext(memories) {
+    const container = document.getElementById('active-context-list');
 
     if (!container) {
-        console.error('Memory container not found');
+        console.error('Active context container not found');
         return;
     }
 
     if (!memories || memories.length === 0) {
-        container.innerHTML = '<div class="empty-memory-state">No memories yet. Start chatting to build context!</div>';
+        container.innerHTML = '<div class="empty-memory-state helpful">No active context yet.<br>Send a message to see memories in use!</div>';
         return;
     }
 
+    console.log('[Active Context] Displaying', memories.length, 'active memories:', memories);
+    container.innerHTML = renderMemoryItems(memories, true);
+}
+
+// Display memories in the inline explorer
+function displayMemories(memories) {
+    const container = document.getElementById('memory-explorer-list');
+
+    if (!container) {
+        console.error('Memory explorer container not found');
+        return;
+    }
+
+    if (!memories || memories.length === 0) {
+        container.innerHTML = '<div class="empty-memory-state helpful">No memories yet.<br>Start chatting to build context!</div>';
+        return;
+    }
+
+    console.log('[Memory Explorer] Displaying', memories.length, 'memories:', memories);
+    container.innerHTML = renderMemoryItems(memories, false);
+}
+
+// Render memory items (shared between active context and explorer)
+function renderMemoryItems(memories, isActiveContext) {
+
     console.log('[Memory Display] Displaying', memories.length, 'memories:', memories);
 
-    container.innerHTML = memories.map((memory, index) => {
+    return memories.map((memory, index) => {
         console.log(`[Memory Display] Processing memory ${index + 1}:`, memory);
-        // Handle different memory formats from Mem0
+        // Handle different memory formats
         // Prioritize v2 format: {"id": "...", "memory": "...", "metadata": {...}}
         let memoryText = '';
         let memoryId = null;
         let metadata = {};
         let score = null;
 
-        // Mem0 v2 API format (normalized by backend) - primary format
+        // Standardized format: {"id": "...", "memory": "...", "metadata": {...}}
         if (typeof memory === 'object' && memory !== null) {
-            // v2 format: direct "memory" field
-            memoryText = memory.memory || memory.text || '';
+            memoryText = memory.memory || '';
             memoryId = memory.id || memory._id || null;
             metadata = memory.metadata || {};
             score = memory.score || null;
-
-            // Legacy formats: nested data structure
-            if (!memoryText && memory.data) {
-                if (typeof memory.data === 'object' && memory.data !== null) {
-                    memoryText = memory.data.memory || memory.data.text || '';
-                    metadata = memory.metadata || memory.data.metadata || {};
-                }
-            }
-
-            // Fallback: try to extract from any string field
-            if (!memoryText) {
-                // Look for any string field that might contain the memory
-                for (const [key, value] of Object.entries(memory)) {
-                    if (typeof value === 'string' && value.length > 0 && key !== 'id' && key !== '_id') {
-                        memoryText = value;
-                        break;
-                    }
-                }
-            }
-
-            // Last resort: stringify if nothing found
-            if (!memoryText) {
-                memoryText = JSON.stringify(memory);
-            }
         } else if (typeof memory === 'string') {
-            // String format memory
+            // String format memory (fallback for simple string memories)
             memoryText = memory;
             memoryId = `mem-${index}`;
         } else {
-            // Unknown format
+            // Unknown format - convert to string
             memoryText = String(memory);
             memoryId = `mem-${index}`;
         }
@@ -1154,34 +2379,707 @@ function displayMemories(memories) {
 
         console.log(`[Memory Display] Parsed memory ${index + 1}:`, {
             id: memoryId,
-            text: memoryText.substring(0, 50) + (memoryText.length > 50 ? '...' : ''),
+            memory: memoryText.substring(0, 50) + (memoryText.length > 50 ? '...' : ''),
             metadata: Object.keys(metadata).length,
             score: score
         });
 
-        const isActive = activeMemoryContext.some(active =>
+        // For active context, all items are active; for explorer, check against activeMemoryContext
+        const isActive = isActiveContext || activeMemoryContext.some(active =>
             typeof active === 'string' && (active.includes(memoryText) || memoryText.includes(active))
         );
-        const displayText = memoryText.length > 60 ? memoryText.substring(0, 60) + '...' : memoryText;
-        const scoreHtml = score !== null && score !== undefined ? `<span class="memory-score">Score: ${(score * 100).toFixed(1)}%</span>` : '';
-        const metadataTags = Object.entries(metadata).filter(([k, v]) => k && v).map(([k, v]) =>
-            `<span class="metadata-tag">${k}: ${v}</span>`
-        ).join('');
+        const displayText = memoryText.length > (isActiveContext ? 100 : 80) ? memoryText.substring(0, isActiveContext ? 100 : 80) + '...' : memoryText;
+        const scoreHtml = score !== null && score !== undefined ? `<span class="memory-score" title="Relevance score: ${(score * 100).toFixed(1)}%">${(score * 100).toFixed(0)}%</span>` : '';
+        
+        // Format metadata tags, handling objects/arrays properly
+        const metadataTags = Object.entries(metadata)
+            .filter(([k, v]) => k && v !== null && v !== undefined)
+            .map(([k, v]) => {
+                // Convert value to string, handling objects and arrays
+                let displayValue = v;
+                if (typeof v === 'object') {
+                    if (Array.isArray(v)) {
+                        displayValue = v.join(', ');
+                    } else {
+                        // For objects, show key-value pairs or JSON string
+                        try {
+                            displayValue = JSON.stringify(v);
+                            // Truncate long JSON strings
+                            if (displayValue.length > 50) {
+                                displayValue = displayValue.substring(0, 47) + '...';
+                            }
+                        } catch (e) {
+                            displayValue = String(v);
+                        }
+                    }
+                } else {
+                    displayValue = String(v);
+                }
+                // Escape HTML and truncate if too long
+                const escapedKey = k.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                const escapedValue = String(displayValue).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                if (escapedValue.length > 30) {
+                    return `<span class="metadata-tag" title="${escapedKey}: ${escapedValue}">${escapedKey}: ${escapedValue.substring(0, 27)}...</span>`;
+                }
+                return `<span class="metadata-tag">${escapedKey}: ${escapedValue}</span>`;
+            })
+            .join('');
 
+        // For active context, show simplified view without actions
+        if (isActiveContext) {
+            return `
+                <div class="memory-item active" title="${memoryText.replace(/"/g, '&quot;')}">
+                    ${scoreHtml}
+                    <div style="cursor: pointer; padding-right: ${scoreHtml ? '50px' : '10px'};">
+                        <div style="display: flex; align-items: flex-start; gap: 6px;">
+                            <span class="memory-icon">✨</span>
+                            <span style="flex: 1; line-height: 1.5;">${displayText}</span>
+                        </div>
+                        ${metadataTags ? `<div class="memory-metadata">${metadataTags}</div>` : ''}
+                    </div>
+                </div>
+            `;
+        }
+
+        // Extract cognitive metrics
+        const importance = memory.importance || metadata.importance || null;
+        const strength = memory.strength || memory.retrieval_strength || null;
+        const stability = memory.stability || null;
+        const accessCount = memory.access_count || 0;
+        const category = memory.category || metadata.category || null;
+        const lastAccessed = memory.last_accessed || null;
+        
+        // Determine memory health class based on strength
+        let healthClass = '';
+        if (strength !== null) {
+            if (strength < 0.3) healthClass = 'weak';
+            else if (strength > 0.7) healthClass = 'strong';
+            else healthClass = 'medium';
+        }
+        
+        // Build cognitive metrics HTML
+        const hasCognitiveMetrics = importance !== null || strength !== null || accessCount > 0;
+        const cognitiveMetricsHtml = hasCognitiveMetrics ? `
+            <div class="memory-cognitive-metrics">
+                ${importance !== null ? `
+                    <div class="metric-item">
+                        <span class="metric-label">Importance</span>
+                        <div class="metric-bar">
+                            <div class="metric-fill importance" style="width: ${importance * 100}%"></div>
+                        </div>
+                        <span class="metric-value">${(importance).toFixed(2)}</span>
+                    </div>
+                ` : ''}
+                ${strength !== null ? `
+                    <div class="metric-item">
+                        <span class="metric-label">Strength</span>
+                        <div class="metric-bar">
+                            <div class="metric-fill strength" style="width: ${strength * 100}%"></div>
+                        </div>
+                        <span class="metric-value">${(strength).toFixed(2)}</span>
+                    </div>
+                ` : ''}
+                ${stability !== null ? `
+                    <div class="metric-item">
+                        <span class="metric-label">Stability</span>
+                        <div class="metric-bar">
+                            <div class="metric-fill stability" style="width: ${Math.min(stability / 500 * 100, 100)}%"></div>
+                        </div>
+                        <span class="metric-value">${stability.toFixed(0)}h</span>
+                    </div>
+                ` : ''}
+                ${accessCount > 0 ? `
+                    <div class="metric-item">
+                        <span class="metric-label">Accesses</span>
+                        <span class="memory-access-badge">🔄 ${accessCount}</span>
+                    </div>
+                ` : ''}
+            </div>
+        ` : '';
+        
+        // Build badges HTML
+        const categoryIcon = category ? getCategoryIconForMemory(category) : '';
+        const badgesHtml = category || accessCount > 0 ? `
+            <div class="memory-badges">
+                ${category ? `<span class="memory-category-badge">${categoryIcon} ${category}</span>` : ''}
+            </div>
+        ` : '';
+
+        // For explorer, show full view with cognitive metrics
         return `
-            <div class="memory-item ${isActive ? 'active' : ''}" title="${memoryText.replace(/"/g, '&quot;')}">
+            <div class="memory-item-enhanced ${healthClass}" title="${memoryText.replace(/"/g, '&quot;')}" data-memory-id="${memoryId}">
                 ${scoreHtml}
                 <div class="memory-actions">
-                    <button class="memory-action-btn" onclick="event.stopPropagation(); showMemoryDetails('${memoryId}')" title="Edit">✏️</button>
-                    <button class="memory-action-btn delete" onclick="event.stopPropagation(); deleteMemory('${memoryId}')" title="Delete Memory">🗑️</button>
+                    <button class="memory-action-btn" onclick="event.stopPropagation(); showMemoryDetails('${memoryId}')" title="Edit memory">✏️</button>
+                    <button class="memory-action-btn delete" onclick="event.stopPropagation(); deleteMemory('${memoryId}')" title="Delete memory">🗑️</button>
                 </div>
-                <div onclick="showMemoryDetails('${memoryId}')" style="cursor: pointer;">
-                    <div><span class="memory-icon">💭</span>${displayText}</div>
-                    ${metadataTags ? `<div class="memory-metadata">${metadataTags}</div>` : ''}
+                <div onclick="showMemoryDetails('${memoryId}')" style="cursor: pointer; padding-right: 60px;">
+                    <div class="memory-text">
+                        <span class="memory-icon">${isActive ? '✨' : '💭'}</span>
+                        ${displayText}
+                    </div>
+                    ${badgesHtml}
+                    ${cognitiveMetricsHtml}
                 </div>
             </div>
         `;
     }).join('');
+}
+
+// Get category icon for memory display
+function getCategoryIconForMemory(category) {
+    const icons = {
+        biographical: '👤',
+        preferences: '❤️',
+        temporal: '📅',
+        relational: '👥',
+        work: '💼',
+        health: '🏥',
+        finance: '💰',
+        general: '📝'
+    };
+    return icons[category] || '📝';
+}
+
+// Toggle Memory Explorer (collapse/expand)
+function toggleMemoryExplorer() {
+    const content = document.getElementById('memory-explorer-content');
+    const btn = document.getElementById('toggle-explorer-btn');
+    if (content.classList.contains('collapsed')) {
+        content.classList.remove('collapsed');
+        btn.textContent = '▼';
+        // Refresh when expanding
+        refreshMemoryExplorer();
+    } else {
+        content.classList.add('collapsed');
+        btn.textContent = '▲';
+    }
+}
+
+// Toggle Memory Info Panel
+function toggleMemoryInfo() {
+    const infoPanel = document.getElementById('memory-info-panel');
+    if (infoPanel.style.display === 'none' || !infoPanel.style.display) {
+        infoPanel.style.display = 'block';
+    } else {
+        infoPanel.style.display = 'none';
+    }
+}
+
+// =========================================
+// COGNITIVE MEMORY EXPLORER - TAB SYSTEM
+// =========================================
+
+let currentTab = 'memories';
+let tabDataCache = {
+    analytics: null,
+    cold: null,
+    graph: null
+};
+
+// Category colors for visualizations
+const categoryColors = {
+    biographical: '#3b82f6',
+    preferences: '#ef4444',
+    temporal: '#f59e0b',
+    relational: '#8b5cf6',
+    work: '#06b6d4',
+    health: '#10b981',
+    finance: '#f97316',
+    general: '#6b7280'
+};
+
+function switchMemoryTab(tabName) {
+    currentTab = tabName;
+    
+    // Update tab buttons
+    document.querySelectorAll('.memory-tab').forEach(tab => {
+        tab.classList.toggle('active', tab.dataset.tab === tabName);
+    });
+    
+    // Update tab content
+    document.querySelectorAll('.memory-tab-content').forEach(content => {
+        content.classList.toggle('active', content.id === `tab-${tabName}`);
+    });
+    
+    // Load data for the tab if not already loaded
+    loadTabData(tabName);
+}
+
+function refreshCurrentTab() {
+    // Clear cache for current tab and reload
+    if (currentTab !== 'memories') {
+        tabDataCache[currentTab] = null;
+    }
+    loadTabData(currentTab, true);
+}
+
+async function loadTabData(tabName, forceRefresh = false) {
+    switch (tabName) {
+        case 'memories':
+            const filter = document.getElementById('metadata-filter')?.value || null;
+            refreshMemoryExplorer(filter);
+            break;
+        case 'analytics':
+            if (!tabDataCache.analytics || forceRefresh) {
+                await loadAnalytics();
+            }
+            break;
+        case 'cold':
+            if (!tabDataCache.cold || forceRefresh) {
+                await loadColdStorage();
+            }
+            break;
+        case 'graph':
+            if (!tabDataCache.graph || forceRefresh) {
+                await loadGraphExplorer();
+            }
+            break;
+    }
+}
+
+// =========================================
+// ANALYTICS DASHBOARD
+// =========================================
+
+async function loadAnalytics() {
+    const container = document.getElementById('analytics-dashboard');
+    
+    try {
+        const response = await fetch('/api/memories/analytics');
+        const data = await response.json();
+        
+        if (!data.success) {
+            container.innerHTML = renderEmptyState('📊', data.error || 'Analytics not available');
+            return;
+        }
+        
+        tabDataCache.analytics = data.analytics;
+        renderAnalyticsDashboard(data.analytics);
+    } catch (error) {
+        console.error('[Analytics] Failed to load:', error);
+        container.innerHTML = renderEmptyState('📊', 'Failed to load analytics');
+    }
+}
+
+function renderAnalyticsDashboard(analytics) {
+    const container = document.getElementById('analytics-dashboard');
+    
+    const activeCount = analytics.active_memories || 0;
+    const coldCount = analytics.cold_storage_memories || 0;
+    const totalCapacity = analytics.max_capacity || 100;
+    const capacityUsage = Math.round((activeCount / totalCapacity) * 100);
+    
+    const avgStrength = (analytics.average_strength || 0).toFixed(2);
+    const avgStability = (analytics.average_stability || 0).toFixed(1);
+    const avgEmotion = (analytics.average_emotion || 0).toFixed(2);
+    
+    const weakCount = analytics.weak_memories || 0;
+    const strongCount = analytics.strong_memories || 0;
+    
+    const categories = analytics.categories || {};
+    
+    container.innerHTML = `
+        <!-- Memory Health Overview -->
+        <div class="analytics-card">
+            <div class="analytics-card-title">📈 Memory Health</div>
+            <div class="analytics-stat-grid">
+                <div class="analytics-stat">
+                    <div class="analytics-stat-value">${activeCount}</div>
+                    <div class="analytics-stat-label">Active Memories</div>
+                </div>
+                <div class="analytics-stat">
+                    <div class="analytics-stat-value">${coldCount}</div>
+                    <div class="analytics-stat-label">Cold Storage</div>
+                </div>
+                <div class="analytics-stat ${strongCount > 0 ? '' : 'warning'}">
+                    <div class="analytics-stat-value">${strongCount}</div>
+                    <div class="analytics-stat-label">Strong (>0.7)</div>
+                </div>
+                <div class="analytics-stat ${weakCount > 3 ? 'danger' : ''}">
+                    <div class="analytics-stat-value">${weakCount}</div>
+                    <div class="analytics-stat-label">Weak (<0.3)</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Capacity Gauge -->
+        <div class="analytics-card">
+            <div class="analytics-card-title">💾 Capacity Usage</div>
+            <div class="analytics-gauge">
+                <div class="analytics-gauge-fill" style="width: ${Math.min(capacityUsage, 100)}%; background: ${capacityUsage > 80 ? '#ef4444' : capacityUsage > 60 ? '#f59e0b' : 'var(--mongodb-green)'}"></div>
+            </div>
+            <div class="analytics-gauge-label">
+                <span>${activeCount} / ${totalCapacity} memories</span>
+                <span>${capacityUsage}%</span>
+            </div>
+        </div>
+        
+        <!-- Cognitive Metrics -->
+        <div class="analytics-card">
+            <div class="analytics-card-title">🧠 Cognitive Metrics</div>
+            <div style="display: flex; flex-direction: column; gap: 10px;">
+                <div class="metric-item">
+                    <span class="metric-label">Avg Strength</span>
+                    <div class="metric-bar">
+                        <div class="metric-fill strength" style="width: ${avgStrength * 100}%"></div>
+                    </div>
+                    <span class="metric-value">${avgStrength}</span>
+                </div>
+                <div class="metric-item">
+                    <span class="metric-label">Avg Stability</span>
+                    <div class="metric-bar">
+                        <div class="metric-fill stability" style="width: ${Math.min(avgStability / 500 * 100, 100)}%"></div>
+                    </div>
+                    <span class="metric-value">${avgStability}h</span>
+                </div>
+                <div class="metric-item">
+                    <span class="metric-label">Avg Emotion</span>
+                    <div class="metric-bar">
+                        <div class="metric-fill importance" style="width: ${avgEmotion * 100}%"></div>
+                    </div>
+                    <span class="metric-value">${avgEmotion}</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Category Distribution -->
+        <div class="analytics-card">
+            <div class="analytics-card-title">📂 Category Distribution</div>
+            <div class="category-chart">
+                ${renderCategoryChart(categories)}
+            </div>
+        </div>
+    `;
+}
+
+function renderCategoryChart(categories) {
+    const entries = Object.entries(categories).sort((a, b) => b[1] - a[1]);
+    const maxCount = Math.max(...entries.map(e => e[1]), 1);
+    
+    if (entries.length === 0) {
+        return '<div style="text-align: center; color: var(--mongodb-text-secondary); font-size: 11px;">No categories yet</div>';
+    }
+    
+    return entries.map(([category, count]) => {
+        const percentage = (count / maxCount) * 100;
+        const color = categoryColors[category] || categoryColors.general;
+        const icon = getCategoryIcon(category);
+        return `
+            <div class="category-row">
+                <span class="category-name">${icon} ${category}</span>
+                <div class="category-bar">
+                    <div class="category-bar-fill" style="width: ${percentage}%; background: ${color}"></div>
+                </div>
+                <span class="category-count">${count}</span>
+            </div>
+        `;
+    }).join('');
+}
+
+function getCategoryIcon(category) {
+    const icons = {
+        biographical: '👤',
+        preferences: '❤️',
+        temporal: '📅',
+        relational: '👥',
+        work: '💼',
+        health: '🏥',
+        finance: '💰',
+        general: '📝'
+    };
+    return icons[category] || '📝';
+}
+
+// =========================================
+// COLD STORAGE TAB
+// =========================================
+
+async function loadColdStorage() {
+    const container = document.getElementById('cold-storage-list');
+    
+    try {
+        const response = await fetch('/api/memories/cold-storage?limit=50');
+        const data = await response.json();
+        
+        if (!data.success) {
+            container.innerHTML = renderEmptyState('❄️', data.error || 'Cold storage not available');
+            return;
+        }
+        
+        tabDataCache.cold = data.memories;
+        renderColdStorage(data.memories || []);
+    } catch (error) {
+        console.error('[Cold Storage] Failed to load:', error);
+        container.innerHTML = renderEmptyState('❄️', 'Failed to load cold storage');
+    }
+}
+
+function renderColdStorage(memories) {
+    const container = document.getElementById('cold-storage-list');
+    
+    if (!memories || memories.length === 0) {
+        container.innerHTML = renderEmptyState('❄️', 'No pruned memories in cold storage.<br>Memories are moved here when they decay or exceed capacity.');
+        return;
+    }
+    
+    container.innerHTML = memories.map(mem => {
+        const text = mem.memory || mem.text || '';
+        const truncatedText = text.length > 100 ? text.substring(0, 100) + '...' : text;
+        const prunedAt = mem.pruned_at ? new Date(mem.pruned_at).toLocaleDateString() : 'Unknown';
+        const reason = mem.pruning_reason || 'decay';
+        const memId = mem.id || mem._id;
+        
+        return `
+            <div class="cold-storage-item" data-memory-id="${memId}">
+                <div class="cold-storage-text">${escapeHtml(truncatedText)}</div>
+                <div class="cold-storage-meta">
+                    <div>
+                        <span class="pruning-reason">🧊 ${reason}</span>
+                        <span style="margin-left: 8px;">Pruned: ${prunedAt}</span>
+                    </div>
+                    <button class="restore-btn" onclick="restoreMemory('${memId}')">
+                        ♻️ Restore
+                    </button>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+async function restoreMemory(memoryId) {
+    try {
+        const response = await fetch(`/api/memories/${memoryId}/restore`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCookie('csrf_access_token')
+            }
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            // Refresh both cold storage and memories tabs
+            tabDataCache.cold = null;
+            loadColdStorage();
+            refreshMemoryExplorer();
+            showNotification('Memory restored successfully!');
+        } else {
+            alert(data.error || 'Failed to restore memory');
+        }
+    } catch (error) {
+        console.error('[Cold Storage] Failed to restore:', error);
+        alert('Failed to restore memory');
+    }
+}
+
+// =========================================
+// =========================================
+// GRAPH EXPLORER TAB
+// =========================================
+
+async function loadGraphExplorer() {
+    const container = document.getElementById('graph-explorer');
+    
+    try {
+        // Load both stats and nodes
+        const [statsResponse, nodesResponse] = await Promise.all([
+            fetch('/api/graph/stats'),
+            fetch('/api/graph/nodes?limit=30')
+        ]);
+        
+        const statsData = await statsResponse.json();
+        const nodesData = await nodesResponse.json();
+        
+        if (!statsData.success || !statsData.enabled) {
+            container.innerHTML = renderEmptyState('🕸️', 'Knowledge graph not enabled.<br>Enable GraphRAG in manifest.json for relationship tracking.');
+            return;
+        }
+        
+        tabDataCache.graph = { stats: statsData, nodes: nodesData.nodes || [] };
+        renderGraphExplorer(statsData, nodesData.nodes || []);
+    } catch (error) {
+        console.error('[Graph] Failed to load:', error);
+        container.innerHTML = renderEmptyState('🕸️', 'Failed to load knowledge graph');
+    }
+}
+
+function renderGraphExplorer(stats, nodes) {
+    const container = document.getElementById('graph-explorer');
+    
+    const totalNodes = stats.total_nodes || 0;
+    const totalEdges = stats.total_edges || 0;
+    const nodeTypes = stats.node_types || {};
+    
+    // Get unique node types for filter
+    const types = [...new Set(nodes.map(n => n.type))].filter(Boolean);
+    
+    container.innerHTML = `
+        <!-- Graph Stats -->
+        <div class="graph-stats-card">
+            <div class="analytics-card-title">🕸️ Graph Statistics</div>
+            <div class="graph-stats-grid">
+                <div class="graph-stat">
+                    <div class="graph-stat-value">${totalNodes}</div>
+                    <div class="graph-stat-label">Nodes</div>
+                </div>
+                <div class="graph-stat">
+                    <div class="graph-stat-value">${totalEdges}</div>
+                    <div class="graph-stat-label">Edges</div>
+                </div>
+                <div class="graph-stat">
+                    <div class="graph-stat-value">${types.length}</div>
+                    <div class="graph-stat-label">Types</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Node Type Filter -->
+        <div class="graph-filter">
+            <select class="graph-filter-select" id="graph-type-filter" onchange="filterGraphNodes()">
+                <option value="">All node types</option>
+                ${types.map(t => `<option value="${t}">${t}</option>`).join('')}
+            </select>
+        </div>
+        
+        <!-- Nodes List -->
+        <div class="graph-nodes-list" id="graph-nodes-list">
+            ${renderGraphNodes(nodes)}
+        </div>
+    `;
+}
+
+function renderGraphNodes(nodes) {
+    if (!nodes || nodes.length === 0) {
+        return '<div class="empty-tab-state"><div class="empty-tab-state-icon">🕸️</div><div>No nodes in graph yet</div></div>';
+    }
+    
+    return nodes.map(node => {
+        const nodeId = node._id || node.id;
+        const nodeType = node.type || 'unknown';
+        const nodeName = node.name || nodeId;
+        const edges = node.edges || [];
+        const edgeCount = edges.length;
+        
+        return `
+            <div class="graph-node" onclick="showNodeDetails('${nodeId}')">
+                <div class="graph-node-header">
+                    <span class="graph-node-type ${nodeType}">${nodeType}</span>
+                    <span class="graph-node-name">${escapeHtml(nodeName)}</span>
+                </div>
+                ${edgeCount > 0 ? `
+                    <div class="graph-node-edges">
+                        ${edges.slice(0, 3).map(e => `
+                            <span class="graph-edge-tag">→ ${e.relation} → ${e.target.split(':').pop()}</span>
+                        `).join('')}
+                        ${edgeCount > 3 ? `<span class="graph-edge-tag">+${edgeCount - 3} more</span>` : ''}
+                    </div>
+                ` : '<div class="graph-node-edges" style="opacity: 0.5">No connections</div>'}
+            </div>
+        `;
+    }).join('');
+}
+
+function filterGraphNodes() {
+    const typeFilter = document.getElementById('graph-type-filter').value;
+    let nodes = tabDataCache.graph?.nodes || [];
+    
+    if (typeFilter) {
+        nodes = nodes.filter(n => n.type === typeFilter);
+    }
+    
+    const container = document.getElementById('graph-nodes-list');
+    container.innerHTML = renderGraphNodes(nodes);
+}
+
+async function showNodeDetails(nodeId) {
+    // Could expand to show traversal results
+    try {
+        const response = await fetch(`/api/graph/traverse?node_id=${encodeURIComponent(nodeId)}&max_depth=1`);
+        const data = await response.json();
+        
+        if (data.success && data.nodes) {
+            console.log('[Graph] Traversal from', nodeId, ':', data.nodes);
+            // Could show a modal with connected nodes
+        }
+    } catch (error) {
+        console.error('[Graph] Failed to traverse:', error);
+    }
+}
+
+// =========================================
+// HELPER FUNCTIONS
+// =========================================
+
+function renderEmptyState(icon, message) {
+    return `
+        <div class="empty-tab-state">
+            <div class="empty-tab-state-icon">${icon}</div>
+            <div>${message}</div>
+        </div>
+    `;
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function showNotification(message) {
+    const indicator = document.getElementById('memory-storage-indicator');
+    if (indicator) {
+        indicator.textContent = message;
+        indicator.classList.add('show');
+        setTimeout(() => indicator.classList.remove('show'), 3000);
+    }
+}
+
+// Refresh Memory Explorer (inline)
+async function refreshMemoryExplorer(metadataFilter = null) {
+    try {
+        const explorerList = document.getElementById('memory-explorer-list');
+        const filterValue = metadataFilter || document.getElementById('metadata-filter')?.value || null;
+        
+        // Show loading state if there are existing memories
+        const existingMemories = explorerList.querySelectorAll('.memory-item');
+        if (existingMemories.length > 0) {
+            explorerList.style.opacity = '0.6';
+            explorerList.style.transition = 'opacity 0.2s';
+        }
+        
+        const response = await fetch('/api/memories?limit=50');
+        if (response.ok) {
+            const data = await response.json();
+            if (data.success) {
+                let memories = data.memories || [];
+                if (filterValue && memories.length > 0) {
+                    memories = memories.filter(m => {
+                        const metadata = m.metadata || {};
+                        return metadata.source === filterValue;
+                    });
+                }
+                memories.forEach(mem => {
+                    const memId = mem.id || mem._id || `mem-${memories.indexOf(mem)}`;
+                    window.memoriesStore[memId] = mem;
+                });
+                displayMemories(memories);
+                
+                // Restore opacity
+                explorerList.style.opacity = '1';
+                
+                // Log refresh success
+                console.log(`[Memory Explorer] Refreshed: ${memories.length} memories displayed`);
+            }
+        }
+    } catch (error) {
+        console.error('[Memory Explorer] Failed to refresh:', error);
+        const explorerList = document.getElementById('memory-explorer-list');
+        if (explorerList) {
+            explorerList.style.opacity = '1';
+        }
+    }
 }
 
 // Show memory details and open edit modal
@@ -1192,17 +3090,10 @@ function showMemoryDetails(memoryId) {
         return;
     }
 
-    // Extract memory text
-    let memoryText = memory.memory || memory.text || '';
-    if (!memoryText && memory.data) {
-        if (typeof memory.data === 'object' && memory.data !== null) {
-            memoryText = memory.data.memory || memory.data.text || '';
-        } else if (typeof memory.data === 'string') {
-            memoryText = memory.data;
-        }
-    }
+    // Extract memory text (standardized format)
+    let memoryText = memory.memory || '';
 
-    // Set form values
+    // Set form values (only content - metadata is preserved automatically)
     document.getElementById('edit-memory-text').value = memoryText;
     document.getElementById('edit-memory-form').dataset.memoryId = memoryId;
 
@@ -1214,19 +3105,56 @@ function showMemoryDetails(memoryId) {
 function showInjectMemoryModal() {
     document.getElementById('inject-memory-modal').classList.add('show');
     document.getElementById('inject-memory-text').focus();
+    // Reset to defaults
+    selectCategory(document.querySelector('.category-btn[data-category="general"]'));
+    document.getElementById('inject-importance').value = 0.5;
+    updateImportanceDisplay(0.5);
 }
 
 // Close inject modal
 function closeInjectModal() {
     document.getElementById('inject-memory-modal').classList.remove('show');
     document.getElementById('inject-memory-form').reset();
+    // Reset category selection to general
+    selectCategory(document.querySelector('.category-btn[data-category="general"]'));
+    updateImportanceDisplay(0.5);
 }
 
-// Inject memory
+// Select category for memory injection
+function selectCategory(btn) {
+    // Remove selection from all buttons
+    document.querySelectorAll('.category-btn').forEach(b => b.classList.remove('selected'));
+    // Add selection to clicked button
+    btn.classList.add('selected');
+    // Update hidden input
+    document.getElementById('inject-category').value = btn.dataset.category;
+}
+
+// Update importance display value
+function updateImportanceDisplay(value) {
+    const display = document.getElementById('importance-value');
+    if (display) {
+        display.textContent = parseFloat(value).toFixed(1);
+        // Color based on value
+        if (value <= 0.3) {
+            display.style.color = '#4caf50'; // Green - low
+        } else if (value <= 0.7) {
+            display.style.color = '#ff9800'; // Orange - medium
+        } else {
+            display.style.color = '#f44336'; // Red - high
+        }
+    }
+}
+
+// Inject memory with categories and importance
 async function injectMemory(event) {
     event.preventDefault();
     
     const memoryText = document.getElementById('inject-memory-text').value.trim();
+    const category = document.getElementById('inject-category').value || 'general';
+    const importance = parseFloat(document.getElementById('inject-importance').value) || 0.5;
+    const bucketId = document.getElementById('inject-bucket-id').value.trim();
+    const bucketType = document.getElementById('inject-bucket-type').value.trim();
     const metadataInput = document.getElementById('inject-memory-metadata').value.trim();
 
     if (!memoryText) {
@@ -1244,16 +3172,23 @@ async function injectMemory(event) {
         }
     }
 
+    // Build payload with enhanced fields
+    const payload = {
+        memory: memoryText,
+        category: category,
+        importance: importance,
+        bucket_id: bucketId || null,
+        bucket_type: bucketType || 'category',
+        metadata: metadata
+    };
+
     try {
         const response = await fetch('/api/memories/inject', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify({
-                memory: memoryText,
-                metadata: metadata
-            })
+            body: JSON.stringify(payload)
         });
 
         const result = await response.json();
@@ -1266,10 +3201,11 @@ async function injectMemory(event) {
         }
 
         if (result.success) {
-            addActivityLog('store', `Memory injected successfully: "${memoryText.substring(0, 50)}${memoryText.length > 50 ? '...' : ''}"`, true);
+            const categoryIcon = getCategoryIcon(category);
+            addActivityLog('store', `${categoryIcon} Memory injected [${category}]: "${memoryText.substring(0, 40)}${memoryText.length > 40 ? '...' : ''}"`, true);
             closeInjectModal();
-            // Refresh memories to show the new one
-            refreshMemories();
+            // Refresh explorer
+            refreshMemoryExplorer();
         } else {
             const errorMsg = result.error || 'Unknown error';
             addActivityLog('error', `Failed to inject memory: ${errorMsg}`, false);
@@ -1283,11 +3219,46 @@ async function injectMemory(event) {
     }
 }
 
+// Get category icon
+function getCategoryIcon(category) {
+    const icons = {
+        'biographical': '👤',
+        'preferences': '❤️',
+        'temporal': '📅',
+        'relational': '👥',
+        'work': '💼',
+        'health': '🏥',
+        'finance': '💰',
+        'general': '📝'
+    };
+    return icons[category] || '📝';
+}
+
 // Close edit modal
 function closeEditModal() {
-    document.getElementById('edit-memory-modal').classList.remove('show');
-    document.getElementById('edit-memory-form').reset();
-    delete document.getElementById('edit-memory-form').dataset.memoryId;
+    const modal = document.getElementById('edit-memory-modal');
+    if (modal) {
+        modal.classList.remove('show');
+        const form = document.getElementById('edit-memory-form');
+        if (form) {
+            form.reset();
+            delete form.dataset.memoryId;
+        }
+        // Reset UI state
+        const saveBtn = document.getElementById('edit-save-btn');
+        const cancelBtn = document.getElementById('edit-cancel-btn');
+        const deleteBtn = document.getElementById('edit-delete-btn');
+        const textarea = document.getElementById('edit-memory-text');
+        if (saveBtn) {
+            saveBtn.disabled = false;
+            saveBtn.textContent = 'Save Changes';
+            saveBtn.style.opacity = '1';
+            saveBtn.style.cursor = 'pointer';
+        }
+        if (cancelBtn) cancelBtn.disabled = false;
+        if (deleteBtn) deleteBtn.disabled = false;
+        if (textarea) textarea.disabled = false;
+    }
 }
 
 // Update memory
@@ -1297,11 +3268,26 @@ async function updateMemory(event) {
     const form = document.getElementById('edit-memory-form');
     const memoryId = form.dataset.memoryId;
     const memoryText = document.getElementById('edit-memory-text').value.trim();
+    const saveBtn = document.getElementById('edit-save-btn');
+    const cancelBtn = document.getElementById('edit-cancel-btn');
+    const deleteBtn = document.getElementById('edit-delete-btn');
+    const textarea = document.getElementById('edit-memory-text');
 
     if (!memoryId || !memoryText) {
         alert('Memory ID and content are required');
         return;
     }
+
+    // Disable UI and show saving state
+    if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Saving...';
+        saveBtn.style.opacity = '0.6';
+        saveBtn.style.cursor = 'not-allowed';
+    }
+    if (cancelBtn) cancelBtn.disabled = true;
+    if (deleteBtn) deleteBtn.disabled = true;
+    if (textarea) textarea.disabled = true;
 
     try {
         const response = await fetch(`/api/memories/${memoryId}`, {
@@ -1321,24 +3307,54 @@ async function updateMemory(event) {
             const errorMsg = result.error || `HTTP ${response.status}: ${response.statusText}`;
             addActivityLog('error', `Failed to update memory: ${errorMsg}`, true);
             alert(`Failed to update memory: ${errorMsg}`);
+            // Re-enable UI on error
+            if (saveBtn) {
+                saveBtn.disabled = false;
+                saveBtn.textContent = 'Save Changes';
+                saveBtn.style.opacity = '1';
+                saveBtn.style.cursor = 'pointer';
+            }
+            if (cancelBtn) cancelBtn.disabled = false;
+            if (deleteBtn) deleteBtn.disabled = false;
+            if (textarea) textarea.disabled = false;
             return;
         }
 
         if (result.success) {
             addActivityLog('success', 'Memory updated successfully', true);
             closeEditModal();
-            // Refresh memories to show updated content
-            refreshMemories();
+            // Refresh explorer
+            refreshMemoryExplorer();
         } else {
             const errorMsg = result.error || 'Unknown error';
             addActivityLog('error', `Failed to update memory: ${errorMsg}`, true);
             alert(`Failed to update memory: ${errorMsg}`);
+            // Re-enable UI on error
+            if (saveBtn) {
+                saveBtn.disabled = false;
+                saveBtn.textContent = 'Save Changes';
+                saveBtn.style.opacity = '1';
+                saveBtn.style.cursor = 'pointer';
+            }
+            if (cancelBtn) cancelBtn.disabled = false;
+            if (deleteBtn) deleteBtn.disabled = false;
+            if (textarea) textarea.disabled = false;
         }
     } catch (error) {
         console.error('Error updating memory:', error);
         const errorMsg = error.message || 'Network error or server unavailable';
         addActivityLog('error', `Error updating memory: ${errorMsg}`, true);
         alert(`Error updating memory: ${errorMsg}`);
+        // Re-enable UI on error
+        if (saveBtn) {
+            saveBtn.disabled = false;
+            saveBtn.textContent = 'Save Changes';
+            saveBtn.style.opacity = '1';
+            saveBtn.style.cursor = 'pointer';
+        }
+        if (cancelBtn) cancelBtn.disabled = false;
+        if (deleteBtn) deleteBtn.disabled = false;
+        if (textarea) textarea.disabled = false;
     }
 }
 
@@ -1370,8 +3386,8 @@ async function deleteMemory(memoryId) {
             addActivityLog('success', 'Memory deleted successfully', true);
             // Close modal if open
             closeEditModal();
-            // Refresh memories to remove deleted item
-            refreshMemories();
+            // Refresh explorer
+            refreshMemoryExplorer();
         } else {
             addActivityLog('error', `Failed to delete memory: ${result.message || 'Unknown error'}`, true);
         }
@@ -1391,7 +3407,7 @@ function manualRefreshMemories() {
 // Apply metadata filter
 function applyMetadataFilter() {
     const filter = document.getElementById('metadata-filter')?.value || null;
-    refreshMemories(filter);
+    refreshMemoryExplorer(filter);
 }
 
 // Show memory storage indicator
@@ -1409,7 +3425,7 @@ async function searchMemories(event) {
 
     if (!query || query.length < 2) {
         const filter = document.getElementById('metadata-filter')?.value;
-        refreshMemories(filter);
+        refreshMemoryExplorer(filter);
         return;
     }
 
@@ -1417,23 +3433,27 @@ async function searchMemories(event) {
         // Add activity log entry
         addActivityLog('search', `Searching memories for: "${query}"`);
 
-        const metadataFilter = document.getElementById('metadata-filter')?.value;
+        const filterValue = document.getElementById('metadata-filter')?.value;
         let url = `/api/memories/search?query=${encodeURIComponent(query)}&limit=5`;
-        if (metadataFilter) {
-            const metadata = JSON.stringify({source: metadataFilter});
-            url += `&metadata=${encodeURIComponent(metadata)}`;
+        if (filterValue) {
+            // Construct filter: {"source": filterValue}
+            const filters = JSON.stringify({source: filterValue});
+            url += `&filters=${encodeURIComponent(filters)}`;
         }
 
         const response = await fetch(url);
         if (response.ok) {
             const data = await response.json();
             if (data.success && data.results && data.results.length > 0) {
+                // Update explorer
                 displayMemories(data.results);
                 addActivityLog('search', `Found ${data.results.length} relevant memories`, true);
             } else {
-                // Show no results message
-                const container = document.getElementById('memory-context-list');
-                container.innerHTML = `<div class="empty-memory-state">No memories found for "${query}"</div>`;
+                // Show no results message in explorer
+                const explorerContainer = document.getElementById('memory-explorer-list');
+                if (explorerContainer) {
+                    explorerContainer.innerHTML = `<div class="empty-memory-state">No memories found for "${query}"</div>`;
+                }
                 addActivityLog('search', `No memories found for: "${query}"`, false);
             }
         }
@@ -1443,35 +3463,10 @@ async function searchMemories(event) {
     }
 }
 
-// Add activity to the Mem0 activity log
+// Activity log removed - no longer needed
 function addActivityLog(type, message, success = true) {
-    const container = document.getElementById('activity-log-content');
-
-    // Remove empty state if present
-    if (container.querySelector('.empty-memory-state')) {
-        container.innerHTML = '';
-    }
-
-    const time = new Date().toLocaleTimeString();
-    const icon = type === 'search' ? '🔍' : type === 'store' ? '💾' : type === 'extract' ? '🧠' : '⚡';
-    const statusIcon = success ? '✅' : '❌';
-
-    const activityItem = document.createElement('div');
-    activityItem.className = `activity-item ${type}`;
-    activityItem.innerHTML = `
-        <div>${icon} ${statusIcon} ${message}</div>
-        <div class="activity-time">${time}</div>
-    `;
-
-    container.insertBefore(activityItem, container.firstChild);
-
-    // Keep only last 10 activities
-    while (container.children.length > 10) {
-        container.removeChild(container.lastChild);
-    }
-
-    // Auto-scroll to top
-    container.scrollTop = 0;
+    // No-op: Activity log UI removed, keeping function for compatibility
+    console.log(`[Activity] ${type}: ${message}`, success ? '✅' : '❌');
 }
 
 async function sendMessage(event) {
@@ -1515,9 +3510,9 @@ async function sendMessage(event) {
         // Add AI response with memory context badge if available
         let responseContent = data.message.content;
 
-        // Show Mem0 operations
-        if (data.mem0_operations) {
-            const ops = data.mem0_operations;
+        // Show memory operations
+        if (data.memory_operations) {
+            const ops = data.memory_operations;
             let opsInfo = [];
 
             if (ops.search_performed) {
@@ -1525,34 +3520,52 @@ async function sendMessage(event) {
                 addActivityLog('search', `Semantic search found ${ops.memories_found} relevant memories`, true);
             }
 
-            if (ops.storage_scheduled) {
+            // Show background extraction indicator when extraction is pending
+            if (ops.extraction_pending) {
+                opsInfo.push('🧠 Extracting memories in background...');
+                addActivityLog('extract', 'Memory extraction in progress...', true);
+                // Show a subtle processing indicator that will be updated via WebSocket
+                responseContent += `<span class="memory-ops-badge memory-extraction-pending" title="Memory extraction in progress...">🧠 Processing...</span>`;
+            } else if (ops.storage_scheduled) {
                 opsInfo.push('💾 Storing conversation for fact extraction');
-                addActivityLog('store', 'Storing conversation in Mem0 for fact extraction', true);
+                addActivityLog('store', 'Storing conversation for fact extraction', true);
             }
 
             if (ops.inference_enabled) {
                 opsInfo.push('🧠 Inference enabled - extracting facts automatically');
-                addActivityLog('extract', 'Mem0 will extract facts from this conversation', true);
+                addActivityLog('extract', 'Memory service will extract facts from this conversation', true);
             }
 
             if (ops.graph_enabled) {
                 opsInfo.push('🕸️ Knowledge graph enabled');
             }
 
-            if (opsInfo.length > 0) {
-                responseContent += `<span class="mem0-ops-badge" title="${opsInfo.join('\\n')}">Mem0 Active</span>`;
+            if (opsInfo.length > 0 && !ops.extraction_pending) {
+                responseContent += `<span class="memory-ops-badge" title="${opsInfo.join('\\n')}">Memory Active</span>`;
             }
         }
 
-        if (data.memory_context && data.memory_context.used_memories > 0) {
-            responseContent += `<span class="memory-context-badge" title="Using ${data.memory_context.used_memories} relevant memories">${data.memory_context.used_memories} memories</span>`;
-
-            // Update active memory context with search details
-            if (data.memory_context.search_details) {
-                displayMemories(data.memory_context.search_details);
+        // Always show memory context (active context used for this response)
+        if (data.memory_context) {
+            const usedCount = data.memory_context.used_memories || 0;
+            const query = data.memory_context.query || '';
+            
+            if (usedCount > 0) {
+                const memoryText = usedCount === 1 ? 'memory' : 'memories';
+                responseContent += `<span class="memory-context-badge" title="Using ${usedCount} relevant ${memoryText} for: '${query}'">${usedCount} ${memoryText}</span>`;
             } else {
-                activeMemoryContext = data.memory_context.memories || [];
-                displayMemories(activeMemoryContext.map(m => ({ memory: m })));
+                responseContent += `<span class="memory-context-badge memory-context-empty" title="No relevant memories found for: '${query}'">No context</span>`;
+            }
+
+            // Update active memory context with search details (always, even if empty)
+            if (data.memory_context.search_details && data.memory_context.search_details.length > 0) {
+                displayActiveContext(data.memory_context.search_details);
+            } else if (data.memory_context.memories && data.memory_context.memories.length > 0) {
+                // memories is already in standardized format: [{memory: "...", id: "...", ...}]
+                displayActiveContext(data.memory_context.memories);
+            } else {
+                // No memories found - clear the display or show empty state
+                displayActiveContext([]);
             }
         }
 
@@ -1567,12 +3580,9 @@ async function sendMessage(event) {
         memoryRefreshRetryCount = 0;
 
         // Delayed refresh to allow async memory processing (2-3 seconds)
-        // This gives Mem0 time to process and store memories asynchronously
+        // This gives the memory service time to process and store memories asynchronously
         const filter = document.getElementById('metadata-filter')?.value;
-        setTimeout(() => {
-            console.log('[Memory Refresh] Delayed refresh after message send (2.5s delay)');
-            refreshMemories(filter, 0, false);
-        }, 2500); // 2.5 second delay
+        // Note: Active context is updated via sendMessage, explorer refreshes when opened
 
         // Note: Memory storage events will also come via WebSocket and trigger refresh
 
@@ -1622,6 +3632,94 @@ function removeMessage(messageId) {
     const message = document.getElementById(messageId);
     if (message) {
         message.remove();
+    }
+}
+
+// Extraction status indicator ID
+const EXTRACTION_STATUS_ID = 'extraction-status-indicator';
+
+function updateExtractionStatusInChat(data) {
+    /**
+     * Updates or creates a status indicator in the chat showing extraction progress.
+     * This provides transparency into what's happening in the background.
+     */
+    const container = document.getElementById('messages-container');
+    let statusDiv = document.getElementById(EXTRACTION_STATUS_ID);
+    
+    // Create status indicator if it doesn't exist
+    if (!statusDiv) {
+        statusDiv = document.createElement('div');
+        statusDiv.id = EXTRACTION_STATUS_ID;
+        statusDiv.className = 'extraction-status-container';
+        container.appendChild(statusDiv);
+    }
+    
+    // Map stages to icons and colors
+    const stageConfig = {
+        'starting': { icon: '🔄', color: 'var(--mongodb-green)', bgColor: 'rgba(0, 237, 100, 0.1)' },
+        'analyzing': { icon: '🔍', color: '#fbbf24', bgColor: 'rgba(251, 191, 36, 0.1)' },
+        'extracting': { icon: '🧠', color: 'var(--mongodb-green)', bgColor: 'rgba(0, 237, 100, 0.1)' },
+        'storing': { icon: '💾', color: '#34d399', bgColor: 'rgba(52, 211, 153, 0.1)' },
+        'complete': { icon: '✅', color: '#10b981', bgColor: 'rgba(16, 185, 129, 0.1)' },
+        'error': { icon: '❌', color: '#f87171', bgColor: 'rgba(248, 113, 113, 0.1)' },
+        // File processing stages
+        'analyzing_metadata': { icon: '📋', color: '#fbbf24', bgColor: 'rgba(251, 191, 36, 0.1)' },
+        'chunking': { icon: '📄', color: '#93c5fd', bgColor: 'rgba(59, 130, 246, 0.1)' },
+        'extracting_facts': { icon: '🧠', color: '#c084fc', bgColor: 'rgba(138, 43, 226, 0.1)' },
+        'filtering_facts': { icon: '🔎', color: '#f472b6', bgColor: 'rgba(244, 114, 182, 0.1)' },
+        'storing_memories': { icon: '💾', color: '#34d399', bgColor: 'rgba(52, 211, 153, 0.1)' },
+        'preparing_extraction': { icon: '🔧', color: '#94a3b8', bgColor: 'rgba(148, 163, 184, 0.1)' },
+        'processing_results': { icon: '📊', color: '#a78bfa', bgColor: 'rgba(167, 139, 250, 0.1)' }
+    };
+    
+    const config = stageConfig[data.stage] || stageConfig['starting'];
+    const progress = data.progress || 0;
+    
+    // Build memory previews HTML if available
+    let previewsHTML = '';
+    if (data.details?.previews && data.details.previews.length > 0) {
+        previewsHTML = `
+            <div class="extraction-previews">
+                ${data.details.previews.map(p => `<div class="extraction-preview-item">💡 ${p}</div>`).join('')}
+            </div>
+        `;
+    }
+    
+    statusDiv.innerHTML = `
+        <div class="extraction-status-card" style="border-color: ${config.color}; background: ${config.bgColor}">
+            <div class="extraction-status-header">
+                <span class="extraction-status-icon">${config.icon}</span>
+                <span class="extraction-status-title">Memory Extraction</span>
+                <span class="extraction-status-progress">${progress}%</span>
+            </div>
+            <div class="extraction-status-message" style="color: ${config.color}">${data.message}</div>
+            <div class="extraction-status-bar">
+                <div class="extraction-status-bar-fill" style="width: ${progress}%; background: ${config.color}"></div>
+            </div>
+            ${previewsHTML}
+        </div>
+    `;
+    
+    scrollToBottom();
+    
+    // Auto-remove on completion after a delay
+    if (data.stage === 'complete' || data.stage === 'error') {
+        setTimeout(() => {
+            removeExtractionStatusFromChat();
+        }, data.stage === 'complete' ? 4000 : 6000);
+    }
+}
+
+function removeExtractionStatusFromChat() {
+    const statusDiv = document.getElementById(EXTRACTION_STATUS_ID);
+    if (statusDiv) {
+        // Fade out animation
+        statusDiv.style.transition = 'opacity 0.5s ease-out, transform 0.5s ease-out';
+        statusDiv.style.opacity = '0';
+        statusDiv.style.transform = 'translateY(-10px)';
+        setTimeout(() => {
+            statusDiv.remove();
+        }, 500);
     }
 }
 

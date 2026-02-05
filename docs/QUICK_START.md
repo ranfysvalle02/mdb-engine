@@ -254,18 +254,29 @@ Configure authentication and authorization declaratively:
   "memory_config": {
     "enabled": true,
     "collection_name": "user_memories",
-    "enable_graph": true
+    "embedding_model_dims": 1536,
+    "graph": {
+      "enabled": true,
+      "auto_extract": true
+    }
   }
 }
 ```
 
+**⚠️ Automatic Index Management**: The memory service automatically creates and manages its own vector search index. You do NOT need to add memory collection indexes to `managed_indexes`. The index is created automatically on startup with:
+- Vector field: `embedding` (with correct dimensions)
+- Filter field: `user_id` (required for user-scoped queries)
+- Automatic updates if the index is missing the `user_id` filter
+
+See [Memory Service Guide](./MEMORY_SERVICE.md) for complete documentation.
+
 Both services become available via dependencies:
 - `get_embedding_service()` - Text chunking and embeddings
-- `get_memory_service()` - Persistent AI memory (Mem0) with inject, delete, search, and update capabilities
+- `get_memory_service()` - Persistent AI memory (MongoDB Atlas Vector Search) with inject, delete, search, and update capabilities
 
 #### 5. WebSockets (`websockets`)
 
-Define real-time endpoints:
+Define real-time endpoints with ticket-based authentication:
 
 ```json
 {
@@ -274,12 +285,26 @@ Define real-time endpoints:
       "path": "/ws",
       "description": "Real-time updates",
       "auth": {
-        "required": false,
-        "allow_anonymous": true
-      }
+        "required": true,
+        "allow_anonymous": false
+      },
+      "ping_interval": 30
     }
   }
 }
+```
+
+**Client Connection:**
+```javascript
+// Step 1: Get ticket (requires JWT cookie from login)
+const ticketRes = await fetch('/auth/ticket', {
+  method: 'POST',
+  credentials: 'include'
+});
+const { ticket } = await ticketRes.json();
+
+// Step 2: Connect WebSocket with ticket (must be within 10 seconds)
+const ws = new WebSocket(`wss://api.example.com/my_app/ws?ticket=${ticket}`);
 ```
 
 #### 6. CORS (`cors`)

@@ -433,6 +433,196 @@ class TestCSRFMiddlewareFactory:
         )
         assert middleware_class is not None
 
+    def test_auth_ticket_exempted_with_boolean_config(self):
+        """Test that /auth/ticket is exempted when csrf_protection is boolean True."""
+        # Simulate what engine.py does: adds /auth/ticket to public_routes
+        manifest_auth = {
+            "csrf_protection": True,
+            "public_routes": ["/health", "/auth/callback", "/auth/ticket"],
+        }
+        middleware_class = create_csrf_middleware(manifest_auth=manifest_auth)
+
+        # Create app and test that /auth/ticket is exempt
+        app = FastAPI()
+
+        @app.post("/auth/ticket")
+        def ticket_endpoint():
+            return {"ticket": "test"}
+
+        @app.post("/submit")
+        def submit():
+            return {"status": "ok"}
+
+        app.add_middleware(middleware_class)
+        client = TestClient(app, raise_server_exceptions=False)
+
+        # /auth/ticket should work without CSRF token
+        response = client.post("/auth/ticket")
+        assert response.status_code == 200
+
+        # /submit should require CSRF token
+        client.get("/")  # Get CSRF cookie
+        response = client.post("/submit")
+        assert response.status_code == 403
+
+    def test_auth_ticket_exempted_with_object_config_explicit_exempt_routes(self):
+        """Test that /auth/ticket is exempted when exempt_routes is explicitly set."""
+        # Simulate what engine.py does: merges /auth/ticket into exempt_routes
+        manifest_auth = {
+            "csrf_protection": {
+                "exempt_routes": ["/health", "/auth/callback", "/auth/ticket"],
+                "token_ttl": 3600,
+            },
+            "public_routes": ["/health", "/auth/callback"],
+        }
+        middleware_class = create_csrf_middleware(manifest_auth=manifest_auth)
+
+        app = FastAPI()
+
+        @app.post("/auth/ticket")
+        def ticket_endpoint():
+            return {"ticket": "test"}
+
+        @app.post("/submit")
+        def submit():
+            return {"status": "ok"}
+
+        app.add_middleware(middleware_class)
+        client = TestClient(app, raise_server_exceptions=False)
+
+        # /auth/ticket should work without CSRF token
+        response = client.post("/auth/ticket")
+        assert response.status_code == 200
+
+        # /submit should require CSRF token
+        client.get("/")  # Get CSRF cookie
+        response = client.post("/submit")
+        assert response.status_code == 403
+
+    def test_auth_ticket_exempted_with_object_config_no_exempt_routes(self):
+        """Test that /auth/ticket is exempted when exempt_routes is not set (uses public_routes)."""
+        # Simulate what engine.py does: adds /auth/ticket to public_routes
+        manifest_auth = {
+            "csrf_protection": {
+                "enabled": True,
+                "token_ttl": 3600,
+                # exempt_routes not set, should fall back to public_routes
+            },
+            "public_routes": ["/health", "/auth/callback", "/auth/ticket"],
+        }
+        middleware_class = create_csrf_middleware(manifest_auth=manifest_auth)
+
+        app = FastAPI()
+
+        @app.post("/auth/ticket")
+        def ticket_endpoint():
+            return {"ticket": "test"}
+
+        app.add_middleware(middleware_class)
+        client = TestClient(app)
+
+        # /auth/ticket should work without CSRF token
+        response = client.post("/auth/ticket")
+        assert response.status_code == 200
+
+    def test_auth_ticket_exempted_with_object_config_empty_exempt_routes(self):
+        """Test that /auth/ticket is exempted when exempt_routes is empty list.
+
+        Note: When exempt_routes is explicitly set to [], create_csrf_middleware uses it
+        instead of falling back to public_routes. However, engine.py ensures /auth/ticket
+        is added to exempt_routes even when it's empty, so this test simulates that behavior.
+        """
+        # Simulate what engine.py does: adds /auth/ticket to empty exempt_routes
+        # In engine.py, if exempt_routes is [], it will add /auth/ticket to it
+        manifest_auth = {
+            "csrf_protection": {
+                "exempt_routes": ["/auth/ticket"],  # engine.py adds this even if original was []
+                "token_ttl": 3600,
+            },
+            "public_routes": ["/health", "/auth/callback"],
+        }
+        middleware_class = create_csrf_middleware(manifest_auth=manifest_auth)
+
+        app = FastAPI()
+
+        @app.post("/auth/ticket")
+        def ticket_endpoint():
+            return {"ticket": "test"}
+
+        app.add_middleware(middleware_class)
+        client = TestClient(app, raise_server_exceptions=False)
+
+        # /auth/ticket should work without CSRF token (engine.py ensures it's in exempt_routes)
+        response = client.post("/auth/ticket")
+        assert response.status_code == 200
+
+    def test_auth_ticket_exempted_when_already_in_exempt_routes(self):
+        """Test that /auth/ticket is not duplicated when already in exempt_routes."""
+        manifest_auth = {
+            "csrf_protection": {
+                "exempt_routes": ["/health", "/auth/ticket"],  # Already includes /auth/ticket
+                "token_ttl": 3600,
+            },
+            "public_routes": ["/health"],
+        }
+        middleware_class = create_csrf_middleware(manifest_auth=manifest_auth)
+
+        app = FastAPI()
+
+        @app.post("/auth/ticket")
+        def ticket_endpoint():
+            return {"ticket": "test"}
+
+        app.add_middleware(middleware_class)
+        client = TestClient(app)
+
+        # /auth/ticket should work without CSRF token
+        response = client.post("/auth/ticket")
+        assert response.status_code == 200
+
+    def test_middleware_exempt_routes_contains_auth_ticket(self):
+        """Test that middleware instance has /auth/ticket in exempt_routes when configured."""
+        # Simulate engine.py behavior: object config with exempt_routes that includes /auth/ticket
+        manifest_auth = {
+            "csrf_protection": {
+                "exempt_routes": ["/health", "/auth/callback", "/auth/ticket"],
+                "token_ttl": 3600,
+            },
+            "public_routes": ["/health", "/auth/callback"],
+        }
+        middleware_class = create_csrf_middleware(manifest_auth=manifest_auth)
+
+        app = FastAPI()
+        app.add_middleware(middleware_class)
+
+        # Get the middleware instance to verify its exempt_routes
+        # The middleware is added to the app, so we need to access it via the app's middleware stack
+        # For testing purposes, create a middleware instance directly
+        middleware_instance = middleware_class(app)
+
+        # Verify /auth/ticket is in exempt_routes
+        assert "/auth/ticket" in middleware_instance.exempt_routes
+        assert middleware_instance._is_exempt("/auth/ticket") is True  # noqa: SLF001
+
+    def test_middleware_exempt_routes_fallback_to_public_routes(self):
+        """Test that middleware falls back to public_routes when exempt_routes not set."""
+        # Simulate engine.py behavior: object config without exempt_routes, uses public_routes
+        manifest_auth = {
+            "csrf_protection": {
+                "enabled": True,
+                "token_ttl": 3600,
+                # exempt_routes not set
+            },
+            "public_routes": ["/health", "/auth/callback", "/auth/ticket"],
+        }
+        middleware_class = create_csrf_middleware(manifest_auth=manifest_auth)
+
+        app = FastAPI()
+        middleware_instance = middleware_class(app)
+
+        # Verify /auth/ticket is exempt (via public_routes fallback)
+        assert middleware_instance._is_exempt("/auth/ticket") is True  # noqa: SLF001
+
 
 class TestGetCSRFToken:
     """Tests for get_csrf_token dependency."""

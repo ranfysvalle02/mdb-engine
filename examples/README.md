@@ -156,7 +156,7 @@ An advanced example demonstrating:
 ### [Chit Chat](./basic/chit_chat/) 💬
 
 An AI chat application demonstrating:
-- Memory service (`Mem0MemoryService`) with persistent memory
+- Memory service (`CustomMemoryService` or `CognitiveMemoryService`) with persistent memory
 - Memory injection (`inject()`) for manual memory insertion without LLM inference
 - Memory deletion (`delete()`, `delete_all()`) for memory management
 - Semantic search across conversation history
@@ -526,7 +526,7 @@ Available dependencies from `mdb_engine.dependencies`:
 | `get_app_config` | Get app manifest/config |
 | `get_scoped_db` | Get scoped database (most common) |
 | `get_embedding_service` | Get EmbeddingService for the current app |
-| `get_memory_service` | Get Mem0 memory service (None if not configured) |
+| `get_memory_service` | Get memory service (None if not configured) |
 | `get_llm_client` | Get auto-configured OpenAI/AzureOpenAI client |
 | `get_llm_model_name` | Get LLM deployment/model name |
 | `get_authz_provider` | Get authorization provider (Casbin/OSO) |

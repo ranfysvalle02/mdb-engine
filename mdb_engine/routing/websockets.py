@@ -162,10 +162,34 @@ class WebSocketConnectionManager:
         async with self._lock:
             connections = list(self.active_connections)
 
+        # Use DEBUG level for broadcast logging to reduce log noise
+        filter_type = type(filter_by_user).__name__ if filter_by_user else "None"
+        logger.debug(
+            f"📡 Broadcasting to {len(connections)} connection(s) for app '{self.app_slug}' "
+            f"(filter_by_user: {filter_by_user}, type: {filter_type})"
+        )
+        if connections:
+            user_ids = [str(c.user_id) if c.user_id else "None" for c in connections]
+            user_types = [type(c.user_id).__name__ if c.user_id else "None" for c in connections]
+            logger.debug(f"📡 Active connections user_ids: {user_ids} (types: {user_types})")
+
         for connection in connections:
             # Filter by user if specified
-            if filter_by_user and connection.user_id != filter_by_user:
-                continue
+            if filter_by_user:
+                # Normalize both user_ids to strings for comparison
+                connection_user_id = str(connection.user_id) if connection.user_id else None
+                filter_user_id = str(filter_by_user) if filter_by_user else None
+
+                if connection_user_id != filter_user_id:
+                    logger.debug(
+                        f"Filtering out connection: user_id mismatch "
+                        f"(connection: {connection_user_id}, filter: {filter_user_id})"
+                    )
+                    continue
+                logger.debug(
+                    f"✅ User match: connection.user_id={connection_user_id}, "
+                    f"filter_by_user={filter_user_id}"
+                )
 
             # Check WebSocket state before attempting to send
             try:
@@ -398,17 +422,16 @@ async def _validate_websocket_origin_in_handler(websocket: Any, app_slug: str) -
     Returns:
         True if origin is valid, False otherwise
     """
+    from ..auth.cors_utils import get_cors_allowed_origins, is_origin_allowed
+
     try:
-        # Get origin from headers
         origin = None
         if hasattr(websocket, "headers"):
             origin = websocket.headers.get("origin")
         elif hasattr(websocket, "scope") and "headers" in websocket.scope:
-            # Extract from ASGI scope headers
             headers_dict = dict(websocket.scope["headers"])
             origin_bytes = headers_dict.get(b"origin")
             if not origin_bytes:
-                # Try case-insensitive lookup
                 for key, value in headers_dict.items():
                     if isinstance(key, bytes) and key.lower() == b"origin":
                         origin_bytes = value
@@ -416,169 +439,133 @@ async def _validate_websocket_origin_in_handler(websocket: Any, app_slug: str) -
             if origin_bytes:
                 origin = origin_bytes.decode("utf-8")
 
-        logger.info(
-            f"🔍 WebSocket origin validation in handler for '{app_slug}': " f"origin={origin}"
-        )
+        logger.info(f"WebSocket origin validation for '{app_slug}': origin={origin}")
 
-        # Get allowed origins from app state (CORS config) FIRST
-        # This allows us to check if wildcard is allowed before rejecting missing origin
         allowed_origins = []
         try:
             app = getattr(websocket, "app", None)
-            if app:
-                # Traverse up to find parent app with CORS config
-                while app:
-                    cors_config = getattr(app.state, "cors_config", None)
-                    if cors_config and cors_config.get("allow_origins"):
-                        origins = cors_config["allow_origins"]
-                        allowed_origins = origins if isinstance(origins, list) else [origins]
-                        logger.debug(
-                            f"Found CORS config on app '{getattr(app, 'title', 'unknown')}' "
-                            f"for '{app_slug}': {allowed_origins}"
-                        )
-                        break
-                    parent_app = getattr(app, "app", None)
-                    if parent_app is app:
-                        break
-                    app = parent_app
-        except (AttributeError, TypeError, KeyError) as e:
-            logger.debug(f"Could not read CORS config: {e}")
+            apps_checked = []
 
-        # Check if CORS allows all origins - if so, allow missing origin
-        if allowed_origins and "*" in allowed_origins:
-            if not origin:
-                logger.info(
-                    f"WebSocket upgrade missing Origin header for '{app_slug}', "
-                    "but CORS allows all origins (*) - allowing connection"
+            if app:
+                current_app = app
+                while current_app:
+                    parent_app = getattr(current_app, "app", None)
+                    if parent_app and parent_app is not current_app:
+                        if getattr(parent_app.state, "is_multi_app", False):
+                            cors_config = getattr(parent_app.state, "cors_config", None)
+                            if cors_config and cors_config.get("enabled", False):
+                                try:
+                                    allowed_origins = get_cors_allowed_origins(cors_config)
+                                    logger.info(
+                                        f"Using parent app CORS config for '{app_slug}': "
+                                        f"{allowed_origins}"
+                                    )
+                                    break
+                                except ValueError as e:
+                                    logger.warning(f"Invalid CORS config in parent app: {e}")
+                            break
+                        current_app = parent_app
+                    else:
+                        break
+
+                if not allowed_origins:
+                    current_app = app
+                    while current_app:
+                        app_title = getattr(current_app, "title", "unknown")
+                        apps_checked.append(app_title)
+                        cors_config = getattr(current_app.state, "cors_config", None)
+                        if cors_config and cors_config.get("enabled", False):
+                            try:
+                                allowed_origins = get_cors_allowed_origins(cors_config)
+                                logger.info(
+                                    f"Using CORS config from app '{app_title}' for '{app_slug}': "
+                                    f"{allowed_origins}"
+                                )
+                                break
+                            except ValueError as e:
+                                logger.warning(f"Invalid CORS config in '{app_title}': {e}")
+
+                        parent_app = getattr(current_app, "app", None)
+                        if parent_app is current_app or parent_app is None:
+                            break
+                        current_app = parent_app
+
+            if not allowed_origins:
+                import os
+
+                is_dev = (
+                    os.getenv("ENVIRONMENT", "").lower() in ["development", "dev"]
+                    or os.getenv("G_NOME_ENV", "").lower() in ["development", "dev"]
+                    or os.path.exists("/.dockerenv")
                 )
-                return True
+
+                if not is_dev:
+                    logger.error(
+                        f"WebSocket origin validation failed for '{app_slug}': "
+                        f"No CORS config found and not in development mode. "
+                        f"Please configure CORS in manifest.json for production use."
+                    )
+                    return False
+
+                logger.warning(
+                    f"No enabled CORS config found for '{app_slug}' "
+                    f"(checked apps: {apps_checked}). Using development fallback."
+                )
+
+                try:
+                    if hasattr(websocket, "scope"):
+                        host = websocket.scope.get("server")
+                        if host:
+                            hostname = host[0] if isinstance(host, tuple) else host
+                            scheme = websocket.scope.get("scheme", "http")
+                            port = host[1] if isinstance(host, tuple) and len(host) > 1 else None
+
+                            if hostname in ["localhost", "0.0.0.0", "127.0.0.1", "::1"]:
+                                for variant in ["localhost", "127.0.0.1"]:
+                                    if port and port not in [80, 443]:
+                                        allowed_origins.append(f"{scheme}://{variant}:{port}")
+                                    else:
+                                        allowed_origins.append(f"{scheme}://{variant}")
+                            else:
+                                if port and port not in [80, 443]:
+                                    allowed_origins.append(f"{scheme}://{hostname}:{port}")
+                                else:
+                                    allowed_origins.append(f"{scheme}://{hostname}")
+                except (AttributeError, TypeError, KeyError) as e:
+                    logger.debug(f"Could not determine fallback origins: {e}")
+
+        except (AttributeError, TypeError, KeyError) as e:
+            logger.warning(f"Could not read CORS config for '{app_slug}': {e}", exc_info=True)
+
+        if is_origin_allowed(origin, allowed_origins):
+            logger.info(
+                f"WebSocket origin validation passed for '{app_slug}': "
+                f"origin={origin or 'missing'}, allowed_origins={allowed_origins}"
+            )
+            return True
 
         if not origin:
-            # In development, allow connections without Origin
             import os
 
-            env = os.getenv("ENVIRONMENT", "").lower()
-            g_nome_env = os.getenv("G_NOME_ENV", "").lower()
-            is_dev = env in ["development", "dev"] or g_nome_env in ["development", "dev"]
+            is_dev = (
+                os.getenv("ENVIRONMENT", "").lower() in ["development", "dev"]
+                or os.getenv("G_NOME_ENV", "").lower() in ["development", "dev"]
+                or os.path.exists("/.dockerenv")
+            )
             if is_dev:
                 logger.warning(
                     f"WebSocket upgrade missing Origin header in development mode: "
                     f"allowing connection for '{app_slug}'"
                 )
                 return True
-            else:
-                logger.warning(f"WebSocket upgrade missing Origin header for '{app_slug}'")
-                return False
 
-        # Normalize origin for comparison
-        def normalize_origin(orig: str) -> str:
-            """
-            Normalize origin handling localhost variants and protocol differences.
-
-            Handles:
-            - Protocol conversion: ws/wss -> http/https (browsers send http/https)
-            - Localhost normalization: 127.0.0.1, 0.0.0.0, ::1 -> localhost
-            - Docker IP normalization: container IPs -> localhost (in development)
-            - Port normalization: removes :80 and :443
-            """
-            if not orig:
-                return orig
-            import os
-            import re
-
-            normalized = orig.lower()
-
-            # Normalize protocol: convert ws/wss to http/https for comparison
-            # WebSocket origins come as http/https from browsers, but configs may use ws/wss
-            normalized = re.sub(r"^ws://", "http://", normalized)
-            normalized = re.sub(r"^wss://", "https://", normalized)
-
-            # Check if we're in development/Docker environment
-            is_dev = (
-                os.getenv("ENVIRONMENT", "").lower() in ["development", "dev"]
-                or os.getenv("G_NOME_ENV", "").lower() in ["development", "dev"]
-                or os.path.exists("/.dockerenv")  # Docker container indicator
-            )
-
-            # Normalize localhost variants
-            # In development/Docker, also normalize common Docker IP ranges to localhost
-            if is_dev:
-                # Match localhost, 127.0.0.1, 0.0.0.0, ::1, and Docker container IPs
-                # Docker typically uses 172.17.0.0/16 or 172.20.0.0/16
-                normalized = re.sub(
-                    r"://(0\.0\.0\.0|127\.0\.0\.1|localhost|::1|172\.(17|20)\.\d+\.\d+)",
-                    "://localhost",
-                    normalized,
-                    flags=re.IGNORECASE,
-                )
-            else:
-                # Production: only normalize standard localhost variants
-                normalized = re.sub(
-                    r"://(0\.0\.0\.0|127\.0\.0\.1|localhost|::1)",
-                    "://localhost",
-                    normalized,
-                    flags=re.IGNORECASE,
-                )
-
-            # Remove default ports
-            normalized = re.sub(r":80$", "", normalized)
-            normalized = re.sub(r":443$", "", normalized)
-
-            return normalized.rstrip("/")
-
-        normalized_origin = normalize_origin(origin)
-        logger.debug(f"Normalized origin: {origin} -> {normalized_origin}")
-
-        # If no CORS config, generate fallback origins from request
-        if not allowed_origins:
-            # Try to get host from websocket scope
-            try:
-                if hasattr(websocket, "scope"):
-                    host = websocket.scope.get("server")
-                    if host:
-                        hostname = host[0] if isinstance(host, tuple) else host
-                        scheme = websocket.scope.get("scheme", "http")
-                        port = host[1] if isinstance(host, tuple) and len(host) > 1 else None
-
-                        # Generate localhost variants if server binds to 0.0.0.0
-                        if hostname in ["localhost", "0.0.0.0", "127.0.0.1", "::1"]:
-                            for variant in ["localhost", "127.0.0.1"]:
-                                if port and port not in [80, 443]:
-                                    allowed_origins.append(f"{scheme}://{variant}:{port}")
-                                else:
-                                    allowed_origins.append(f"{scheme}://{variant}")
-                        else:
-                            if port and port not in [80, 443]:
-                                allowed_origins.append(f"{scheme}://{hostname}:{port}")
-                            else:
-                                allowed_origins.append(f"{scheme}://{hostname}")
-            except (AttributeError, TypeError, KeyError) as e:
-                logger.debug(f"Could not determine fallback origins: {e}")
-
-        logger.debug(f"Allowed origins for '{app_slug}': {allowed_origins}")
-
-        # Check if origin matches any allowed origin
-        for allowed in allowed_origins:
-            if allowed == "*":
-                logger.warning(
-                    "WebSocket Origin validation using wildcard '*' - "
-                    "not recommended for production"
-                )
-                return True
-
-            normalized_allowed = normalize_origin(allowed)
-            if normalized_origin == normalized_allowed:
-                logger.info(
-                    f"✅ WebSocket origin validated in handler for '{app_slug}': "
-                    f"{origin} matches {allowed}"
-                )
-                return True
+            logger.warning(f"WebSocket upgrade missing Origin header for '{app_slug}'")
+            return False
 
         logger.warning(
-            f"❌ WebSocket origin validation failed for '{app_slug}': "
-            f"origin={origin} (normalized: {normalized_origin}), "
-            f"allowed={allowed_origins} "
-            f"(normalized: {[normalize_origin(a) for a in allowed_origins]})"
+            f"WebSocket origin validation failed for '{app_slug}': "
+            f"origin={origin} not in allowed_origins={allowed_origins}. "
+            f"Add '{origin}' to manifest.json cors.allow_origins"
         )
         return False
 
@@ -590,8 +577,7 @@ async def _validate_websocket_origin_in_handler(websocket: Any, app_slug: str) -
         ValueError,
         RuntimeError,
     ) as e:
-        logger.error(f"❌ Error validating WebSocket origin for '{app_slug}': {e}", exc_info=True)
-        # Fail secure - reject if we can't validate
+        logger.error(f"Error validating WebSocket origin for '{app_slug}': {e}", exc_info=True)
         return False
 
 
@@ -601,12 +587,18 @@ async def authenticate_websocket(
     require_auth: bool = True,
 ) -> tuple[str | None, str | None]:
     """
-    Authenticate a WebSocket connection using multiple methods with fallback.
+    Authenticate a WebSocket connection using ticket-based authentication.
 
-    Authentication methods (in order of preference):
-    1. Ticket (query param or header) - short-lived, single-use, secure for multi-app SSO
-    2. Session key (query param or header) - encrypted session-based authentication
-    3. Cookie (httpOnly JWT token) - backward compatibility fallback
+    Authentication method:
+    - Ticket (query param `?ticket=<uuid>` or header `X-WebSocket-Ticket`)
+      - short-lived (10s TTL), single-use, secure for multi-app SSO
+
+    Ticket Flow:
+    1. Client requests ticket via POST /auth/ticket (requires JWT cookie)
+    2. Server validates JWT and generates one-time ticket (UUID)
+    3. Client connects WebSocket with ticket in query param or header
+    4. Server validates and consumes ticket (single-use)
+    5. WebSocket connection established
 
     Args:
         websocket: FastAPI WebSocket instance (can access headers before accept)
@@ -626,8 +618,10 @@ async def authenticate_websocket(
 
     from fastapi import WebSocketDisconnect
 
-    if not require_auth:
-        return None, None
+    # CRITICAL: Even when require_auth=False, we should still try to authenticate
+    # if a ticket is provided, so we can associate user_id with the connection.
+    # This enables proper user-scoped broadcasting even for "optional" auth.
+    # Only fail if require_auth=True and authentication fails.
 
     try:
         # Helper function to get app and traverse hierarchy
@@ -648,10 +642,8 @@ async def authenticate_websocket(
                     break
                 app = parent_app
 
-        # Try to get services from app state
+        # Try to get ticket store from app state
         websocket_ticket_store = _global_websocket_ticket_store
-        websocket_session_manager = None
-        user_pool = None
 
         apps_checked_list = []
         for app, app_title in get_app_and_state():
@@ -663,25 +655,9 @@ async def authenticate_websocket(
                         f"Found websocket_ticket_store on app '{app_title}' "
                         f"for app_slug '{app_slug}'"
                     )
-            if not websocket_session_manager:
-                websocket_session_manager = getattr(app.state, "websocket_session_manager", None)
-                if websocket_session_manager:
-                    logger.info(
-                        f"✅ Found websocket_session_manager on app '{app_title}' "
-                        f"for app_slug '{app_slug}' (checked: {apps_checked_list})"
-                    )
-            if not user_pool:
-                user_pool = getattr(app.state, "user_pool", None)
-                if user_pool:
-                    logger.debug(f"Found user_pool on app '{app_title}' for app_slug '{app_slug}'")
 
-        if not websocket_session_manager:
-            logger.warning(
-                f"⚠️ websocket_session_manager not found for '{app_slug}' "
-                f"(checked apps: {apps_checked_list})"
-            )
-
-        # Method 1: Ticket authentication (preferred)
+        # Ticket authentication (primary method for multi-app SSO)
+        # Try ticket auth even if require_auth=False (for user association)
         ticket = None
         try:
             if hasattr(websocket, "query_params"):
@@ -699,131 +675,30 @@ async def authenticate_websocket(
                     user_email = ticket_data.get("user_email")
                     logger.info(
                         f"WebSocket authenticated successfully for app '{app_slug}': {user_email} "
-                        f"(method: ticket)"
+                        f"(method: ticket, require_auth={require_auth})"
                     )
                     return user_id, user_email
             except (ValueError, TypeError, AttributeError, KeyError, RuntimeError) as e:
                 logger.debug(f"Ticket validation failed: {e}")
-
-        # Method 2: Session key authentication (fallback)
-        session_key = None
-        try:
-            if hasattr(websocket, "query_params"):
-                # Try dict-like access first
-                if hasattr(websocket.query_params, "get"):
-                    session_key = websocket.query_params.get("session_key")
-                # Fallback: try dict access
-                elif isinstance(websocket.query_params, dict):
-                    session_key = websocket.query_params.get("session_key")
-                # Fallback: try attribute access
-                elif hasattr(websocket.query_params, "session_key"):
-                    session_key = websocket.query_params.session_key
-            if not session_key and hasattr(websocket, "headers"):
-                session_key = websocket.headers.get("X-WebSocket-Session-Key")
-        except (AttributeError, TypeError, KeyError) as e:
-            logger.debug(f"Error extracting session key from websocket: {e}")
-            pass
-
-        logger.debug(
-            f"Session key extraction for '{app_slug}': "
-            f"session_key={'present' if session_key else 'missing'}, "
-            f"websocket_session_manager={'present' if websocket_session_manager else 'missing'}"
-        )
-
-        if session_key and websocket_session_manager:
-            try:
-                logger.debug(
-                    f"Validating session key for '{app_slug}': "
-                    f"session_key={session_key[:16]}... (truncated), "
-                    f"manager_type={type(websocket_session_manager).__name__}"
-                )
-                session_data = await websocket_session_manager.validate_session(session_key)
-                if session_data:
-                    user_id = session_data.get("user_id")
-                    user_email = session_data.get("user_email")
-                    logger.info(
-                        f"WebSocket authenticated successfully for app '{app_slug}': {user_email} "
-                        f"(method: session_key)"
-                    )
-                    return user_id, user_email
-                else:
-                    logger.warning(
-                        f"Session key validation returned None for '{app_slug}': "
-                        f"session_key={session_key[:16]}... (truncated)"
-                    )
-            except RuntimeError as e:
-                # Handle event loop conflicts (e.g., TestClient with anyio)
-                error_msg = str(e).lower()
-                if "attached to a different loop" in error_msg or "different loop" in error_msg:
-                    logger.warning(
-                        f"Event loop conflict during session key validation for '{app_slug}': {e}. "
-                        "This may occur in test environments with TestClient. "
-                        "Session key validation failed."
-                    )
-                    # Return None to indicate authentication failure
-                    # Don't re-raise - let the normal auth failure path handle it
-                else:
-                    # Re-raise other RuntimeErrors
-                    logger.warning(
-                        f"Session key validation failed for '{app_slug}': {e}",
-                        exc_info=True,
-                    )
-                    raise
-            except (ValueError, TypeError, AttributeError, KeyError) as e:
-                logger.warning(
-                    f"Session key validation failed for '{app_slug}': {e}",
-                    exc_info=True,
-                )
-        elif session_key and not websocket_session_manager:
-            logger.error(
-                f"Session key provided for '{app_slug}' but websocket_session_manager not found. "
-                "Cannot validate session key."
-            )
-
-        # Method 3: Cookie-based JWT authentication (backward compatibility)
-        from ..auth.shared_middleware import AUTH_COOKIE_NAME
-
-        cookies = _get_cookies_from_websocket(websocket)
-        auth_token = cookies.get(AUTH_COOKIE_NAME) if cookies else None
-
-        if auth_token and user_pool:
-            try:
-                # For tests that expect JWT errors to be raised, we need to validate
-                # the token structure first. However, validate_token handles JWT errors
-                # internally, so we'll let it handle validation and only catch non-JWT errors.
-                user = await user_pool.validate_token(auth_token)
-                if user:
-                    user_id = str(user.get("_id") or user.get("sub") or user.get("user_id"))
-                    user_email = user.get("email")
-                    logger.info(
-                        f"WebSocket authenticated successfully for app '{app_slug}': {user_email} "
-                        f"(method: cookie)"
-                    )
-                    return user_id, user_email
-            except (
-                ValueError,
-                TypeError,
-                AttributeError,
-                KeyError,
-                RuntimeError,
-            ) as e:
-                # Handle errors from token validation or user data access
-                logger.debug(f"Cookie token validation failed: {e}")
-            # Note: JWT errors (DecodeError, ExpiredSignatureError) are caught
-            # internally by validate_token and return None. For tests that need JWT
-            # errors raised, they should mock validate_token to raise them directly.
+                # If require_auth=True and ticket validation fails, we'll fail below
+                # If require_auth=False, we allow anonymous connection
 
         # No authentication method succeeded
+        # SECURITY: If require_auth=True, we must fail
         if require_auth:
             logger.error(
                 f"❌ WebSocket authentication failed for app '{app_slug}'. "
-                "No valid ticket, session key, or cookie found. "
-                "Generate ticket via /auth/ticket endpoint, "
-                "session key via /auth/websocket-session, "
-                "or ensure JWT cookie is present."
+                "No valid ticket found. Generate ticket via /auth/ticket endpoint."
             )
             return None, None
 
+        # require_auth=False: Allow anonymous connection
+        # Ticket-based auth was attempted first (if ticket provided) but failed or not provided
+        # This is safe - anonymous connections are explicitly allowed
+        logger.debug(
+            f"WebSocket connection allowed as anonymous for app '{app_slug}' "
+            f"(require_auth=False, no ticket provided)"
+        )
         return None, None
 
     except WebSocketDisconnect:
@@ -1185,7 +1060,16 @@ def create_websocket_endpoint(
 
             # Connection already accepted at line 984 - no need to accept again
             # Connect with metadata (websocket already accepted)
-            connection = await manager.connect(websocket, user_id=user_id, user_email=user_email)
+            # Ensure user_id is a string for consistent storage and filtering
+            normalized_user_id = str(user_id) if user_id else None
+            logger.info(
+                f"🔌 Connecting WebSocket for app '{app_slug}': "
+                f"user_id={normalized_user_id} (type: {type(normalized_user_id).__name__}), "
+                f"user_email={user_email}"
+            )
+            connection = await manager.connect(
+                websocket, user_id=normalized_user_id, user_email=user_email
+            )
 
             # Send initial connection confirmation
             await manager.send_to_connection(

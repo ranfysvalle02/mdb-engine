@@ -1514,11 +1514,11 @@ class TestCORSCConfigPropagation:
                 # Check that parent app has merged CORS config
                 assert hasattr(app.state, "cors_config")
                 cors_config = app.state.cors_config
-                # Should include both default "*" and child app origins
-                assert (
-                    "*" in cors_config["allow_origins"]
-                    or "https://example.com" in cors_config["allow_origins"]
-                )
+                # When child has credentials=True and specific origins,
+                # merged should use child's origins
+                # (not parent's wildcard, because wildcard + credentials is invalid)
+                assert "https://example.com" in cors_config["allow_origins"]
+                assert "https://test.com" in cors_config["allow_origins"]
                 assert cors_config["allow_credentials"] is True
 
     @pytest.mark.asyncio

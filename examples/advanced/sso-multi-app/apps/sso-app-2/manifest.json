@@ -9,14 +9,19 @@
     "auth_hub_url": "http://localhost:8000",
     "roles": ["base_user", "viewer", "editor", "admin"],
     "require_role": "base_user",
-    "public_routes": ["/health", "/auth/callback", "/"]
+    "public_routes": ["/health", "/auth/callback", "/"],
+    "csrf_protection": {
+      "enabled": true,
+      "exempt_routes": ["/health", "/auth/callback"],
+      "token_ttl": 3600
+    }
   },
   "cors": {
     "enabled": true,
     "allow_origins": ["http://localhost:8000", "http://localhost:8001", "http://localhost:8002"],
     "allow_credentials": true,
-    "allow_methods": ["*"],
-    "allow_headers": ["*"]
+    "allow_methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    "allow_headers": ["Content-Type", "Authorization", "X-CSRF-Token"]
   },
   "data_access": {
     "read_scopes": ["flux"],

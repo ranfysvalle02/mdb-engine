@@ -75,13 +75,23 @@ from .indexes import (
     run_index_creation_for_collection,
 )
 
+# Redaction service
+from .redaction import (
+    BaseRedactionService,
+    PresidioRedactionService,
+    RedactionServiceError,
+    RegexpRedactionService,
+    create_redaction_service,
+    get_redaction_service,
+)
+
 # Repository pattern
 from .repositories import Entity, MongoRepository, Repository, UnitOfWork
 
 # Utilities
 from .utils import clean_mongo_doc, clean_mongo_docs
 
-__version__ = "0.7.5"
+__version__ = "0.7.6"
 
 __all__ = [
     # Core Engine
@@ -130,6 +140,13 @@ __all__ = [
     "AsyncAtlasIndexManager",
     "AutoIndexManager",
     "run_index_creation_for_collection",
+    # Redaction Service
+    "BaseRedactionService",
+    "RegexpRedactionService",
+    "PresidioRedactionService",
+    "RedactionServiceError",
+    "get_redaction_service",
+    "create_redaction_service",
     # Utilities
     "clean_mongo_doc",
     "clean_mongo_docs",

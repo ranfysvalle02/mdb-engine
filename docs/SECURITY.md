@@ -1040,6 +1040,150 @@ async function makeRequest(url, options) {
 4. **Don't expose tokens in URLs** - Always use headers, never query parameters
 5. **Test CSRF protection** - Verify that requests without valid tokens are rejected
 
+## CORS Security
+
+Cross-Origin Resource Sharing (CORS) controls which origins can access your API. Proper CORS configuration is essential for security.
+
+### Security Principles
+
+1. **Use Specific Origins** - Never use wildcard (`*`) with credentials
+2. **Restrict Methods** - Only allow necessary HTTP methods
+3. **Restrict Headers** - Only allow necessary headers
+4. **Validate Early** - CORS config is validated during app initialization
+5. **Fail Secure** - Reject requests from unknown origins
+
+### Common Security Mistakes
+
+#### ❌ Wildcard with Credentials
+
+**Never do this:**
+```json
+{
+  "cors": {
+    "allow_origins": ["*"],
+    "allow_credentials": true
+  }
+}
+```
+
+Browsers reject this combination. MDB Engine validates and raises `ValueError` if detected.
+
+**✅ Correct:**
+```json
+{
+  "cors": {
+    "allow_origins": [
+      "https://app.yourdomain.com",
+      "https://admin.yourdomain.com"
+    ],
+    "allow_credentials": true
+  }
+}
+```
+
+#### ❌ Overly Permissive Methods
+
+**❌ Don't:**
+```json
+{
+  "cors": {
+    "allow_methods": ["*"]
+  }
+}
+```
+
+**✅ Do:**
+```json
+{
+  "cors": {
+    "allow_methods": ["GET", "POST", "PUT", "DELETE"]
+  }
+}
+```
+
+#### ❌ Overly Permissive Headers
+
+**❌ Don't:**
+```json
+{
+  "cors": {
+    "allow_headers": ["*"]
+  }
+}
+```
+
+**✅ Do:**
+```json
+{
+  "cors": {
+    "allow_headers": ["Content-Type", "Authorization", "X-CSRF-Token"]
+  }
+}
+```
+
+### Production Configuration
+
+For production, use strict CORS configuration:
+
+```json
+{
+  "cors": {
+    "enabled": true,
+    "allow_origins": [
+      "https://app.yourdomain.com",
+      "https://admin.yourdomain.com"
+    ],
+    "allow_credentials": true,
+    "allow_methods": ["GET", "POST", "PUT", "DELETE"],
+    "allow_headers": ["Content-Type", "Authorization", "X-CSRF-Token"],
+    "max_age": 3600
+  }
+}
+```
+
+### WebSocket CORS
+
+WebSocket connections require origin validation. The origin is validated before accepting the connection:
+
+1. **Extract Origin** - From WebSocket upgrade request headers
+2. **Check CORS Config** - From parent app (multi-app) or child app
+3. **Validate Origin** - Using normalized origin comparison
+4. **Reject if Invalid** - Fail secure by default
+
+### Validation
+
+MDB Engine validates CORS configuration during:
+- **App Initialization** - Validates manifest CORS config
+- **Config Merge** - Validates merged configs in multi-app setups
+- **Runtime** - Validates origins on each request
+
+### Monitoring
+
+Monitor CORS rejections in logs:
+```
+WebSocket origin validation failed for 'my-app': origin=https://evil.com 
+not in allowed_origins=['https://app.example.com']
+```
+
+This helps detect:
+- Misconfigurations
+- Potential attacks
+- Origin mismatches
+
+### Best Practices
+
+1. **Use Specific Origins** - Never wildcard in production
+2. **Enable Credentials Only When Needed** - Only for cookie/auth scenarios
+3. **Restrict Methods** - Only allow necessary HTTP methods
+4. **Restrict Headers** - Only allow necessary headers
+5. **Set Appropriate Max Age** - Balance security and performance
+6. **Monitor Rejections** - Log and alert on CORS failures
+7. **Test Configuration** - Verify CORS works before deploying
+
+**See Also:**
+- [CORS Troubleshooting Guide](../guides/CORS_TROUBLESHOOTING.md) - Comprehensive CORS troubleshooting
+- [Manifest Reference](../MANIFEST_REFERENCE.md#cors) - CORS configuration reference
+
 ## Security Best Practices
 
 ### For Developers

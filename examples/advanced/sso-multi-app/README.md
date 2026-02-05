@@ -234,6 +234,25 @@ All apps share these critical environment variables:
 - `MONGODB_URI`: MongoDB connection string
 - `MONGODB_DB`: Database name (must be same for all apps)
 - `MDB_ENGINE_JWT_SECRET`: JWT secret (must be same for all apps for SSO to work)
+  - **Development**: Default secret provided in docker-compose.yml for local testing
+  - **Production**: **MUST** be set via environment variable (default is INSECURE for production!)
+  - Generate a strong secret: `python -c 'import secrets; print(secrets.token_urlsafe(32))'`
+  - **SECURITY**: Never use default values in production! Always set a unique, strong secret.
+- `ENVIRONMENT`: Set to `"production"` for production deployments (enables secure cookies)
+- `SECURE_COOKIES`: Set to `"true"` to force secure cookies even in development (requires HTTPS)
+
+**Setting JWT Secret for Production:**
+
+```bash
+# Generate a secure secret
+python -c 'import secrets; print(secrets.token_urlsafe(32))'
+
+# Export before running docker-compose
+export MDB_ENGINE_JWT_SECRET="your-generated-secret-here"
+
+# Or create a .env file (DO NOT commit to git!)
+echo "MDB_ENGINE_JWT_SECRET=your-generated-secret-here" > .env
+```
 
 See `.env.example` for all available options.
 
@@ -416,6 +435,84 @@ python web.py
 | Roles | N/A | Per-app roles |
 | Use Case | Isolated apps | Platform apps |
 
+## Security Configuration
+
+### Production Security Checklist
+
+Before deploying to production, ensure the following security measures are in place:
+
+#### Critical Security Requirements
+
+- [ ] **JWT Secret**: Set `MDB_ENGINE_JWT_SECRET` to a strong, randomly generated secret (32+ bytes)
+  - Generate: `python -c 'import secrets; print(secrets.token_urlsafe(32))'`
+  - Never use default values or commit secrets to version control
+- [ ] **Environment**: Set `ENVIRONMENT=production` to enable secure cookie settings
+- [ ] **HTTPS**: Ensure all traffic uses HTTPS (required for secure cookies)
+- [ ] **Secure Cookies**: Cookies automatically use `secure=True` and `samesite=strict` in production
+- [ ] **CORS**: Verify CORS origins are restricted to your production domains
+- [ ] **CSRF Protection**: Enabled by default in shared auth mode (verify in manifest.json)
+- [ ] **Master Key**: Set `MDB_ENGINE_MASTER_KEY` for app secret encryption (if using app-level auth)
+
+#### Security Features Enabled
+
+✅ **Cookie Security**: HttpOnly, Secure (production), SameSite=Strict (production)  
+✅ **CSRF Protection**: Double-submit cookie pattern (auto-enabled for shared auth)  
+✅ **CORS Restrictions**: Specific methods and headers (not wildcards)  
+✅ **Token Validation**: JWT format validation before processing  
+✅ **Input Validation**: Token length and structure checks  
+✅ **Error Sanitization**: Generic error messages prevent information leakage  
+✅ **Per-User Encryption Salts**: Enhanced encryption security (sso-app-1)  
+
+#### Development vs Production
+
+| Setting | Development | Production |
+|---------|-------------|------------|
+| Cookie `secure` | `false` | `true` (auto) |
+| Cookie `samesite` | `lax` | `strict` (auto) |
+| JWT Secret | Can use default | **MUST** be set |
+| HTTPS | Optional | **REQUIRED** |
+| Error Messages | Detailed | Generic |
+
+#### Security Configuration in Manifests
+
+All apps have CSRF protection configured:
+
+```json
+{
+  "auth": {
+    "mode": "shared",
+    "csrf_protection": {
+      "enabled": true,
+      "exempt_routes": ["/health", "/auth/callback"],
+      "token_ttl": 3600
+    }
+  }
+}
+```
+
+CORS is restricted to specific methods and headers:
+
+```json
+{
+  "cors": {
+    "allow_methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    "allow_headers": ["Content-Type", "Authorization", "X-CSRF-Token"]
+  }
+}
+```
+
+### Generating Secure Secrets
+
+**JWT Secret:**
+```bash
+python -c 'import secrets; print(secrets.token_urlsafe(32))'
+```
+
+**Master Key (for app-level authentication):**
+```bash
+python -c 'from mdb_engine.core.encryption import EnvelopeEncryptionService; print(EnvelopeEncryptionService.generate_master_key())'
+```
+
 ## Render.com Deployment
 
 For **single-service deployment on Render.com**, use the multi-app mounting approach:
@@ -434,8 +531,198 @@ For **single-service deployment on Render.com**, use the multi-app mounting appr
    - `MONGODB_URI` - Your MongoDB connection string
    - `MONGODB_DB` - Database name
    - `MDB_ENGINE_JWT_SECRET` - JWT secret (same for all apps)
+     - **Required for production**: Generate with `python -c 'import secrets; print(secrets.token_urlsafe(32))'`
+     - Development uses insecure default (DO NOT use in production!)
 
 4. **Deploy!** All apps accessible under one URL with path prefixes.
+
+## AI Chat with Memory Encryption (CSFLE)
+
+The **AI Chat** app (`sso-app-3`) demonstrates **Client-Side Field Level Encryption (CSFLE)** for memory content. This ensures sensitive user memories are encrypted at rest in MongoDB.
+
+### Zero-Config Encryption (Docker)
+
+When running with Docker Compose, CSFLE **just works**:
+
+1. The encryption key is **auto-generated** on first startup
+2. The key is **persisted** in the `csfle_keys` Docker volume
+3. Data remains readable across container restarts
+
+```bash
+docker-compose up ai-chat
+# That's it! Memory content is encrypted automatically.
+```
+
+### Enabling Memory Encryption
+
+Memory encryption is enabled with a single line in `manifest.json`:
+
+```json
+{
+  "memory_config": {
+    "enabled": true,
+    "encrypted": true
+  }
+}
+```
+
+### What Gets Encrypted
+
+- **Encrypted fields**: `content`, `text` (memory content)
+- **Queryable fields** (NOT encrypted): `user_id`, `session_id`, `created_at`, `importance`, `embedding`, `category`
+
+### How Auto-Key Generation Works
+
+The Docker entrypoint script (`docker-entrypoint.sh`) handles key management:
+
+1. **First run**: Generates a 96-byte master key and saves it to `/data/csfle/.local_master_key`
+2. **Subsequent runs**: Loads the existing key from the persisted volume
+3. **Manual override**: Set `MDB_CSFLE_LOCAL_KEY` environment variable to use your own key
+
+The key is stored in the `csfle_keys` Docker volume, which persists across container restarts.
+
+### Viewing/Backing Up the Key
+
+```bash
+# View the auto-generated key
+docker exec ai_chat cat /data/csfle/.local_master_key
+
+# Back up the key (IMPORTANT for production!)
+docker exec ai_chat cat /data/csfle/.local_master_key > csfle_backup.key
+```
+
+### Using a Custom Key
+
+If you want to use your own key instead of auto-generation:
+
+```bash
+# Generate a key
+python -c 'from mdb_engine.core.csfle import generate_local_master_key; print(generate_local_master_key())'
+
+# Set in environment before starting
+export MDB_CSFLE_LOCAL_KEY=<your-key>
+docker-compose up ai-chat
+```
+
+### Production KMS Providers
+
+For production, use cloud KMS instead of local keys:
+
+```json
+{
+  "memory_config": {
+    "encrypted": true,
+    "encryption": {
+      "kms_provider": "aws"
+    }
+  }
+}
+```
+
+Environment variables for AWS KMS:
+```bash
+AWS_ACCESS_KEY_ID=...
+AWS_SECRET_ACCESS_KEY=...
+AWS_KMS_KEY_ARN=arn:aws:kms:us-east-1:...
+```
+
+See [CSFLE Setup Guide](../../../docs/guides/CSFLE_SETUP.md) for detailed documentation.
+
+## AI Chat with Context Engineering
+
+The **AI Chat** app (`sso-app-3`) also demonstrates **Context Engineering** - an advanced memory service feature that dynamically constructs optimal LLM context using multiple memory layers.
+
+### What is Context Engineering?
+
+Context Engineering is the architectural discipline of constructing the "present moment" for an LLM. It optimizes context assembly by combining:
+
+- **Persona Layer**: System instructions from PersonaEngine (role, description, traits)
+- **Entity Memory**: Extracted facts (Name, OS, Language, Expertise) from user memories
+- **Dynamic Persona**: Adaptive instructions based on user expertise and emotion
+- **Short-Term Memory (STM)**: Recent chat history with sliding window optimization
+- **Long-Term Memory (LTM)**: Semantic vector search results
+- **Graph Context**: Knowledge graph data (if enabled)
+
+### Context Engineering Features
+
+The AI Chat app uses Context Engineering to:
+
+1. **Automatically build system prompts** from persona configuration in `manifest.json`
+2. **Extract entity facts** (Name, OS, Language, Expertise) from biographical and preference memories
+3. **Adapt persona dynamically** based on user expertise level and emotional context
+4. **Optimize token usage** with sliding window + summary pattern for STM
+5. **Display Context Engineering metadata** in the UI (persona, entity facts, dynamic instructions)
+
+### Configuration
+
+Context Engineering is enabled in `CognitiveEngine` initialization:
+
+```python
+cognitive_engine = CognitiveEngine(
+    app_slug=APP_SLUG,
+    memory_service=memory_service,
+    chat_history_collection=chat_history_collection,
+    # Context Engineering configuration
+    enable_context_engineering=True,
+    stm_raw_window=5,  # Keep last 5 messages raw, summarize older ones
+    enable_entity_extraction=True,
+    enable_dynamic_persona=True,
+)
+```
+
+### Persona Configuration
+
+The persona is configured in `manifest.json`:
+
+```json
+{
+  "memory_config": {
+    "persona": {
+      "enabled": true,
+      "default_role": "Orby - AI Assistant",
+      "default_description": "Orby is an intelligent AI assistant...",
+      "default_traits": {
+        "technical_focus": 0.6,
+        "humor": 0.3,
+        "formality": 0.6,
+        "empathy": 0.7,
+        "creativity": 0.5
+      }
+    }
+  }
+}
+```
+
+### UI Features
+
+The AI Chat UI displays Context Engineering metadata in a dedicated panel:
+
+- **🎭 Persona**: Shows current persona role and description
+- **📋 Entity Facts**: Displays extracted facts (Name, OS, Language, Expertise)
+- **⚙️ Dynamic Instructions**: Shows persona adaptation instructions (collapsible)
+- **📝 STM Summary**: Displays summary of older chat history (collapsible)
+
+### Example Usage
+
+1. **Start chatting** with the AI Chat app
+2. **View Context Engineering panel** in the sidebar to see how context is being built
+3. **Watch persona adapt** as you reveal expertise level or emotional state
+4. **See entity facts** extracted from your conversations
+5. **Observe STM optimization** as chat history grows
+
+### Benefits
+
+- **Better responses**: Context-engineered prompts provide more relevant, personalized responses
+- **Token efficiency**: Sliding window + summary pattern optimizes token usage
+- **Dynamic adaptation**: Persona adjusts based on user context
+- **Transparency**: UI shows exactly how context is being constructed
+- **Automatic**: No manual prompt engineering required
+
+### See Also
+
+- [Context Engineering Documentation](../../../docs/CONTEXT_ENGINEERING.md) - Comprehensive guide
+- [Memory Service Documentation](../../../docs/MEMORY_SERVICE.md) - Memory service overview
+- [Cognitive Architecture](../../../docs/COGNITIVE_ARCHITECTURE.md) - STM + LTM architecture
 
 ## Related Examples
 
@@ -450,13 +737,15 @@ sso-multi-app/
 ├── README.md                    # This file
 ├── docker-compose.yml           # Multi-container orchestration
 ├── docker-compose.bundled.yml   # Single-container orchestration
-├── Dockerfile                   # Multi-container build
+├── Dockerfile                   # Multi-container build (with CSFLE support)
 ├── Dockerfile.bundled           # Single-container build
+├── docker-entrypoint.sh         # Entrypoint for CSFLE key auto-generation
 ├── start-all-apps.py            # Bundled startup script
 ├── multi_app_manifest.json      # Multi-app manifest (NEW)
 ├── .env.example                 # Environment template
 └── apps/
     ├── multi_app_main.py         # Multi-app main file (NEW)
+    ├── shared_security.py        # Shared security utilities
     ├── auth-hub/                # Auth hub (central authentication)
     │   ├── manifest.json
     │   ├── web.py
@@ -465,8 +754,12 @@ sso-multi-app/
     │   ├── manifest.json
     │   ├── web.py
     │   └── templates/
-    └── sso-app-2/               # FLUX
-        ├── manifest.json
+    ├── sso-app-2/               # FLUX
+    │   ├── manifest.json
+    │   ├── web.py
+    │   └── templates/
+    └── sso-app-3/               # AI Chat (with CSFLE memory encryption)
+        ├── manifest.json        # "encrypted": true for memory
         ├── web.py
         └── templates/
 ```

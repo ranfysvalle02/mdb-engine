@@ -19,7 +19,7 @@ pip install semantic-text-splitter openai
 
 ## Configuration
 
-The embedding service auto-detects the provider from environment variables (same logic as mem0):
+The embedding service auto-detects the provider from environment variables:
 
 - **OpenAI**: Requires `OPENAI_API_KEY`
 - **AzureOpenAI**: Requires `AZURE_OPENAI_API_KEY` and `AZURE_OPENAI_ENDPOINT`
@@ -209,6 +209,6 @@ except EmbeddingServiceError as e:
 
 ## Notes
 
-- The embedding service uses the same auto-detection logic as mem0 for consistency
+- The embedding service auto-detects OpenAI or Azure OpenAI from environment variables
 - LLM functionality (chat completions, structured extraction) should be implemented directly at the example level using the OpenAI SDK or your preferred provider
-- For memory functionality, use `mdb_engine.memory.Mem0MemoryService` which handles embeddings and LLM via environment variables
+- For memory functionality, use `mdb_engine.memory.CustomMemoryService` or `mdb_engine.memory.CognitiveMemoryService` which handle embeddings and LLM via environment variables

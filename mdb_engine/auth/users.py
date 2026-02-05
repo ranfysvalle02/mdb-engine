@@ -639,13 +639,18 @@ async def get_or_create_anonymous_user(
     return user
 
 
-async def get_platform_demo_user(mongo_uri: str, db_name: str) -> dict[str, Any] | None:
+async def get_platform_demo_user(
+    connection_manager=None,
+    users_collection=None,
+) -> dict[str, Any] | None:
     """
     Get platform demo user information from top-level database.
 
     Args:
-        mongo_uri: MongoDB connection URI
-        db_name: Database name
+        connection_manager: ConnectionManager instance (required if users_collection "
+        "not provided)
+        users_collection: Motor Collection instance (required if connection_manager "
+        "not provided - must be from MDB-Engine)
 
     Returns:
         Dict with demo user info (email, password from config, user_id) or None if not available
@@ -656,17 +661,32 @@ async def get_platform_demo_user(mongo_uri: str, db_name: str) -> dict[str, Any]
         if not DEMO_ENABLED or not DEMO_EMAIL_DEFAULT:
             return None
 
-        # Access top-level database
-        from motor.motor_asyncio import AsyncIOMotorClient
-
-        client = AsyncIOMotorClient(mongo_uri)
-        top_level_db = client[db_name]
+        # Use MDB-Engine connection - REQUIRED
+        if users_collection is not None:
+            # Use provided collection (from MDB-Engine)
+            collection = users_collection
+            logger.debug("✅ Using MDB-Engine collection for platform demo user lookup")
+        elif connection_manager and connection_manager.initialized:
+            # Get collection from MDB-Engine connection manager
+            try:
+                motor_db = connection_manager.mongo_db
+                collection = motor_db.users
+                logger.debug("✅ Using MDB-Engine connection pool for platform demo user lookup")
+            except (AttributeError, RuntimeError, KeyError) as e:
+                logger.exception(
+                    f"❌ Could not get collection from MDB-Engine connection manager: {e}. "
+                    f"get_platform_demo_user requires MDB-Engine connection."
+                )
+                return None
+        else:
+            logger.error(
+                "❌ Either 'users_collection' or 'connection_manager' must be provided. "
+                "get_platform_demo_user requires MDB-Engine connection pool."
+            )
+            return None
 
         # Check if demo user exists
-        demo_user = await top_level_db.users.find_one(
-            {"email": DEMO_EMAIL_DEFAULT}, {"_id": 1, "email": 1}
-        )
-        client.close()
+        demo_user = await collection.find_one({"email": DEMO_EMAIL_DEFAULT}, {"_id": 1, "email": 1})
 
         if demo_user:
             return {
@@ -691,14 +711,14 @@ async def get_platform_demo_user(mongo_uri: str, db_name: str) -> dict[str, Any]
 
 
 async def _link_platform_demo_user(
-    db, slug_id: str, collection_name: str, mongo_uri: str, db_name: str
+    db, slug_id: str, collection_name: str, connection_manager=None
 ) -> dict[str, Any] | None:
     """Link platform demo user to app demo user."""
     import datetime
 
     try:
         logger.debug(f"ensure_demo_users_exist: Auto-linking platform demo user for '{slug_id}'")
-        platform_demo = await get_platform_demo_user(mongo_uri, db_name)
+        platform_demo = await get_platform_demo_user(connection_manager=connection_manager)
         if not platform_demo:
             logger.warning(f"ensure_demo_users_exist: Platform demo user not found for '{slug_id}'")
             return None
@@ -783,15 +803,14 @@ def _validate_demo_user_config(
 async def _resolve_demo_user_email_password(
     email: str | None,
     password: str | None,
-    mongo_uri: str | None,
-    db_name: str | None,
-    slug_id: str,
+    connection_manager=None,
+    slug_id: str = "",
 ) -> tuple[str | None, str | None]:
     """Resolve email and password from config or platform demo."""
     # If email not specified, try platform demo
     if not email:
-        if mongo_uri and db_name:
-            platform_demo = await get_platform_demo_user(mongo_uri, db_name)
+        if connection_manager:
+            platform_demo = await get_platform_demo_user(connection_manager=connection_manager)
             if platform_demo:
                 email = platform_demo["email"]
                 if not password:
@@ -800,7 +819,7 @@ async def _resolve_demo_user_email_password(
                 logger.warning(f"No email specified and platform demo not available for {slug_id}")
                 return None, None
         else:
-            logger.warning(f"No email specified and cannot access platform demo for {slug_id}")
+            logger.warning(f"No email specified and connection_manager not provided for {slug_id}")
             return None, None
 
     # Validate email format
@@ -810,8 +829,8 @@ async def _resolve_demo_user_email_password(
 
     if not password:
         # Try to get from platform demo
-        if mongo_uri and db_name:
-            platform_demo = await get_platform_demo_user(mongo_uri, db_name)
+        if connection_manager:
+            platform_demo = await get_platform_demo_user(connection_manager=connection_manager)
             if platform_demo and platform_demo.get("email") == email:
                 password = platform_demo.get("password")
 
@@ -835,8 +854,7 @@ async def _create_demo_user_from_config(
     role: str,
     extra_data: dict[str, Any],
     link_to_platform: bool,
-    mongo_uri: str | None,
-    db_name: str | None,
+    connection_manager=None,
 ) -> dict[str, Any] | None:
     """Create a demo user from configuration."""
     import datetime
@@ -858,9 +876,9 @@ async def _create_demo_user_from_config(
     }
 
     # Link to platform demo if requested
-    if link_to_platform and mongo_uri and db_name:
+    if link_to_platform and connection_manager:
         try:
-            platform_demo = await get_platform_demo_user(mongo_uri, db_name)
+            platform_demo = await get_platform_demo_user(connection_manager=connection_manager)
             if platform_demo and platform_demo.get("email") == email:
                 user_doc["platform_user_id"] = platform_demo.get("platform_user_id")
         except (
@@ -933,8 +951,7 @@ async def ensure_demo_users_exist(
     db,
     slug_id: str,
     config: dict[str, Any] | None = None,
-    mongo_uri: str | None = None,
-    db_name: str | None = None,
+    connection_manager=None,
 ) -> list[dict[str, Any]]:
     """
     Intelligently ensure demo users exist for a app based on manifest configuration.
@@ -946,11 +963,10 @@ async def ensure_demo_users_exist(
     4. Links to platform demo user if configured
 
     Args:
-        db: Database wrapper
+        db: Database wrapper (ScopedMongoWrapper from MDB-Engine)
         slug_id: App slug
         config: Optional app config (fetches if not provided)
-        mongo_uri: Optional MongoDB URI for accessing platform demo user
-        db_name: Optional database name for accessing platform demo user
+        connection_manager: ConnectionManager instance (REQUIRED for accessing platform demo user)
 
     Returns:
         List of demo user dicts that were created or already exist
@@ -983,9 +999,9 @@ async def ensure_demo_users_exist(
     created_users = []
 
     # Auto-link platform demo user if enabled
-    if auto_link and seed_strategy == "auto" and mongo_uri and db_name:
+    if auto_link and seed_strategy == "auto" and connection_manager:
         platform_user = await _link_platform_demo_user(
-            db, slug_id, collection_name, mongo_uri, db_name
+            db, slug_id, collection_name, connection_manager=connection_manager
         )
         if platform_user:
             created_users.append(platform_user)
@@ -1004,9 +1020,8 @@ async def ensure_demo_users_exist(
             email, password = await _resolve_demo_user_email_password(
                 validated_config["email"],
                 validated_config["password"],
-                mongo_uri,
-                db_name,
-                slug_id,
+                connection_manager=connection_manager,
+                slug_id=slug_id,
             )
             if not email or not password:
                 continue
@@ -1031,8 +1046,7 @@ async def ensure_demo_users_exist(
                 validated_config["role"],
                 validated_config["extra_data"],
                 validated_config["link_to_platform"],
-                mongo_uri,
-                db_name,
+                connection_manager=connection_manager,
             )
             if user:
                 created_users.append(user)
@@ -1250,7 +1264,7 @@ async def get_or_create_demo_user(
 
 
 async def ensure_demo_users_for_actor(
-    db, slug_id: str, mongo_uri: str, db_name: str
+    db, slug_id: str, connection_manager=None
 ) -> list[dict[str, Any]]:
     """
     Convenience function for actors to ensure demo users exist.
@@ -1271,17 +1285,15 @@ async def ensure_demo_users_for_actor(
         demo_users = await ensure_demo_users_for_actor(
             db=self.db,
             slug_id=self.write_scope,
-            mongo_uri=self.mongo_uri,
-            db_name=self.db_name
+            connection_manager=self.connection_manager
         )
         if demo_users:
             logger.info(f"Ensured {len(demo_users)} demo user(s) exist")
 
     Args:
-        db: Database wrapper
+        db: Database wrapper (ScopedMongoWrapper from MDB-Engine)
         slug_id: App slug
-        mongo_uri: MongoDB connection URI
-        db_name: Database name
+        connection_manager: ConnectionManager instance (REQUIRED for accessing platform demo user)
 
     Returns:
         List of demo user dicts that were created or already exist
@@ -1325,7 +1337,9 @@ async def ensure_demo_users_for_actor(
             return []
 
         # Ensure demo users exist
-        return await ensure_demo_users_exist(db, slug_id, config, mongo_uri, db_name)
+        return await ensure_demo_users_exist(
+            db, slug_id, config, connection_manager=connection_manager
+        )
 
     except FileNotFoundError:
         logger.debug(

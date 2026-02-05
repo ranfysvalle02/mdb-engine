@@ -356,6 +356,175 @@ When using shared auth (`auth.mode: "shared"`):
 4. **Unified Monitoring**: Single health check endpoint
 5. **Easy Configuration**: Declarative via manifest or programmatic
 
+## Service Architecture & Modularity
+
+MDB-Engine is designed with modularity in mind. Each service can be used standalone or composed together, with clear dependency contracts defined via Python Protocols.
+
+### Service Dependency Matrix
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        Service Dependency Matrix                             │
+├────────────────────────┬─────────────────────────────────────────────────────┤
+│ Service                │ Required Dependencies      │ Optional Dependencies  │
+├────────────────────────┼──────────────────────────────┼──────────────────────┤
+│ LLMService             │ litellm, API keys          │ (none)                │
+│ EmbeddingService       │ semantic-text-splitter,    │ (none)                │
+│                        │ openai/voyageai            │                       │
+│ GraphService           │ MongoDB Collection         │ LLMService, Embedding │
+│ CognitiveMemoryService │ MongoDB Collection,        │ GraphService          │
+│                        │ EmbeddingService           │                       │
+└────────────────────────┴──────────────────────────────┴──────────────────────┘
+```
+
+### Protocol-Based Architecture
+
+Services implement Python Protocols (`mdb_engine.core.protocols`) for:
+- **Type Safety**: Full IDE autocompletion and type checking
+- **Testability**: Easy mocking with any Protocol-conforming object
+- **Flexibility**: Swap implementations without changing consuming code
+
+**Available Protocols:**
+
+| Protocol                  | Description                                    |
+|---------------------------|------------------------------------------------|
+| `LLMServiceProtocol`      | Chat completion interface (sync/async)         |
+| `EmbeddingServiceProtocol`| Text embedding generation                      |
+| `TextChunkerProtocol`     | Semantic text chunking                         |
+| `GraphServiceProtocol`    | Knowledge graph operations                     |
+| `MemoryServiceProtocol`   | Long-term memory with semantic search          |
+
+### Standalone Usage Patterns
+
+#### Using LLMService Standalone
+
+```python
+from mdb_engine.llm import LLMService
+
+# LLMService only requires litellm and API keys
+llm = LLMService(config={"default_model": "openai/gpt-4o"})
+
+# Sync call
+response = llm.chat_completion_sync([
+    {"role": "user", "content": "Hello!"}
+])
+print(response)
+
+# Async call
+import asyncio
+response = asyncio.run(llm.chat_completion([
+    {"role": "user", "content": "Hello!"}
+]))
+```
+
+#### Using EmbeddingService Standalone
+
+```python
+from mdb_engine.embeddings import EmbeddingProvider
+
+# EmbeddingService only requires openai/voyageai packages
+embeddings = EmbeddingProvider(config={
+    "default_embedding_model": "text-embedding-3-small"
+})
+
+# Generate embeddings
+vectors = asyncio.run(embeddings.embed(["Hello world", "Test text"]))
+```
+
+#### Using GraphService Standalone
+
+```python
+from mdb_engine.graph import GraphService
+from pymongo import MongoClient
+
+# GraphService needs MongoDB collection, optionally LLM/Embeddings
+client = MongoClient("mongodb://localhost:27017")
+collection = client["mydb"]["graph_nodes"]
+
+graph = GraphService(
+    app_slug="my_app",
+    config={"enabled": True},
+    collection=collection,
+)
+
+# Create nodes and edges
+graph.upsert_node("person:alice", "person", "Alice", {"age": 30})
+graph.upsert_node("interest:hiking", "interest", "Hiking")
+graph.add_edge("person:alice", "ENJOYS", "interest:hiking")
+
+# Traverse the graph
+results = graph.traverse("person:alice", max_depth=2)
+```
+
+#### Using CognitiveMemoryService with Dependency Injection
+
+```python
+from mdb_engine.memory import get_memory_service
+from mdb_engine.llm import LLMService
+from mdb_engine.embeddings import EmbeddingProvider
+from pymongo import MongoClient
+
+# Create services independently
+llm = LLMService(config={"default_model": "gpt-4o"})
+embeddings = EmbeddingProvider()
+
+# Inject services into memory service
+client = MongoClient("mongodb://localhost:27017")
+collection = client["mydb"]["memories"]
+
+memory = get_memory_service(
+    app_slug="my_app",
+    collection=collection,
+    config={"enabled": True, "infer": True},
+    llm_service=llm,           # Inject LLM service
+    embedding_service=embeddings,  # Inject embedding service
+)
+
+# Memory service uses injected services instead of creating its own
+memories = memory.add("User said they live in Seattle", user_id="user123")
+```
+
+### Dependency Injection in ServiceInitializer
+
+The `ServiceInitializer` manages service lifecycle for MDB-Engine apps:
+
+```python
+# ServiceInitializer stores services with Protocol type hints
+self._graph_services: dict[str, GraphServiceProtocol] = {}
+self._memory_services: dict[str, MemoryServiceProtocol] = {}
+
+# Get typed services
+graph = service_initializer.get_graph_service("my_app")  # -> GraphServiceProtocol | None
+memory = service_initializer.get_memory_service("my_app")  # -> MemoryServiceProtocol | None
+```
+
+### Testing with Protocols
+
+Protocols enable easy mocking:
+
+```python
+from mdb_engine.core.protocols import LLMServiceProtocol
+
+class MockLLMService:
+    """Mock LLM service for testing."""
+    
+    async def chat_completion(self, messages, **kwargs):
+        return "Mocked response"
+    
+    def chat_completion_sync(self, messages, **kwargs):
+        return "Mocked response"
+
+# MockLLMService implements LLMServiceProtocol
+assert isinstance(MockLLMService(), LLMServiceProtocol)  # True
+
+# Use in tests
+memory = get_memory_service(
+    app_slug="test_app",
+    collection=mock_collection,
+    llm_service=MockLLMService(),
+)
+```
+
 ## Related Documentation
 
 - [App Authentication Guide](APP_AUTHENTICATION.md) - Detailed authentication guide

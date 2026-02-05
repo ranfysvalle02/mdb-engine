@@ -55,8 +55,8 @@
   },
   "cors": {
     "enabled": true,
-    "allow_origins": ["*"],
-    "allow_credentials": true,
+    "allow_origins": ["http://localhost:3000", "http://localhost:5001"],
+    "allow_credentials": false,
     "allow_methods": ["*"],
     "allow_headers": ["*"]
   }

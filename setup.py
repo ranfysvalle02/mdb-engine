@@ -14,7 +14,7 @@ if readme_file.exists():
 
 setup(
     name="mdb-engine",
-    version="0.7.5",
+    version="0.7.6",
     description="MongoDB Engine",
     long_description=long_description,
     long_description_content_type="text/markdown",
@@ -31,11 +31,9 @@ setup(
         "pyjwt>=2.8.0",
         "jsonschema>=4.0.0",
         "bcrypt>=4.0.0",
-        "mem0ai>=0.1.7",
         "semantic-text-splitter>=0.9.0",
         "numpy>=1.0.0,<2.0.0",
         "openai>=1.0.0",  # Required for embedding providers
-        "azure-identity>=1.15.0",  # Required for mem0's azure_openai provider
     ],
     extras_require={
         "casbin": ["casbin>=1.0.0", "casbin-motor-adapter>=0.1.0"],

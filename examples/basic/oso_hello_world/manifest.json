@@ -32,7 +32,7 @@
   },
   "cors": {
     "enabled": true,
-    "allow_origins": ["*"],
+    "allow_origins": ["http://localhost:3000", "http://localhost:8000"],
     "allow_credentials": true,
     "allow_methods": ["*"],
     "allow_headers": ["*"]

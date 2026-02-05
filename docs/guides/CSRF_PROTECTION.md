@@ -355,8 +355,15 @@ CSRF cookie (`csrf_required: true`) adds an extra validation layer but is **redu
 // Step 1: Make GET request to receive CSRF cookie
 await fetch('/api/endpoint', { credentials: 'include' });
 
-// Step 2: Connect WebSocket (CSRF cookie sent automatically)
-const ws = new WebSocket('ws://localhost:8000/app1/ws');
+// Step 2: Get ticket for WebSocket connection
+const ticketRes = await fetch('/auth/ticket', {
+  method: 'POST',
+  credentials: 'include'
+});
+const { ticket } = await ticketRes.json();
+
+// Step 3: Connect WebSocket with ticket
+const ws = new WebSocket(`ws://localhost:8000/app1/ws?ticket=${ticket}`);
 ```
 
 ## Security Best Practices

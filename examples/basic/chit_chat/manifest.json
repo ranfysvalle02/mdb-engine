@@ -1,8 +1,8 @@
 {
   "schema_version": "2.0",
   "slug": "conversations",
-  "name": "ChitChat - AI Chat with Memory",
-  "description": "Beautiful AI chat application with persistent memory using Mem0. Demonstrates intelligent memory management, semantic search, and context-aware AI responses.",
+  "name": "ChitChat - Enterprise AI Chat with Hybrid Memory",
+  "description": "Enterprise-grade AI chat application implementing a Robust Hybrid Memory Architecture (STM + LTM) with MongoDB Atlas Vector Search. Demonstrates parallel retrieval, deterministic context merging, and asynchronous fact extraction.",
   "status": "active",
   "developer_id": "developer@example.com",
   "auth": {
@@ -77,12 +77,86 @@
     },
     "auto_setup": true
   },
+  "llm_config": {
+    "enabled": true,
+    "default_model": "openai/gpt-4o",
+    "temperature": 0.3,
+    "fallbacks": ["gpt-4o-mini"],
+    "litellm_config": {
+      "num_retries": 2,
+      "request_timeout": 60
+    }
+  },
   "memory_config": {
     "enabled": true,
+    "provider": "cognitive",
     "collection_name": "user_memories",
+    "embedding_model": "text-embedding-3-small",
+    "chat_model": "gpt-4o",
+    "memory_llm_model": "openai/gpt-4o",
     "embedding_model_dims": 1536,
-    "enable_graph": true,
-    "infer": true
+    "infer": true,
+    "async_mode": true,
+    "enable_cognitive": true,
+    "max_depth": 500,
+    "cognitive": {
+      "enabled": true,
+      "decay": {
+        "enabled": true,
+        "default_stability_hours": 48,
+        "min_stability": 0.1,
+        "use_server_side_pipeline": true
+      },
+      "emotion": {
+        "enabled": true,
+        "flashbulb_threshold": 0.7,
+        "max_stability_multiplier": 100
+      },
+      "conflict_resolution": {
+        "enabled": true,
+        "similarity_threshold": 0.85
+      },
+      "pruning": {
+        "enabled": true,
+        "max_capacity": 500,
+        "prune_percentage": 0.1,
+        "strategy": "soft_delete"
+      },
+      "cold_storage": {
+        "enabled": true,
+        "retention_days": 365
+      }
+    },
+    "redaction": {
+      "enabled": true,
+      "replacement": "[REDACTED]",
+      "patterns": {
+        "ssn": true,
+        "credit_card": true,
+        "password": true,
+        "api_key": true,
+        "phone": false,
+        "email": false
+      }
+    },
+    "categories": {
+      "enabled": true,
+      "custom_categories": ["work", "health", "finance", "travel"]
+    },
+    "reflection": {
+      "enabled": true,
+      "interval_hours": 24,
+      "message_threshold": 50,
+      "min_salience_to_keep": 0.3,
+      "store_reflections": true
+    },
+    "entities": {
+      "enabled": true,
+      "auto_extract": true
+    },
+    "graph": {
+      "enabled": false
+    }
   },
   "managed_indexes": {
     "conversations": [
@@ -138,15 +212,16 @@
       "path": "/ws",
       "description": "Real-time message updates and memory events",
       "auth": {
-        "required": false,
-        "allow_anonymous": true
+        "required": true,
+        "csrf_required": false
       },
-      "ping_interval": 30
+      "ping_interval": 30,
+      "ticket_ttl_seconds": 10
     }
   },
   "cors": {
     "enabled": true,
-    "allow_origins": ["*"],
+    "allow_origins": ["http://localhost:3000", "http://localhost:8000", "http://localhost:8003"],
     "allow_credentials": true,
     "allow_methods": ["*"],
     "allow_headers": ["*"]

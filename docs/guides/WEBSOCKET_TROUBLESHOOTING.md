@@ -9,11 +9,11 @@ Complete troubleshooting guide for WebSocket connections in multi-app SSO deploy
 | Connection fails immediately | 403 | CORS origin not allowed | Add frontend origin to `cors.allow_origins` |
 | Connection fails immediately | 403 | Missing `allow_credentials` | Set `cors.allow_credentials: true` |
 | Connection fails immediately | 403 | Wrong WebSocket URL | Use `/app1/ws` not `/ws` |
-| Connects then closes | 1008 | No auth cookie | Ensure user is logged in first |
-| Connects then closes | 1008 | Expired token | Refresh token before connecting |
-| Connects then closes | 1008 | Missing CSRF cookie | Make GET request first to get CSRF cookie |
-| Connects then closes | 1008 | Missing session key | Get session key from `/auth/websocket-session` endpoint |
-| Connects then closes | 1008 | Invalid/expired session key | Generate new session key |
+| Connects then closes | 1008 | No ticket | Get ticket from `/auth/ticket` endpoint |
+| Connects then closes | 1008 | Expired ticket | Get new ticket (must connect within 10 seconds) |
+| Connects then closes | 1008 | Invalid ticket | Ensure ticket is valid UUID and not already used |
+| Connects then closes | 1008 | Missing ticket | Get ticket from `/auth/ticket` endpoint |
+| Connects then closes | 1008 | Invalid/expired ticket | Get new ticket (tickets expire in 10 seconds) |
 | Route not found | 404 | WebSocket not in manifest | Add `websockets` section to manifest |
 
 ## Table of Contents
@@ -46,10 +46,10 @@ Before troubleshooting, verify these basics:
 ### Frontend ✅
 - [ ] User is logged in before connecting WebSocket
 - [ ] Login request uses `credentials: 'include'`
-- [ ] WebSocket session key obtained from `/auth/websocket-session` endpoint
-- [ ] WebSocket URL includes full path prefix and session key (`/app1/ws?session_key=...`)
+- [ ] WebSocket ticket obtained from `/auth/ticket` endpoint
+- [ ] WebSocket URL includes full path prefix and ticket (`/app1/ws?ticket=<uuid>`)
 - [ ] Error handling for 403 and 1008 errors
-- [ ] Session key refreshed if expired
+- [ ] Ticket obtained immediately before connection (within 10 seconds)
 
 ---
 
@@ -234,6 +234,8 @@ console.log("Cookies:", document.cookie);
 
 ## CORS & Origin Issues
 
+> **📖 For comprehensive CORS troubleshooting, see [CORS Troubleshooting Guide](./CORS_TROUBLESHOOTING.md)**
+
 ### Common Mistakes
 
 #### ❌ Mistake 1: Wildcard Origin with Credentials
@@ -288,103 +290,100 @@ const wsUrl = `${protocol}//${window.location.host}/app-3/ws`;
 
 ## Authentication Failures
 
-### Session Key Authentication (Secure-by-Default)
+### Ticket-Based Authentication (Current Implementation)
 
-MDB-Engine uses **secure-by-default WebSocket authentication** with encrypted session keys. Session keys are generated on login, encrypted via envelope encryption, and stored in the `_mdb_engine_websocket_sessions` private collection.
+MDB-Engine uses **ticket-based authentication** for WebSocket connections. Tickets are short-lived (10-second TTL), single-use UUIDs that are generated via the `/auth/ticket` endpoint and consumed immediately upon WebSocket connection.
 
-#### Problem: Missing Session Key
+#### Problem: Missing Ticket
 
 **Symptoms:**
 - WebSocket connection rejected immediately
-- Server logs show: "WebSocket session key missing" or "No authentication found"
+- Server logs show: "No valid ticket found. Generate ticket via /auth/ticket endpoint."
 - Connection closes with code 1008 (Policy Violation)
 
 **Solutions:**
 
-1. **Get Session Key After Login:**
+1. **Get Ticket Before Connecting:**
    ```javascript
-   // ✅ CORRECT: Get session key from endpoint after login
-   async function getWebSocketSessionKey() {
-     const response = await fetch('/auth/websocket-session', {
-       method: 'GET',
-       credentials: 'include',
+   // ✅ CORRECT: Get ticket from endpoint before WebSocket connection
+   async function getWebSocketTicket() {
+     const response = await fetch('/auth/ticket', {
+       method: 'POST',
+       credentials: 'include', // Sends JWT cookie
      });
      
      if (response.ok) {
        const data = await response.json();
-       return data.session_key;
+       return data.ticket;
      }
      
-     throw new Error('Failed to get session key');
+     throw new Error('Failed to get ticket');
    }
    
-   // Use session key in WebSocket URL
-   const sessionKey = await getWebSocketSessionKey();
-   const ws = new WebSocket(`ws://localhost:8000/app-3/ws?session_key=${sessionKey}`);
+   // Use ticket in WebSocket URL (must connect within 10 seconds)
+   const ticket = await getWebSocketTicket();
+   const ws = new WebSocket(`ws://localhost:8000/app-3/ws?ticket=${ticket}`);
    ```
 
-2. **Check Session Key Endpoint:**
+2. **Check Ticket Endpoint:**
    ```javascript
    // Verify endpoint is accessible
-   const response = await fetch('/auth/websocket-session', {
-     method: 'GET',
+   const response = await fetch('/auth/ticket', {
+     method: 'POST',
      credentials: 'include',
    });
    
    console.log('Status:', response.status);
    console.log('Data:', await response.json());
-   // Should return 200 with session_key, expires_at, ttl_hours
+   // Should return 200 with ticket, expires_in
    ```
 
-3. **Session Key Included in Login Response:**
+3. **Ticket Must Be Used Immediately:**
    ```javascript
-   // Some login endpoints may include session key in response
-   const loginResponse = await fetch('/auth-hub/login', {
-     method: 'POST',
-     credentials: 'include',
-     body: JSON.stringify({ email, password }),
-   });
+   // ✅ CORRECT: Get ticket and connect immediately
+   const ticket = await getWebSocketTicket();
+   const ws = new WebSocket(`ws://localhost:8000/app-3/ws?ticket=${ticket}`);
    
-   const loginData = await loginResponse.json();
-   const sessionKey = loginData.websocket_session_key; // May be included
+   // ❌ WRONG: Don't store ticket for later use
+   // Tickets expire in 10 seconds and are single-use
    ```
 
-#### Problem: Invalid or Expired Session Key
+#### Problem: Invalid or Expired Ticket
 
 **Symptoms:**
 - WebSocket connection rejected
-- Server logs show: "WebSocket session key validation failed" or "WebSocket session expired"
+- Server logs show: "WebSocket ticket expired" or "WebSocket ticket not found"
 - Connection closes with code 1008
 
 **Solutions:**
 
-1. **Refresh Session Key:**
+1. **Get Fresh Ticket:**
    ```javascript
-   // Get a fresh session key
-   async function refreshSessionKey() {
-     const response = await fetch('/auth/websocket-session', {
-       method: 'GET',
+   // Get a fresh ticket (tickets expire in 10 seconds)
+   async function getFreshTicket() {
+     const response = await fetch('/auth/ticket', {
+       method: 'POST',
        credentials: 'include',
      });
      
      if (response.ok) {
        const data = await response.json();
-       return data.session_key;
+       return data.ticket;
      }
      
      return null;
    }
    
-   // Use fresh session key
-   const sessionKey = await refreshSessionKey();
-   if (sessionKey) {
-     const ws = new WebSocket(`ws://localhost:8000/app-3/ws?session_key=${sessionKey}`);
+   // Use fresh ticket immediately
+   const ticket = await getFreshTicket();
+   if (ticket) {
+     const ws = new WebSocket(`ws://localhost:8000/app-3/ws?ticket=${ticket}`);
    }
    ```
 
-2. **Check Session Key Expiration:**
+2. **Check Ticket Expiration:**
    ```javascript
-   // Session keys expire after 24 hours by default
+   // Tickets expire after 10 seconds by default
    // Check expires_at from session endpoint
    const response = await fetch('/auth/websocket-session', {
      method: 'GET',
@@ -396,183 +395,129 @@ MDB-Engine uses **secure-by-default WebSocket authentication** with encrypted se
    const now = new Date();
    
    if (expiresAt < now) {
-     console.warn('Session key expired, refreshing...');
-     // Get new session key
+     console.warn('Ticket expired, getting new ticket...');
+     // Get new ticket (tickets expire in 10 seconds)
+     const newTicket = await getWebSocketTicket();
+     return newTicket;
    }
    ```
 
-#### Problem: Session Key Not Validated
+#### Problem: Ticket Not Validated
 
 **Symptoms:**
 - WebSocket connection rejected
-- Server logs show: "WebSocket session key validation error"
-- CSRF middleware rejecting connection
-
-**Solutions:**
-
-1. **Verify Session Key Format:**
-   ```javascript
-   // Session keys are base64 URL-safe strings
-   const sessionKey = '...'; // From endpoint
-   console.log('Session key length:', sessionKey.length);
-   // Should be a reasonable length (typically 32+ characters)
-   ```
-
-2. **Check Session Key in URL:**
-   ```javascript
-   // ✅ CORRECT: Session key in query param
-   const ws = new WebSocket(`ws://localhost:8000/app-3/ws?session_key=${sessionKey}`);
-   
-   // ✅ ALTERNATIVE: Session key in header (if library supports)
-   const ws = new WebSocket('ws://localhost:8000/app-3/ws', {
-     headers: {
-       'X-WebSocket-Session-Key': sessionKey,
-     },
-   });
-   ```
-
-### Cookie-Based Authentication (Fallback/Backward Compatibility)
-
-MDB-Engine falls back to **httpOnly cookies** for WebSocket authentication if session key is not available. Tokens are stored in httpOnly cookies set during login, and the browser automatically sends them on WebSocket upgrade requests.
-
-#### Problem: No Token Cookie
-
-**Symptoms:**
-- WebSocket connection rejected immediately
-- Server logs show: "No token cookie found" or "No mdb_auth_token cookie found"
-- Connection closes with code 1008 (Policy Violation)
-
-**Solutions:**
-
-1. **Verify Cookie is Set During Login:**
-   ```javascript
-   // ✅ CORRECT: Cookie set server-side during authentication
-   // No client-side code needed - browser sends automatically
-   const ws = new WebSocket('ws://localhost:8000/app-3/ws');
-   
-   // ❌ WRONG: Don't use query params
-   const ws = new WebSocket(`ws://localhost:8000/app-3/ws?token=${token}`);
-   
-   // ❌ WRONG: Don't try to pass token manually
-   const ws = new WebSocket('ws://localhost:8000/app-3/ws', [token]);
-   ```
-
-2. **Check Cookie in Browser DevTools:**
-   ```javascript
-   // Check browser DevTools → Application → Cookies
-   // Verify "mdb_auth_token" cookie exists with:
-   // - HttpOnly: true
-   // - Secure: true (in production)
-   // - SameSite: Lax
-   // - Path: /
-   ```
-
-3. **Verify Authentication Completed:**
-   ```javascript
-   // Ensure user is logged in before connecting WebSocket
-   // Cookie should be set during login/authentication flow
-   // Check Network tab → Login request → Response Headers → Set-Cookie
-   ```
-
-#### Problem: Invalid Token
-
-**Symptoms:**
-- Connection rejected immediately
-- Server logs show: "JWT decode error" or "Invalid token"
+- Server logs show: "WebSocket ticket not found" or "WebSocket ticket expired"
 - Connection closes with code 1008
 
 **Solutions:**
 
-1. **Verify Cookie Contains Valid Token:**
-   - Check browser DevTools → Application → Cookies → "mdb_auth_token"
-   - Verify cookie value is a valid JWT (three parts separated by dots)
-   - Ensure cookie wasn't corrupted or modified
+1. **Verify Ticket Format:**
+   ```javascript
+   // Tickets are UUIDs (e.g., "550e8400-e29b-41d4-a716-446655440000")
+   const ticket = '...'; // From /auth/ticket endpoint
+   console.log('Ticket format:', /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ticket));
+   // Should be a valid UUID format
+   ```
 
-2. **Check Token Expiration:**
-   - Server validates token expiration automatically
-   - If expired, refresh token via `/auth/refresh` endpoint
-   - New cookie will be set automatically
+2. **Check Ticket in URL:**
+   ```javascript
+   // ✅ CORRECT: Ticket in query param
+   const ws = new WebSocket(`ws://localhost:8000/app-3/ws?ticket=${ticket}`);
+   
+   // ✅ ALTERNATIVE: Ticket in header (if library supports)
+   const ws = new WebSocket('ws://localhost:8000/app-3/ws', {
+     headers: {
+       'X-WebSocket-Ticket': ticket,
+     },
+   });
+   ```
 
-3. **Verify JWT Secret Matches:**
-   - Ensure backend uses correct JWT secret
-   - Check environment variables are set correctly
-   - Verify token was issued by same auth system
+### Ticket Authentication (Current Implementation)
 
-#### Problem: Token Expired
+MDB-Engine uses **ticket-based authentication** exclusively for WebSocket connections. Tickets are obtained via the `/auth/ticket` endpoint and must be used within 10 seconds.
+
+#### Problem: No Ticket Provided
 
 **Symptoms:**
-- Initial connection works, then disconnects
-- Server logs show "Signature has expired"
-- Connection closes unexpectedly
+- WebSocket connection rejected immediately
+- Server logs show: "No valid ticket found. Generate ticket via /auth/ticket endpoint."
+- Connection closes with code 1008 (Policy Violation)
 
 **Solutions:**
 
-1. **Refresh Token Before Connecting:**
+1. **Get Ticket Before Connecting:**
    ```javascript
-   async function connectWebSocket() {
-     // Refresh token if needed (server handles cookie refresh)
-     const response = await fetch('/auth/refresh', {
+   // ✅ CORRECT: Get ticket from /auth/ticket endpoint
+   async function getWebSocketTicket() {
+     const response = await fetch('/auth/ticket', {
        method: 'POST',
-       credentials: 'include' // Important: sends cookies
+       credentials: 'include', // Sends JWT cookie
      });
      
      if (response.ok) {
-       // New token cookie set automatically
-       // Connect WebSocket - browser sends new cookie
-       const ws = new WebSocket('ws://localhost:8000/app-3/ws');
-       return ws;
+       const data = await response.json();
+       return data.ticket;
      }
+     
+     throw new Error('Failed to get ticket');
    }
+   
+   // Use ticket immediately (must connect within 10 seconds)
+   const ticket = await getWebSocketTicket();
+   const ws = new WebSocket(`ws://localhost:8000/app-3/ws?ticket=${ticket}`);
    ```
 
-2. **Handle Reconnection with Token Refresh:**
+2. **Verify Ticket Endpoint Returns Ticket:**
    ```javascript
-   ws.onclose = async (event) => {
-     if (event.code === 1008) {
-       // Authentication failure - refresh token and reconnect
-       console.log('Auth failed, refreshing token...');
-       await fetch('/auth/refresh', {
-         method: 'POST',
-         credentials: 'include'
-       });
-       setTimeout(() => connectWebSocket(), 2000);
-     }
-   };
+   // Check ticket endpoint response
+   const response = await fetch('/auth/ticket', {
+     method: 'POST',
+     credentials: 'include',
+   });
+   
+   const data = await response.json();
+   console.log('Ticket:', data.ticket);
+   console.log('Expires in:', data.expires_in, 'seconds');
+   // Should return 200 with ticket (UUID) and expires_in (10)
    ```
 
-3. **Implement Proactive Token Refresh:**
+3. **Ensure User is Authenticated:**
    ```javascript
-   // Monitor and refresh token proactively
-   setInterval(async () => {
-     const response = await fetch('/auth/refresh', {
-       method: 'POST',
-       credentials: 'include'
-     });
-     if (response.ok) {
-       // New cookie set automatically
-       // WebSocket will use new cookie on next connection
-     }
-   }, 10 * 60 * 1000); // Refresh every 10 minutes
+   // User must be logged in (JWT cookie must exist)
+   // Check browser DevTools → Application → Cookies → "mdb_auth_token"
+   // Cookie should exist with HttpOnly, Secure, SameSite attributes
    ```
 
-#### Problem: CSRF Cookie Missing
+#### Problem: Invalid or Expired Ticket
 
 **Symptoms:**
-- Connection rejected with 403 Forbidden
-- Server logs show: "CSRF token missing for WebSocket authentication"
-- Connection closes immediately
+- Connection rejected immediately
+- Server logs show: "WebSocket ticket expired" or "WebSocket ticket not found"
+- Connection closes with code 1008
 
 **Solutions:**
 
-1. **Ensure CSRF Cookie is Set:**
-   - CSRF cookie is set automatically on first GET request
-   - Make a GET request to any endpoint before connecting WebSocket
-   - Check browser DevTools → Cookies → "csrf_token" exists
+1. **Get Fresh Ticket:**
+   ```javascript
+   // Tickets expire in 10 seconds - get fresh ticket
+   const ticket = await getWebSocketTicket();
+   // Connect immediately - don't delay
+   const ws = new WebSocket(`ws://localhost:8000/app-3/ws?ticket=${ticket}`);
+   ```
 
-2. **Verify Cookie Path:**
-   - CSRF cookie should have `path="/"`
-   - Ensures cookie is available to all mounted apps
-   - Check cookie attributes in browser DevTools
+2. **Handle Ticket Expiration:**
+   ```javascript
+   // If connection fails, get new ticket and reconnect
+   ws.onerror = async () => {
+     const newTicket = await getWebSocketTicket();
+     const ws = new WebSocket(`ws://localhost:8000/app-3/ws?ticket=${newTicket}`);
+   };
+   ```
+
+3. **Verify Ticket Format:**
+   - Tickets are UUIDs (e.g., "550e8400-e29b-41d4-a716-446655440000")
+   - Check ticket is valid UUID format
+   - Ensure ticket wasn't modified or corrupted
 
 ---
 
@@ -639,12 +584,22 @@ MDB-Engine falls back to **httpOnly cookies** for WebSocket authentication if se
   console.log('Token expires:', new Date(payload.exp * 1000));
   ```
 
-- [ ] **Cookie is set and sent automatically:**
+- [ ] **Ticket is obtained and used:**
   ```javascript
-  // ✅ Correct: Browser automatically sends httpOnly cookies
-  const ws = new WebSocket(url);
-  // NOT: new WebSocket(`${url}?token=${token}`) ❌
-  // NOT: new WebSocket(url, [token]) ❌
+  // ✅ Correct: Get ticket and use it in query param
+  async function getWebSocketTicket() {
+    const response = await fetch('/auth/ticket', {
+      method: 'POST',
+      credentials: 'include',
+    });
+    const data = await response.json();
+    return data.ticket;
+  }
+  
+  const ticket = await getWebSocketTicket();
+  const ws = new WebSocket(`${url}?ticket=${ticket}`);
+  // NOT: new WebSocket(url) ❌ (ticket required)
+  // NOT: new WebSocket(url, [token]) ❌ (ticket required)
   ```
 
 - [ ] **Origin matches allowed origins:**
@@ -688,20 +643,35 @@ class SSOWebSocketClient {
     };
   }
 
-  connect(): void {
+  private async getWebSocketTicket(): Promise<string> {
+    const response = await fetch('/auth/ticket', {
+      method: 'POST',
+      credentials: 'include', // Sends JWT cookie
+    });
+    
+    if (response.ok) {
+      const data = await response.json();
+      return data.ticket;
+    }
+    
+    throw new Error('Failed to get WebSocket ticket');
+  }
+
+  async connect(): Promise<void> {
     // Determine protocol (ws for HTTP, wss for HTTPS)
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host;
     const wsUrl = `${protocol}//${host}/${this.config.appSlug}/${this.config.endpoint}`;
 
-    // No token needed - browser automatically sends httpOnly cookies
-    // Ensure user is authenticated and cookie is set before connecting
+    // Get ticket before connecting (requires JWT cookie)
+    // Ensure user is authenticated and JWT cookie is set
     console.log(`🔌 Connecting to WebSocket: ${wsUrl}`);
     console.log(`   Current origin: ${window.location.origin}`);
 
     try {
-      // Browser automatically sends httpOnly cookies
-      this.ws = new WebSocket(wsUrl);
+      // Get ticket and connect with ticket
+      const ticket = await this.getWebSocketTicket();
+      this.ws = new WebSocket(`${wsUrl}?ticket=${ticket}`);
 
       this.ws.onopen = () => {
         console.log('✅ WebSocket connected');
@@ -824,20 +794,35 @@ export function useSSOWebSocket(options: UseWebSocketOptions) {
   const reconnectAttemptsRef = useRef(0);
   const reconnectTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  const connect = useCallback(() => {
+  const getWebSocketTicket = useCallback(async (): Promise<string> => {
+    const response = await fetch('/auth/ticket', {
+      method: 'POST',
+      credentials: 'include', // Sends JWT cookie
+    });
+    
+    if (response.ok) {
+      const data = await response.json();
+      return data.ticket;
+    }
+    
+    throw new Error('Failed to get WebSocket ticket');
+  }, []);
+
+  const connect = useCallback(async () => {
     if (!enabled) return;
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host;
     const wsUrl = `${protocol}//${host}/${appSlug}/${endpoint}`;
 
-    // No token needed - browser automatically sends httpOnly cookies
-    // Ensure user is authenticated and cookie is set before connecting
+    // Get ticket before connecting (requires JWT cookie)
+    // Ensure user is authenticated and JWT cookie is set
     console.log(`🔌 Connecting to WebSocket: ${wsUrl}`);
 
     try {
-      // Browser automatically sends httpOnly cookies
-      const ws = new WebSocket(wsUrl);
+      // Get ticket and connect with ticket
+      const ticket = await getWebSocketTicket();
+      const ws = new WebSocket(`${wsUrl}?ticket=${ticket}`);
       wsRef.current = ws;
 
       ws.onopen = () => {
@@ -1109,11 +1094,21 @@ ws.onclose = (e) => console.log('🔌 Closed:', e.code, e.reason);
 }
 ```
 
-### Fix 2: Verify WebSocket URL and Cookie
+### Fix 2: Verify WebSocket URL and Ticket
 
 ```javascript
-// ✅ CORRECT: Include path prefix, browser sends cookies automatically
-const wsUrl = `ws://localhost:8000/app-3/ws`;
+// ✅ CORRECT: Get ticket and include in URL
+async function getWebSocketTicket() {
+  const response = await fetch('/auth/ticket', {
+    method: 'POST',
+    credentials: 'include',
+  });
+  const data = await response.json();
+  return data.ticket;
+}
+
+const ticket = await getWebSocketTicket();
+const wsUrl = `ws://localhost:8000/app-3/ws?ticket=${ticket}`;
 const ws = new WebSocket(wsUrl);
 
 // ❌ WRONG (missing path prefix)

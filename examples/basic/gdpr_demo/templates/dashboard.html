@@ -1,0 +1,295 @@
+{% extends "base.html" %}
+
+{% block title %}GDPR Dashboard{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h1>GDPR Compliance Dashboard</h1>
+    <p style="opacity: 0.8; margin-bottom: 20px;">
+        Welcome, {{ user.get('email', 'User') }}! Manage your data and exercise your GDPR rights.
+    </p>
+    <p><strong>Memories stored:</strong> {{ memory_count }}</p>
+</div>
+
+<!-- Right to Access -->
+<div class="card gdpr-section">
+    <h2>📥 Right to Access (Article 15)</h2>
+    <p>Export all your personal data stored in the system.</p>
+    <button class="btn" onclick="exportData()">Export My Data</button>
+    <div id="export-result" style="margin-top: 15px;"></div>
+</div>
+
+<!-- Right to Rectification -->
+<div class="card gdpr-section">
+    <h2>✏️ Right to Rectification (Article 16)</h2>
+    <p>Update your personal information.</p>
+    <form id="update-form" onsubmit="updateData(event)">
+        <div class="form-group">
+            <label for="name">Name</label>
+            <input type="text" id="name" name="name" value="{{ user.get('name', '') }}" required>
+        </div>
+        <button type="submit" class="btn">Update Information</button>
+    </form>
+    <div id="update-result" style="margin-top: 15px;"></div>
+</div>
+
+<!-- Memory Management -->
+<div class="card gdpr-section">
+    <h2>💭 Memory Management</h2>
+    <p>Add and manage your memories.</p>
+    
+    <div class="form-group">
+        <label for="memory-text">Add a Memory</label>
+        <textarea id="memory-text" rows="3" placeholder="e.g., I prefer dark mode interfaces"></textarea>
+    </div>
+    <button class="btn" onclick="addMemory()">Add Memory</button>
+    
+    <div style="margin-top: 20px;">
+        <button class="btn btn-secondary" onclick="loadMemories()">Refresh Memories</button>
+        <button class="btn btn-danger" onclick="deleteAllMemories(true)">Delete All Memories (Hard Delete)</button>
+        <button class="btn btn-secondary" onclick="deleteAllMemories(false)">Soft Delete All Memories</button>
+    </div>
+    
+    <div id="memories-list" style="margin-top: 20px;"></div>
+</div>
+
+<!-- Right to Erasure -->
+<div class="card gdpr-section">
+    <h2>🗑️ Right to Erasure (Article 17)</h2>
+    <p><strong>Warning:</strong> This will permanently delete all your data. This action cannot be undone.</p>
+    
+    <div class="alert alert-warning">
+        <strong>Deletion Strategies:</strong><br>
+        • <strong>Hard Delete (Default):</strong> Permanently removes all data including cold storage (GDPR compliant)<br>
+        • <strong>Soft Delete:</strong> Marks data as deleted but preserves for legal retention<br>
+        • <strong>Anonymization:</strong> Replaces identifiers with anonymous values
+    </div>
+    
+    <div class="action-buttons">
+        <button class="btn btn-danger" onclick="deleteAccount(false)">Hard Delete Account (GDPR)</button>
+        <button class="btn btn-secondary" onclick="deleteAccount(true)">Soft Delete Account (Legal Retention)</button>
+        <button class="btn btn-secondary" onclick="anonymizeAccount()">Anonymize Account</button>
+    </div>
+    
+    <div id="delete-result" style="margin-top: 15px;"></div>
+</div>
+
+<script>
+async function exportData() {
+    const resultDiv = document.getElementById('export-result');
+    resultDiv.innerHTML = '<p>Exporting data...</p>';
+    
+    try {
+        const response = await fetch('/api/gdpr/export');
+        const data = await response.json();
+        
+        if (response.ok) {
+            const jsonStr = JSON.stringify(data, null, 2);
+            resultDiv.innerHTML = `
+                <div class="alert alert-success">
+                    <strong>Export successful!</strong>
+                    <pre style="margin-top: 10px; overflow-x: auto; max-height: 400px;">${jsonStr}</pre>
+                    <button class="btn btn-secondary" onclick="downloadExport()" style="margin-top: 10px;">Download JSON</button>
+                </div>
+            `;
+            window.exportData = data;
+        } else {
+            resultDiv.innerHTML = `<div class="alert alert-error">Error: ${data.detail || 'Export failed'}</div>`;
+        }
+    } catch (error) {
+        resultDiv.innerHTML = `<div class="alert alert-error">Error: ${error.message}</div>`;
+    }
+}
+
+function downloadExport() {
+    if (!window.exportData) return;
+    const blob = new Blob([JSON.stringify(window.exportData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `gdpr-export-${new Date().toISOString()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+async function updateData(event) {
+    event.preventDefault();
+    const resultDiv = document.getElementById('update-result');
+    resultDiv.innerHTML = '<p>Updating...</p>';
+    
+    const formData = {
+        name: document.getElementById('name').value
+    };
+    
+    try {
+        const response = await fetch('/api/gdpr/rectify', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(formData)
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok) {
+            resultDiv.innerHTML = '<div class="alert alert-success">Information updated successfully!</div>';
+        } else {
+            resultDiv.innerHTML = `<div class="alert alert-error">Error: ${data.detail || 'Update failed'}</div>`;
+        }
+    } catch (error) {
+        resultDiv.innerHTML = `<div class="alert alert-error">Error: ${error.message}</div>`;
+    }
+}
+
+async function addMemory() {
+    const text = document.getElementById('memory-text').value.trim();
+    if (!text) {
+        alert('Please enter a memory');
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/memories/add', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ memory: text })
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok) {
+            document.getElementById('memory-text').value = '';
+            loadMemories();
+        } else {
+            alert(`Error: ${data.detail || 'Failed to add memory'}`);
+        }
+    } catch (error) {
+        alert(`Error: ${error.message}`);
+    }
+}
+
+async function loadMemories() {
+    const listDiv = document.getElementById('memories-list');
+    listDiv.innerHTML = '<p>Loading memories...</p>';
+    
+    try {
+        const response = await fetch('/api/memories');
+        const data = await response.json();
+        
+        if (response.ok && data.memories && data.memories.length > 0) {
+            listDiv.innerHTML = `
+                <h3>Your Memories (${data.count})</h3>
+                ${data.memories.map(m => `
+                    <div class="memory-item">
+                        <strong>Memory:</strong> ${m.text || m.memory || 'N/A'}<br>
+                        <small style="opacity: 0.7;">Created: ${m.created_at || 'N/A'}</small>
+                    </div>
+                `).join('')}
+            `;
+        } else {
+            listDiv.innerHTML = '<p style="opacity: 0.7;">No memories found.</p>';
+        }
+    } catch (error) {
+        listDiv.innerHTML = `<div class="alert alert-error">Error: ${error.message}</div>`;
+    }
+}
+
+async function deleteAllMemories(hardDelete) {
+    if (!confirm(`Are you sure you want to ${hardDelete ? 'permanently delete' : 'soft delete'} all memories?`)) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/memories?hard_delete=${hardDelete}`, {
+            method: 'DELETE'
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok) {
+            alert(data.message || 'Memories deleted successfully');
+            loadMemories();
+        } else {
+            alert(`Error: ${data.detail || 'Failed to delete memories'}`);
+        }
+    } catch (error) {
+        alert(`Error: ${error.message}`);
+    }
+}
+
+async function deleteAccount(softDelete) {
+    const strategy = softDelete ? 'soft delete' : 'hard delete';
+    const message = softDelete 
+        ? 'This will soft delete your account (data preserved for legal retention). Continue?'
+        : 'This will PERMANENTLY DELETE all your data. This action cannot be undone. Continue?';
+    
+    if (!confirm(message)) {
+        return;
+    }
+    
+    const resultDiv = document.getElementById('delete-result');
+    resultDiv.innerHTML = '<p>Deleting account...</p>';
+    
+    try {
+        const response = await fetch(`/api/gdpr/delete?soft_delete=${softDelete}`, {
+            method: 'DELETE'
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok) {
+            resultDiv.innerHTML = `
+                <div class="alert alert-success">
+                    <strong>Account ${strategy} successful!</strong><br>
+                    ${JSON.stringify(data, null, 2)}
+                </div>
+            `;
+            setTimeout(() => {
+                window.location.href = '/login';
+            }, 2000);
+        } else {
+            resultDiv.innerHTML = `<div class="alert alert-error">Error: ${data.detail || 'Deletion failed'}</div>`;
+        }
+    } catch (error) {
+        resultDiv.innerHTML = `<div class="alert alert-error">Error: ${error.message}</div>`;
+    }
+}
+
+async function anonymizeAccount() {
+    if (!confirm('This will anonymize your account (replace identifiers with anonymous values). Continue?')) {
+        return;
+    }
+    
+    const resultDiv = document.getElementById('delete-result');
+    resultDiv.innerHTML = '<p>Anonymizing account...</p>';
+    
+    try {
+        const response = await fetch('/api/gdpr/delete?anonymize=true', {
+            method: 'DELETE'
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok) {
+            resultDiv.innerHTML = `
+                <div class="alert alert-success">
+                    <strong>Account anonymized successfully!</strong><br>
+                    ${JSON.stringify(data, null, 2)}
+                </div>
+            `;
+            setTimeout(() => {
+                window.location.href = '/login';
+            }, 2000);
+        } else {
+            resultDiv.innerHTML = `<div class="alert alert-error">Error: ${data.detail || 'Anonymization failed'}</div>`;
+        }
+    } catch (error) {
+        resultDiv.innerHTML = `<div class="alert alert-error">Error: ${error.message}</div>`;
+    }
+}
+
+// Load memories on page load
+window.addEventListener('DOMContentLoaded', () => {
+    loadMemories();
+});
+</script>
+{% endblock %}

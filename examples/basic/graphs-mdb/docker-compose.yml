@@ -1,0 +1,88 @@
+# ============================================================================
+# Docker Compose Configuration for Graphs MDB Example
+# ============================================================================
+
+services:
+  # Graphs MDB Application
+  app:
+    build:
+      context: ../../..
+      dockerfile: examples/basic/graphs-mdb/Dockerfile
+      args:
+        APP_USER: appuser
+        APP_UID: 1000
+        APP_GID: 1000
+    container_name: graphs_mdb_app
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    environment:
+      - MONGO_URI=${MONGO_URI:-mongodb://mongodb:27017/?directConnection=true}
+      - MONGO_DB_NAME=${MONGO_DB_NAME:-graphs_mdb_db}
+      - APP_SLUG=${APP_SLUG:-graphs_mdb}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - PYTHONUNBUFFERED=${PYTHONUNBUFFERED:-1}
+      - APP_SECRET_KEY=${APP_SECRET_KEY:-graphs_mdb_demo_secret_key_change_in_production}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - mdb_engine_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    tmpfs:
+      - /tmp:noexec,nosuid,size=100m
+
+  # MongoDB Atlas Local (No Authentication)
+  # Accessible from MongoDB Compass using:
+  # Connection String: mongodb://localhost:27017/
+  mongodb:
+    image: mongodb/mongodb-atlas-local:latest
+    container_name: graphs_mdb_mongodb
+    restart: unless-stopped
+    ports:
+      - "${MONGO_PORT:-27017}:27017"
+    environment:
+      MONGODB_INITDB_DATABASE: ${MONGO_DB_NAME:-graphs_mdb_db}
+    volumes:
+      - mongodb_data:/data/db
+      - mongodb_config:/data/configdb
+    networks:
+      - mdb_engine_network
+    healthcheck:
+      # Wait for replica set primary to be elected (not just ping)
+      test: mongosh "mongodb://localhost:27017/?directConnection=true" --quiet --eval "rs.status().ok && rs.status().myState === 1"
+      interval: 5s
+      timeout: 10s
+      retries: 20
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+volumes:
+  mongodb_data:
+    driver: local
+  mongodb_config:
+    driver: local
+
+networks:
+  mdb_engine_network:
+    driver: bridge

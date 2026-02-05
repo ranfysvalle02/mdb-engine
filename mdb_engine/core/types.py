@@ -267,18 +267,187 @@ class WebSocketsDict(TypedDict):
 # ============================================================================
 
 
-class MemoryConfigDict(TypedDict, total=False):
-    """Mem0 memory service configuration."""
+class CognitiveDecayConfigDict(TypedDict, total=False):
+    """Cognitive decay (Ebbinghaus Forgetting Curve) configuration."""
+
+    enabled: bool
+    default_stability_hours: float
+    min_stability: float
+    use_server_side_pipeline: bool
+
+
+class CognitiveEmotionConfigDict(TypedDict, total=False):
+    """Cognitive emotion (Flashbulb Memory) configuration."""
+
+    enabled: bool
+    flashbulb_threshold: float
+    max_stability_multiplier: float
+
+
+class ConflictResolutionConfigDict(TypedDict, total=False):
+    """Conflict resolution (integrity check) configuration."""
+
+    enabled: bool
+    similarity_threshold: float
+    llm_model: str | None
+
+
+class PruningConfigDict(TypedDict, total=False):
+    """Memory pruning (soft-delete) configuration."""
+
+    enabled: bool
+    max_capacity: int
+    prune_percentage: float
+    strategy: Literal["soft_delete", "hard_delete"]
+
+
+class ColdStorageConfigDict(TypedDict, total=False):
+    """Cold storage (paper trail) configuration."""
+
+    enabled: bool
+    retention_days: int
+
+
+class CognitiveConfigDict(TypedDict, total=False):
+    """Full cognitive memory configuration."""
+
+    enabled: bool
+    decay: CognitiveDecayConfigDict
+    emotion: CognitiveEmotionConfigDict
+    conflict_resolution: ConflictResolutionConfigDict
+    pruning: PruningConfigDict
+    cold_storage: ColdStorageConfigDict
+
+
+class RedactionPatternsDict(TypedDict, total=False):
+    """Redaction patterns configuration."""
+
+    ssn: bool
+    credit_card: bool
+    phone: bool
+    email: bool
+    ip_address: bool
+    api_key: bool
+    password: bool
+    custom: list[str]
+
+
+class RedactionConfigDict(TypedDict, total=False):
+    """Redaction layer configuration."""
+
+    enabled: bool
+    replacement: str
+    patterns: RedactionPatternsDict
+    allow_list: list[str]
+    log_redactions: bool
+
+
+class ReflectionConfigDict(TypedDict, total=False):
+    """Memory reflection configuration."""
+
+    enabled: bool
+    interval_hours: int
+    message_threshold: int
+    min_salience_to_keep: float
+    store_reflections: bool
+
+
+class EntitiesConfigDict(TypedDict, total=False):
+    """Entity store configuration."""
 
     enabled: bool
     collection_name: str
+    auto_extract: bool
+
+
+class CategoriesConfigDict(TypedDict, total=False):
+    """Memory categories configuration."""
+
+    enabled: bool
+    custom_categories: list[str]
+
+
+class FusionConfigDict(TypedDict, total=False):
+    """Memory fusion (intelligent deduplication) configuration."""
+
+    enabled: bool
+    use_llm: bool
+    similarity_threshold: float
+    fallback_to_simple: bool
+    parallel_limit: int
+    timeout_seconds: int
+
+
+class MemoryGraphConfigDict(TypedDict, total=False):
+    """Graph-powered memory layer configuration."""
+
+    enabled: bool
+    auto_extract: bool
+
+
+class MemoryTypesConfigDict(TypedDict, total=False):
+    """Memory types configuration (Cognitive Blueprint v2.0)."""
+
+    enabled: bool
+    auto_detect: bool
+    default_type: Literal["semantic", "entity", "procedural", "episodic", "working"]
+    episodic_retention_days: int
+    working_ttl_hours: int
+
+
+class ProceduralConfigDict(TypedDict, total=False):
+    """Procedural memory configuration."""
+
+    enabled: bool
+    auto_extract: bool
+    detect_code: bool
+    detect_workflows: bool
+
+
+class ConsolidationConfigDict(TypedDict, total=False):
+    """Consolidation configuration for reflection service."""
+
+    extract_entities: bool
+    route_by_type: bool
+    link_to_graph: bool
+    extract_procedural: bool
+
+
+class MemoryConfigDict(TypedDict, total=False):
+    """Memory service configuration."""
+
+    enabled: bool
+    collection_name: str
+    index_name: str
     embedding_model_dims: int
-    enable_graph: bool
     infer: bool
     embedding_model: str
     chat_model: str
+    memory_llm_model: str
     temperature: float
     async_mode: bool
+    provider: Literal["custom", "cognitive"]
+    enable_cognitive: bool
+    max_depth: int | None
+    similarity_threshold: float
+    reinforcement_factor: float
+    decay_factor: float
+    merge_threshold_low: float
+    merge_threshold_high: float
+    # Nested configurations
+    cognitive: CognitiveConfigDict
+    redaction: RedactionConfigDict
+    reflection: ReflectionConfigDict
+    entities: EntitiesConfigDict
+    categories: CategoriesConfigDict
+    fusion: FusionConfigDict
+    graph: MemoryGraphConfigDict
+    # Cognitive Blueprint v2.0 configurations
+    memory_types: MemoryTypesConfigDict
+    procedural: ProceduralConfigDict
+    consolidation: ConsolidationConfigDict
+    persona: dict[str, Any]  # Persona configuration
+    perceptions: dict[str, Any]  # Perceptions configuration
 
 
 # ============================================================================
@@ -375,7 +544,6 @@ class ManifestDict(TypedDict, total=False):
     name: str
     description: str | None
     status: Literal["active", "draft", "archived", "inactive"]
-    auth_required: bool  # Backward compatibility
     auth: AuthConfigDict | None
     token_management: TokenManagementDict | None
     data_scope: list[str]

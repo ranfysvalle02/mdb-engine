@@ -25,6 +25,14 @@ from fastapi import Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
+# Import shared security utilities
+try:
+    from shared_security import get_cookie_settings
+except ImportError:
+    # Fallback if shared_security not available (shouldn't happen in normal usage)
+    def get_cookie_settings():
+        return {"httponly": True, "samesite": "lax", "secure": False}
+
 # Configure logging
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO"),
@@ -280,12 +288,13 @@ async def login(
     )
 
     # Set cookie for auth hub (no domain - works on this port only)
+    cookie_settings = get_cookie_settings()
     response.set_cookie(
         key=AUTH_COOKIE,
         value=token,
-        httponly=True,
-        samesite="lax",
-        secure=False,  # Set True in production with HTTPS
+        httponly=cookie_settings["httponly"],
+        samesite=cookie_settings["samesite"],
+        secure=cookie_settings["secure"],
         max_age=86400,  # 24 hours
         path="/",
         # No domain - cookie works on this port only
@@ -300,6 +309,8 @@ async def register_page(request: Request):
     user = get_current_user(request)
     if user:
         return RedirectResponse(url="/dashboard", status_code=302)
+    # CSRF token is automatically set by middleware, but we ensure it's available
+    # The route is exempt from CSRF validation but token is still generated for frontend
     return templates.TemplateResponse("register.html", {"request": request})
 
 
@@ -350,12 +361,13 @@ async def register(
         )
 
         # Set cookie for auth hub (no domain - works on this port only)
+        cookie_settings = get_cookie_settings()
         response.set_cookie(
             key=AUTH_COOKIE,
             value=token,
-            httponly=True,
-            samesite="lax",
-            secure=False,
+            httponly=cookie_settings["httponly"],
+            samesite=cookie_settings["samesite"],
+            secure=cookie_settings["secure"],
             max_age=86400,
             path="/",
             # No domain - cookie works on this port only
@@ -363,7 +375,12 @@ async def register(
 
         return response
     except ValueError as e:
-        return JSONResponse(status_code=400, content={"success": False, "error": str(e)})
+        # Log detailed error server-side, return generic message to client
+        logger.error(f"Registration error: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=400,
+            content={"success": False, "error": "Registration failed. Please check your input and try again."},
+        )
 
 
 @app.post("/logout")
@@ -381,18 +398,20 @@ async def logout(request: Request):
         except (ValueError, KeyError):
             pass  # Token may already be invalid
 
-    response = JSONResponse(content={"success": True})
+    # Redirect to login page after logout
+    response = RedirectResponse(url="/login", status_code=302)
     # Delete cookie
     host = request.url.hostname
     cookie_domain = None
     if host == "localhost" or host == "127.0.0.1":
         cookie_domain = "localhost"
+    cookie_settings = get_cookie_settings()
     response.delete_cookie(
         AUTH_COOKIE,
         path="/",
         domain=cookie_domain,
-        secure=False,
-        samesite="lax",
+        secure=cookie_settings["secure"],
+        samesite=cookie_settings["samesite"],
     )
     return response
 

@@ -9,9 +9,21 @@ The MongoDBEngine now includes:
 - Optional Ray support with enable_ray parameter
 - Automatic app token retrieval
 - Multi-site mode auto-detection from manifest
+- Optional CSFLE (Client-Side Field Level Encryption) support
 """
 
-from .engine import MongoDBEngine
+# Optional CSFLE support (gracefully handles missing pymongo[encryption])
+from .csfle import (
+    CSFLEConfig,
+    generate_local_master_key,
+    get_csfle_status,
+    is_csfle_available,
+)
+from .engine import (
+    MongoDBEngine,
+    build_csfle_config_from_manifest,
+    build_csfle_config_from_manifests,
+)
 from .manifest import (  # Classes; Constants; Functions (for backward compatibility); Schemas
     CURRENT_SCHEMA_VERSION,
     DEFAULT_SCHEMA_VERSION,
@@ -33,6 +45,15 @@ from .manifest import (  # Classes; Constants; Functions (for backward compatibi
     validate_manifests_parallel,
 )
 
+# Service Protocols for dependency injection and type checking
+from .protocols import (
+    EmbeddingServiceProtocol,
+    GraphServiceProtocol,
+    LLMServiceProtocol,
+    MemoryServiceProtocol,
+    TextChunkerProtocol,
+)
+
 # Optional Ray integration (gracefully handles missing Ray)
 from .ray_integration import (
     RAY_AVAILABLE,
@@ -49,6 +70,19 @@ __all__ = [
     "AppRayActor",
     "get_ray_actor_handle",
     "ray_actor_decorator",
+    # CSFLE Support (optional - only active if pymongo[encryption] installed)
+    "CSFLEConfig",
+    "build_csfle_config_from_manifest",
+    "build_csfle_config_from_manifests",
+    "generate_local_master_key",
+    "get_csfle_status",
+    "is_csfle_available",
+    # Service Protocols (for DI and type checking)
+    "LLMServiceProtocol",
+    "EmbeddingServiceProtocol",
+    "TextChunkerProtocol",
+    "GraphServiceProtocol",
+    "MemoryServiceProtocol",
     # Classes
     "ManifestValidator",
     "ManifestParser",

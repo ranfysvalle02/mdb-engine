@@ -13,8 +13,12 @@ python-dateutil>=2.8.2
 python-dotenv>=1.0.0
 pymongo>=4.0.0
 
-# Memory service (Mem0)
-mem0ai>=0.1.0
+# Memory service (Custom MongoDB Atlas Vector Search)
+# No additional dependencies needed - uses mdb-engine's built-in memory service
+
+# Authorization (Casbin)
+casbin>=1.35.0
+casbin-motor-adapter>=0.1.0
 
 # AI/LLM Dependencies (install at least one provider)
 # OpenAI (recommended)
@@ -26,3 +30,6 @@ anthropic>=0.18.0
 
 # Demo seeding script
 aiohttp>=3.9.0
+
+# Test script dependencies
+requests>=2.31.0

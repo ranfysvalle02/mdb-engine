@@ -73,7 +73,11 @@ The engine automatically:
 **AI/ML Services:**
 
 - `embedding_config`: Text chunking and vector embeddings - optional
-- `memory_config`: Mem0 memory service - optional
+- `memory_config`: Memory service (MongoDB Atlas Vector Search) - optional
+  - **Intelligent Memory Management**: LLM-powered fact extraction, semantic search, user isolation
+  - **Cognitive Features**: Importance scoring, reinforcement, decay, merging, pruning (optional)
+  - **Automatic Index Management**: Vector search index created and managed automatically
+  - **Zero Configuration**: Just enable in manifest - no manual index setup needed
 
 **Real-time:**
 
@@ -256,13 +260,48 @@ Automatically configures `EmbeddingService` - available via `Depends(get_embeddi
 {
   "memory_config": {
     "enabled": true,
+    "provider": "cognitive",
     "collection_name": "user_memories",
-    "enable_graph": true
+    "embedding_model": "text-embedding-3-small",
+    "chat_model": "gpt-4o",
+    "embedding_model_dims": 1536,
+    "infer": true,
+    "async_mode": true,
+    "enable_cognitive": true,
+    "max_depth": 100
   }
 }
 ```
 
-Automatically configures Mem0 - available via `Depends(get_memory_service)`.
+Automatically configures memory service with:
+- ✅ **Vector search index** created and managed automatically (no manual index definition needed)
+- ✅ **LLM fact extraction** from conversations (when `infer: true`)
+- ✅ **Semantic search** capabilities via MongoDB Atlas Vector Search
+- ✅ **Cognitive features** (importance scoring, reinforcement, decay, merging, pruning) when enabled
+- ✅ **User isolation** - all memories scoped per user automatically
+- ✅ Available via `Depends(get_memory_service)` dependency
+
+**Key Features:**
+- **Automatic Index Management**: The memory service creates its own vector search index with `user_id` filter - you never need to define it in `managed_indexes`
+- **Fact Extraction**: Automatically extracts atomic facts from conversations using LLM inference
+- **Direct Injection**: Can inject memories directly without LLM inference (for structured data, preferences, facts)
+- **Cognitive Memory**: Optional advanced features including importance scoring, memory reinforcement, decay, merging, and pruning
+- **Metadata Support**: Full support for custom metadata, bucket_id, and bucket_type for organization
+
+**Usage Pattern:**
+```python
+from mdb_engine.dependencies import get_memory_service
+
+@app.post("/chat")
+async def chat(message: str, user_id: str, memory=Depends(get_memory_service)):
+    if memory:  # Gracefully handles if not configured
+        # Search for relevant memories
+        memories = memory.search(query=message, user_id=user_id, limit=5)
+        context = "\n".join([m.get("memory", "") for m in memories])
+        
+        # Add new memory from conversation
+        memory.add(messages=[...], user_id=user_id)
+```
 
 ### 5. Multi-App Coordination
 
@@ -504,6 +543,8 @@ All advanced features are optional and gracefully degrade:
 
 - If not configured → `get_memory_service()` returns `None`
 - Your code checks: `if memory: memory.search(...)`
+- **Automatic Index Management**: Even when enabled, you don't need to define memory indexes in `managed_indexes` - the service manages its own vector search index automatically
+- **Graceful Degradation**: Memory operations are optional - your app works fine without them
 
 **Embedding Service:**
 

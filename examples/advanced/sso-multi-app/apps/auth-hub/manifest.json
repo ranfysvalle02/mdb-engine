@@ -10,6 +10,11 @@
     "default_role": "base_user",
     "require_role": "base_user",
     "public_routes": ["/", "/health", "/login", "/register", "/api/public"],
+    "csrf_protection": {
+      "enabled": true,
+      "exempt_routes": ["/health", "/auth/callback", "/register", "/login"],
+      "token_ttl": 3600
+    },
     "users": {
       "enabled": true,
       "strategy": "app_users"
@@ -19,8 +24,8 @@
     "enabled": true,
     "allow_origins": ["http://localhost:8000", "http://localhost:8001", "http://localhost:8002", "http://localhost:8003"],
     "allow_credentials": true,
-    "allow_methods": ["*"],
-    "allow_headers": ["*"]
+    "allow_methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    "allow_headers": ["Content-Type", "Authorization", "X-CSRF-Token"]
   },
   "data_access": {
     "read_scopes": ["auth-hub"],

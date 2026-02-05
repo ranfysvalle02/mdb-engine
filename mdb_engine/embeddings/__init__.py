@@ -4,8 +4,9 @@ Embeddings Service Module
 Provides EmbeddingService for semantic text splitting and embedding generation.
 Examples should implement their own LLM clients directly using the OpenAI SDK.
 
-For memory functionality, use mdb_engine.memory.Mem0MemoryService which
-handles embeddings and LLM via environment variables (.env).
+For memory functionality, use mdb_engine.memory.CustomMemoryService or "
+"mdb_engine.memory.CognitiveMemoryService which handle embeddings and LLM via "
+"environment variables (.env).
 
 FastAPI Dependency Injection:
     # RECOMMENDED: Use request-scoped dependencies

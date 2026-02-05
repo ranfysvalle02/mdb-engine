@@ -64,6 +64,46 @@ class IndexManager:
             )
             return
 
+        # Check for conflicts with memory service managed indexes
+        memory_config = manifest.get("memory_config", {})
+        if memory_config.get("enabled", False):
+            memory_collection_base = memory_config.get("collection_name", "memories")
+            # Remove slug prefix if present (it will be added automatically)
+            if memory_collection_base.startswith(f"{slug}_"):
+                memory_collection_base = memory_collection_base[len(f"{slug}_") :]
+
+            # Check if user is trying to manually define indexes for memory collection
+            if memory_collection_base in managed_indexes:
+                indexes = managed_indexes[memory_collection_base]
+                # Check if any index is a vectorSearch index (memory service manages these)
+                for idx_def in indexes:
+                    if idx_def.get("type") in ("vectorSearch", "search"):
+                        raise ValueError(
+                            f"❌ Cannot manually define vector search indexes for memory "
+                            f"collection '{memory_collection_base}'. "
+                            f"The memory service automatically manages its own vector search "
+                            f"index. Please remove the '{memory_collection_base}' entry from "
+                            f"'managed_indexes' in your manifest.json. "
+                            f"The memory service will automatically create the required index "
+                            f"'{slug}_{memory_collection_base}_vector_index'."
+                        )
+                # Also check for any indexes on the prefixed collection name
+                # (user might have used full name)
+                prefixed_memory_collection = f"{slug}_{memory_collection_base}"
+                if prefixed_memory_collection in managed_indexes:
+                    indexes = managed_indexes[prefixed_memory_collection]
+                    for idx_def in indexes:
+                        if idx_def.get("type") in ("vectorSearch", "search"):
+                            raise ValueError(
+                                f"❌ Cannot manually define vector search indexes for memory "
+                                f"collection '{prefixed_memory_collection}'. "
+                                f"The memory service automatically manages its own vector search "
+                                f"index. Please remove the '{prefixed_memory_collection}' entry "
+                                f"from 'managed_indexes' in your manifest.json. "
+                                f"The memory service will automatically create the required index "
+                                f"'{prefixed_memory_collection}_vector_index'."
+                            )
+
         # Validate indexes
         logger.info(
             f"[{slug}] Validating {len(managed_indexes)} collection(s) " f"with managed indexes..."

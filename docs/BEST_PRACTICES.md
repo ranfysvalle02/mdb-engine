@@ -11,7 +11,7 @@ This guide covers best practices for building applications with `mdb-engine`, fo
 | `Depends(get_scoped_db)` | Simple database access | `from mdb_engine.dependencies import get_scoped_db` |
 | `Depends(get_embedding_service)` | Text chunking & embeddings | `from mdb_engine.dependencies import get_embedding_service` |
 | `Depends(get_llm_client)` | Chat completions | `from mdb_engine.dependencies import get_llm_client` |
-| `Depends(get_memory_service)` | Semantic memory (Mem0) | `from mdb_engine.dependencies import get_memory_service` |
+| `Depends(get_memory_service)` | Semantic memory (MongoDB Atlas Vector Search) | `from mdb_engine.dependencies import get_memory_service` |
 | `AppContext = Depends()` | Multiple services at once | `from mdb_engine.dependencies import AppContext` |
 
 ---
@@ -76,7 +76,7 @@ async def chat(query: str, ctx: AppContext = Depends()):
     - ctx.config      - Manifest configuration
     - ctx.engine      - MongoDBEngine instance
     - ctx.embedding_service - EmbeddingService (None if not configured)
-    - ctx.memory      - Mem0 memory service (None if not configured)
+    - ctx.memory      - Memory service (None if not configured)
     - ctx.llm         - OpenAI/AzureOpenAI client (None if not configured)
     - ctx.llm_model   - Model/deployment name
     - ctx.user        - Current authenticated user (None if not logged in)
@@ -312,40 +312,132 @@ async def chat_with_history(
     }
 ```
 
-### Memory Service (Mem0)
+### Memory Service
 
-For persistent semantic memory:
+For persistent semantic memory with intelligent fact extraction and cognitive features:
+
+**Best Practices:**
+
+1. **Use `add()` for conversations, `inject()` for structured data:**
+   - `add()`: Automatically extracts facts from conversations using LLM inference
+   - `inject()`: Direct insertion for facts, preferences, structured data (no LLM inference)
+
+2. **Leverage metadata for organization:**
+   - Use `metadata` for filtering and categorization
+   - Use `bucket_id` and `bucket_type` for grouping related memories
+
+3. **Set appropriate `max_depth` based on use case:**
+   - Chatbots: 50-100 memories per user
+   - Knowledge bases: `null` (unlimited)
+   - Personal assistants: 100-200 memories
+
+4. **Combine with LLM for context-aware responses:**
+   - Search memories before generating responses
+   - Store conversations after generating responses
+
+5. **Monitor memory growth in production:**
+   - Set `max_depth` to prevent unbounded growth
+   - Use cognitive features (enabled by default) for automatic pruning
+
+**Example: Complete AI Chat with Memory:**
 
 ```python
-from mdb_engine.dependencies import get_memory_service
+from mdb_engine.dependencies import (
+    get_memory_service,
+    get_llm_client,
+    get_llm_model_name,
+    get_current_user
+)
+
+@app.post("/chat")
+async def chat(
+    message: str,
+    user: dict = Depends(get_current_user),
+    memory=Depends(get_memory_service),
+    llm_client=Depends(get_llm_client),
+    model_name=Depends(get_llm_model_name),
+):
+    """Chat endpoint with memory context."""
+    if not memory:
+        raise HTTPException(503, "Memory service not configured")
+    if not llm_client:
+        raise HTTPException(503, "LLM not configured")
+    
+    user_id = str(user["_id"])
+    
+    # 1. Search for relevant memories
+    memories = memory.search(
+        query=message,
+        user_id=user_id,
+        limit=5
+    )
+    
+    # 2. Build context from memories
+    context = "\n".join([m.get("memory", "") for m in memories])
+    
+    # 3. Generate response with context
+    response = llm_client.chat.completions.create(
+        model=model_name,
+        messages=[
+            {"role": "system", "content": f"User context:\n{context}"},
+            {"role": "user", "content": message}
+        ]
+    )
+    
+    response_text = response.choices[0].message.content
+    
+    # 4. Store conversation as memory (with automatic fact extraction)
+    memory.add(
+        messages=[
+            {"role": "user", "content": message},
+            {"role": "assistant", "content": response_text}
+        ],
+        user_id=user_id,
+        metadata={
+            "conversation_id": "conv_123",
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    )
+    
+    return {"response": response_text, "memories_used": len(memories)}
 
 @app.post("/remember")
 async def remember(
     content: str,
-    user_id: str,
+    user: dict = Depends(get_current_user),
     memory=Depends(get_memory_service),
 ):
-    """Store a memory for a user."""
+    """Manually store a memory (direct injection, no LLM inference)."""
     if not memory:
         raise HTTPException(503, "Memory service not configured")
     
-    # Use add() for LLM inference, inject() for direct insertion
+    # Use inject() for direct insertion (preferences, facts, structured data)
     result = memory.inject(
         memory=content,
-        user_id=user_id,
-        metadata={"source": "manual"}
+        user_id=str(user["_id"]),
+        metadata={"source": "manual", "category": "preference"}
     )
     return {"stored": True, "memory_id": result.get("id")}
 
 @app.get("/recall")
 async def recall(
     query: str,
-    user_id: str,
+    user: dict = Depends(get_current_user),
     memory=Depends(get_memory_service),
 ):
-    """Recall relevant memories."""
+    """Recall relevant memories with metadata filtering."""
     if not memory:
         return {"memories": [], "configured": False}
+    
+    # Search with optional metadata filtering
+    memories = memory.search(
+        query=query,
+        user_id=str(user["_id"]),
+        metadata={"category": "preference"},  # Optional filter
+        limit=10
+    )
+    
+    return {"memories": memories, "count": len(memories)}
     
     results = memory.search(query=query, user_id=user_id, limit=5)
     return {
@@ -982,7 +1074,7 @@ await db.items.find({}).to_list(100)
 # Embedding service for text chunking & vectors
 embedding_service = engine.get_embedding_service(app_slug)
 
-# Memory service for semantic memory (Mem0)
+# Memory service for semantic memory (MongoDB Atlas Vector Search)
 memory_service = engine.get_memory_service(app_slug)
 ```
 

@@ -1,0 +1,12 @@
+# Requirements for Graphs MDB Example
+# Install MDB_ENGINE: pip install mdb-engine
+# Or install from source: pip install -e ../../../
+
+mdb-engine>=0.1.0
+python-dotenv>=1.0.0
+
+# Web framework
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6
+jinja2>=3.1.0

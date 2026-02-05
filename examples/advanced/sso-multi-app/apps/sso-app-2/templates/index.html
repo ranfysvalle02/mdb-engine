@@ -917,7 +917,18 @@
             setTimeout(() => { el.style.transform = 'translateX(100%)'; setTimeout(() => el.remove(), 300); }, 3000); 
         }
 
-        async function logout() { await fetch('/logout', { method:'POST' }); window.location.reload(); }
+        async function logout() {
+            try {
+                // POST to logout endpoint to revoke token and delete cookie
+                await fetch('/logout', { method: 'POST' });
+                // Redirect to auth hub login page
+                window.location.href = 'http://localhost:8000/login';
+            } catch (error) {
+                console.error('Logout error:', error);
+                // Fallback: redirect to auth hub on error
+                window.location.href = 'http://localhost:8000/login';
+            }
+        }
         
         document.addEventListener('DOMContentLoaded', () => {
             const buyBtn = document.getElementById('buy-button');

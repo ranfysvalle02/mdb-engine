@@ -184,12 +184,24 @@ def create_app(slug: str, manifest_path: Path, title: str):
     )
     
     # Configure CORS from manifest
+    # NOTE: MDB Engine handles CORS automatically via manifest.json
+    # This example shows manual setup for reference only
     cors_config = manifest.get("cors", {})
     if cors_config.get("enabled", False):
+        allow_origins = cors_config.get("allow_origins", ["http://localhost:3000"])
+        allow_credentials = cors_config.get("allow_credentials", False)
+        
+        # Security: Never use wildcard with credentials
+        if "*" in allow_origins and allow_credentials:
+            raise ValueError(
+                "Cannot use wildcard origins (*) with allow_credentials=true. "
+                "Use specific origins instead."
+            )
+        
         app.add_middleware(
             CORSMiddleware,
-            allow_origins=cors_config.get("allow_origins", ["*"]),
-            allow_credentials=cors_config.get("allow_credentials", True),
+            allow_origins=allow_origins,
+            allow_credentials=allow_credentials,
             allow_methods=cors_config.get("allow_methods", ["*"]),
             allow_headers=cors_config.get("allow_headers", ["*"]),
         )

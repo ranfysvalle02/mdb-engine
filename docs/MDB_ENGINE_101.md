@@ -27,7 +27,7 @@ This guide is designed to help Large Language Models understand and generate cod
 | **App Secrets** | Production, need encrypted tokens | Set `MDB_ENGINE_MASTER_KEY` env var |
 | **Casbin** | Simple RBAC (admin/user roles) | `"provider": "casbin"` in auth config |
 | **OSO** | Complex policies (ownership, attributes) | `"provider": "oso"` in auth config |
-| **Memory** | AI chatbots with conversation history | `"memory_config": {...}` in manifest |
+| **Memory** | AI chatbots with conversation history, persistent user context | `"memory_config": {...}` in manifest |
 | **Embeddings** | Semantic search, RAG, similarity | Use `EmbeddingService` |
 | **WebSockets** | Real-time updates, live data | `"websockets": {...}` in manifest |
 | **Auto-indexing** | Let engine create indexes from queries | Default ON, disable with `auto_index=False` |
@@ -87,8 +87,7 @@ pip install mdb-engine[oso]
 # For all optional features
 pip install mdb-engine[all]
 
-# For memory service (Mem0)
-pip install mem0ai
+# Memory service uses pymongo and openai (already included)
 
 # For development/testing
 pip install mdb-engine[test]
@@ -717,51 +716,54 @@ tasks = await db.tasks.find({"status": "pending"}).sort("created_at", -1).to_lis
 }
 ```
 
+### Authentication
+
+WebSocket connections use **ticket-based authentication**:
+
+1. **Client gets ticket** (requires JWT cookie from login):
+   ```javascript
+   const ticketRes = await fetch('/auth/ticket', {
+     method: 'POST',
+     credentials: 'include' // Sends JWT cookie
+   });
+   const { ticket } = await ticketRes.json();
+   ```
+
+2. **Client connects with ticket** (must be within 10 seconds):
+   ```javascript
+   const ws = new WebSocket(`wss://api.example.com/my_app/ws?ticket=${ticket}`);
+   ```
+
+3. **Server validates ticket** (automatic - handled by engine)
+
+**Security**: Tickets are single-use, expire in 10 seconds, and are stored in-memory.
+
 ### Setup
+
+WebSocket routes are **automatically registered** from manifest.json when using `create_app()` or `create_multi_app()`. No manual setup needed.
 
 ```python
 from mdb_engine.routing.websockets import broadcast_to_app, register_message_handler
 
-@app.on_event("startup")
-async def startup():
-    await engine.initialize()
-    await engine.register_app(manifest, create_indexes=True)
-    
-    # Register WebSocket routes from manifest
-    # Uses FastAPI's APIRouter approach for full feature support
-    engine.register_websocket_routes(app, "my_app")
-    
-    # Register message handlers
-    register_message_handler("my_app", handle_websocket_message)
+# WebSocket routes automatically registered from manifest
+# Authentication handled automatically via ticket-based auth
 ```
 
-### WebSocket Endpoint
+### Broadcasting Messages
 
 ```python
-from fastapi import WebSocket, WebSocketDisconnect
-from mdb_engine.routing.websockets import get_websocket_manager
+from mdb_engine.routing.websockets import broadcast_to_app
 
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    manager = get_websocket_manager("my_app")
-    
-    # Get user from auth (if required)
-    user = await get_app_user(request=websocket, ...)
-    
-    # Connect
-    connection = await manager.connect(
-        websocket,
-        user_id=str(user["_id"]) if user else None,
-        user_email=user.get("email") if user else None
-    )
-    
-    try:
-        while True:
-            data = await websocket.receive_text()
-            # Handle message
-            await handle_message(connection, data)
-    except WebSocketDisconnect:
-        await manager.disconnect(connection)
+# Broadcast to all connected clients for an app
+await broadcast_to_app("my_app", {
+    "type": "update",
+    "data": {"status": "completed"}
+})
+
+# Broadcast to specific user
+from mdb_engine.routing.websockets import get_websocket_manager
+manager = get_websocket_manager("my_app")
+await manager.send_to_user(user_id="user123", message={"type": "notification"})
 ```
 
 ### Broadcasting Messages
@@ -845,28 +847,71 @@ await embedding_service.process_and_store(
 embeddings = await embedding_service.embed(["Text 1", "Text 2"])
 ```
 
-### Memory Service (Mem0)
+### Memory Service
 
-**Purpose**: Intelligent memory management for AI applications - stores and retrieves user memories.
+**Purpose**: Intelligent memory management for AI applications - stores and retrieves user memories with semantic search capabilities.
 
-**Architecture**: Uses an abstract base class pattern (`BaseMemoryService`) for extensibility. Mem0 is the default implementation, but the architecture supports future memory providers.
+**Architecture**: Uses an abstract base class pattern (`BaseMemoryService`) for extensibility. `CognitiveMemoryService` is the default implementation (accessible via `CustomMemoryService` alias for backwards compatibility). The architecture supports future memory providers.
 
-**v0.7.5 Enhancements**: Added `inject()` method for manual memory insertion without LLM inference, and enhanced delete functionality.
+**Core Features**: 
+- **Native MongoDB Atlas Vector Search**: Direct integration with MongoDB for semantic search
+- **LLM Fact Extraction**: Automatically extracts atomic facts from conversations
+- **Direct Injection**: Manually inject memories without LLM inference (for facts, preferences, structured data)
+- **Automatic Re-embedding**: Updates trigger automatic re-embedding when content changes
+- **User Isolation**: All memories are scoped per user for privacy and security
+- **Metadata Support**: Full support for bucket_id, bucket_type, and custom metadata
 
-**v0.7.4 Enhancements**: Enhanced hybrid update pattern with direct MongoDB access for reliable metadata updates and consistent data retrieval. Properly handles Mem0's MongoDB structure (`_id`, `payload`) automatically.
+**Cognitive Features** (enabled by default):
+- **Importance Scoring**: AI evaluates memory significance (0.1-1.0 scale)
+- **Memory Reinforcement**: Similar memories (similarity > 0.85) strengthen existing memories instead of creating duplicates
+- **Memory Decay**: Less relevant memories gradually decay in importance
+- **Memory Merging**: Related memories (similarity 0.7-0.85) are merged intelligently
+- **Memory Pruning**: Least important memories removed when capacity exceeded (based on `max_depth`)
+- **Access Tracking**: Tracks how often memories are accessed for effective importance calculation
 
 **Manifest Configuration:**
 ```json
 {
   "memory_config": {
     "enabled": true,
+    "provider": "cognitive",
     "collection_name": "user_memories",
-    "enable_graph": true,
+    "embedding_model": "text-embedding-3-small",
+    "chat_model": "gpt-4o",
+    "embedding_model_dims": 1536,
     "infer": true,
-    "async_mode": true
+    "async_mode": true,
+    "enable_cognitive": true,
+    "max_depth": 100
   }
 }
 ```
+
+**Configuration Options:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `boolean` | `false` | Enable memory service |
+| `provider` | `string` | `"cognitive"` | Memory provider (`"cognitive"` or `"custom"`) |
+| `collection_name` | `string` | `"{slug}_memories"` | Collection name (auto-prefixed with app slug) |
+| `embedding_model` | `string` | `"text-embedding-3-small"` | Embedding model name |
+| `chat_model` | `string` | `"gpt-4o"` | LLM model for fact extraction |
+| `embedding_model_dims` | `integer` | `1536` | Embedding dimensions (128-4096) |
+| `infer` | `boolean` | `true` | Enable LLM fact extraction |
+| `async_mode` | `boolean` | `true` | Process memories asynchronously |
+| `enable_cognitive` | `boolean` | `true` | Enable cognitive features (importance, reinforcement, decay, merging, pruning) |
+| `max_depth` | `integer\|null` | `100` | Max memories per user (`null` = unlimited) |
+
+**⚠️ Automatic Index Management**: The memory service automatically creates and manages its own vector search index. You do NOT need to add memory collection indexes to `managed_indexes`. The index is created automatically on startup with:
+- Vector field: `embedding` (with correct dimensions from `embedding_model_dims`)
+- Filter field: `user_id` (required for user-scoped queries)
+- Similarity: `cosine`
+- Automatic updates if the index is missing the `user_id` filter
+- Index name: `{collection_name}_vector_index` (e.g., `conversations_user_memories_vector_index`)
+
+If you try to manually define vector search indexes for memory collections in `managed_indexes`, the engine will raise an error to prevent conflicts.
+
+See [Memory Service Guide](./MEMORY_SERVICE.md) and [Cognitive Memory Guide](./COGNITIVE_MEMORY.md) for complete documentation.
 
 **Environment Variables:**
 ```bash
@@ -911,17 +956,15 @@ memories = await memory_service.search(
 all_memories = await memory_service.get_all(user_id="user123")
 # Returns normalized format: [{"id": "...", "memory": "...", "metadata": {...}, ...}]
 
-# Update memory (hybrid: content via Mem0, metadata via MongoDB)
-# v0.7.4+: Enhanced hybrid update pattern with direct MongoDB access
+# Update memory (automatic re-embedding on content changes)
 updated = await memory_service.update(
     memory_id=memory["id"],
     user_id="user123",
     memory="Updated memory content",
-    metadata={"category": "updated"}  # Full metadata support via MongoDB
+    metadata={"category": "updated"}  # Full metadata support
 )
-# Returns normalized memory document fetched directly from MongoDB
-# Mem0 structure (_id, payload) is automatically handled
-# Content updates trigger re-embedding via Mem0
+# Returns normalized memory document
+# Content updates trigger automatic re-embedding
 # Metadata updates go directly to MongoDB for full control
 
 # Update only metadata (no content change) - FULLY SUPPORTED
@@ -940,36 +983,75 @@ success = await memory_service.delete_all(user_id="user123")
 # Returns True if successful, False otherwise
 ```
 
-**Integration Example:**
+**Integration Example with FastAPI Dependencies:**
 ```python
+from fastapi import Depends
+from mdb_engine.dependencies import (
+    get_memory_service, 
+    get_llm_client, 
+    get_llm_model_name,
+    get_current_user
+)
+
 @app.post("/chat")
-async def chat(message: str, user: dict = Depends(get_current_user)):
-    db = engine.get_scoped_db("my_app")
-    memory_service = engine.get_memory_service("my_app")
-    
-    # Get relevant memories
-    memories = await memory_service.search(
+async def chat(
+    message: str,
+    user: dict = Depends(get_current_user),
+    memory=Depends(get_memory_service),
+    llm_client=Depends(get_llm_client),
+    model_name=Depends(get_llm_model_name)
+):
+    # Get relevant memories (semantic search)
+    memories = await memory.search(
         query=message,
         user_id=str(user["_id"]),
-        limit=3
+        limit=5
     )
     
     # Build context from memories
-    context = "\n".join([m["memory"] for m in memories])
+    context = "\n".join([m.get("memory", "") for m in memories])
     
-    # Generate response (using your LLM)
-    response = await generate_llm_response(message, context)
+    # Generate response with context
+    response = llm_client.chat.completions.create(
+        model=model_name,
+        messages=[
+            {"role": "system", "content": f"User context:\n{context}"},
+            {"role": "user", "content": message}
+        ]
+    )
     
-    # Store conversation as memory
-    await memory_service.add(
+    # Store conversation as memory (with automatic fact extraction)
+    await memory.add(
         messages=[
             {"role": "user", "content": message},
-            {"role": "assistant", "content": response}
+            {"role": "assistant", "content": response.choices[0].message.content}
         ],
         user_id=str(user["_id"])
     )
     
-    return {"response": response}
+    return {"response": response.choices[0].message.content}
+```
+
+**Using Cognitive Features:**
+```python
+# With cognitive features enabled, memories automatically:
+# - Get importance scores (0.1-1.0)
+# - Reinforce similar memories instead of creating duplicates
+# - Decay less relevant memories over time
+# - Merge related memories (similarity 0.7-0.85)
+# - Prune least important when max_depth exceeded
+
+# Example: Adding memories that will be reinforced
+await memory.add(messages=[{"role": "user", "content": "I love Python"}], user_id="user123")
+await memory.add(messages=[{"role": "user", "content": "Python is my favorite language"}], user_id="user123")
+# Second memory reinforces the first (similarity > 0.85) instead of creating duplicate
+
+# Example: Direct injection for structured data
+await memory.inject(
+    memory="User prefers dark mode",
+    user_id="user123",
+    metadata={"source": "settings", "category": "preference", "importance": 0.9}
+)
 ```
 
 ---

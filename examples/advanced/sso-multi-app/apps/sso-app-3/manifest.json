@@ -8,18 +8,147 @@
   "auth": {
     "mode": "shared",
     "auth_hub_url": "http://localhost:8000",
-    "roles": ["base_user", "viewer", "editor", "admin"],
+    "roles": [
+      "base_user",
+      "viewer",
+      "editor",
+      "admin"
+    ],
     "require_role": "base_user",
-    "public_routes": ["/health", "/auth/callback"]
+    "public_routes": [
+      "/health",
+      "/auth/callback"
+    ],
+    "csrf_protection": {
+      "enabled": true,
+      "exempt_routes": [
+        "/health",
+        "/auth/callback"
+      ],
+      "token_ttl": 3600
+    }
   },
-  "memory_config": {
+    "memory_config": {
+      "enabled": true,
+      "encrypted": true,
+      "provider": "cognitive",
+      "collection_name": "user_memories",
+      "embedding_model_dims": 1536,
+      "embedding_model": "text-embedding-3-small",
+      "chat_model": "gemini/gemini-3-flash-preview",
+      "memory_llm_model": "gemini/gemini-3-flash-preview",
+      "infer": true,
+      "enable_cognitive": true,
+      "max_depth": 1000,
+      "persona": {
+        "enabled": true,
+        "default_role": "Orby - AI Assistant",
+        "default_description": "Orby is an intelligent AI assistant with access to stored memories and document context. When answering questions about document authors, titles, or metadata, Orby pays special attention to the [Document Context] information in memories. Orby provides accurate, helpful responses with a friendly, professional tone.",
+        "default_traits": {
+          "technical_focus": 0.6,
+          "humor": 0.3,
+          "formality": 0.6,
+          "empathy": 0.7,
+          "creativity": 0.5
+        }
+      },
+      "perceptions": {
+        "enabled": true,
+        "auto_analyze": true,
+        "update_frequency": "per_interaction"
+      },
+      "cognitive": {
+      "enabled": true,
+      "decay": {
+        "enabled": true,
+        "default_stability_hours": 72,
+        "min_stability": 0.1,
+        "use_server_side_pipeline": true
+      },
+      "emotion": {
+        "enabled": true,
+        "flashbulb_threshold": 0.7,
+        "max_stability_multiplier": 100
+      },
+      "conflict_resolution": {
+        "enabled": true,
+        "similarity_threshold": 0.85
+      },
+      "pruning": {
+        "enabled": true,
+        "max_capacity": 1000,
+        "prune_percentage": 0.1,
+        "strategy": "soft_delete"
+      },
+      "cold_storage": {
+        "enabled": true,
+        "retention_days": 730
+      }
+    },
+    "redaction": {
+      "enabled": true,
+      "replacement": "[REDACTED]",
+      "patterns": {
+        "ssn": true,
+        "credit_card": true,
+        "password": true,
+        "api_key": true,
+        "phone": false,
+        "email": false
+      }
+    },
+    "categories": {
+      "enabled": true,
+      "custom_categories": [
+        "work",
+        "health",
+        "finance",
+        "travel"
+      ]
+    },
+    "reflection": {
+      "enabled": true,
+      "interval_hours": 24,
+      "message_threshold": 50,
+      "min_salience_to_keep": 0.3,
+      "store_reflections": true
+    },
+    "graph": {
+      "enabled": true,
+      "auto_extract": true
+    }
+  },
+  "graph_config": {
     "enabled": true,
-    "collection_name": "user_memories",
-    "embedding_model_dims": 1536,
-    "embedding_model": "text-embedding-3-small",
-    "chat_model": "gemini-2.5-flash",
-    "enable_graph": true,
-    "infer": true
+    "collection_name": "__kg",
+    "auto_extract": true,
+    "default_max_depth": 2,
+    "node_types": [
+      "person",
+      "interest",
+      "event",
+      "location",
+      "organization",
+      "product",
+      "concept",
+      "document",
+      "project"
+    ]
+  },
+  "llm_config": {
+    "enabled": true,
+    "default_model": "gemini/gemini-3-flash-preview",
+    "temperature": 1.0,
+    "fallbacks": [
+      "gpt-4o-mini"
+    ],
+    "tools": [
+      {"google_search": {}}
+    ],
+    "litellm_config": {
+      "num_retries": 2,
+      "request_timeout": 60
+    }
   },
   "raw_content_config": {
     "enabled": true,
@@ -31,7 +160,10 @@
     "conversations": [
       {
         "type": "regular",
-        "keys": {"user_id": 1, "created_at": -1},
+        "keys": {
+          "user_id": 1,
+          "created_at": -1
+        },
         "name": "user_conversations_idx",
         "options": {
           "background": true
@@ -39,7 +171,9 @@
       },
       {
         "type": "regular",
-        "keys": {"created_at": -1},
+        "keys": {
+          "created_at": -1
+        },
         "name": "created_idx",
         "options": {
           "background": true
@@ -49,7 +183,10 @@
     "messages": [
       {
         "type": "regular",
-        "keys": {"conversation_id": 1, "created_at": 1},
+        "keys": {
+          "conversation_id": 1,
+          "created_at": 1
+        },
         "name": "conversation_messages_idx",
         "options": {
           "background": true
@@ -57,7 +194,10 @@
       },
       {
         "type": "regular",
-        "keys": {"user_id": 1, "created_at": -1},
+        "keys": {
+          "user_id": 1,
+          "created_at": -1
+        },
         "name": "user_messages_idx",
         "options": {
           "background": true
@@ -69,17 +209,22 @@
         "type": "vectorSearch",
         "name": "raw_content_vector_idx",
         "definition": {
-          "fields": [{
-            "type": "vector",
-            "path": "embedding",
-            "numDimensions": 1536,
-            "similarity": "cosine"
-          }]
+          "fields": [
+            {
+              "type": "vector",
+              "path": "embedding",
+              "numDimensions": 1536,
+              "similarity": "cosine"
+            }
+          ]
         }
       },
       {
         "type": "regular",
-        "keys": {"bucket_id": 1, "user_id": 1},
+        "keys": {
+          "bucket_id": 1,
+          "user_id": 1
+        },
         "name": "raw_content_bucket_user_idx",
         "options": {
           "background": true
@@ -92,17 +237,31 @@
       "path": "/ws",
       "description": "Real-time message updates and memory events",
       "auth": {
-        "required": false,
-        "allow_anonymous": true
+        "required": true,
+        "csrf_required": false
       },
       "ping_interval": 30
     }
   },
   "cors": {
     "enabled": true,
-    "allow_origins": ["*"],
+    "allow_origins": [
+      "http://localhost:3000",
+      "http://localhost:8000",
+      "http://localhost:8003"
+    ],
     "allow_credentials": true,
-    "allow_methods": ["*"],
-    "allow_headers": ["*"]
+    "allow_methods": [
+      "GET",
+      "POST",
+      "PUT",
+      "DELETE",
+      "OPTIONS"
+    ],
+    "allow_headers": [
+      "Content-Type",
+      "Authorization",
+      "X-CSRF-Token"
+    ]
   }
 }

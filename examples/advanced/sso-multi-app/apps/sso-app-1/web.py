@@ -25,6 +25,16 @@ from fastapi.templating import Jinja2Templates
 
 from mdb_engine.dependencies import get_scoped_db
 
+# Import shared security utilities
+try:
+    from shared_security import get_cookie_settings, validate_jwt_token_format
+except ImportError:
+    # Fallback if shared_security not available (shouldn't happen in normal usage)
+    def get_cookie_settings():
+        return {"httponly": True, "samesite": "lax", "secure": False}
+    def validate_jwt_token_format(token: str) -> bool:
+        return bool(token and len(token) > 10)
+
 # Configure logging
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO"),
@@ -116,30 +126,56 @@ def get_auth_hub_url() -> str:
 # ============================================================================
 
 
-def get_user_encryption_key(user_email: str) -> bytes:
-    """Derive a Fernet encryption key for a specific user."""
-    # Use PBKDF2 to derive a key from user email + app secret
+async def get_user_salt(db, user_email: str) -> bytes:
+    """
+    Get or create a per-user salt for encryption key derivation.
+    
+    Uses a separate collection to store per-user salts for enhanced security.
+    """
+    salt_doc = await db.user_salts.find_one({"user_email": user_email})
+    if salt_doc:
+        return salt_doc["salt"]
+    
+    # Generate and store new salt for this user
+    salt = secrets.token_bytes(16)
+    await db.user_salts.insert_one({
+        "user_email": user_email,
+        "salt": salt,
+        "created_at": datetime.utcnow(),
+    })
+    return salt
+
+
+async def get_user_encryption_key(db, user_email: str) -> bytes:
+    """
+    Derive a Fernet encryption key for a specific user using per-user salt.
+    
+    Uses PBKDF2 with per-user salt stored in database for enhanced security.
+    """
+    salt = await get_user_salt(db, user_email)
+    
+    # Use PBKDF2 to derive a key from user email + app secret with per-user salt
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
         length=32,
-        salt=b"password_manager_salt",  # In production, use per-user salt
-        iterations=480000,
+        salt=salt,  # Per-user salt for enhanced security
+        iterations=600000,  # Increased iterations for better security
     )
     key_material = f"{user_email}:{APP_SECRET}".encode()
     key = base64.urlsafe_b64encode(kdf.derive(key_material))
     return key
 
 
-def encrypt_password(password: str, user_email: str) -> str:
-    """Encrypt a password using user-specific key."""
-    key = get_user_encryption_key(user_email)
+async def encrypt_password(db, password: str, user_email: str) -> str:
+    """Encrypt a password using user-specific key with per-user salt."""
+    key = await get_user_encryption_key(db, user_email)
     f = Fernet(key)
     return f.encrypt(password.encode()).decode()
 
 
-def decrypt_password(encrypted_password: str, user_email: str) -> str:
-    """Decrypt a password using user-specific key."""
-    key = get_user_encryption_key(user_email)
+async def decrypt_password(db, encrypted_password: str, user_email: str) -> str:
+    """Decrypt a password using user-specific key with per-user salt."""
+    key = await get_user_encryption_key(db, user_email)
     f = Fernet(key)
     return f.decrypt(encrypted_password.encode()).decode()
 
@@ -190,8 +226,12 @@ async def auth_callback(request: Request, token: str = None):
         token = request.query_params.get("token")
     if token:
         token = unquote_plus(token)
-    if not token:
-        return RedirectResponse(url=f"{get_auth_hub_url()}/login", status_code=302)
+    
+    # Validate token format before processing
+    if not token or not validate_jwt_token_format(token):
+        return RedirectResponse(
+            url=f"{get_auth_hub_url()}/login?error=invalid_token", status_code=302
+        )
 
     from mdb_engine.auth.shared_users import SharedUserPool
 
@@ -208,12 +248,13 @@ async def auth_callback(request: Request, token: str = None):
         )
 
     response = RedirectResponse(url="/", status_code=302)
+    cookie_settings = get_cookie_settings()
     response.set_cookie(
         key="mdb_auth_token",
         value=token,
-        httponly=True,
-        samesite="lax",
-        secure=False,
+        httponly=cookie_settings["httponly"],
+        samesite=cookie_settings["samesite"],
+        secure=cookie_settings["secure"],
         max_age=86400,  # 24 hours
         path="/",
     )
@@ -241,12 +282,13 @@ async def logout(request: Request):
     response = RedirectResponse(url=f"{get_auth_hub_url()}/login", status_code=302)
 
     # Delete cookie
+    cookie_settings = get_cookie_settings()
     response.delete_cookie(
         "mdb_auth_token",
         path="/",
         domain=None,  # Let browser handle domain
-        secure=False,
-        samesite="lax",
+        secure=cookie_settings["secure"],
+        samesite=cookie_settings["samesite"],
     )
 
     return response
@@ -311,7 +353,7 @@ async def get_passwords(request: Request, db=Depends(get_scoped_db)):
                         "id": str(pwd["_id"]),
                         "website": pwd.get("website", ""),
                         "username": pwd.get("username", ""),
-                        "password": decrypt_password(pwd["encrypted_password"], user_email),
+                        "password": await decrypt_password(db, pwd["encrypted_password"], user_email),
                         "created_at": pwd.get("created_at", datetime.utcnow()).isoformat()
                         if isinstance(pwd.get("created_at"), datetime)
                         else str(pwd.get("created_at", "")),
@@ -409,7 +451,7 @@ async def update_password(password_id: str, request: Request, db=Depends(get_sco
             raise HTTPException(400, "Website, username, and password are required")
 
         # Encrypt password
-        encrypted_password = encrypt_password(password, user_email)
+        encrypted_password = await encrypt_password(db, password, user_email)
 
         # Update in database
         from bson import ObjectId

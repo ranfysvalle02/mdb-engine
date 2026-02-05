@@ -21,6 +21,14 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
+# Import shared security utilities
+try:
+    from shared_security import get_cookie_settings
+except ImportError:
+    # Fallback if shared_security not available (shouldn't happen in normal usage)
+    def get_cookie_settings():
+        return {"httponly": True, "samesite": "lax", "secure": False}
+
 # --- External Clients ---
 try:
     import httpx
@@ -689,9 +697,36 @@ async def execute_trade(trade: TradeRequest, request: Request, db=Depends(get_sc
 
 
 @app.post("/logout")
-def logout():
-    response = RedirectResponse("/?logout=true")
-    response.delete_cookie("mdb_auth_token")
+async def logout(request: Request):
+    """Logout and revoke token."""
+    from mdb_engine.auth.shared_users import SharedUserPool
+
+    pool: SharedUserPool = getattr(app.state, "user_pool", None)
+
+    # Get token from cookie
+    token = request.cookies.get("mdb_auth_token")
+
+    # Revoke token if we have pool and token
+    if pool and token:
+        try:
+            await pool.revoke_token(token, reason="logout")
+        except (AttributeError, TypeError, ValueError, KeyError) as e:
+            logger.warning(f"Failed to revoke token: {e}")
+
+    # Create response redirecting to auth hub
+    auth_hub_url = os.getenv("AUTH_HUB_URL", "http://localhost:8000")
+    response = RedirectResponse(url=f"{auth_hub_url}/login", status_code=302)
+
+    # Delete cookie
+    cookie_settings = get_cookie_settings()
+    response.delete_cookie(
+        "mdb_auth_token",
+        path="/",
+        domain=None,  # Let browser handle domain
+        secure=cookie_settings["secure"],
+        samesite=cookie_settings["samesite"],
+    )
+
     return response
 
 

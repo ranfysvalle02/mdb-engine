@@ -1,5 +1,5 @@
 {
-  "version": "2.0",
+  "schema_version": "2.0",
   "slug": "parallax",
   "name": "Parallax - Call Transcript Analysis",
   "description": "Multi-lens analysis of call transcripts through SALES, MARKETING, and PRODUCT perspectives",
@@ -16,9 +16,8 @@
     "collection_name": "call_memories",
     "embedding_model": "text-embedding-3-small",
     "chat_model": "gpt-4o",
-    "temperature": 0.3,
-    "infer": true,
-    "enable_graph": false
+    "temperature": 1.0,
+    "infer": true
   },
   "auth": {
     "policy": {
@@ -178,8 +177,8 @@
   },
   "cors": {
     "enabled": true,
-    "allow_origins": ["*"],
-    "allow_credentials": true,
+    "allow_origins": ["http://localhost:3000", "http://localhost:8000"],
+    "allow_credentials": false,
     "allow_methods": ["*"],
     "allow_headers": ["*"]
   },

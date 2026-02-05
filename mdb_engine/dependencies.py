@@ -122,7 +122,7 @@ async def get_embedding_service(request: Request) -> "EmbeddingService":
 
 
 async def get_memory_service(request: Request) -> Optional["BaseMemoryService"]:
-    """Get the memory service if configured (defaults to Mem0 implementation)."""
+    """Get the memory service if configured (defaults to CustomMemoryService)."""
     engine = getattr(request.app.state, "engine", None)
     slug = getattr(request.app.state, "app_slug", None)
     if not engine or not slug:

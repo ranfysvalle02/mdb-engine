@@ -1,0 +1,6 @@
+# MDB-Engine Memory Kitchen Sink Example
+mdb-engine
+fastapi
+uvicorn[standard]
+python-dotenv
+pydantic

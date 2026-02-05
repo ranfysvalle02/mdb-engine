@@ -223,3 +223,36 @@ DANGEROUS_OPERATORS: Final[tuple[str, ...]] = (
     "$accumulator",  # Can be abused for code execution
 )
 """MongoDB operators that are blocked for security reasons."""
+
+# ============================================================================
+# CLIENT-SIDE FIELD LEVEL ENCRYPTION (CSFLE) CONSTANTS
+# ============================================================================
+
+CSFLE_KEY_VAULT_NAMESPACE: Final[str] = "encryption.__keyVault"
+"""Default namespace for CSFLE key vault (database.collection)."""
+
+CSFLE_KEY_VAULT_DB: Final[str] = "encryption"
+"""Default database name for CSFLE key vault."""
+
+CSFLE_KEY_VAULT_COLLECTION: Final[str] = "__keyVault"
+"""Default collection name for CSFLE key vault."""
+
+CSFLE_LOCAL_KEY_ENV: Final[str] = "MDB_CSFLE_LOCAL_KEY"
+"""Environment variable name for local CSFLE master key."""
+
+CSFLE_CRYPT_SHARED_LIB_ENV: Final[str] = "CRYPT_SHARED_LIB_PATH"
+"""Environment variable name for crypt_shared library path."""
+
+CSFLE_LOCAL_KEY_SIZE: Final[int] = 96
+"""Size of local master key in bytes (required by MongoDB)."""
+
+CSFLE_DEFAULT_ENCRYPTED_FIELDS: Final[tuple[str, ...]] = ("content", "text")
+"""Default fields to encrypt for memory collections."""
+
+CSFLE_SUPPORTED_KMS_PROVIDERS: Final[tuple[str, ...]] = (
+    "local",  # Local key provider (development)
+    "aws",  # AWS Key Management Service
+    "azure",  # Azure Key Vault
+    "gcp",  # Google Cloud KMS
+)
+"""Supported KMS providers for CSFLE."""

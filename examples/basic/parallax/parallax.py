@@ -85,7 +85,7 @@ class ParallaxEngine:
         self.deployment_name = deployment_name
         self.watchlist = watchlist or WATCHLIST
         self.scan_limit = 3  # Default: 3 calls for simple, powerful demo
-        self.temperature = 0.0  # Strict adherence to facts for Parallax
+        self.temperature = 1.0  # Strict adherence to facts for Parallax
         self.app_slug = app_slug
 
         # Initialize specialized modules

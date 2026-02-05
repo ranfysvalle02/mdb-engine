@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mdb-engine"
-version = "0.7.5"
+version = "0.7.6"
 description = "MongoDB Engine"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -34,11 +34,10 @@ dependencies = [
     "jsonschema>=4.0.0",
     "bcrypt>=4.0.0",
     "cryptography>=41.0.0",  # Required for envelope encryption
-    "mem0ai>=0.1.7",
     "semantic-text-splitter>=0.9.0",
     "numpy>=1.0.0,<2.0.0",
-    "openai>=1.0.0",  # Required for embedding providers
-    "azure-identity>=1.15.0",  # Required for mem0's azure_openai provider
+    "openai>=1.0.0",  # Required for embedding providers and memory service
+    "litellm>=1.0.0",  # Required for LLM service (supports 100+ providers)
     "click>=8.0.0",  # CLI tool
 ]
 
@@ -46,7 +45,11 @@ dependencies = [
 casbin = ["casbin>=1.0.0", "casbin-motor-adapter>=0.1.0"]
 oso = ["oso-cloud>=0.1.0"]
 llm = [
-    # LLM packages removed - examples should implement their own LLM clients
+    "litellm>=1.0.0",  # Unified LLM interface supporting 100+ providers
+]
+redaction-presidio = [
+    "presidio-analyzer>=2.0.0",
+    "presidio-anonymizer>=2.0.0",
 ]
 test = [
     "pytest>=7.4.0",
@@ -68,6 +71,8 @@ all = [
     "casbin>=1.0.0",
     "casbin-motor-adapter>=0.1.0",
     "oso-cloud>=0.1.0",
+    "presidio-analyzer>=2.0.0",
+    "presidio-anonymizer>=2.0.0",
 ]
 
 [project.scripts]
@@ -138,6 +143,7 @@ ignore = [
     "F841",   # Unused variables (common in test assertions)
     "B018",   # Useless expressions (common in test assertions)
     "BLE001", # Blind exception catching (acceptable in test mocks)
+    "SLF001", # Private member access (acceptable in tests)
 ]
 
 [tool.ruff.lint.mccabe]

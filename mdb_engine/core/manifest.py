@@ -2,7 +2,7 @@
 Manifest validation and parsing system.
 
 This module provides:
-- Multi-version schema support for backward compatibility
+- Multi-version schema support
 - Schema migration functions for upgrading manifests
 - Optimized validation with caching for scale
 - Parallel manifest processing capabilities
@@ -19,7 +19,6 @@ Versions:
 Migration Strategy:
 - Automatically detects schema version from manifest
 - Migrates older versions to current schema if needed
-- Maintains backward compatibility
 - Allows apps to specify target schema version
 
 For Scale:
@@ -128,15 +127,6 @@ MANIFEST_SCHEMA_V2 = {
             "enum": ["active", "draft", "archived", "inactive"],
             "default": "draft",
             "description": "App status",
-        },
-        "auth_required": {
-            "type": "boolean",
-            "default": False,
-            "description": (
-                "Whether authentication is required for this app "
-                "(backward compatibility). If auth.policy is provided, "
-                "this is ignored."
-            ),
         },
         "auth": {
             "type": "object",
@@ -453,7 +443,7 @@ MANIFEST_SCHEMA_V2 = {
                         "Intelligent authorization policy for app-level access "
                         "control. Supports role-based, user-based, and "
                         "permission-based access. Takes precedence over "
-                        "auth_required."
+                        "auth.policy.required."
                     ),
                 },
                 "users": {
@@ -1298,6 +1288,57 @@ MANIFEST_SCHEMA_V2 = {
             },
             "description": "Collection name -> list of index definitions",
         },
+        "encrypted_fields": {
+            "type": "object",
+            "patternProperties": {
+                "^[a-zA-Z0-9_]+$": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "minItems": 1,
+                    "description": "List of field names to encrypt in this collection",
+                }
+            },
+            "additionalProperties": False,
+            "description": (
+                "Collection name -> list of fields to encrypt using MongoDB CSFLE. "
+                "Similar to managed_indexes, enables encrypting fields in ANY collection. "
+                'Example: {"payments": ["card_number", "cvv"], "users": ["ssn"]}. '
+                "Collection names are automatically prefixed with app slug. "
+                "Requires CRYPT_SHARED_LIB_PATH environment variable."
+            ),
+        },
+        "encryption_config": {
+            "type": "object",
+            "properties": {
+                "kms_provider": {
+                    "type": "string",
+                    "enum": ["local", "aws", "azure", "gcp"],
+                    "default": "local",
+                    "description": (
+                        "KMS provider for encryption keys. Default: 'local'. "
+                        "For production, use 'aws', 'azure', or 'gcp' with "
+                        "appropriate credentials in environment variables."
+                    ),
+                },
+                "key_vault_namespace": {
+                    "type": "string",
+                    "default": "encryption.__keyVault",
+                    "description": "Namespace for CSFLE key vault (database.collection)",
+                },
+                "crypt_shared_lib_path": {
+                    "type": "string",
+                    "description": (
+                        "Path to crypt_shared library. Auto-detected from "
+                        "CRYPT_SHARED_LIB_PATH environment variable if not set."
+                    ),
+                },
+            },
+            "additionalProperties": False,
+            "description": (
+                "Global encryption settings for encrypted_fields. "
+                "Configures KMS provider and key vault for all encrypted collections."
+            ),
+        },
         "collection_settings": {
             "type": "object",
             "patternProperties": {"^[a-zA-Z0-9_]+$": {"$ref": "#/definitions/collectionSettings"}},
@@ -1463,6 +1504,103 @@ MANIFEST_SCHEMA_V2 = {
                 "Generation) applications."
             ),
         },
+        "llm_config": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": (
+                        "Enable LLM service for this app. When enabled, "
+                        "LLMService will be available for chat completions and text generation. "
+                        "Powered by LiteLLM - supports 100+ LLM providers. "
+                        "Auto-detects provider from environment variables or uses configured model."
+                    ),
+                },
+                "default_model": {
+                    "type": "string",
+                    "default": "openai/gpt-4o",
+                    "description": (
+                        "Default LiteLLM model string for chat completions. "
+                        "Format: 'provider/model' "
+                        "(e.g., 'openai/gpt-4o', 'gemini/gemini-3-flash-preview', "
+                        "'anthropic/claude-sonnet-4-20250514', 'azure/gpt-4o'). "
+                        "Supports 100+ providers via LiteLLM. "
+                        "See: https://docs.litellm.ai/docs/providers"
+                    ),
+                },
+                "fallbacks": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "List of fallback models to try if the primary model fails. "
+                        "If the primary model returns an error (rate limit, timeout, etc.), "
+                        "LiteLLM will automatically try the next model in the list. "
+                        "Example: ['gpt-4o-mini', 'claude-3-5-haiku-20241022']. "
+                        "Models should be in LiteLLM format "
+                        "(e.g., 'openai/gpt-4o-mini' or just 'gpt-4o-mini'). "
+                        "This provides redundancy and automatic failover "
+                        "without manual error handling."
+                    ),
+                },
+                "litellm_config": {
+                    "type": "object",
+                    "description": (
+                        "LiteLLM configuration options passed directly to LiteLLM. "
+                        "Common options include: "
+                        "- 'num_retries': Number of retries per request (default: 0) "
+                        "- 'request_timeout': Request timeout in seconds (default: 600) "
+                        "- 'max_budget': Maximum budget per request "
+                        "- 'drop_params': Drop unsupported parameters "
+                        "See: https://docs.litellm.ai/docs/completion/configuration for full list."
+                    ),
+                    "additionalProperties": True,
+                },
+                "temperature": {
+                    "type": "number",
+                    "default": 0.7,
+                    "description": (
+                        "Default temperature for LLM chat completions. "
+                        "Provider-specific rules apply: "
+                        "- Gemini models: Always enforced to 1.0 "
+                        "- Azure OpenAI and OpenAI: Always enforced to 0.3 "
+                        "Can be overridden per-request via chat_completion() temperature parameter."
+                    ),
+                },
+                "persona": {
+                    "type": "string",
+                    "default": "helpful assistant",
+                    "description": (
+                        "Default persona/system prompt for LLM chat completions. "
+                        "This will be automatically prepended as a system message "
+                        "if no system message is present in the messages array. "
+                        "Default: 'helpful assistant'."
+                    ),
+                },
+                "provider": {
+                    "type": "string",
+                    "description": (
+                        "DEPRECATED: Legacy provider format (e.g., 'openai', 'azure', 'gemini'). "
+                        "Use 'default_model' with LiteLLM format instead (e.g., 'openai/gpt-4o'). "
+                        "This will be converted to LiteLLM format automatically."
+                    ),
+                },
+            },
+            "additionalProperties": False,
+            "description": (
+                "LLM service configuration. Powered by LiteLLM - "
+                "provides unified interface for chat completions "
+                "across 100+ providers "
+                "(OpenAI, Azure OpenAI, Anthropic, Google Gemini, Cohere, "
+                "HuggingFace, Bedrock, Vertex AI, Ollama, Groq, Together AI, "
+                "and 90+ more). "
+                "Auto-detects provider from environment variables if not specified. "
+                "Supports fallback models for automatic failover "
+                "and LiteLLM configuration options. "
+                "Perfect for chat applications, RAG pipelines, and text generation. "
+                "See: https://docs.litellm.ai/docs/providers for complete provider list."
+            ),
+        },
         "memory_config": {
             "type": "object",
             "properties": {
@@ -1470,11 +1608,74 @@ MANIFEST_SCHEMA_V2 = {
                     "type": "boolean",
                     "default": False,
                     "description": (
-                        "Enable Mem0 memory service for this app. When "
-                        "enabled, Mem0MemoryService will be initialized and "
+                        "Enable memory service for this app. When "
+                        "enabled, CustomMemoryService will be initialized and "
                         "available for intelligent memory management using "
-                        "MongoDB as the vector store. mem0 handles embeddings "
-                        "and LLM via environment variables (.env)."
+                        "MongoDB Atlas Vector Search. Uses mdb_engine.embeddings and "
+                        "OpenAI SDK directly. Configure embeddings and LLM via "
+                        "environment variables (.env)."
+                    ),
+                },
+                "encrypted": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": (
+                        "Enable field-level encryption for memory content. "
+                        "When true, sensitive memory fields (content, text) are "
+                        "automatically encrypted at rest using MongoDB CSFLE. "
+                        "Query fields (user_id, timestamps, importance) remain "
+                        "searchable. Uses local KMS by default - auto-generates "
+                        "ephemeral key if MDB_CSFLE_LOCAL_KEY not set. For "
+                        "production, configure 'encryption' object with "
+                        "AWS/Azure/GCP KMS. Requires CRYPT_SHARED_LIB_PATH "
+                        "environment variable pointing to crypt_shared library."
+                    ),
+                },
+                "encryption": {
+                    "type": "object",
+                    "properties": {
+                        "kms_provider": {
+                            "type": "string",
+                            "enum": ["local", "aws", "azure", "gcp"],
+                            "default": "local",
+                            "description": (
+                                "KMS provider for encryption keys. 'local' uses "
+                                "MDB_CSFLE_LOCAL_KEY env var (auto-generates if "
+                                "not set). 'aws', 'azure', 'gcp' use respective "
+                                "cloud KMS services with credentials from env vars."
+                            ),
+                        },
+                        "fields": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "default": ["content", "text"],
+                            "description": (
+                                "Fields to encrypt (default: content, text). "
+                                "Supports nested fields like 'metadata.pii'. "
+                                "Query fields (user_id, embedding, etc.) should "
+                                "NOT be encrypted as they need to remain searchable."
+                            ),
+                        },
+                        "key_vault_namespace": {
+                            "type": "string",
+                            "default": "encryption.__keyVault",
+                            "description": (
+                                "Namespace for CSFLE key vault (database.collection). "
+                                "Default: encryption.__keyVault"
+                            ),
+                        },
+                        "crypt_shared_lib_path": {
+                            "type": "string",
+                            "description": (
+                                "Path to crypt_shared library. Auto-detected from "
+                                "CRYPT_SHARED_LIB_PATH environment variable if not set."
+                            ),
+                        },
+                    },
+                    "additionalProperties": False,
+                    "description": (
+                        "Advanced encryption settings (only used when encrypted=true). "
+                        "Allows customizing KMS provider, encrypted fields, and key vault."
                     ),
                 },
                 "collection_name": {
@@ -1484,6 +1685,15 @@ MANIFEST_SCHEMA_V2 = {
                         "MongoDB collection name for storing memories "
                         "(defaults to '{app_slug}_memories'). Will be prefixed "
                         "with app slug if not already prefixed."
+                    ),
+                },
+                "index_name": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9_]+$",
+                    "description": (
+                        "MongoDB Atlas Vector Search index name "
+                        "(defaults to '{collection_name}_vector_index'). "
+                        "This is the name of the vector search index in MongoDB Atlas."
                     ),
                 },
                 "embedding_model_dims": {
@@ -1497,15 +1707,6 @@ MANIFEST_SCHEMA_V2 = {
                         "specify if you need to override auto-detection. "
                         "Default: 1536. The system will automatically detect "
                         "the correct dimensions from your embedding model."
-                    ),
-                },
-                "enable_graph": {
-                    "type": "boolean",
-                    "default": False,
-                    "description": (
-                        "Enable knowledge graph construction for entity "
-                        "relationships. When enabled, Mem0 will build a graph "
-                        "of connected entities from memories."
                     ),
                 },
                 "infer": {
@@ -1522,16 +1723,31 @@ MANIFEST_SCHEMA_V2 = {
                     "type": "string",
                     "description": (
                         "Embedding model name (e.g., 'text-embedding-3-small'). "
-                        "If not provided, mem0 will use environment variables "
+                        "If not provided, the memory service will use environment variables "
                         "or defaults."
                     ),
                 },
                 "chat_model": {
                     "type": "string",
                     "description": (
-                        "Chat model name for inference (e.g., 'gpt-4o'). "
-                        "If not provided, mem0 will use environment variables "
+                        "Chat model name for inference (e.g., 'gpt-4o', 'gemini-3-flash-preview'). "
+                        "Used as fallback for memory_llm_model if not specified. "
+                        "If not provided, the memory service will use environment variables "
                         "or defaults."
+                    ),
+                },
+                "memory_llm_model": {
+                    "type": "string",
+                    "description": (
+                        "LLM model name for memory operations "
+                        "(fact extraction, importance assessment). "
+                        "Defaults to chat_model if not specified. "
+                        "This allows using different models for chat "
+                        "(via CognitiveEngine) vs memory operations. "
+                        "Example: Use 'gemini-3-flash-preview' for chat "
+                        "but 'gpt-4o' for memory operations. "
+                        "Note: Memory operations currently require "
+                        "OpenAI or Azure OpenAI compatible models."
                     ),
                 },
                 "temperature": {
@@ -1540,8 +1756,11 @@ MANIFEST_SCHEMA_V2 = {
                     "maximum": 2.0,
                     "default": 0.0,
                     "description": (
-                        "Temperature for LLM inference "
-                        "(0.0 = deterministic, 2.0 = creative). "
+                        "Temperature for LLM inference in memory operations "
+                        "(fact extraction, importance assessment, memory merging). "
+                        "Can also be set via MEMORY_LLM_TEMPERATURE environment variable. "
+                        "Default: 0.0 (deterministic output). "
+                        "Higher values make output more random. "
                         "Only used if infer=true."
                     ),
                 },
@@ -1554,16 +1773,885 @@ MANIFEST_SCHEMA_V2 = {
                         "memory ingestion."
                     ),
                 },
+                "provider": {
+                    "type": "string",
+                    "enum": ["custom", "cognitive"],
+                    "default": "cognitive",
+                    "description": (
+                        "Memory service provider to use (both use CognitiveMemoryService). "
+                        "'cognitive' (default): Customizable memory service with optional "
+                        "cognitive features. 'custom': Alias for cognitive (backwards "
+                        "compatibility). Cognitive features can be disabled via "
+                        "enable_cognitive=false or max_depth=None."
+                    ),
+                },
+                "enable_cognitive": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": (
+                        "Enable cognitive features (importance scoring, reinforcement, "
+                        "decay, merging, pruning). Set to false for basic memory service "
+                        "behavior."
+                    ),
+                },
+                "max_depth": {
+                    "type": "integer",
+                    "minimum": 10,
+                    "maximum": 10000,
+                    "default": 100,
+                    "description": (
+                        "Maximum number of memories to store per user (cognitive provider only). "
+                        "When exceeded, least important memories are pruned."
+                    ),
+                },
+                "similarity_threshold": {
+                    "type": "number",
+                    "minimum": 0.0,
+                    "maximum": 1.0,
+                    "default": 0.7,
+                    "description": (
+                        "Similarity threshold for memory reinforcement (cognitive provider "
+                        "only). Memories above this threshold are reinforced instead of "
+                        "creating duplicates."
+                    ),
+                },
+                "reinforcement_factor": {
+                    "type": "number",
+                    "minimum": 1.0,
+                    "maximum": 2.0,
+                    "default": 1.1,
+                    "description": (
+                        "Factor by which to increase importance when reinforcing memories "
+                        "(cognitive provider only)."
+                    ),
+                },
+                "decay_factor": {
+                    "type": "number",
+                    "minimum": 0.0,
+                    "maximum": 1.0,
+                    "default": 0.99,
+                    "description": (
+                        "Factor by which to decrease importance for unused memories "
+                        "(cognitive provider only)."
+                    ),
+                },
+                "merge_threshold_low": {
+                    "type": "number",
+                    "minimum": 0.0,
+                    "maximum": 1.0,
+                    "default": 0.7,
+                    "description": (
+                        "Lower similarity threshold for memory merging (cognitive provider only). "
+                        "Memories between merge_threshold_low and merge_threshold_high are merged."
+                    ),
+                },
+                "merge_threshold_high": {
+                    "type": "number",
+                    "minimum": 0.0,
+                    "maximum": 1.0,
+                    "default": 0.85,
+                    "description": (
+                        "Upper similarity threshold for memory merging (cognitive provider only). "
+                        "Memories between merge_threshold_low and merge_threshold_high are merged."
+                    ),
+                },
+                "fusion": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": (
+                                "Enable LLM-powered memory fusion for intelligent deduplication. "
+                                "When enabled, semantically similar facts extracted from the same "
+                                "message are fused into a single, high-quality memory using LLM."
+                            ),
+                        },
+                        "use_llm": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": (
+                                "Use LLM for fusion (default: true). If false, uses simple "
+                                "heuristic merge (longest text, highest emotion, best category)."
+                            ),
+                        },
+                        "similarity_threshold": {
+                            "type": "number",
+                            "minimum": 0.5,
+                            "maximum": 1.0,
+                            "default": 0.8,
+                            "description": (
+                                "Cosine similarity threshold for clustering facts. "
+                                "Facts above this threshold are grouped and fused together."
+                            ),
+                        },
+                        "fallback_to_simple": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": (
+                                "Fall back to simple heuristic merge if LLM fusion fails. "
+                                "Provides graceful degradation on LLM errors or timeouts."
+                            ),
+                        },
+                        "parallel_limit": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 10,
+                            "default": 5,
+                            "description": (
+                                "Maximum concurrent LLM fusion calls. "
+                                "Controls parallelization for multiple clusters."
+                            ),
+                        },
+                        "timeout_seconds": {
+                            "type": "integer",
+                            "minimum": 5,
+                            "maximum": 60,
+                            "default": 10,
+                            "description": "Timeout for each LLM fusion call in seconds.",
+                        },
+                    },
+                    "additionalProperties": False,
+                    "description": (
+                        "Memory fusion configuration. Enables intelligent deduplication "
+                        "of facts extracted from the same message using LLM-powered semantic "
+                        "synthesis. Prevents storing duplicates like 'User loves chocolate' "
+                        "and 'Chocolate is user's favorite candy' by fusing them into a "
+                        "single, comprehensive memory."
+                    ),
+                },
+                "redaction": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": (
+                                "Enable redaction layer to protect sensitive data "
+                                "from being stored in memory or sent to LLMs. "
+                                "Disabled by default - opt-in for privacy protection."
+                            ),
+                        },
+                        "provider": {
+                            "type": "string",
+                            "enum": ["regexp", "presidio"],
+                            "default": "regexp",
+                            "description": (
+                                "Redaction provider: 'regexp' (default, pattern-based) "
+                                "or 'presidio' (ML-based, requires presidio-analyzer)."
+                            ),
+                        },
+                        "replacement": {
+                            "type": "string",
+                            "default": "[REDACTED]",
+                            "description": "Text to replace sensitive data with.",
+                        },
+                        "patterns": {
+                            "type": "object",
+                            "properties": {
+                                "ssn": {
+                                    "type": "boolean",
+                                    "default": True,
+                                    "description": "Redact Social Security Numbers (XXX-XX-XXXX).",
+                                },
+                                "credit_card": {
+                                    "type": "boolean",
+                                    "default": True,
+                                    "description": "Redact credit card numbers (13-16 digits).",
+                                },
+                                "phone": {
+                                    "type": "boolean",
+                                    "default": False,
+                                    "description": "Redact phone numbers.",
+                                },
+                                "email": {
+                                    "type": "boolean",
+                                    "default": False,
+                                    "description": "Redact email addresses.",
+                                },
+                                "ip_address": {
+                                    "type": "boolean",
+                                    "default": False,
+                                    "description": "Redact IP addresses.",
+                                },
+                                "api_key": {
+                                    "type": "boolean",
+                                    "default": True,
+                                    "description": "Redact API keys and secrets.",
+                                },
+                                "password": {
+                                    "type": "boolean",
+                                    "default": True,
+                                    "description": "Redact password assignments.",
+                                },
+                                "custom": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                    "description": (
+                                        "Custom regex patterns to redact. "
+                                        "Example: ['\\\\bsecret\\\\s*[:=]\\\\s*\\\\S+']"
+                                    ),
+                                },
+                            },
+                            "additionalProperties": False,
+                            "description": "Configure which patterns to redact.",
+                        },
+                        "allow_list": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "Values that should never be redacted. "
+                                "Example: ['support@company.com']"
+                            ),
+                        },
+                        "log_redactions": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "Log redaction counts (without exposing data).",
+                        },
+                        "entities": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "Entity types to detect (Presidio provider only). "
+                                "Example: ['NAME', 'PHONE_NUMBER', 'EMAIL_ADDRESS']"
+                            ),
+                        },
+                        "language": {
+                            "type": "string",
+                            "default": "en",
+                            "description": "Language code for Presidio provider (default: 'en').",
+                        },
+                    },
+                    "additionalProperties": False,
+                    "description": (
+                        "Redaction layer configuration. Protects sensitive data "
+                        "(SSN, credit cards, passwords, API keys) from being stored "
+                        "in memory or sent to LLMs for fact extraction."
+                    ),
+                },
+                "reflection": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": (
+                                "Enable periodic memory consolidation. "
+                                "Summarizes atomic memories into narrative reflections."
+                            ),
+                        },
+                        "interval_hours": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 168,
+                            "default": 24,
+                            "description": "Hours between reflection cycles (default: 24).",
+                        },
+                        "message_threshold": {
+                            "type": "integer",
+                            "minimum": 10,
+                            "maximum": 500,
+                            "default": 50,
+                            "description": (
+                                "Number of memories to trigger reflection "
+                                "(alternative to time-based trigger)."
+                            ),
+                        },
+                        "min_salience_to_keep": {
+                            "type": "number",
+                            "minimum": 0.0,
+                            "maximum": 1.0,
+                            "default": 0.4,
+                            "description": (
+                                "Minimum importance score to keep after reflection. "
+                                "Memories below this are pruned after consolidation."
+                            ),
+                        },
+                        "store_reflections": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "Store reflection summaries in separate collection.",
+                        },
+                    },
+                    "additionalProperties": False,
+                    "description": (
+                        "Memory reflection and consolidation configuration. "
+                        "Periodically consolidates atomic memories into narrative summaries "
+                        "to prevent memory bloat and improve retrieval quality."
+                    ),
+                },
+                "categories": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": (
+                                "Enable memory categorization during fact extraction. "
+                                "Categories: biographical, preferences, temporal, relational."
+                            ),
+                        },
+                        "custom_categories": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "Additional custom categories beyond the defaults. "
+                                "Example: ['work', 'health', 'hobbies']"
+                            ),
+                        },
+                    },
+                    "additionalProperties": False,
+                    "description": (
+                        "Memory categorization configuration. "
+                        "Enhances fact extraction to categorize memories for "
+                        "better organization and retrieval."
+                    ),
+                },
+                "cognitive": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": (
+                                "Enable advanced cognitive memory features. "
+                                "Includes decay-aware retrieval, emotion tagging, "
+                                "conflict resolution, and soft-delete pruning."
+                            ),
+                        },
+                        "decay": {
+                            "type": "object",
+                            "properties": {
+                                "enabled": {
+                                    "type": "boolean",
+                                    "default": True,
+                                    "description": (
+                                        "Enable Ebbinghaus Forgetting Curve decay. "
+                                        "Memories weaken over time based on stability."
+                                    ),
+                                },
+                                "default_stability_hours": {
+                                    "type": "number",
+                                    "minimum": 0.1,
+                                    "maximum": 10000,
+                                    "default": 24,
+                                    "description": (
+                                        "Default stability (half-life) in hours for new memories. "
+                                        "Higher values = slower decay. Default: 24 hours."
+                                    ),
+                                },
+                                "min_stability": {
+                                    "type": "number",
+                                    "minimum": 0.01,
+                                    "maximum": 1,
+                                    "default": 0.1,
+                                    "description": (
+                                        "Minimum stability value to prevent division by zero."
+                                    ),
+                                },
+                                "use_server_side_pipeline": {
+                                    "type": "boolean",
+                                    "default": True,
+                                    "description": (
+                                        "Use MongoDB aggregation pipeline for decay calculations. "
+                                        "Improves performance for large memory stores."
+                                    ),
+                                },
+                            },
+                            "additionalProperties": False,
+                            "description": (
+                                "Decay configuration based on Ebbinghaus Forgetting Curve. "
+                                "Retrieval strength = importance * exp(-time / stability)."
+                            ),
+                        },
+                        "emotion": {
+                            "type": "object",
+                            "properties": {
+                                "enabled": {
+                                    "type": "boolean",
+                                    "default": True,
+                                    "description": (
+                                        "Enable emotional intensity extraction (Flashbulb Memory). "
+                                        "High-emotion facts get higher initial stability."
+                                    ),
+                                },
+                                "flashbulb_threshold": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1,
+                                    "default": 0.7,
+                                    "description": (
+                                        "Emotion threshold for flashbulb memory effect. "
+                                        "Facts above this get significantly higher stability."
+                                    ),
+                                },
+                                "max_stability_multiplier": {
+                                    "type": "number",
+                                    "minimum": 1,
+                                    "maximum": 1000,
+                                    "default": 100,
+                                    "description": (
+                                        "Maximum stability bonus for high-emotion memories. "
+                                        "stability = default + (emotion * multiplier)."
+                                    ),
+                                },
+                            },
+                            "additionalProperties": False,
+                            "description": (
+                                "Emotion (Flashbulb Memory) configuration. "
+                                "High-emotion events are remembered with exceptional clarity."
+                            ),
+                        },
+                        "conflict_resolution": {
+                            "type": "object",
+                            "properties": {
+                                "enabled": {
+                                    "type": "boolean",
+                                    "default": True,
+                                    "description": (
+                                        "Enable LLM-based conflict detection. "
+                                        "Prevents storing contradictory facts."
+                                    ),
+                                },
+                                "similarity_threshold": {
+                                    "type": "number",
+                                    "minimum": 0.5,
+                                    "maximum": 1,
+                                    "default": 0.85,
+                                    "description": (
+                                        "Similarity threshold to consider facts related. "
+                                        "Only check conflicts for highly similar memories."
+                                    ),
+                                },
+                                "llm_model": {
+                                    "type": "string",
+                                    "description": (
+                                        "Override LLM model for conflict detection. "
+                                        "Defaults to memory_llm_model."
+                                    ),
+                                },
+                            },
+                            "additionalProperties": False,
+                            "description": (
+                                "Conflict resolution (integrity check) configuration. "
+                                "Prevents digital dementia by detecting contradictions."
+                            ),
+                        },
+                        "pruning": {
+                            "type": "object",
+                            "properties": {
+                                "enabled": {
+                                    "type": "boolean",
+                                    "default": True,
+                                    "description": (
+                                        "Enable automatic memory pruning when capacity exceeded."
+                                    ),
+                                },
+                                "max_capacity": {
+                                    "type": "integer",
+                                    "minimum": 10,
+                                    "maximum": 100000,
+                                    "default": 1000,
+                                    "description": (
+                                        "Maximum active memories per user. "
+                                        "Weakest memories are pruned when exceeded."
+                                    ),
+                                },
+                                "prune_percentage": {
+                                    "type": "number",
+                                    "minimum": 0.01,
+                                    "maximum": 0.5,
+                                    "default": 0.1,
+                                    "description": (
+                                        "Extra percentage to prune to avoid constant triggers. "
+                                        "Default: 10% buffer."
+                                    ),
+                                },
+                                "strategy": {
+                                    "type": "string",
+                                    "enum": ["soft_delete", "hard_delete"],
+                                    "default": "soft_delete",
+                                    "description": (
+                                        "Pruning strategy. 'soft_delete' moves to cold storage; "
+                                        "'hard_delete' permanently removes memories."
+                                    ),
+                                },
+                            },
+                            "additionalProperties": False,
+                            "description": (
+                                "Memory pruning configuration. "
+                                "Removes weakest memories when capacity is exceeded."
+                            ),
+                        },
+                        "cold_storage": {
+                            "type": "object",
+                            "properties": {
+                                "enabled": {
+                                    "type": "boolean",
+                                    "default": True,
+                                    "description": (
+                                        "Enable cold storage for pruned memories. "
+                                        "Provides paper trail for analytics and recovery."
+                                    ),
+                                },
+                                "retention_days": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 3650,
+                                    "default": 365,
+                                    "description": (
+                                        "Days to retain memories in cold storage. "
+                                        "Default: 365 days (1 year)."
+                                    ),
+                                },
+                            },
+                            "additionalProperties": False,
+                            "description": (
+                                "Cold storage (paper trail) configuration. "
+                                "Preserves pruned memories for analytics and recovery."
+                            ),
+                        },
+                    },
+                    "additionalProperties": False,
+                    "description": (
+                        "Advanced cognitive memory configuration. "
+                        "Enables biological-style memory features including "
+                        "Ebbinghaus Forgetting Curve decay, Flashbulb Memory emotion tagging, "
+                        "conflict resolution, and soft-delete pruning with cold storage."
+                    ),
+                },
+                "graph": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": (
+                                "Enable graph-powered memory layer. When enabled, memories "
+                                "automatically extract nodes and relationships to the "
+                                "knowledge graph. Requires graph_config to be enabled."
+                            ),
+                        },
+                        "auto_extract": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": (
+                                "Automatically extract graph nodes when memories are added. "
+                                "If false, graph extraction must be triggered manually."
+                            ),
+                        },
+                    },
+                    "additionalProperties": False,
+                    "description": (
+                        "Graph-powered memory configuration. Enables automatic node "
+                        "and relationship extraction from memories to the knowledge "
+                        "graph. Works with graph_config to provide GraphRAG capabilities "
+                        "for memory retrieval."
+                    ),
+                },
+                "memory_types": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": (
+                                "Enable memory type classification "
+                                "(Cognitive Blueprint v2.0). Classifies memories as "
+                                "semantic, entity, procedural, episodic, or working."
+                            ),
+                        },
+                        "auto_detect": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": (
+                                "Automatically detect memory type using LLM classification. "
+                                "If false, uses default_type for all memories."
+                            ),
+                        },
+                        "default_type": {
+                            "type": "string",
+                            "enum": ["semantic", "entity", "procedural", "episodic", "working"],
+                            "default": "semantic",
+                            "description": "Default memory type when auto_detect is disabled.",
+                        },
+                        "episodic_retention_days": {
+                            "type": "integer",
+                            "minimum": 30,
+                            "maximum": 3650,
+                            "default": 730,
+                            "description": (
+                                "Retention period for episodic memories in days "
+                                "(default: 730 = 2 years). Episodic memories are "
+                                "automatically deleted after this period."
+                            ),
+                        },
+                        "working_ttl_hours": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 168,
+                            "default": 24,
+                            "description": (
+                                "Time-to-live for working memory in hours (default: 24). "
+                                "Working memory is automatically deleted after this period."
+                            ),
+                        },
+                    },
+                    "additionalProperties": False,
+                    "description": (
+                        "Memory types configuration (Cognitive Blueprint v2.0). "
+                        "Enables directory strategy with semantic, entity, "
+                        "procedural, episodic, and working memory types."
+                    ),
+                },
+                "procedural": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": (
+                                "Enable procedural memory support. Stores how-to "
+                                "workflows, code snippets, and step-by-step procedures."
+                            ),
+                        },
+                        "auto_extract": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": (
+                                "Automatically extract procedural content from memories. "
+                                "Detects code, workflows, and procedures."
+                            ),
+                        },
+                        "detect_code": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "Detect code snippets and programming instructions.",
+                        },
+                        "detect_workflows": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "Detect step-by-step workflows and procedures.",
+                        },
+                    },
+                    "additionalProperties": False,
+                    "description": (
+                        "Procedural memory configuration. Enables storage of how-to workflows, "
+                        "code snippets, and procedures with success tracking."
+                    ),
+                },
+                "consolidation": {
+                    "type": "object",
+                    "properties": {
+                        "extract_entities": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": (
+                                "Extract entities from episodic memories during consolidation. "
+                                "Creates entity memories for people, projects, objects."
+                            ),
+                        },
+                        "route_by_type": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": (
+                                "Route consolidated memories to appropriate memory types. "
+                                "Ensures memories are stored in the correct category."
+                            ),
+                        },
+                        "link_to_graph": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": (
+                                "Link extracted entities to GraphService during consolidation. "
+                                "Creates graph nodes for entity memories."
+                            ),
+                        },
+                        "extract_procedural": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": (
+                                "Extract procedural knowledge during consolidation. "
+                                "Identifies workflows and code patterns."
+                            ),
+                        },
+                    },
+                    "additionalProperties": False,
+                    "description": (
+                        "Consolidation configuration for reflection service. "
+                        "Enhances memory consolidation with entity extraction, "
+                        "routing, and procedural knowledge extraction."
+                    ),
+                },
+                "persona": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "Enable persona engine for dynamic persona management.",
+                        },
+                        "default_role": {
+                            "type": "string",
+                            "description": (
+                                "Default persona role (e.g., 'AI Assistant', "
+                                "'Senior Python Architect')."
+                            ),
+                        },
+                        "default_description": {
+                            "type": "string",
+                            "description": (
+                                "Default persona description explaining the AI's "
+                                "identity and capabilities."
+                            ),
+                        },
+                        "default_traits": {
+                            "type": "object",
+                            "description": (
+                                "Default persona traits as key-value pairs. "
+                                "Common traits: technical_focus, humor, formality, "
+                                "empathy, creativity. Values typically range from "
+                                "0.0 to 1.0."
+                            ),
+                        },
+                    },
+                    "additionalProperties": True,
+                    "description": (
+                        "Persona configuration for Context Engineering. "
+                        "Defines the AI's identity, role, description, and behavioral traits. "
+                        "Used by PersonaEngine to maintain consistent persona across conversations."
+                    ),
+                },
+                "perceptions": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "Enable perception analysis for memory context.",
+                        },
+                        "auto_analyze": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "Automatically analyze perceptions from memories.",
+                        },
+                        "update_frequency": {
+                            "type": "string",
+                            "enum": ["per_interaction", "daily", "weekly"],
+                            "default": "per_interaction",
+                            "description": "Frequency of perception updates.",
+                        },
+                    },
+                    "additionalProperties": True,
+                    "description": (
+                        "Perceptions configuration for cognitive memory features. "
+                        "Enables analysis of user perceptions and context from memories."
+                    ),
+                },
             },
             "additionalProperties": False,
             "description": (
-                "Mem0 memory service configuration. Enables intelligent memory "
+                "Memory service configuration. Enables intelligent memory "
                 "management that automatically extracts, stores, and retrieves "
-                "user memories. Uses MongoDB as the vector store (native "
-                "integration with mdb-engine). mem0 handles embeddings and LLM "
-                "via environment variables (.env). Configure "
-                "AZURE_OPENAI_API_KEY/AZURE_OPENAI_ENDPOINT or OPENAI_API_KEY "
+                "user memories. Uses MongoDB Atlas Vector Search (native "
+                "integration with mdb-engine). Uses mdb_engine.embeddings and OpenAI SDK directly. "
+                "Configure AZURE_OPENAI_API_KEY/AZURE_OPENAI_ENDPOINT or OPENAI_API_KEY "
                 "in your .env file."
+            ),
+        },
+        "graph_config": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": (
+                        "Enable graph service for this app (enabled by default). "
+                        "Set to false to disable. Creates a standalone knowledge graph "
+                        "with MongoDB $graphLookup traversal for multi-hop reasoning "
+                        "queries. Can be used independently or with memory service."
+                    ),
+                },
+                "collection_name": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9_]+$",
+                    "default": "__kg",
+                    "description": (
+                        "Collection name for knowledge graph nodes "
+                        "(defaults to '__kg'). Will be prefixed with app slug."
+                    ),
+                },
+                "auto_extract": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": (
+                        "Enable LLM-powered automatic entity/relationship extraction. "
+                        "Extracts nodes (people, interests, events, locations) and "
+                        "edges (relationships) from text."
+                    ),
+                },
+                "llm_model": {
+                    "type": "string",
+                    "description": (
+                        "LLM model for graph extraction (e.g., 'openai/gpt-4o'). "
+                        "Uses llm_config.default_model if not specified."
+                    ),
+                },
+                "temperature": {
+                    "type": "number",
+                    "minimum": 0.0,
+                    "maximum": 2.0,
+                    "default": 0.0,
+                    "description": "Temperature for LLM extraction (default: 0.0).",
+                },
+                "default_max_depth": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 5,
+                    "default": 2,
+                    "description": (
+                        "Default traversal depth for $graphLookup queries. "
+                        "Depth 2 covers most use cases (e.g., 'brother's interests')."
+                    ),
+                },
+                "vector_index_name": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9_]+$",
+                    "default": "graph_vector_index",
+                    "description": "Name of the vector search index for hybrid search.",
+                },
+                "embedding_dims": {
+                    "type": "integer",
+                    "minimum": 128,
+                    "maximum": 4096,
+                    "default": 1536,
+                    "description": "Embedding dimensions for vector index (default: 1536).",
+                },
+                "node_types": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "default": [
+                        "person",
+                        "interest",
+                        "event",
+                        "location",
+                        "organization",
+                        "product",
+                        "concept",
+                    ],
+                    "description": (
+                        "Allowed node types for graph extraction. "
+                        "LLM will classify nodes into these types."
+                    ),
+                },
+            },
+            "additionalProperties": False,
+            "description": (
+                "Graph service configuration. Enables standalone knowledge graph "
+                "with MongoDB $graphLookup for multi-hop traversal. Combines vector "
+                "search (semantic entry points) with graph traversal (structural "
+                "relationships) for GraphRAG. Can be used independently of memory service."
             ),
         },
         "cors": {
@@ -2175,11 +3263,6 @@ MANIFEST_SCHEMA_V1 = {
             "default": "draft",
             "description": "App status",
         },
-        "auth_required": {
-            "type": "boolean",
-            "default": False,
-            "description": "Whether authentication is required for this app",
-        },
         "data_scope": {
             "type": "array",
             "items": {"type": "string"},
@@ -2247,12 +3330,8 @@ def get_schema_version(manifest_data: dict[str, Any]) -> str:
         return str(version)
 
     # Heuristic: If manifest has new fields, assume 2.0, otherwise 1.0
-    v2_fields = ["auth", "collection_settings"]
-    # Also check for old format for backward compatibility
-    old_v2_fields = ["auth_policy", "sub_auth"]
-    if any(field in manifest_data for field in v2_fields) or any(
-        field in manifest_data for field in old_v2_fields
-    ):
+    v2_fields = ["auth", "collection_settings", "auth_policy"]
+    if any(field in manifest_data for field in v2_fields):
         return "2.0"
 
     return DEFAULT_SCHEMA_VERSION
@@ -2284,19 +3363,14 @@ def migrate_manifest(
         if "schema_version" not in migrated:
             migrated["schema_version"] = "2.0"
 
-        # Migrate old auth_policy/sub_auth format to new auth.policy/auth.users format
+        # Old auth_policy/sub_auth format is no longer supported
+        # Manifests must use auth.policy/auth.users format
         if "auth_policy" in migrated or "sub_auth" in migrated:
-            logger.warning(
+            raise ValueError(
                 f"Manifest {migrated.get('slug', 'unknown')} uses deprecated "
                 f"'auth_policy'/'sub_auth' format. "
-                f"Consider migrating to 'auth.policy'/'auth.users' format."
+                f"Please migrate to 'auth.policy'/'auth.users' format."
             )
-            if "auth" not in migrated:
-                migrated["auth"] = {}
-            if "auth_policy" in migrated:
-                migrated["auth"]["policy"] = migrated.pop("auth_policy")
-            if "sub_auth" in migrated:
-                migrated["auth"]["users"] = migrated.pop("sub_auth")
 
         # No data transformation needed - V2.0 is backward compatible
         # New fields (auth, etc.) are optional
@@ -2590,6 +3664,77 @@ async def validate_manifest_with_db(
                 ["developer_id"],
             )
 
+    # Validate SSO apps require WebSocket auth (security requirement)
+    validation_result = _validate_sso_websocket_auth(manifest_data)
+    if not validation_result[0]:
+        return validation_result
+
+    return True, None, None
+
+
+def _validate_sso_websocket_auth(
+    manifest_data: dict[str, Any],
+) -> tuple[bool, str | None, list[str] | None]:
+    """
+    Validate that SSO apps require WebSocket authentication for security.
+
+    Security Rule: Apps using SSO (auth.mode="shared") should require WebSocket
+    authentication unless explicitly allowing anonymous access. This prevents
+    anonymous connections to authenticated apps, which could lead to:
+    - User-scoped broadcast failures
+    - Security vulnerabilities
+    - Inconsistent authentication state
+
+    Args:
+        manifest_data: Manifest dictionary to validate
+
+    Returns:
+        Tuple of (is_valid, error_message, error_paths)
+    """
+    auth_config = manifest_data.get("auth", {})
+    auth_mode = auth_config.get("mode", "app")
+
+    # Only validate SSO apps (shared mode)
+    if auth_mode != "shared":
+        return True, None, None
+
+    # Check if app requires role (indicates authenticated app)
+    require_role = auth_config.get("require_role")
+
+    # Check WebSocket configuration
+    websockets_config = manifest_data.get("websockets", {})
+
+    for endpoint_name, endpoint_config in websockets_config.items():
+        if not isinstance(endpoint_config, dict):
+            continue
+
+        ws_auth = endpoint_config.get("auth", {})
+        require_auth = ws_auth.get("required", True)  # Default is True
+        allow_anonymous = ws_auth.get("allow_anonymous", False)  # Default is False
+
+        # Security check: If SSO app requires role, WebSocket should require auth
+        # unless explicitly allowing anonymous
+        if require_role and not require_auth and not allow_anonymous:
+            error_msg = (
+                f"Security violation: SSO app with 'require_role' must require "
+                f"WebSocket authentication. Endpoint '{endpoint_name}' has "
+                f"'auth.required=false' without 'allow_anonymous=true'. "
+                f"This creates a security vulnerability where anonymous connections "
+                f"can access authenticated app resources."
+            )
+            error_paths = [f"websockets.{endpoint_name}.auth.required"]
+            return False, error_msg, error_paths
+
+        # Security check: If SSO app requires role and allows anonymous, warn but allow
+        # (some apps may legitimately need public WebSocket endpoints)
+        if require_role and not require_auth and allow_anonymous:
+            logger.warning(
+                f"⚠️ SSO app '{manifest_data.get('slug', 'unknown')}' allows anonymous "
+                f"WebSocket connections on endpoint '{endpoint_name}' despite requiring "
+                f"role '{require_role}' for HTTP routes. This may be intentional, but "
+                f"ensure this is the desired security model."
+            )
+
     return True, None, None
 
 
@@ -2617,6 +3762,7 @@ def validate_manifest(
     """
     import asyncio
 
+    # First validate schema
     try:
         loop = asyncio.get_event_loop()
         if loop.is_running():
@@ -2627,12 +3773,25 @@ def validate_manifest(
                 future = executor.submit(
                     lambda: asyncio.run(_validate_manifest_async(manifest_data, use_cache))
                 )
-                return future.result()
+                schema_result = future.result()
         else:
-            return loop.run_until_complete(_validate_manifest_async(manifest_data, use_cache))
+            schema_result = loop.run_until_complete(
+                _validate_manifest_async(manifest_data, use_cache)
+            )
     except RuntimeError:
         # No event loop, create one
-        return asyncio.run(_validate_manifest_async(manifest_data, use_cache))
+        schema_result = asyncio.run(_validate_manifest_async(manifest_data, use_cache))
+
+    # If schema validation failed, return early
+    if not schema_result[0]:
+        return schema_result
+
+    # Then validate SSO WebSocket auth requirements (security check)
+    sso_result = _validate_sso_websocket_auth(manifest_data)
+    if not sso_result[0]:
+        return sso_result
+
+    return True, None, None
 
 
 def _validate_regular_index(

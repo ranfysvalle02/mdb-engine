@@ -23,7 +23,6 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from dotenv import load_dotenv
 from fastapi import Depends, HTTPException, Request
-from fastapi.middleware.cors import CORSMiddleware
 
 # ============================================================================
 # MDB_ENGINE IMPORTS
@@ -111,14 +110,6 @@ app = engine.create_app(
     ],
 )
 
-# Add CORS for frontend access
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 # ============================================================================
 # STEP 4: DEFINE DEPENDENCIES

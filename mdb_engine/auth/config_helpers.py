@@ -178,6 +178,8 @@ def get_cors_config(request: Request) -> dict[str, Any]:
     """
     Get CORS configuration from app.state with defaults merged.
 
+    Validates configuration and logs warnings for invalid settings.
+
     Args:
         request: FastAPI Request object
 
@@ -187,7 +189,14 @@ def get_cors_config(request: Request) -> dict[str, Any]:
     try:
         cors_config = getattr(request.app.state, "cors_config", None)
         if cors_config:
-            return merge_config_with_defaults(cors_config, CORS_DEFAULTS)
+            merged_config = merge_config_with_defaults(cors_config, CORS_DEFAULTS)
+            try:
+                from .cors_utils import validate_cors_config
+
+                validate_cors_config(merged_config)
+            except ValueError as e:
+                logger.warning(f"CORS config validation warning: {e}")
+            return merged_config
         return CORS_DEFAULTS.copy()
     except (AttributeError, TypeError, KeyError) as e:
         logger.warning(f"Error getting CORS config: {e}, using defaults")

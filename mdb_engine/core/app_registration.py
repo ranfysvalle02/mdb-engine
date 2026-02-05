@@ -118,6 +118,7 @@ class AppRegistrationManager:
         manifest: "ManifestDict",
         create_indexes_callback: Callable[[str, "ManifestDict"], Any] | None = None,
         seed_data_callback: Callable[[str, dict[str, list[dict[str, Any]]]], Any] | None = None,
+        initialize_graph_callback: Callable[[str, dict[str, Any]], Any] | None = None,
         initialize_memory_callback: Callable[[str, dict[str, Any]], Any] | None = None,
         register_websockets_callback: Callable[[str, dict[str, Any]], Any] | None = None,
         setup_observability_callback: Callable[[str, "ManifestDict", dict[str, Any]], Any]
@@ -133,6 +134,7 @@ class AppRegistrationManager:
             manifest: Validated manifest dictionary containing app configuration
             create_indexes_callback: Optional callback to create indexes
             seed_data_callback: Optional callback to seed initial data
+            initialize_graph_callback: Optional callback to initialize graph service
             initialize_memory_callback: Optional callback to initialize memory service
             register_websockets_callback: Optional callback to register WebSockets
             setup_observability_callback: Optional callback to setup observability
@@ -232,7 +234,14 @@ class AppRegistrationManager:
             if seed_data_callback and "initial_data" in manifest:
                 callback_tasks.append(seed_data_callback(slug, manifest["initial_data"]))
 
-            # Initialize Memory service if configured
+            # Initialize Graph service if configured (MUST complete before memory)
+            # Graph is enabled by default - users can disable via manifest
+            graph_config = manifest.get("graph_config", {})
+            if initialize_graph_callback and graph_config.get("enabled", True):
+                # Graph must be initialized BEFORE memory (memory uses graph for GraphRAG)
+                await initialize_graph_callback(slug, graph_config)
+
+            # Initialize Memory service if configured (after graph so it can use graph service)
             memory_config = manifest.get("memory_config")
             if initialize_memory_callback and memory_config and memory_config.get("enabled", False):
                 callback_tasks.append(initialize_memory_callback(slug, memory_config))
@@ -280,6 +289,7 @@ class AppRegistrationManager:
                 "App registered successfully",
                 extra={
                     "app_slug": slug,
+                    "graph_enabled": bool(graph_config.get("enabled", True)),
                     "memory_enabled": bool(memory_config and memory_config.get("enabled", False)),
                     "websockets_configured": bool(websockets_config),
                     "duration_ms": round(duration_ms, 2),

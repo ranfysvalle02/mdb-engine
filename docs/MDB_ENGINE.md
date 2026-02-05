@@ -485,7 +485,7 @@ async def get_documents(
   // WebSocket endpoints
   "websockets": { ... },
   
-  // Memory service (Mem0)
+  // Memory service (MongoDB Atlas Vector Search)
   "memory_config": { ... },
   
   // Embedding service
@@ -844,6 +844,345 @@ When you use `engine.create_app()` with auth configuration in `manifest.json`:
 
 ---
 
+## Memory Service: Intelligent AI Memory Management
+
+MDB-Engine includes a powerful **Memory Service** that provides persistent, semantic memory storage and retrieval using MongoDB Atlas Vector Search. This enables your AI applications to remember user preferences, facts, and conversation context across sessions.
+
+### Key Features
+
+#### 🧠 Intelligent Memory Management
+- **Automatic Fact Extraction**: LLM-powered extraction of key facts from conversations
+- **Semantic Search**: Find relevant memories using vector similarity search
+- **User Isolation**: All memories are scoped per user for privacy and security
+- **Metadata Support**: Rich metadata filtering and custom fields
+- **Bucket Support**: Organize memories by conversation, category, or custom buckets
+
+#### 🚀 Zero-Configuration Setup
+- **Automatic Index Management**: Vector search index is created and managed automatically
+- **No Manual Configuration**: Just enable the service in your manifest
+- **Smart Updates**: Existing indexes are automatically updated if needed
+- **Error Prevention**: Engine prevents manual index conflicts
+
+#### 🎯 Cognitive Features (Optional)
+- **Importance Scoring**: AI evaluates memory significance (0.1-1.0 scale)
+- **Memory Reinforcement**: Similar memories strengthen existing memories
+- **Memory Decay**: Less relevant memories fade over time
+- **Memory Merging**: Related memories are combined intelligently
+- **Memory Pruning**: Least important memories removed when capacity exceeded
+
+### Quick Start
+
+#### 1. Enable Memory Service in Manifest
+
+```json
+{
+  "schema_version": "2.0",
+  "slug": "my_app",
+  "name": "My App",
+  "memory_config": {
+    "enabled": true,
+    "collection_name": "user_memories",
+    "embedding_model_dims": 1536
+  }
+}
+```
+
+That's it! The memory service will:
+- ✅ Automatically create the collection
+- ✅ Automatically create the vector search index with `user_id` filter
+- ✅ Configure everything needed for semantic search
+
+#### 2. Use in Your Application
+
+```python
+from mdb_engine.dependencies import get_memory_service, get_scoped_db
+from fastapi import Depends
+
+@app.post("/chat")
+async def chat(
+    message: str,
+    user_id: str,
+    memory=Depends(get_memory_service),
+    db=Depends(get_scoped_db)
+):
+    # Search for relevant memories
+    memories = memory.search(
+        query=message,
+        user_id=user_id,
+        limit=5
+    )
+    
+    # Build context from memories
+    context = "\n".join([m.get("memory", "") for m in memories])
+    
+    # Generate response (using your LLM client)
+    response = await generate_response(message, context)
+    
+    # Add new memory from conversation
+    memory.add(
+        messages=[
+            {"role": "user", "content": message},
+            {"role": "assistant", "content": response}
+        ],
+        user_id=user_id
+    )
+    
+    return {"response": response, "memories_used": len(memories)}
+```
+
+### Configuration Options
+
+#### Basic Configuration
+
+```json
+{
+  "memory_config": {
+    "enabled": true,
+    "collection_name": "user_memories",
+    "embedding_model_dims": 1536
+  }
+}
+```
+
+#### Full Configuration with Cognitive Features
+
+```json
+{
+  "memory_config": {
+    "enabled": true,
+    "provider": "cognitive",
+    "collection_name": "user_memories",
+    "embedding_model": "text-embedding-3-small",
+    "chat_model": "gpt-4o",
+    "embedding_model_dims": 1536,
+    "infer": true,
+    "async_mode": true,
+    "enable_cognitive": true,
+    "max_depth": 100
+  }
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `boolean` | `false` | Enable memory service |
+| `provider` | `string` | `"cognitive"` | Memory provider (`"cognitive"` or `"custom"`) |
+| `collection_name` | `string` | `"{slug}_memories"` | Collection name (auto-prefixed with app slug) |
+| `embedding_model` | `string` | `"text-embedding-3-small"` | Embedding model name |
+| `chat_model` | `string` | `"gpt-4o"` | LLM model for fact extraction |
+| `embedding_model_dims` | `integer` | `1536` | Embedding dimensions (128-4096) |
+| `infer` | `boolean` | `true` | Enable LLM fact extraction |
+| `async_mode` | `boolean` | `true` | Process memories asynchronously |
+| `enable_cognitive` | `boolean` | `true` | Enable cognitive features |
+| `max_depth` | `integer\|null` | `100` | Max memories per user (`null` = unlimited) |
+
+### Automatic Index Management
+
+**⚠️ Important**: The memory service **automatically creates and manages its own vector search index**. You do NOT need to (and should NOT) add memory collection indexes to `managed_indexes` in your manifest.
+
+**On Startup:**
+1. Service checks if vector search index exists
+2. If missing, creates index with correct configuration:
+   - Vector field: `embedding` (with specified dimensions)
+   - Filter field: `user_id` (required for filtering)
+   - Similarity: `cosine`
+3. If index exists but missing `user_id` filter, automatically updates it
+4. Waits for index to become queryable before allowing searches
+
+**Index Name**: Automatically generated as `{collection_name}_vector_index`
+- Example: `conversations_user_memories_vector_index`
+
+### Memory Service Operations
+
+#### Adding Memories
+
+**From Conversations (with LLM inference):**
+```python
+memory.add(
+    messages=[
+        {"role": "user", "content": "I'm allergic to peanuts"},
+        {"role": "assistant", "content": "I'll remember that."}
+    ],
+    user_id="user_123"
+)
+# Automatically extracts facts: "User is allergic to peanuts"
+```
+
+**Direct Injection (without LLM inference):**
+```python
+memory.inject(
+    memory="User prefers dark mode",
+    user_id="user_123",
+    metadata={"source": "settings", "importance": 0.8}
+)
+```
+
+#### Searching Memories
+
+```python
+# Semantic search
+memories = memory.search(
+    query="What are the user's preferences?",
+    user_id="user_123",
+    limit=5
+)
+
+# With metadata filtering
+memories = memory.search(
+    query="dietary restrictions",
+    user_id="user_123",
+    metadata={"category": "health"},
+    limit=10
+)
+```
+
+#### Managing Memories
+
+```python
+# Get specific memory
+memory_obj = memory.get(memory_id="mem_123", user_id="user_123")
+
+# Get all memories for user
+all_memories = memory.get_all(user_id="user_123")
+
+# Update memory
+memory.update(
+    memory_id="mem_123",
+    user_id="user_123",
+    memory="Updated memory content",
+    metadata={"updated": True}
+)
+
+# Delete memory
+memory.delete(memory_id="mem_123", user_id="user_123")
+
+# Delete all memories for user
+memory.delete_all(user_id="user_123")
+```
+
+### Cognitive Features
+
+When `enable_cognitive: true` (default), the memory service includes advanced features:
+
+#### Importance Assessment
+Memories are automatically scored for importance (0.1-1.0) based on:
+- Uniqueness of information
+- Actionability
+- Personal significance
+- Key facts or decisions
+
+#### Memory Reinforcement
+When similar content appears (similarity > 0.85), existing memories are **reinforced** instead of creating duplicates:
+- Importance increases
+- Access count increments
+- Last accessed timestamp updates
+
+#### Memory Decay
+Memories that are less relevant to new content gradually **decay** in importance, mimicking natural forgetting.
+
+#### Memory Merging
+Related memories (similarity 0.7-0.85) are **merged** into a single cohesive memory:
+- LLM combines the texts
+- Embeddings are averaged
+- Higher importance is used
+- Access counts are combined
+
+#### Memory Pruning
+When memory count exceeds `max_depth`, least important memories are **pruned** based on effective importance (combines raw importance with access frequency).
+
+### Integration with LLM Services
+
+The memory service works seamlessly with your LLM client:
+
+```python
+from mdb_engine.dependencies import get_memory_service, get_llm_client
+from openai import AzureOpenAI
+
+@app.post("/chat")
+async def chat(
+    message: str,
+    user_id: str,
+    memory=Depends(get_memory_service),
+    llm_client=Depends(get_llm_client)
+):
+    # Get relevant context from memory
+    memories = memory.search(query=message, user_id=user_id, limit=5)
+    context = "\n".join([m.get("memory", "") for m in memories])
+    
+    # Generate response with context
+    response = llm_client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": f"User context:\n{context}"},
+            {"role": "user", "content": message}
+        ]
+    )
+    
+    # Store conversation in memory
+    memory.add(
+        messages=[
+            {"role": "user", "content": message},
+            {"role": "assistant", "content": response.choices[0].message.content}
+        ],
+        user_id=user_id
+    )
+    
+    return {"response": response.choices[0].message.content}
+```
+
+### Environment Variables
+
+The memory service uses environment variables for LLM/embedding configuration:
+
+```bash
+# OpenAI
+export OPENAI_API_KEY="your-key"
+
+# Azure OpenAI
+export AZURE_OPENAI_API_KEY="your-key"
+export AZURE_OPENAI_ENDPOINT="https://your-resource.openai.azure.com"
+export AZURE_OPENAI_API_VERSION="2024-02-15-preview"
+
+# Optional: Memory LLM temperature
+export MEMORY_LLM_TEMPERATURE="0"
+```
+
+### Best Practices
+
+1. **Use Appropriate `max_depth`**: Set based on your use case:
+   - Chatbots: 50-100 memories per user
+   - Knowledge bases: `null` (unlimited)
+   - Personal assistants: 100-200 memories
+
+2. **Leverage Metadata**: Use metadata for filtering and organization:
+   ```python
+   memory.add(
+       messages=[...],
+       user_id="user_123",
+       metadata={
+           "conversation_id": "conv_456",
+           "category": "preferences",
+           "source": "user_input"
+       }
+   )
+   ```
+
+3. **Use Buckets for Organization**: Group related memories:
+   ```python
+   memory.add(
+       messages=[...],
+       user_id="user_123",
+       bucket_id="dietary_restrictions",
+       bucket_type="health"
+   )
+   ```
+
+4. **Monitor Memory Growth**: For production apps, set `max_depth` to prevent unbounded growth.
+
+5. **Combine with Chat History**: Use memory service for long-term context, chat history for immediate context.
+
+---
+
 ## Before & After Examples
 
 ### Example 1: Simple CRUD API
@@ -1074,6 +1413,180 @@ async def get_tasks(
 - ✅ Permission checks via dependency injection
 - ✅ Automatic app_id filtering
 
+### Example 3: AI Chatbot with Memory
+
+#### Before (Without MDB-Engine)
+
+```python
+from fastapi import FastAPI
+from motor.motor_asyncio import AsyncIOMotorClient
+from openai import AzureOpenAI
+import os
+
+app = FastAPI()
+client = AsyncIOMotorClient("mongodb://localhost:27017")
+db = client.my_database
+llm_client = AzureOpenAI(...)
+
+APP_ID = "chatbot"
+
+@app.on_event("startup")
+async def startup():
+    # Manual vector index creation
+    await db.user_memories.create_index([
+        ("embedding", "vector"),
+        ("user_id", 1)
+    ])
+
+def get_embedding(text: str) -> list[float]:
+    # Manual embedding generation
+    response = llm_client.embeddings.create(
+        model="text-embedding-3-small",
+        input=text
+    )
+    return response.data[0].embedding
+
+@app.post("/chat")
+async def chat(message: str, user_id: str):
+    # Manual memory search
+    query_embedding = get_embedding(message)
+    
+    # Manual vector search pipeline
+    pipeline = [
+        {
+            "$vectorSearch": {
+                "index": "vector_index",
+                "path": "embedding",
+                "queryVector": query_embedding,
+                "filter": {"user_id": user_id, "app_id": APP_ID},
+                "numCandidates": 100,
+                "limit": 5
+            }
+        }
+    ]
+    
+    memories = await db.user_memories.aggregate(pipeline).to_list(5)
+    context = "\n".join([m["memory"] for m in memories])
+    
+    # Generate response
+    response = llm_client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": f"Context: {context}"},
+            {"role": "user", "content": message}
+        ]
+    )
+    
+    # Manual memory storage
+    memory_text = f"User: {message}\nAssistant: {response.choices[0].message.content}"
+    memory_embedding = get_embedding(memory_text)
+    
+    await db.user_memories.insert_one({
+        "app_id": APP_ID,
+        "user_id": user_id,
+        "memory": memory_text,
+        "embedding": memory_embedding
+    })
+    
+    return {"response": response.choices[0].message.content}
+```
+
+**Issues:**
+- ❌ 100+ lines of boilerplate
+- ❌ Manual vector index management
+- ❌ Manual embedding generation
+- ❌ Manual vector search pipeline
+- ❌ No fact extraction or cognitive features
+- ❌ No automatic index updates
+
+#### After (With MDB-Engine)
+
+```python
+from pathlib import Path
+from fastapi import Depends
+from mdb_engine import MongoDBEngine
+from mdb_engine.dependencies import get_memory_service, get_llm_client, get_llm_model_name
+
+# Initialize engine
+engine = MongoDBEngine(
+    mongo_uri="mongodb://localhost:27017",
+    db_name="my_database"
+)
+
+# Create app with memory service configured
+app = engine.create_app(
+    slug="chatbot",
+    manifest=Path("manifest.json")
+)
+
+@app.post("/chat")
+async def chat(
+    message: str,
+    user_id: str,
+    memory=Depends(get_memory_service),
+    llm_client=Depends(get_llm_client),
+    model_name=Depends(get_llm_model_name)
+):
+    # Automatic memory search
+    memories = memory.search(
+        query=message,
+        user_id=user_id,
+        limit=5
+    )
+    
+    # Build context
+    context = "\n".join([m.get("memory", "") for m in memories])
+    
+    # Generate response
+    response = llm_client.chat.completions.create(
+        model=model_name,
+        messages=[
+            {"role": "system", "content": f"Context: {context}"},
+            {"role": "user", "content": message}
+        ]
+    )
+    
+    # Automatic memory storage with fact extraction
+    memory.add(
+        messages=[
+            {"role": "user", "content": message},
+            {"role": "assistant", "content": response.choices[0].message.content}
+        ],
+        user_id=user_id
+    )
+    
+    return {"response": response.choices[0].message.content}
+```
+
+**manifest.json:**
+```json
+{
+  "schema_version": "2.0",
+  "slug": "chatbot",
+  "name": "AI Chatbot",
+  "memory_config": {
+    "enabled": true,
+    "collection_name": "user_memories",
+    "embedding_model_dims": 1536,
+    "enable_cognitive": true,
+    "max_depth": 100
+  },
+  "llm_config": {
+    "provider": "azure_openai",
+    "model": "gpt-4o"
+  }
+}
+```
+
+**Benefits:**
+- ✅ ~30 lines of code (vs 100+ before)
+- ✅ Automatic vector index management
+- ✅ Automatic embedding generation
+- ✅ Automatic fact extraction from conversations
+- ✅ Cognitive features (importance, reinforcement, decay, merging, pruning)
+- ✅ Automatic index updates
+- ✅ User-scoped queries automatically handled
+
 ---
 
 ## Common Migration Patterns
@@ -1171,7 +1684,50 @@ async def get_tasks(
     # ... rest of code
 ```
 
-### Pattern 4: Full Migration (Everything)
+### Pattern 4: Add Memory Service
+
+**Use Case:** You want to add AI memory capabilities to your app.
+
+**Steps:**
+1. Add `memory_config` to `manifest.json`:
+```json
+{
+  "memory_config": {
+    "enabled": true,
+    "collection_name": "user_memories",
+    "embedding_model_dims": 1536
+  }
+}
+```
+
+2. Use memory service in routes:
+```python
+from mdb_engine.dependencies import get_memory_service
+
+@app.post("/chat")
+async def chat(
+    message: str,
+    user_id: str,
+    memory=Depends(get_memory_service)
+):
+    # Search memories
+    memories = memory.search(query=message, user_id=user_id, limit=5)
+    
+    # Add new memory
+    memory.add(messages=[...], user_id=user_id)
+```
+
+3. Remove manual vector index creation:
+```python
+# Remove this:
+@app.on_event("startup")
+async def startup():
+    await db.user_memories.create_index([...])  # No longer needed!
+```
+
+The memory service automatically creates and manages its vector search index!
+
+### Pattern 5: Full Migration (Everything)
 
 **Use Case:** Complete migration with all features.
 
@@ -1181,7 +1737,7 @@ async def get_tasks(
    - Auth configuration
    - Index definitions
    - CORS settings
-   - Services (memory, embeddings, etc.)
+   - Services (memory, embeddings, LLM, WebSockets, etc.)
 
 2. Replace all database access with `get_scoped_db()`
 
@@ -1195,6 +1751,30 @@ async def get_tasks(
    - `get_scoped_db` for database access
    - `get_current_user` for authentication
    - `get_authz_provider` for authorization
+
+### Pattern 6: Add Memory Encryption (CSFLE)
+
+**Use Case:** You want to encrypt sensitive memory data at rest.
+
+**Steps:**
+1. Update `manifest.json` memory config:
+```json
+{
+  "memory_config": {
+    "enabled": true,
+    "encrypted": true,
+    "collection_name": "user_memories"
+  }
+}
+```
+
+2. Set environment variables (optional for Docker/Dev):
+```bash
+# Docker: Auto-generated key used automatically
+# Manual: MDB_CSFLE_LOCAL_KEY=<your-key>
+```
+
+3. No code changes required! The engine handles encryption/decryption transparently.
 
 ---
 
@@ -1340,7 +1920,7 @@ After migration:
 
 5. **Explore Advanced Features**
    - WebSockets
-   - Memory service (Mem0)
+   - Memory service (MongoDB Atlas Vector Search)
    - Embedding service
    - Multi-app scenarios
 

@@ -1,0 +1,787 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Graphs MDB - MDB-Engine Graph Features Demo</title>
+    <style>
+        :root {
+            --bg-primary: #0f0f0f;
+            --bg-secondary: #1a1a1a;
+            --bg-tertiary: #252525;
+            --text-primary: #f0f0f0;
+            --text-secondary: #a0a0a0;
+            --accent-green: #10b981;
+            --accent-blue: #3b82f6;
+            --accent-purple: #8b5cf6;
+            --accent-orange: #f59e0b;
+            --accent-red: #ef4444;
+            --border-color: #333;
+        }
+        
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+        
+        header {
+            text-align: center;
+            padding: 3rem 0;
+            border-bottom: 1px solid var(--border-color);
+            margin-bottom: 2rem;
+        }
+        
+        h1 {
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(135deg, var(--accent-green), var(--accent-blue));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .subtitle {
+            color: var(--text-secondary);
+            font-size: 1.1rem;
+        }
+        
+        .status-badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            background: var(--accent-green);
+            color: white;
+            border-radius: 999px;
+            font-size: 0.875rem;
+            margin-top: 1rem;
+        }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+        
+        .card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1.5rem;
+        }
+        
+        .card h2 {
+            font-size: 1.25rem;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .card h2 .icon {
+            font-size: 1.5rem;
+        }
+        
+        .endpoint-list {
+            list-style: none;
+        }
+        
+        .endpoint-list li {
+            padding: 0.75rem 0;
+            border-bottom: 1px solid var(--border-color);
+        }
+        
+        .endpoint-list li:last-child {
+            border-bottom: none;
+        }
+        
+        .method {
+            display: inline-block;
+            padding: 0.125rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            margin-right: 0.5rem;
+        }
+        
+        .method.get { background: var(--accent-blue); }
+        .method.post { background: var(--accent-green); }
+        .method.put { background: var(--accent-orange); }
+        .method.delete { background: var(--accent-red); }
+        
+        .path {
+            font-family: monospace;
+            color: var(--text-primary);
+        }
+        
+        .description {
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+            margin-top: 0.25rem;
+        }
+        
+        /* Interactive Form Section */
+        .interactive-section {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+        }
+        
+        .interactive-section h2 {
+            margin-bottom: 1.5rem;
+        }
+        
+        .form-group {
+            margin-bottom: 1rem;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 0.5rem;
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+        }
+        
+        input, textarea, select {
+            width: 100%;
+            padding: 0.75rem;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 1rem;
+        }
+        
+        textarea {
+            min-height: 100px;
+            resize: vertical;
+        }
+        
+        input:focus, textarea:focus, select:focus {
+            outline: none;
+            border-color: var(--accent-blue);
+        }
+        
+        button {
+            padding: 0.75rem 1.5rem;
+            background: var(--accent-green);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+        
+        button:hover {
+            opacity: 0.9;
+        }
+        
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .btn-secondary {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+        }
+        
+        .btn-danger {
+            background: var(--accent-red);
+        }
+        
+        .button-group {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+        
+        /* Response Display */
+        .response-area {
+            margin-top: 1.5rem;
+        }
+        
+        .response-area pre {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 1rem;
+            overflow-x: auto;
+            font-family: monospace;
+            font-size: 0.875rem;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .response-area .status {
+            margin-bottom: 0.5rem;
+            font-size: 0.875rem;
+        }
+        
+        .response-area .status.success {
+            color: var(--accent-green);
+        }
+        
+        .response-area .status.error {
+            color: var(--accent-red);
+        }
+        
+        /* Tabs */
+        .tabs {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1.5rem;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 0.5rem;
+        }
+        
+        .tab {
+            padding: 0.5rem 1rem;
+            background: transparent;
+            border: 1px solid transparent;
+            color: var(--text-secondary);
+            cursor: pointer;
+            border-radius: 8px 8px 0 0;
+        }
+        
+        .tab.active {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            border-color: var(--border-color);
+            border-bottom-color: var(--bg-tertiary);
+        }
+        
+        .tab-content {
+            display: none;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        /* Quick Actions */
+        .quick-actions {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+            flex-wrap: wrap;
+        }
+        
+        .quick-actions button {
+            font-size: 0.875rem;
+            padding: 0.5rem 1rem;
+        }
+        
+        footer {
+            text-align: center;
+            padding: 2rem 0;
+            border-top: 1px solid var(--border-color);
+            margin-top: 2rem;
+            color: var(--text-secondary);
+        }
+        
+        footer a {
+            color: var(--accent-blue);
+            text-decoration: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Graphs MDB</h1>
+            <p class="subtitle">MDB-Engine Knowledge Graph Features Demo</p>
+            <span class="status-badge" id="status-badge">Loading...</span>
+        </header>
+        
+        <!-- Quick Actions -->
+        <div class="interactive-section">
+            <h2>Quick Actions</h2>
+            <div class="quick-actions">
+                <button onclick="seedData()">Seed Demo Data</button>
+                <button onclick="getStats()">View Stats</button>
+                <button onclick="listNodes()">List All Nodes</button>
+                <button class="btn-danger" onclick="resetData()">Reset All Data</button>
+            </div>
+            <div class="response-area" id="quick-response" style="display: none;">
+                <div class="status" id="quick-status"></div>
+                <pre id="quick-output"></pre>
+            </div>
+        </div>
+        
+        <!-- Interactive Forms -->
+        <div class="interactive-section">
+            <h2>Try It Out</h2>
+            
+            <div class="tabs">
+                <button class="tab active" onclick="showTab('nodes')">Nodes</button>
+                <button class="tab" onclick="showTab('edges')">Edges</button>
+                <button class="tab" onclick="showTab('traverse')">Traverse</button>
+                <button class="tab" onclick="showTab('search')">Hybrid Search</button>
+                <button class="tab" onclick="showTab('extract')">Extract</button>
+            </div>
+            
+            <!-- Nodes Tab -->
+            <div id="tab-nodes" class="tab-content active">
+                <div class="form-group">
+                    <label>Node ID (format: type:name)</label>
+                    <input type="text" id="node-id" placeholder="person:alex" value="person:alex">
+                </div>
+                <div class="form-group">
+                    <label>Node Type</label>
+                    <select id="node-type">
+                        <option value="person">person</option>
+                        <option value="interest">interest</option>
+                        <option value="event">event</option>
+                        <option value="location">location</option>
+                        <option value="organization">organization</option>
+                        <option value="product">product</option>
+                        <option value="concept">concept</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Name</label>
+                    <input type="text" id="node-name" placeholder="Alex" value="Alex">
+                </div>
+                <div class="form-group">
+                    <label>Properties (JSON)</label>
+                    <textarea id="node-properties">{"occupation": "Engineer", "city": "Seattle"}</textarea>
+                </div>
+                <div class="button-group">
+                    <button onclick="createNode()">Create Node</button>
+                    <button class="btn-secondary" onclick="getNode()">Get Node</button>
+                    <button class="btn-danger" onclick="deleteNode()">Delete Node</button>
+                </div>
+            </div>
+            
+            <!-- Edges Tab -->
+            <div id="tab-edges" class="tab-content">
+                <div class="form-group">
+                    <label>Source Node ID</label>
+                    <input type="text" id="edge-source" placeholder="person:alex" value="person:alex">
+                </div>
+                <div class="form-group">
+                    <label>Relation</label>
+                    <input type="text" id="edge-relation" placeholder="likes" value="likes">
+                </div>
+                <div class="form-group">
+                    <label>Target Node ID</label>
+                    <input type="text" id="edge-target" placeholder="interest:golf" value="interest:golf">
+                </div>
+                <div class="form-group">
+                    <label>Weight (0.0 - 1.0)</label>
+                    <input type="number" id="edge-weight" min="0" max="1" step="0.1" value="0.9">
+                </div>
+                <div class="button-group">
+                    <button onclick="addEdge()">Add Edge</button>
+                    <button class="btn-danger" onclick="removeEdge()">Remove Edge</button>
+                </div>
+            </div>
+            
+            <!-- Traverse Tab -->
+            <div id="tab-traverse" class="tab-content">
+                <div class="form-group">
+                    <label>Start Node ID</label>
+                    <input type="text" id="traverse-node" placeholder="person:john_smith" value="person:john_smith">
+                </div>
+                <div class="form-group">
+                    <label>Max Depth</label>
+                    <input type="number" id="traverse-depth" min="1" max="5" value="2">
+                </div>
+                <div class="button-group">
+                    <button onclick="traverseGraph()">Traverse Graph</button>
+                    <button class="btn-secondary" onclick="getNeighbors()">Get Neighbors (1-hop)</button>
+                </div>
+            </div>
+            
+            <!-- Search Tab -->
+            <div id="tab-search" class="tab-content">
+                <div class="form-group">
+                    <label>Search Query</label>
+                    <input type="text" id="search-query" placeholder="What does John like?" value="What does John like?">
+                </div>
+                <div class="form-group">
+                    <label>Max Depth</label>
+                    <input type="number" id="search-depth" min="1" max="5" value="2">
+                </div>
+                <div class="form-group">
+                    <label>Limit (entry nodes)</label>
+                    <input type="number" id="search-limit" min="1" max="20" value="5">
+                </div>
+                <button onclick="hybridSearch()">Search (GraphRAG)</button>
+            </div>
+            
+            <!-- Extract Tab -->
+            <div id="tab-extract" class="tab-content">
+                <div class="form-group">
+                    <label>Text to Extract From</label>
+                    <textarea id="extract-text" rows="4">My colleague Sarah works at Google and loves hiking. She recently visited Tokyo for a conference.</textarea>
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="extract-auto" checked> Auto-create nodes and edges
+                    </label>
+                </div>
+                <button onclick="extractEntities()">Extract Entities (LLM)</button>
+            </div>
+            
+            <div class="response-area" id="form-response" style="display: none;">
+                <div class="status" id="form-status"></div>
+                <pre id="form-output"></pre>
+            </div>
+        </div>
+        
+        <!-- API Reference -->
+        <h2 style="margin-bottom: 1rem;">API Reference</h2>
+        <div class="grid">
+            <div class="card">
+                <h2><span class="icon">&#128203;</span> Node Operations</h2>
+                <ul class="endpoint-list">
+                    <li>
+                        <span class="method post">POST</span>
+                        <span class="path">/graph/nodes</span>
+                        <div class="description">Create or update a node</div>
+                    </li>
+                    <li>
+                        <span class="method get">GET</span>
+                        <span class="path">/graph/nodes</span>
+                        <div class="description">List all nodes (filter by type)</div>
+                    </li>
+                    <li>
+                        <span class="method get">GET</span>
+                        <span class="path">/graph/nodes/{node_id}</span>
+                        <div class="description">Get a single node</div>
+                    </li>
+                    <li>
+                        <span class="method delete">DELETE</span>
+                        <span class="path">/graph/nodes/{node_id}</span>
+                        <div class="description">Delete a node</div>
+                    </li>
+                </ul>
+            </div>
+            
+            <div class="card">
+                <h2><span class="icon">&#128279;</span> Edge Operations</h2>
+                <ul class="endpoint-list">
+                    <li>
+                        <span class="method post">POST</span>
+                        <span class="path">/graph/edges</span>
+                        <div class="description">Add an edge between nodes</div>
+                    </li>
+                    <li>
+                        <span class="method delete">DELETE</span>
+                        <span class="path">/graph/edges</span>
+                        <div class="description">Remove an edge</div>
+                    </li>
+                </ul>
+            </div>
+            
+            <div class="card">
+                <h2><span class="icon">&#128269;</span> Graph Traversal</h2>
+                <ul class="endpoint-list">
+                    <li>
+                        <span class="method get">GET</span>
+                        <span class="path">/graph/traverse/{node_id}</span>
+                        <div class="description">Traverse from a node (multi-hop)</div>
+                    </li>
+                    <li>
+                        <span class="method get">GET</span>
+                        <span class="path">/graph/neighbors/{node_id}</span>
+                        <div class="description">Get immediate neighbors</div>
+                    </li>
+                </ul>
+            </div>
+            
+            <div class="card">
+                <h2><span class="icon">&#129302;</span> GraphRAG & Extraction</h2>
+                <ul class="endpoint-list">
+                    <li>
+                        <span class="method post">POST</span>
+                        <span class="path">/graph/search</span>
+                        <div class="description">Hybrid search (vector + graph)</div>
+                    </li>
+                    <li>
+                        <span class="method post">POST</span>
+                        <span class="path">/graph/extract</span>
+                        <div class="description">Extract entities from text (LLM)</div>
+                    </li>
+                    <li>
+                        <span class="method get">GET</span>
+                        <span class="path">/graph/stats</span>
+                        <div class="description">Get graph statistics</div>
+                    </li>
+                </ul>
+            </div>
+        </div>
+        
+        <footer>
+            <p>Built with <a href="https://github.com/mongodb-developer/mdb-engine">MDB-Engine</a></p>
+            <p>View <a href="/api">API Overview</a> | <a href="/docs">OpenAPI Docs</a></p>
+        </footer>
+    </div>
+    
+    <script>
+        const API_BASE = '';
+        
+        // Check health on load
+        async function checkHealth() {
+            try {
+                const res = await fetch(`${API_BASE}/health`);
+                const data = await res.json();
+                const badge = document.getElementById('status-badge');
+                if (data.graph_enabled) {
+                    badge.textContent = 'Graph Service Active';
+                    badge.style.background = '#10b981';
+                } else {
+                    badge.textContent = 'Graph Service Disabled';
+                    badge.style.background = '#f59e0b';
+                }
+            } catch (e) {
+                document.getElementById('status-badge').textContent = 'Connection Error';
+                document.getElementById('status-badge').style.background = '#ef4444';
+            }
+        }
+        
+        // Tab switching
+        function showTab(tabName) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+            
+            document.querySelector(`[onclick="showTab('${tabName}')"]`).classList.add('active');
+            document.getElementById(`tab-${tabName}`).classList.add('active');
+        }
+        
+        // Response display helpers
+        function showQuickResponse(data, success = true) {
+            const area = document.getElementById('quick-response');
+            const status = document.getElementById('quick-status');
+            const output = document.getElementById('quick-output');
+            
+            area.style.display = 'block';
+            status.className = 'status ' + (success ? 'success' : 'error');
+            status.textContent = success ? 'Success' : 'Error';
+            output.textContent = JSON.stringify(data, null, 2);
+        }
+        
+        function showFormResponse(data, success = true) {
+            const area = document.getElementById('form-response');
+            const status = document.getElementById('form-status');
+            const output = document.getElementById('form-output');
+            
+            area.style.display = 'block';
+            status.className = 'status ' + (success ? 'success' : 'error');
+            status.textContent = success ? 'Success' : 'Error';
+            output.textContent = JSON.stringify(data, null, 2);
+        }
+        
+        // Quick actions
+        async function seedData() {
+            try {
+                const res = await fetch(`${API_BASE}/demo/seed`, { method: 'POST' });
+                const data = await res.json();
+                showQuickResponse(data, res.ok);
+            } catch (e) {
+                showQuickResponse({ error: e.message }, false);
+            }
+        }
+        
+        async function resetData() {
+            if (!confirm('Delete all graph data?')) return;
+            try {
+                const res = await fetch(`${API_BASE}/demo/reset`, { method: 'POST' });
+                const data = await res.json();
+                showQuickResponse(data, res.ok);
+            } catch (e) {
+                showQuickResponse({ error: e.message }, false);
+            }
+        }
+        
+        async function getStats() {
+            try {
+                const res = await fetch(`${API_BASE}/graph/stats`);
+                const data = await res.json();
+                showQuickResponse(data, res.ok);
+            } catch (e) {
+                showQuickResponse({ error: e.message }, false);
+            }
+        }
+        
+        async function listNodes() {
+            try {
+                const res = await fetch(`${API_BASE}/graph/nodes`);
+                const data = await res.json();
+                showQuickResponse(data, res.ok);
+            } catch (e) {
+                showQuickResponse({ error: e.message }, false);
+            }
+        }
+        
+        // Node operations
+        async function createNode() {
+            try {
+                let properties = {};
+                try {
+                    properties = JSON.parse(document.getElementById('node-properties').value || '{}');
+                } catch (e) {}
+                
+                const res = await fetch(`${API_BASE}/graph/nodes`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        node_id: document.getElementById('node-id').value,
+                        node_type: document.getElementById('node-type').value,
+                        name: document.getElementById('node-name').value,
+                        properties: properties
+                    })
+                });
+                const data = await res.json();
+                showFormResponse(data, res.ok);
+            } catch (e) {
+                showFormResponse({ error: e.message }, false);
+            }
+        }
+        
+        async function getNode() {
+            try {
+                const nodeId = document.getElementById('node-id').value;
+                const res = await fetch(`${API_BASE}/graph/nodes/${encodeURIComponent(nodeId)}`);
+                const data = await res.json();
+                showFormResponse(data, res.ok);
+            } catch (e) {
+                showFormResponse({ error: e.message }, false);
+            }
+        }
+        
+        async function deleteNode() {
+            const nodeId = document.getElementById('node-id').value;
+            if (!confirm(`Delete node "${nodeId}"?`)) return;
+            try {
+                const res = await fetch(`${API_BASE}/graph/nodes/${encodeURIComponent(nodeId)}`, { method: 'DELETE' });
+                const data = await res.json();
+                showFormResponse(data, res.ok);
+            } catch (e) {
+                showFormResponse({ error: e.message }, false);
+            }
+        }
+        
+        // Edge operations
+        async function addEdge() {
+            try {
+                const res = await fetch(`${API_BASE}/graph/edges`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        source_id: document.getElementById('edge-source').value,
+                        relation: document.getElementById('edge-relation').value,
+                        target_id: document.getElementById('edge-target').value,
+                        weight: parseFloat(document.getElementById('edge-weight').value)
+                    })
+                });
+                const data = await res.json();
+                showFormResponse(data, res.ok);
+            } catch (e) {
+                showFormResponse({ error: e.message }, false);
+            }
+        }
+        
+        async function removeEdge() {
+            try {
+                const res = await fetch(`${API_BASE}/graph/edges`, {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        source_id: document.getElementById('edge-source').value,
+                        relation: document.getElementById('edge-relation').value,
+                        target_id: document.getElementById('edge-target').value
+                    })
+                });
+                const data = await res.json();
+                showFormResponse(data, res.ok);
+            } catch (e) {
+                showFormResponse({ error: e.message }, false);
+            }
+        }
+        
+        // Traversal
+        async function traverseGraph() {
+            try {
+                const nodeId = document.getElementById('traverse-node').value;
+                const depth = document.getElementById('traverse-depth').value;
+                const res = await fetch(`${API_BASE}/graph/traverse/${encodeURIComponent(nodeId)}?max_depth=${depth}`);
+                const data = await res.json();
+                showFormResponse(data, res.ok);
+            } catch (e) {
+                showFormResponse({ error: e.message }, false);
+            }
+        }
+        
+        async function getNeighbors() {
+            try {
+                const nodeId = document.getElementById('traverse-node').value;
+                const res = await fetch(`${API_BASE}/graph/neighbors/${encodeURIComponent(nodeId)}`);
+                const data = await res.json();
+                showFormResponse(data, res.ok);
+            } catch (e) {
+                showFormResponse({ error: e.message }, false);
+            }
+        }
+        
+        // Search
+        async function hybridSearch() {
+            try {
+                const res = await fetch(`${API_BASE}/graph/search`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        query: document.getElementById('search-query').value,
+                        max_depth: parseInt(document.getElementById('search-depth').value),
+                        limit: parseInt(document.getElementById('search-limit').value)
+                    })
+                });
+                const data = await res.json();
+                showFormResponse(data, res.ok);
+            } catch (e) {
+                showFormResponse({ error: e.message }, false);
+            }
+        }
+        
+        // Extract
+        async function extractEntities() {
+            try {
+                const res = await fetch(`${API_BASE}/graph/extract`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        text: document.getElementById('extract-text').value,
+                        auto_create: document.getElementById('extract-auto').checked
+                    })
+                });
+                const data = await res.json();
+                showFormResponse(data, res.ok);
+            } catch (e) {
+                showFormResponse({ error: e.message }, false);
+            }
+        }
+        
+        // Initialize
+        checkHealth();
+    </script>
+</body>
+</html>
