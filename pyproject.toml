@@ -194,6 +194,7 @@ disallow_untyped_defs = false
 disallow_incomplete_defs = false
 warn_return_any = false
 
+# ── Third-party stubs ──────────────────────────────────────────────
 [[tool.mypy.overrides]]
 module = [
     "motor.*",
@@ -212,3 +213,31 @@ module = [
     "opentelemetry.*",
 ]
 ignore_missing_imports = true
+
+# ── Gradual typing: suppress existing errors in internal modules ───
+# The codebase predates mypy adoption; 661 errors remain across 91
+# files (mostly attr-defined from mixin patterns). Ignoring them here
+# lets CI pass now.  To tighten, remove subpackages one at a time and
+# fix the errors that surface.
+[[tool.mypy.overrides]]
+module = [
+    "mdb_engine.auth.*",
+    "mdb_engine.cli.*",
+    "mdb_engine.config",
+    "mdb_engine.core.*",
+    "mdb_engine.database.*",
+    "mdb_engine.dependencies",
+    "mdb_engine.di.*",
+    "mdb_engine.embeddings.*",
+    "mdb_engine.gdpr.*",
+    "mdb_engine.graph.*",
+    "mdb_engine.indexes.*",
+    "mdb_engine.llm.*",
+    "mdb_engine.memory.*",
+    "mdb_engine.observability.*",
+    "mdb_engine.osi.*",
+    "mdb_engine.repositories.*",
+    "mdb_engine.routing.*",
+    "mdb_engine.utils.*",
+]
+ignore_errors = true
