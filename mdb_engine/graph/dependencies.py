@@ -86,14 +86,21 @@ async def get_graph_service_dependency(request: Request) -> GraphService:
             if hasattr(app.state, "engine") and app.state.engine is not None:
                 engine = app.state.engine
                 slug = manifest.get("slug", "default")
-                collection_name = graph_config.get("collection_name", f"{slug}__kg")
+                # Default to "kg", then prefix with slug
+                base_collection_name = graph_config.get("collection_name", "kg")
+                # Normalize legacy "__kg" to "kg" (private attributes are blocked by ScopedMongoWrapper)
+                if base_collection_name == "__kg":
+                    base_collection_name = "kg"
+                if base_collection_name.startswith(f"{slug}_"):
+                    collection_name = base_collection_name
+                else:
+                    collection_name = f"{slug}_{base_collection_name}"
 
                 try:
-                    # Get PyMongo collection from connection manager
+                    # Use Motor async collections directly - forward-facing DI
                     motor_client = engine._connection_manager.mongo_client  # noqa: SLF001
-                    pymongo_client = motor_client.delegate
-                    pymongo_db = pymongo_client[engine.db_name]
-                    collection = pymongo_db[collection_name]
+                    motor_db = motor_client[engine.db_name]
+                    collection = motor_db[collection_name]  # Motor AsyncIOMotorCollection
 
                     service = get_graph_service(
                         app_slug=slug,
@@ -129,7 +136,7 @@ def get_graph_service_for_app(
     Args:
         app_slug: Application slug
         config: Graph service configuration
-        collection: PyMongo collection for graph nodes
+        collection: Motor AsyncIOMotorCollection for graph nodes (REQUIRED - must be from MDB-Engine connection manager)
         llm_service: Optional LLMService instance
         embedding_service: Optional EmbeddingService instance
 

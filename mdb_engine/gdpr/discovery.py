@@ -63,9 +63,7 @@ class DataDiscoveryService:
         # Filter by app_slug if provided
         if app_slug:
             collection_names = [
-                name
-                for name in collection_names
-                if name.startswith(f"{app_slug}_") or name in KNOWN_USER_COLLECTIONS
+                name for name in collection_names if name.startswith(f"{app_slug}_") or name in KNOWN_USER_COLLECTIONS
             ]
 
         # Build query
@@ -91,8 +89,7 @@ class DataDiscoveryService:
                         }
                     )
                     logger.debug(
-                        f"Found {count} documents in collection '{collection_name}' "
-                        f"for user '{user_identifier}'"
+                        f"Found {count} documents in collection '{collection_name}' " f"for user '{user_identifier}'"
                     )
             except PyMongoError as e:
                 logger.warning(f"Error checking collection '{collection_name}': {e}. Skipping.")

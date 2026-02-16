@@ -13,10 +13,12 @@ import abc
 import logging
 from typing import Any
 
+from ..exceptions import MongoDBEngineError
+
 logger = logging.getLogger(__name__)
 
 
-class AuthorizationError(Exception):
+class AuthorizationError(MongoDBEngineError):
     """
     Base exception for authorization failures.
 
@@ -169,7 +171,7 @@ class BaseAuthorizationProvider(abc.ABC):
     def _mark_initialized(self) -> None:
         """Mark the provider as initialized (internal use only)."""
         self._initialized = True
-        logger.info(f"✅ {self._engine_name} authorization provider initialized successfully")
+        logger.info(f"{self._engine_name} authorization provider initialized successfully")
 
     def is_casbin(self) -> bool:
         """
@@ -245,8 +247,7 @@ class BaseAuthorizationProvider(abc.ABC):
             False (operation failed)
         """
         logger.warning(
-            f"{self._engine_name} {operation} failed: "
-            f"params={params}, error={type(error).__name__}: {error}",
+            f"{self._engine_name} {operation} failed: " f"params={params}, error={type(error).__name__}: {error}",
             exc_info=True,
         )
         return False

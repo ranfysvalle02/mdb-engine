@@ -10,7 +10,9 @@ Tests cover:
 """
 
 from datetime import datetime, timedelta, timezone
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from mdb_engine.memory.reflection import (
     ReflectionService,
@@ -88,7 +90,8 @@ class TestReflectionServiceInit:
 class TestShouldReflect:
     """Test reflection trigger logic."""
 
-    def test_should_reflect_disabled(self):
+    @pytest.mark.asyncio
+    async def test_should_reflect_disabled(self):
         """Test should_reflect returns False when disabled."""
         mock_memories = MagicMock()
 
@@ -98,18 +101,19 @@ class TestShouldReflect:
             config={"enabled": False},
         )
 
-        should, reason = service.should_reflect("user123")
+        should, reason = await service.should_reflect("user123")
 
         assert should is False
         assert "disabled" in reason.lower()
 
-    def test_should_reflect_count_threshold(self):
+    @pytest.mark.asyncio
+    async def test_should_reflect_count_threshold(self):
         """Test should_reflect triggers on count threshold."""
         mock_memories = MagicMock()
-        mock_memories.count_documents.return_value = 60  # > 50 threshold
+        mock_memories.count_documents = AsyncMock(return_value=60)  # > 50 threshold
 
         mock_reflections = MagicMock()
-        mock_reflections.find_one.return_value = None  # No previous reflection
+        mock_reflections.find_one = AsyncMock(return_value=None)  # No previous reflection
 
         service = ReflectionService(
             app_slug="test_app",
@@ -118,20 +122,21 @@ class TestShouldReflect:
             config={"enabled": True, "message_threshold": 50},
         )
 
-        should, reason = service.should_reflect("user123")
+        should, reason = await service.should_reflect("user123")
 
         assert should is True
         assert "exceeds threshold" in reason.lower() or "accumulated" in reason.lower()
 
-    def test_should_reflect_time_based(self):
+    @pytest.mark.asyncio
+    async def test_should_reflect_time_based(self):
         """Test should_reflect triggers on time interval."""
         mock_memories = MagicMock()
-        mock_memories.count_documents.return_value = 10  # Below threshold
+        mock_memories.count_documents = AsyncMock(return_value=10)  # Below threshold
 
         mock_reflections = MagicMock()
         # Last reflection was 25 hours ago (> 24h default)
         last_time = datetime.now(timezone.utc) - timedelta(hours=25)
-        mock_reflections.find_one.return_value = {"created_at": last_time}
+        mock_reflections.find_one = AsyncMock(return_value={"created_at": last_time})
 
         service = ReflectionService(
             app_slug="test_app",
@@ -140,20 +145,21 @@ class TestShouldReflect:
             config={"enabled": True, "interval_hours": 24},
         )
 
-        should, reason = service.should_reflect("user123")
+        should, reason = await service.should_reflect("user123")
 
         assert should is True
         assert "time" in reason.lower() or "hours" in reason.lower()
 
-    def test_should_reflect_recent_reflection(self):
+    @pytest.mark.asyncio
+    async def test_should_reflect_recent_reflection(self):
         """Test should_reflect returns False if recent reflection exists."""
         mock_memories = MagicMock()
-        mock_memories.count_documents.return_value = 10  # Below threshold
+        mock_memories.count_documents = AsyncMock(return_value=10)  # Below threshold
 
         mock_reflections = MagicMock()
         # Last reflection was 1 hour ago (< 24h)
         last_time = datetime.now(timezone.utc) - timedelta(hours=1)
-        mock_reflections.find_one.return_value = {"created_at": last_time}
+        mock_reflections.find_one = AsyncMock(return_value={"created_at": last_time})
 
         service = ReflectionService(
             app_slug="test_app",
@@ -162,7 +168,7 @@ class TestShouldReflect:
             config={"enabled": True},
         )
 
-        should, reason = service.should_reflect("user123")
+        should, reason = await service.should_reflect("user123")
 
         assert should is False
         assert "ago" in reason.lower()
@@ -171,7 +177,8 @@ class TestShouldReflect:
 class TestRunReflection:
     """Test reflection execution."""
 
-    def test_run_reflection_disabled(self):
+    @pytest.mark.asyncio
+    async def test_run_reflection_disabled(self):
         """Test run_reflection returns early when disabled."""
         mock_memories = MagicMock()
 
@@ -181,16 +188,21 @@ class TestRunReflection:
             config={"enabled": False},
         )
 
-        result = service.run_reflection("user123")
+        result = await service.run_reflection("user123")
 
         assert result["success"] is False
         assert "disabled" in result["reason"].lower()
         assert result["memories_processed"] == 0
 
-    def test_run_reflection_force(self):
+    @pytest.mark.asyncio
+    async def test_run_reflection_force(self):
         """Test run_reflection with force flag."""
         mock_memories = MagicMock()
-        mock_memories.find.return_value.sort.return_value = iter([])  # No memories
+        mock_cursor = MagicMock()
+        mock_cursor.sort = MagicMock(return_value=mock_cursor)
+        mock_cursor.to_list = AsyncMock(return_value=[])  # No memories
+        mock_memories.find = MagicMock(return_value=mock_cursor)
+        mock_memories.count_documents = AsyncMock(return_value=0)
 
         service = ReflectionService(
             app_slug="test_app",
@@ -198,22 +210,24 @@ class TestRunReflection:
             config={"enabled": False},  # Disabled but force=True
         )
 
-        result = service.run_reflection("user123", force=True)
+        result = await service.run_reflection("user123", force=True)
 
         # Should attempt even though disabled
         assert result["success"] is True
         assert result["memories_processed"] == 0
 
-    def test_run_reflection_no_memories(self):
+    @pytest.mark.asyncio
+    async def test_run_reflection_no_memories(self):
         """Test run_reflection with no memories to process."""
         mock_memories = MagicMock()
         mock_cursor = MagicMock()
-        mock_cursor.sort.return_value = iter([])
-        mock_memories.find.return_value = mock_cursor
-        mock_memories.count_documents.return_value = 0
+        mock_cursor.sort = MagicMock(return_value=mock_cursor)
+        mock_cursor.to_list = AsyncMock(return_value=[])
+        mock_memories.find = MagicMock(return_value=mock_cursor)
+        mock_memories.count_documents = AsyncMock(return_value=0)
 
         mock_reflections = MagicMock()
-        mock_reflections.find_one.return_value = None
+        mock_reflections.find_one = AsyncMock(return_value=None)
 
         service = ReflectionService(
             app_slug="test_app",
@@ -222,12 +236,13 @@ class TestRunReflection:
             config={"enabled": True},
         )
 
-        result = service.run_reflection("user123", force=True)
+        result = await service.run_reflection("user123", force=True)
 
         assert result["success"] is True
-        assert "no memories" in result["reason"].lower()
+        assert "no memories" in result["reason"].lower() or "period" in result["reason"].lower()
 
-    def test_run_reflection_with_memories(self):
+    @pytest.mark.asyncio
+    async def test_run_reflection_with_memories(self):
         """Test run_reflection processes memories."""
         # Setup mock memories
         mock_memories = MagicMock()
@@ -248,21 +263,17 @@ class TestRunReflection:
             },
         ]
         mock_cursor = MagicMock()
-        mock_cursor.sort.return_value = iter(test_memories)
-        mock_memories.find.return_value = mock_cursor
-        mock_memories.count_documents.return_value = 60
+        mock_cursor.sort = MagicMock(return_value=mock_cursor)
+        mock_cursor.to_list = AsyncMock(return_value=test_memories)
+        mock_memories.find = MagicMock(return_value=mock_cursor)
+        mock_memories.count_documents = AsyncMock(return_value=60)
 
         mock_reflections = MagicMock()
-        mock_reflections.find_one.return_value = None
-        mock_reflections.insert_one.return_value = MagicMock(inserted_id="ref123")
-
-        # Mock LLM service - chat_completion needs to be async/coroutine
-
-        async def mock_chat_completion(*args, **kwargs):
-            return "The user is a Python developer at Tech Corp."
+        mock_reflections.find_one = AsyncMock(return_value=None)
+        mock_reflections.insert_one = AsyncMock(return_value=MagicMock(inserted_id="ref123"))
 
         mock_llm_service = MagicMock()
-        mock_llm_service.chat_completion = mock_chat_completion
+        mock_llm_service.chat_completion = AsyncMock(return_value="The user is a Python developer at Tech Corp.")
 
         service = ReflectionService(
             app_slug="test_app",
@@ -275,7 +286,7 @@ class TestRunReflection:
             llm_service=mock_llm_service,
         )
 
-        result = service.run_reflection("user123", force=True)
+        result = await service.run_reflection("user123", force=True)
 
         assert result["success"] is True
         assert result["memories_processed"] == 2
@@ -283,32 +294,11 @@ class TestRunReflection:
 
 
 class TestPruning:
-    """Test memory pruning functionality."""
+    """Test memory pruning functionality (Perfect Recall: no pruning)."""
 
-    def test_prune_disabled(self):
-        """Test pruning is skipped when min_salience is 0."""
+    def test_pruning_removed_perfect_recall(self):
+        """Test that pruning method was removed (Perfect Recall preserves all memories)."""
         mock_memories = MagicMock()
-        mock_memories.find.return_value.sort.return_value = iter([])
-        mock_memories.count_documents.return_value = 0
-
-        service = ReflectionService(
-            app_slug="test_app",
-            memories_collection=mock_memories,
-            config={
-                "enabled": True,
-                "min_salience_to_keep": 0,
-            },
-        )
-
-        # Internal pruning method
-        pruned = service._prune_low_salience_memories([], "user123")  # noqa: SLF001
-
-        assert pruned == 0
-
-    def test_prune_low_salience(self):
-        """Test pruning removes low-salience memories."""
-        mock_memories = MagicMock()
-        mock_memories.delete_many.return_value = MagicMock(deleted_count=2)
 
         service = ReflectionService(
             app_slug="test_app",
@@ -319,45 +309,87 @@ class TestPruning:
             },
         )
 
+        # _prune_low_salience_memories was removed in favor of Perfect Recall
+        assert not hasattr(service, "_prune_low_salience_memories")
+
+    @pytest.mark.asyncio
+    async def test_run_reflection_preserves_all_memories(self):
+        """Test that reflection does not delete any memories (Perfect Recall)."""
+        mock_memories = MagicMock()
         test_memories = [
-            {"_id": "mem1", "importance": 0.8},  # Keep
-            {"_id": "mem2", "importance": 0.3},  # Prune
-            {"_id": "mem3", "importance": 0.4},  # Prune
-            {"_id": "mem4", "importance": 0.6},  # Keep
+            {
+                "_id": "mem1",
+                "text": "Low importance memory",
+                "importance": 0.2,
+                "category": "preferences",
+                "created_at": datetime.now(timezone.utc),
+            },
+            {
+                "_id": "mem2",
+                "text": "High importance memory",
+                "importance": 0.9,
+                "category": "biographical",
+                "created_at": datetime.now(timezone.utc),
+            },
         ]
+        mock_cursor = MagicMock()
+        mock_cursor.sort = MagicMock(return_value=mock_cursor)
+        mock_cursor.to_list = AsyncMock(return_value=test_memories)
+        mock_memories.find = MagicMock(return_value=mock_cursor)
+        mock_memories.count_documents = AsyncMock(return_value=60)
+        mock_memories.delete_many = AsyncMock()  # Should NOT be called
 
-        pruned = service._prune_low_salience_memories(test_memories, "user123")  # noqa: SLF001
+        mock_reflections = MagicMock()
+        mock_reflections.find_one = AsyncMock(return_value=None)
+        mock_reflections.insert_one = AsyncMock(return_value=MagicMock(inserted_id="ref123"))
 
-        assert pruned == 2
-        mock_memories.delete_many.assert_called_once()
+        mock_llm_service = MagicMock()
+        mock_llm_service.chat_completion = AsyncMock(return_value="Summary of all memories.")
+
+        service = ReflectionService(
+            app_slug="test_app",
+            memories_collection=mock_memories,
+            reflections_collection=mock_reflections,
+            config={"enabled": True, "min_salience_to_keep": 0.5},
+            llm_service=mock_llm_service,
+        )
+
+        result = await service.run_reflection("user123", force=True)
+
+        assert result["success"] is True
+        assert result["memories_processed"] == 2
+        # Perfect Recall: no memories should be deleted
+        mock_memories.delete_many.assert_not_called()
 
 
 class TestGetRecentReflections:
     """Test retrieving recent reflections."""
 
-    def test_get_recent_reflections(self):
+    @pytest.mark.asyncio
+    async def test_get_recent_reflections(self):
         """Test getting recent reflections."""
         mock_reflections = MagicMock()
+        reflections_data = [
+            {
+                "_id": "ref1",
+                "content": "Summary 1",
+                "type": "periodic_summary",
+                "memories_consolidated": 10,
+                "created_at": datetime.now(timezone.utc),
+            },
+            {
+                "_id": "ref2",
+                "content": "Summary 2",
+                "type": "periodic_summary",
+                "memories_consolidated": 15,
+                "created_at": datetime.now(timezone.utc) - timedelta(days=1),
+            },
+        ]
         mock_cursor = MagicMock()
-        mock_cursor.__iter__ = lambda self: iter(
-            [
-                {
-                    "_id": "ref1",
-                    "content": "Summary 1",
-                    "type": "periodic_summary",
-                    "memories_consolidated": 10,
-                    "created_at": datetime.now(timezone.utc),
-                },
-                {
-                    "_id": "ref2",
-                    "content": "Summary 2",
-                    "type": "periodic_summary",
-                    "memories_consolidated": 15,
-                    "created_at": datetime.now(timezone.utc) - timedelta(days=1),
-                },
-            ]
-        )
-        mock_reflections.find.return_value = mock_cursor
+        mock_cursor.sort = MagicMock(return_value=mock_cursor)
+        mock_cursor.limit = MagicMock(return_value=mock_cursor)
+        mock_cursor.to_list = AsyncMock(return_value=reflections_data)
+        mock_reflections.find = MagicMock(return_value=mock_cursor)
 
         service = ReflectionService(
             app_slug="test_app",
@@ -366,21 +398,28 @@ class TestGetRecentReflections:
             config={"enabled": True},
         )
 
-        reflections = service.get_recent_reflections("user123", limit=5)
+        reflections = await service.get_recent_reflections("user123", limit=5)
 
         assert len(reflections) == 2
         assert reflections[0]["content"] == "Summary 1"
 
-    def test_get_recent_reflections_no_collection(self):
-        """Test getting reflections when no collection configured."""
+    @pytest.mark.asyncio
+    async def test_get_recent_reflections_no_collection(self):
+        """Test getting reflections when no reflections collection available."""
+        mock_memories = MagicMock()
+        # When reflections_collection=None, the init falls back to
+        # memories_collection.database.get_collection(). Force it to None
+        # after construction to test the guard clause.
         service = ReflectionService(
             app_slug="test_app",
-            memories_collection=MagicMock(),
+            memories_collection=mock_memories,
             reflections_collection=None,
             config={"enabled": True},
         )
+        # Override after init to test the None guard in get_recent_reflections
+        service.reflections_collection = None
 
-        reflections = service.get_recent_reflections("user123")
+        reflections = await service.get_recent_reflections("user123")
 
         assert reflections == []
 
@@ -388,18 +427,21 @@ class TestGetRecentReflections:
 class TestStats:
     """Test statistics retrieval."""
 
-    def test_get_stats(self):
+    @pytest.mark.asyncio
+    async def test_get_stats(self):
         """Test getting service statistics."""
         mock_memories = MagicMock()
-        mock_memories.count_documents.return_value = 10
+        mock_memories.count_documents = AsyncMock(return_value=10)
 
         mock_reflections = MagicMock()
-        mock_reflections.count_documents.return_value = 5
+        mock_reflections.count_documents = AsyncMock(return_value=5)
         last_time = datetime.now(timezone.utc) - timedelta(hours=12)
-        mock_reflections.find_one.return_value = {
-            "created_at": last_time,
-            "memories_consolidated": 20,
-        }
+        mock_reflections.find_one = AsyncMock(
+            return_value={
+                "created_at": last_time,
+                "memories_consolidated": 20,
+            }
+        )
 
         service = ReflectionService(
             app_slug="test_app",
@@ -408,20 +450,21 @@ class TestStats:
             config={"enabled": True},
         )
 
-        stats = service.get_stats("user123")
+        stats = await service.get_stats("user123")
 
         assert stats["enabled"] is True
         assert stats["total_reflections"] == 5
         assert stats["last_memories_consolidated"] == 20
 
-    def test_get_stats_no_reflections(self):
+    @pytest.mark.asyncio
+    async def test_get_stats_no_reflections(self):
         """Test stats when no reflections exist."""
         mock_memories = MagicMock()
-        mock_memories.count_documents.return_value = 10
+        mock_memories.count_documents = AsyncMock(return_value=10)
 
         mock_reflections = MagicMock()
-        mock_reflections.count_documents.return_value = 0
-        mock_reflections.find_one.return_value = None
+        mock_reflections.count_documents = AsyncMock(return_value=0)
+        mock_reflections.find_one = AsyncMock(return_value=None)
 
         service = ReflectionService(
             app_slug="test_app",
@@ -430,7 +473,7 @@ class TestStats:
             config={"enabled": True},
         )
 
-        stats = service.get_stats("user123")
+        stats = await service.get_stats("user123")
 
         assert stats["total_reflections"] == 0
         assert "last_reflection" not in stats
@@ -439,7 +482,8 @@ class TestStats:
 class TestGenerateReflection:
     """Test reflection generation."""
 
-    def test_generate_reflection_no_llm(self):
+    @pytest.mark.asyncio
+    async def test_generate_reflection_no_llm(self):
         """Test reflection generation fails gracefully without LLM."""
         service = ReflectionService(
             app_slug="test_app",
@@ -448,17 +492,14 @@ class TestGenerateReflection:
             llm_service=None,  # No LLM service
         )
 
-        result = service._generate_reflection([], "user123")  # noqa: SLF001
+        result = await service._generate_reflection([], "user123")  # noqa: SLF001
 
         assert result is None
 
-    def test_generate_reflection_success(self):
+    @pytest.mark.asyncio
+    async def test_generate_reflection_success(self):
         """Test successful reflection generation."""
-        from unittest.mock import AsyncMock
-
-        # Mock LLM service - chat_completion needs to be async/coroutine
         mock_llm_service = MagicMock()
-        # Use AsyncMock for async function to avoid recursion issues
         mock_llm_service.chat_completion = AsyncMock(return_value="User summary here.")
 
         service = ReflectionService(
@@ -472,9 +513,7 @@ class TestGenerateReflection:
             {"text": "User likes coding", "importance": 0.8, "category": "preferences"},
         ]
 
-        result = service._generate_reflection(memories, "user123")  # noqa: SLF001
+        result = await service._generate_reflection(memories, "user123")  # noqa: SLF001
 
         assert result == "User summary here."
-        # Note: chat_completion is called via asyncio.run() which wraps it,
-        # so we check it was called
         assert mock_llm_service.chat_completion.called

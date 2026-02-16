@@ -22,9 +22,7 @@ from .config_defaults import (
 logger = logging.getLogger(__name__)
 
 
-def merge_config_with_defaults(
-    user_config: dict[str, Any], defaults: dict[str, Any]
-) -> dict[str, Any]:
+def merge_config_with_defaults(user_config: dict[str, Any], defaults: dict[str, Any]) -> dict[str, Any]:
     """
     Deep merge user config with defaults.
 
@@ -86,9 +84,7 @@ def get_password_policy(request: Request) -> dict[str, Any]:
         Password policy configuration dictionary
     """
     security_config = get_security_config(request)
-    return security_config.get(
-        "password_policy", SECURITY_CONFIG_DEFAULTS["password_policy"].copy()
-    )
+    return security_config.get("password_policy", SECURITY_CONFIG_DEFAULTS["password_policy"].copy())
 
 
 def get_session_fingerprinting_config(request: Request) -> dict[str, Any]:
@@ -119,9 +115,7 @@ def get_account_lockout_config(request: Request) -> dict[str, Any]:
         Account lockout configuration dictionary
     """
     security_config = get_security_config(request)
-    return security_config.get(
-        "account_lockout", SECURITY_CONFIG_DEFAULTS["account_lockout"].copy()
-    )
+    return security_config.get("account_lockout", SECURITY_CONFIG_DEFAULTS["account_lockout"].copy())
 
 
 def get_ip_validation_config(request: Request) -> dict[str, Any]:
@@ -149,9 +143,7 @@ def get_token_fingerprinting_config(request: Request) -> dict[str, Any]:
         Token fingerprinting configuration dictionary
     """
     security_config = get_security_config(request)
-    return security_config.get(
-        "token_fingerprinting", SECURITY_CONFIG_DEFAULTS["token_fingerprinting"].copy()
-    )
+    return security_config.get("token_fingerprinting", SECURITY_CONFIG_DEFAULTS["token_fingerprinting"].copy())
 
 
 def get_token_management_config(request: Request) -> dict[str, Any]:

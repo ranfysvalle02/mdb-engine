@@ -87,9 +87,7 @@ class TestAppSecretsManager:
         replacement_doc = mock_collection.replace_one.call_args[0][1]
         assert replacement_doc["rotation_count"] == 3  # Incremented
 
-    async def test_verify_app_secret_valid(
-        self, app_secrets_manager, mock_mongo_db, encryption_service
-    ):
+    async def test_verify_app_secret_valid(self, app_secrets_manager, mock_mongo_db, encryption_service):
         """Test verifying correct secret."""
         mock_db, mock_collection = mock_mongo_db
 
@@ -108,9 +106,7 @@ class TestAppSecretsManager:
         result = await app_secrets_manager.verify_app_secret("test_app", secret)
         assert result is True
 
-    async def test_verify_app_secret_invalid(
-        self, app_secrets_manager, mock_mongo_db, encryption_service
-    ):
+    async def test_verify_app_secret_invalid(self, app_secrets_manager, mock_mongo_db, encryption_service):
         """Test verifying wrong secret."""
         mock_db, mock_collection = mock_mongo_db
 
@@ -208,8 +204,8 @@ class TestAppSecretsManager:
         assert "updated_at" in call_args
         assert "rotation_count" in call_args
 
-    def test_verify_app_secret_sync(self, app_secrets_manager, mock_mongo_db, encryption_service):
-        """Test synchronous secret verification."""
+    async def test_verify_app_secret_async(self, app_secrets_manager, mock_mongo_db, encryption_service):
+        """Test async secret verification."""
         mock_db, mock_collection = mock_mongo_db
 
         secret = "my_secret"
@@ -225,15 +221,13 @@ class TestAppSecretsManager:
             }
         )
 
-        # Should work when no async context
-        result = app_secrets_manager.verify_app_secret_sync("test_app", secret)
+        result = await app_secrets_manager.verify_app_secret("test_app", secret)
         assert result is True
 
-    def test_app_secret_exists_sync(self, app_secrets_manager, mock_mongo_db):
-        """Test synchronous secret existence check."""
+    async def test_app_secret_exists_async(self, app_secrets_manager, mock_mongo_db):
+        """Test async secret existence check."""
         mock_db, mock_collection = mock_mongo_db
         mock_collection.find_one = AsyncMock(return_value={"_id": "test_app"})
 
-        # Should work when no async context
-        result = app_secrets_manager.app_secret_exists_sync("test_app")
+        result = await app_secrets_manager.app_secret_exists("test_app")
         assert result is True

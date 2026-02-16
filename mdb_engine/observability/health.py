@@ -6,9 +6,10 @@ Provides health check functions for monitoring system status.
 
 import asyncio
 import logging
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
@@ -74,13 +75,19 @@ class HealthChecker:
         Run all registered health checks.
 
         Returns:
-            Dictionary with overall status and individual check results
+            Dictionary with overall status, individual check results,
+            and per-check / overall timing in milliseconds.
         """
+        overall_start = time.monotonic()
         results: list[HealthCheckResult] = []
 
         for check_func in self._checks:
+            check_start = time.monotonic()
             try:
                 result = await check_func()
+                # Attach per-check timing
+                result.details = result.details or {}
+                result.details["duration_ms"] = round((time.monotonic() - check_start) * 1000, 1)
                 results.append(result)
             except (
                 RuntimeError,
@@ -90,12 +97,14 @@ class HealthChecker:
                 ConnectionError,
                 OSError,
             ) as e:
+                duration_ms = round((time.monotonic() - check_start) * 1000, 1)
                 logger.error(f"Health check {check_func.__name__} failed: {e}", exc_info=True)
                 results.append(
                     HealthCheckResult(
                         name=check_func.__name__,
                         status=HealthStatus.UNKNOWN,
                         message=f"Check failed: {str(e)}",
+                        details={"duration_ms": duration_ms},
                     )
                 )
 
@@ -112,14 +121,13 @@ class HealthChecker:
 
         return {
             "status": overall_status.value,
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "response_time_ms": round((time.monotonic() - overall_start) * 1000, 1),
             "checks": [r.to_dict() for r in results],
         }
 
 
-async def check_mongodb_health(
-    mongo_client: Any | None, timeout_seconds: float = 5.0
-) -> HealthCheckResult:
+async def check_mongodb_health(mongo_client: Any | None, timeout_seconds: float = 5.0) -> HealthCheckResult:
     """
     Check MongoDB connection health.
 
@@ -278,9 +286,7 @@ async def check_pool_health(
             # No usage data available, but client is connected
             # This is fine - detailed metrics might not be available but client works
             status = HealthStatus.HEALTHY
-            message = metrics.get(
-                "note", "Connection pool is operational (detailed metrics unavailable)"
-            )
+            message = metrics.get("note", "Connection pool is operational (detailed metrics unavailable)")
 
         return HealthCheckResult(
             name="connection_pool",
@@ -294,3 +300,153 @@ async def check_pool_health(
             status=HealthStatus.UNKNOWN,
             message=f"Failed to check pool health: {str(e)}",
         )
+
+
+# =========================================================================
+# Service health checks (LLM, Embeddings, Graph)
+# =========================================================================
+
+
+async def check_llm_health(llm_service: Any | None) -> HealthCheckResult:
+    """Check LLM service health by inspecting circuit breaker state.
+
+    Args:
+        llm_service: LLMService instance (or any object with ``_circuit_breaker``)
+
+    Returns:
+        HealthCheckResult with circuit breaker state details
+    """
+    if llm_service is None:
+        return HealthCheckResult(
+            name="llm",
+            status=HealthStatus.UNKNOWN,
+            message="LLM service not configured",
+        )
+
+    cb = getattr(llm_service, "_circuit_breaker", None)
+    if cb is None:
+        return HealthCheckResult(
+            name="llm",
+            status=HealthStatus.HEALTHY,
+            message="LLM service available (no circuit breaker)",
+        )
+
+    stats = cb.stats
+    state = stats.get("state", "unknown")
+
+    if state == "open":
+        status = HealthStatus.UNHEALTHY
+        message = (
+            f"LLM circuit breaker OPEN -- {stats['failure_count']} failures, " f"{stats['total_trips']} total trips"
+        )
+    elif state == "half_open":
+        status = HealthStatus.DEGRADED
+        message = "LLM circuit breaker HALF-OPEN -- probing for recovery"
+    else:
+        status = HealthStatus.HEALTHY
+        message = "LLM service is healthy"
+
+    return HealthCheckResult(
+        name="llm",
+        status=status,
+        message=message,
+        details=stats,
+    )
+
+
+async def check_embedding_health(embedding_provider: Any | None) -> HealthCheckResult:
+    """Check embedding service health by inspecting circuit breaker state.
+
+    Args:
+        embedding_provider: EmbeddingProvider instance
+
+    Returns:
+        HealthCheckResult
+    """
+    if embedding_provider is None:
+        return HealthCheckResult(
+            name="embeddings",
+            status=HealthStatus.UNKNOWN,
+            message="Embedding provider not configured",
+        )
+
+    cb = getattr(embedding_provider, "_circuit_breaker", None)
+    if cb is None:
+        return HealthCheckResult(
+            name="embeddings",
+            status=HealthStatus.HEALTHY,
+            message="Embedding provider available (no circuit breaker)",
+        )
+
+    stats = cb.stats
+    state = stats.get("state", "unknown")
+
+    if state == "open":
+        status = HealthStatus.UNHEALTHY
+        message = f"Embedding circuit breaker OPEN -- {stats['failure_count']} failures"
+    elif state == "half_open":
+        status = HealthStatus.DEGRADED
+        message = "Embedding circuit breaker HALF-OPEN"
+    else:
+        status = HealthStatus.HEALTHY
+        message = "Embedding service is healthy"
+
+    return HealthCheckResult(
+        name="embeddings",
+        status=status,
+        message=message,
+        details=stats,
+    )
+
+
+async def check_graph_health(graph_service: Any | None) -> HealthCheckResult:
+    """Check graph service health by inspecting circuit breaker state.
+
+    Args:
+        graph_service: GraphService instance
+
+    Returns:
+        HealthCheckResult
+    """
+    if graph_service is None:
+        return HealthCheckResult(
+            name="graph",
+            status=HealthStatus.UNKNOWN,
+            message="Graph service not configured",
+        )
+
+    enabled = getattr(graph_service, "_enabled", False)
+    if not enabled:
+        return HealthCheckResult(
+            name="graph",
+            status=HealthStatus.HEALTHY,
+            message="Graph service is disabled (by configuration)",
+        )
+
+    cb = getattr(graph_service, "_circuit_breaker", None)
+    if cb is None:
+        return HealthCheckResult(
+            name="graph",
+            status=HealthStatus.HEALTHY,
+            message="Graph service available (no circuit breaker)",
+        )
+
+    stats = cb.stats
+    state = stats.get("state", "unknown")
+
+    if state == "open":
+        status = HealthStatus.UNHEALTHY
+        message = f"Graph circuit breaker OPEN -- {stats['failure_count']} failures"
+    elif state == "half_open":
+        status = HealthStatus.DEGRADED
+        message = "Graph circuit breaker HALF-OPEN"
+    else:
+        status = HealthStatus.HEALTHY
+        message = "Graph service is healthy"
+
+    return HealthCheckResult(
+        name="graph",
+        status=status,
+        message=message,
+        details=stats,
+    )

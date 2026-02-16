@@ -208,9 +208,7 @@ class TestAuthRateLimitMiddleware:
         middleware = AuthRateLimitMiddleware(mock_app)
 
         request = MagicMock()
-        request.headers.get.side_effect = lambda h: (
-            "10.0.0.1, 10.0.0.2" if h == "X-Forwarded-For" else None
-        )
+        request.headers.get.side_effect = lambda h: ("10.0.0.1, 10.0.0.2" if h == "X-Forwarded-For" else None)
         request.client.host = "192.168.1.1"
 
         ip = middleware._get_client_ip(request)  # noqa: SLF001

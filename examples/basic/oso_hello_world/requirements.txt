@@ -1,8 +1,7 @@
 # Requirements for OSO Hello World Example
-# Install MDB_ENGINE with OSO support: pip install mdb-engine[oso]
-# Or install from source: pip install -e ../../../[oso]
+# Install mdb-engine from source with OSO support (NOT published to PyPI):
+#   pip install -e "../../..[oso]"
 
-mdb-engine[oso]>=0.1.0
 python-dotenv>=1.0.0
 
 # Web framework

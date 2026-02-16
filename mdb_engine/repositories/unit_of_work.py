@@ -5,8 +5,13 @@ Manages repository access and provides a clean interface for data operations.
 The UnitOfWork acts as a factory for repositories and manages their lifecycle.
 """
 
+from __future__ import annotations
+
 import logging
-from typing import Any, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, TypeVar
+
+if TYPE_CHECKING:
+    from mdb_engine.database.scoped_wrapper import ScopedMongoWrapper
 
 from .base import Entity, Repository
 from .mongo import MongoRepository
@@ -29,14 +34,14 @@ class UnitOfWork:
     Usage:
         # In a route handler
         @app.get("/users/{user_id}")
-        async def get_user(user_id: str, ctx: RequestContext = Depends()):
+        async def get_user(user_id: str, ctx: RequestContext = Depends(get_request_context)):
             # Access repository through UnitOfWork
             user = await ctx.uow.users.get(user_id)
             return user
 
         # With explicit repository method
         @app.get("/orders")
-        async def list_orders(ctx: RequestContext = Depends()):
+        async def list_orders(ctx: RequestContext = Depends(get_request_context)):
             repo = ctx.uow.repository("orders", Order)
             return await repo.find({"status": "pending"})
 
@@ -121,7 +126,7 @@ class UnitOfWork:
         return self.repository(name)
 
     @property
-    def db(self) -> Any:
+    def db(self) -> ScopedMongoWrapper:
         """
         Direct access to the underlying ScopedMongoWrapper.
 

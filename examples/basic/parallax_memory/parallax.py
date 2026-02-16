@@ -466,7 +466,7 @@ class ParallaxEngine:
                             }
                         )
                     except Exception:
-                        pass
+                        logger.debug("Progress callback failed for report_complete", exc_info=True)
 
         logger.info(
             f"Analysis complete: {new_calls} new calls analyzed, {cached_calls} cached, {len(reports)} reports generated"
@@ -483,7 +483,7 @@ class ParallaxEngine:
                     }
                 )
             except Exception:
-                pass
+                logger.debug("Progress callback failed for analysis_complete", exc_info=True)
 
         return reports
 
@@ -744,7 +744,7 @@ class ParallaxEngine:
                     }
                 )
             except Exception:
-                pass
+                logger.debug("Progress callback failed for report_complete", exc_info=True)
         
         return report
 

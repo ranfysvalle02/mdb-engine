@@ -315,8 +315,7 @@ class OsoAdapter(BaseAuthorizationProvider):
                 import oso  # noqa: F401
             except ImportError as e:
                 raise AuthorizationError(
-                    "OSO library is not installed. "
-                    "Install with: pip install oso-cloud or pip install oso"
+                    "OSO library is not installed. " "Install with: pip install oso-cloud or pip install oso"
                 ) from e
 
         super().__init__(engine_name="OSO Cloud")
@@ -438,9 +437,7 @@ class OsoAdapter(BaseAuthorizationProvider):
         """
         try:
             if len(params) != 3:
-                logger.warning(
-                    f"OSO add_policy expects 3 params (role, object, action), got {len(params)}"
-                )
+                logger.warning(f"OSO add_policy expects 3 params (role, object, action), got {len(params)}")
                 return False
 
             role, obj, act = params
@@ -448,14 +445,10 @@ class OsoAdapter(BaseAuthorizationProvider):
             # OSO Cloud SDK uses insert() method with a list
             if hasattr(self._oso, "insert"):
                 # OSO Cloud client - insert fact as a list
-                result = await asyncio.to_thread(
-                    self._oso.insert, ["grants_permission", role, act, obj]
-                )
+                result = await asyncio.to_thread(self._oso.insert, ["grants_permission", role, act, obj])
             elif hasattr(self._oso, "tell"):
                 # Legacy OSO Cloud SDK
-                result = await asyncio.to_thread(
-                    self._oso.tell, "grants_permission", role, act, obj
-                )
+                result = await asyncio.to_thread(self._oso.tell, "grants_permission", role, act, obj)
             elif hasattr(self._oso, "register_constant"):
                 # OSO library - we'd need to use a different approach
                 logger.warning("OSO library mode: add_policy needs to be handled via policy files")
@@ -483,8 +476,7 @@ class OsoAdapter(BaseAuthorizationProvider):
         try:
             if len(params) < 2 or len(params) > 3:
                 logger.warning(
-                    f"OSO add_role_for_user expects 2-3 params "
-                    f"(user, role, [resource]), got {len(params)}"
+                    f"OSO add_role_for_user expects 2-3 params " f"(user, role, [resource]), got {len(params)}"
                 )
                 return False
 
@@ -526,16 +518,12 @@ class OsoAdapter(BaseAuthorizationProvider):
             elif hasattr(self._oso, "tell"):
                 # Legacy OSO Cloud SDK
                 if resource is not None:
-                    result = await asyncio.to_thread(
-                        self._oso.tell, "has_role", user, role, resource
-                    )
+                    result = await asyncio.to_thread(self._oso.tell, "has_role", user, role, resource)
                 else:
                     result = await asyncio.to_thread(self._oso.tell, "has_role", user, role)
             elif hasattr(self._oso, "register_constant"):
                 # OSO library - we'd need to use a different approach
-                logger.warning(
-                    "OSO library mode: add_role_for_user needs to be handled via policy files"
-                )
+                logger.warning("OSO library mode: add_role_for_user needs to be handled via policy files")
                 result = True  # Assume success for now
             else:
                 logger.warning("OSO client doesn't support insert() or tell() method")
@@ -544,9 +532,7 @@ class OsoAdapter(BaseAuthorizationProvider):
             # Clear cache when roles are modified
             if result:
                 await self.clear_cache()
-                logger.debug(
-                    f"OSO role assigned: has_role({user}, {role}, " f"{resource or 'documents'})"
-                )
+                logger.debug(f"OSO role assigned: has_role({user}, {role}, " f"{resource or 'documents'})")
             return result
         except (RuntimeError, ValueError, AttributeError, TypeError, ConnectionError) as e:
             # Catching specific exceptions from OSO operations
@@ -595,11 +581,7 @@ class OsoAdapter(BaseAuthorizationProvider):
             if hasattr(self._oso, "query"):
                 # OSO library - query facts
                 result = await asyncio.to_thread(
-                    lambda: list(
-                        self._oso.query_rule(
-                            "grants_permission", role, act, obj, accept_expression=True
-                        )
-                    )
+                    lambda: list(self._oso.query_rule("grants_permission", role, act, obj, accept_expression=True))
                 )
                 return len(result) > 0
             else:
@@ -627,16 +609,12 @@ class OsoAdapter(BaseAuthorizationProvider):
             if hasattr(self._oso, "query_rule"):
                 # OSO library - query facts
                 result = await asyncio.to_thread(
-                    lambda: list(
-                        self._oso.query_rule("has_role", user, role, accept_expression=True)
-                    )
+                    lambda: list(self._oso.query_rule("has_role", user, role, accept_expression=True))
                 )
                 return len(result) > 0
             elif hasattr(self._oso, "query"):
                 # Alternative query method
-                result = await asyncio.to_thread(
-                    lambda: list(self._oso.query("has_role", user, role))
-                )
+                result = await asyncio.to_thread(lambda: list(self._oso.query("has_role", user, role)))
                 return len(result) > 0
             else:
                 # OSO Cloud - we'd need to use the API to check facts
@@ -656,9 +634,7 @@ class OsoAdapter(BaseAuthorizationProvider):
         """
         try:
             if len(params) != 2:
-                logger.warning(
-                    f"OSO remove_role_for_user expects 2 params (user, role), got {len(params)}"
-                )
+                logger.warning(f"OSO remove_role_for_user expects 2 params (user, role), got {len(params)}")
                 return False
 
             user, role = params

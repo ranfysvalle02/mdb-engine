@@ -29,7 +29,6 @@ from mdb_engine import MongoDBEngine
 engine = MongoDBEngine(
     mongo_uri=os.getenv("MONGODB_URI", "mongodb://localhost:27017"),
     db_name=os.getenv("MONGODB_DB", "mdb_runtime"),
-    enable_ray=os.getenv("ENABLE_RAY", "false").lower() == "true",
 )
 ```
 
@@ -38,7 +37,6 @@ engine = MongoDBEngine(
 - Creates a connection pool to MongoDB
 - Manages connection lifecycle (connect, reconnect, close)
 - Handles connection errors and retries
-- Provides optional Ray integration for distributed processing
 - Stores connection configuration for later use
 
 **Value:**
@@ -46,7 +44,6 @@ engine = MongoDBEngine(
 - **Connection pooling**: Automatically manages connection pool size and lifecycle
 - **Error handling**: Built-in retry logic and connection recovery
 - **Resource management**: Proper cleanup on shutdown
-- **Optional Ray**: Easy distributed processing without code changes
 
 **How to implement your own:**
 
@@ -102,7 +99,6 @@ async def lifespan(app):
 | Connection pooling | Automatic | Manual |
 | Error handling | Built-in | Manual |
 | Lifecycle management | Automatic | Manual event handlers |
-| Ray integration | Optional flag | Manual setup |
 
 ---
 

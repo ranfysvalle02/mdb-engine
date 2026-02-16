@@ -26,7 +26,9 @@ try:
     nest_asyncio.apply()
 except ImportError:
     # nest_asyncio not available - tests may fail with event loop conflicts
-    pass
+    import warnings
+
+    warnings.warn("nest_asyncio not installed; nested event-loop tests may fail", stacklevel=1)
 
 import pytest
 from motor.motor_asyncio import (
@@ -94,9 +96,7 @@ def mock_mongo_client() -> MagicMock:
             collection = MagicMock(spec=AsyncIOMotorCollection)
             collection.name = name
             collection.database = db
-            collection.replace_one = AsyncMock(
-                return_value=MagicMock(modified_count=1, upserted_id="test_id")
-            )
+            collection.replace_one = AsyncMock(return_value=MagicMock(modified_count=1, upserted_id="test_id"))
             collection.find_one = AsyncMock(return_value=None)
             collection.find = AsyncMock(return_value=AsyncMock(to_list=AsyncMock(return_value=[])))
             collection.insert_one = AsyncMock(return_value=MagicMock(inserted_id="test_id"))
@@ -106,12 +106,8 @@ def mock_mongo_client() -> MagicMock:
             collection.delete_one = AsyncMock(return_value=MagicMock(deleted_count=1))
             collection.delete_many = AsyncMock(return_value=MagicMock(deleted_count=2))
             collection.count_documents = AsyncMock(return_value=0)
-            collection.aggregate = AsyncMock(
-                return_value=AsyncMock(to_list=AsyncMock(return_value=[]))
-            )
-            collection.list_indexes = AsyncMock(
-                return_value=AsyncMock(to_list=AsyncMock(return_value=[]))
-            )
+            collection.aggregate = AsyncMock(return_value=AsyncMock(to_list=AsyncMock(return_value=[])))
+            collection.list_indexes = AsyncMock(return_value=AsyncMock(to_list=AsyncMock(return_value=[])))
             collection.create_index = AsyncMock(return_value="test_index")
             collection.drop_index = AsyncMock()
             return collection
@@ -127,9 +123,7 @@ def mock_mongo_client() -> MagicMock:
 
             def __getattr__(self, name):
                 if name.startswith("_"):
-                    raise AttributeError(
-                        f"'{type(self).__name__}' object has no attribute '{name}'"
-                    )
+                    raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
                 return self._get_collection(name)
 
             def __getitem__(self, name):
@@ -164,17 +158,13 @@ def mock_mongo_database(mock_mongo_client: MagicMock) -> MagicMock:
         collection.delete_many = AsyncMock(return_value=MagicMock(deleted_count=2))
         collection.count_documents = AsyncMock(return_value=0)
         collection.aggregate = AsyncMock(return_value=AsyncMock(to_list=AsyncMock(return_value=[])))
-        collection.list_indexes = AsyncMock(
-            return_value=AsyncMock(to_list=AsyncMock(return_value=[]))
-        )
+        collection.list_indexes = AsyncMock(return_value=AsyncMock(to_list=AsyncMock(return_value=[])))
         collection.create_index = AsyncMock(return_value="test_index")
         collection.drop_index = AsyncMock()
         collection.create_search_index = AsyncMock()
         collection.update_search_index = AsyncMock()
         collection.drop_search_index = AsyncMock()
-        collection.list_search_indexes = AsyncMock(
-            return_value=AsyncMock(to_list=AsyncMock(return_value=[]))
-        )
+        collection.list_search_indexes = AsyncMock(return_value=AsyncMock(to_list=AsyncMock(return_value=[])))
         return collection
 
     # MagicMock doesn't allow setting __getattr__ directly on instances
@@ -236,6 +226,7 @@ def mock_mongo_collection() -> MagicMock:
     collection.list_indexes = AsyncMock(return_value=AsyncMock(to_list=AsyncMock(return_value=[])))
     collection.create_index = AsyncMock(return_value="test_index")
     collection.drop_index = AsyncMock()
+    collection.replace_one = AsyncMock(return_value=MagicMock(modified_count=1, upserted_id=None))
     return collection
 
 
@@ -292,9 +283,7 @@ def scoped_db_config() -> dict[str, Any]:
 
 
 @pytest.fixture
-async def scoped_db(
-    mock_mongo_database: MagicMock, scoped_db_config: dict[str, Any]
-) -> ScopedMongoWrapper:
+async def scoped_db(mock_mongo_database: MagicMock, scoped_db_config: dict[str, Any]) -> ScopedMongoWrapper:
     """Create a ScopedMongoWrapper instance with mocked database."""
     return ScopedMongoWrapper(real_db=mock_mongo_database, **scoped_db_config)
 
@@ -449,9 +438,7 @@ def assert_filter_has_experiment_scope(filter_dict: dict[str, Any], expected_sco
     if "$and" in filter_dict:
         # Check if any $and condition has experiment_id
         and_conditions = filter_dict["$and"]
-        has_scope = any(
-            isinstance(cond, dict) and "experiment_id" in cond for cond in and_conditions
-        )
+        has_scope = any(isinstance(cond, dict) and "experiment_id" in cond for cond in and_conditions)
         assert has_scope, "Filter missing experiment_id scope in $and conditions"
     elif "experiment_id" in filter_dict:
         # Direct experiment_id filter

@@ -6,13 +6,38 @@ This allows for extensibility with different memory providers (custom, cognitive
 while maintaining a consistent API.
 
 This module is part of MDB_ENGINE - MongoDB Engine.
+
+Error Handling Convention
+-------------------------
+All memory service methods follow these rules:
+
+1. **Raise** for invalid inputs and programming errors:
+   - Missing required parameters, invalid types, empty content.
+   - Use ``ValueError`` / ``InputValidationError`` for caller mistakes.
+   - Use ``MemoryServiceError`` (or subclass) for internal failures that
+     the caller should handle (e.g. LLM unavailable, DB connection lost).
+
+2. **Return ``[]``** for search / query methods with no results or recoverable
+   failures (e.g. embedding generation fails during ``search``).
+   Callers can always iterate over the result without None-checking.
+
+3. **Return ``None``** for single-item lookups that found nothing
+   (e.g. ``get()`` with an unknown ID, ``detect_knowledge_conflict``
+   finding no conflict).
+
+4. **Return ``False``** for boolean operations that did not succeed
+   (e.g. ``delete`` when the memory was not found).
+
+Every public method should document its error behaviour in the docstring.
 """
 
 from abc import ABC, abstractmethod
 from typing import Any
 
+from ..exceptions import MongoDBEngineError
 
-class MemoryServiceError(Exception):
+
+class MemoryServiceError(MongoDBEngineError):
     """Base exception for all memory service errors."""
 
     pass
@@ -23,14 +48,14 @@ class BaseMemoryService(ABC):
     Abstract base class for memory service implementations.
 
     This class defines the interface that all memory service implementations must follow.
-    Concrete implementations (e.g., CustomMemoryService, CognitiveMemoryService) "
+    Concrete implementations (e.g., CognitiveMemoryService) "
     "inherit from this class and implement the abstract methods.
 
     All memory operations are scoped per user_id for safety and data isolation.
     """
 
     @abstractmethod
-    def add(
+    async def add(
         self,
         messages: str | list[dict[str, str]],
         user_id: str | None = None,
@@ -62,7 +87,7 @@ class BaseMemoryService(ABC):
         pass
 
     @abstractmethod
-    def inject(
+    async def inject(
         self,
         memory: str | dict[str, Any],
         user_id: str | None = None,
@@ -102,7 +127,7 @@ class BaseMemoryService(ABC):
         pass
 
     @abstractmethod
-    def get_all(
+    async def get_all(
         self,
         user_id: str | None = None,
         limit: int = 100,
@@ -124,13 +149,12 @@ class BaseMemoryService(ABC):
         pass
 
     @abstractmethod
-    def search(
+    async def search(
         self,
         query: str,
         user_id: str | None = None,
         limit: int = 5,
         filters: dict[str, Any] | None = None,
-        version: str | None = None,
         **kwargs,
     ) -> list[dict[str, Any]]:
         """
@@ -142,7 +166,6 @@ class BaseMemoryService(ABC):
             limit: Maximum number of results to return
             filters: Filter structure for metadata filtering
                      Example: {"metadata": {"bucket_id": "conversation:123"}}
-            version: Optional version parameter (for compatibility)
             **kwargs: Additional provider-specific arguments
 
         Returns:
@@ -151,7 +174,7 @@ class BaseMemoryService(ABC):
         pass
 
     @abstractmethod
-    def get(
+    async def get(
         self,
         memory_id: str,
         user_id: str | None = None,
@@ -171,7 +194,7 @@ class BaseMemoryService(ABC):
         pass
 
     @abstractmethod
-    def delete(
+    async def delete(
         self,
         memory_id: str,
         user_id: str | None = None,
@@ -191,7 +214,7 @@ class BaseMemoryService(ABC):
         pass
 
     @abstractmethod
-    def delete_all(
+    async def delete_all(
         self,
         user_id: str | None = None,
         hard_delete: bool = ...,  # Ellipsis indicates required parameter
@@ -202,7 +225,7 @@ class BaseMemoryService(ABC):
 
         Args:
             user_id: User ID whose memories should be deleted (optional)
-            hard_delete: REQUIRED - If True, permanently remove all memories including cold storage.
+            hard_delete: REQUIRED - If True, permanently remove all memories.
                          If False, soft-delete by marking as deleted (for legal retention).
                          Must be explicitly specified - no default for safety.
             **kwargs: Additional provider-specific arguments
@@ -213,7 +236,7 @@ class BaseMemoryService(ABC):
         pass
 
     @abstractmethod
-    def update(
+    async def update(
         self,
         memory_id: str,
         user_id: str | None = None,
@@ -248,60 +271,10 @@ class BaseMemoryService(ABC):
     # These methods are part of the cognitive memory architecture.
     # Implementations that don't support cognitive features can raise NotImplementedError.
 
-    def prune_memories(
-        self,
-        user_id: str,
-        max_capacity: int | None = None,
-        prune_percentage: float = 0.1,
-        reason: str = "capacity_limit_reached",
-        use_strength: bool = True,
-    ) -> int:
-        """
-        Soft-delete the weakest memories when capacity is exceeded.
-
-        This implements biological "forgetting" - weak memories fade to cold storage
-        rather than being permanently deleted.
-
-        Args:
-            user_id: User ID to prune memories for
-            max_capacity: Maximum active memories allowed
-            prune_percentage: Extra percentage to prune to avoid constant triggers
-            reason: Pruning reason for audit trail
-            use_strength: Use decay-aware strength for scoring
-
-        Returns:
-            Number of memories moved to cold storage
-        """
-        raise NotImplementedError("Cognitive memory features not supported by this provider")
-
-    def get_cold_storage(
-        self,
-        user_id: str,
-        limit: int = 100,
-        include_reason: bool = True,
-    ) -> list[dict[str, Any]]:
-        """
-        Retrieve memories from cold storage (pruned/inactive memories).
-
-        Cold storage contains memories that have been soft-deleted, providing:
-        - Audit trail for what was forgotten
-        - Analytics on user memory patterns
-        - Recovery capability if needed
-
-        Args:
-            user_id: User ID to retrieve cold storage for
-            limit: Maximum memories to return
-            include_reason: Include pruning reason in results
-
-        Returns:
-            List of pruned memory documents
-        """
-        raise NotImplementedError("Cognitive memory features not supported by this provider")
-
-    def restore_from_cold_storage(
+    async def restore_from_cold_storage(
         self,
         memory_id: str,
-        user_id: str | None = None,
+        user_id: str,
     ) -> dict[str, Any] | None:
         """
         Restore a memory from cold storage to active status.
@@ -315,14 +288,14 @@ class BaseMemoryService(ABC):
         """
         raise NotImplementedError("Cognitive memory features not supported by this provider")
 
-    def get_memory_analytics(
+    async def get_memory_analytics(
         self,
         user_id: str,
     ) -> dict[str, Any]:
         """
         Get analytics about a user's memory health.
 
-        Returns metrics useful for understanding memory usage and decay patterns.
+        Returns metrics useful for understanding memory usage (Perfect Recall mode).
 
         Args:
             user_id: User ID to analyze

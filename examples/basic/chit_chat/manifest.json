@@ -79,9 +79,9 @@
   },
   "llm_config": {
     "enabled": true,
-    "default_model": "openai/gpt-4o",
-    "temperature": 0.3,
-    "fallbacks": ["gpt-4o-mini"],
+    "providers": {
+      "chat": "openai/gpt-4o"
+    },
     "litellm_config": {
       "num_retries": 2,
       "request_timeout": 60
@@ -101,12 +101,6 @@
     "max_depth": 500,
     "cognitive": {
       "enabled": true,
-      "decay": {
-        "enabled": true,
-        "default_stability_hours": 48,
-        "min_stability": 0.1,
-        "use_server_side_pipeline": true
-      },
       "emotion": {
         "enabled": true,
         "flashbulb_threshold": 0.7,
@@ -127,18 +121,6 @@
         "retention_days": 365
       }
     },
-    "redaction": {
-      "enabled": true,
-      "replacement": "[REDACTED]",
-      "patterns": {
-        "ssn": true,
-        "credit_card": true,
-        "password": true,
-        "api_key": true,
-        "phone": false,
-        "email": false
-      }
-    },
     "categories": {
       "enabled": true,
       "custom_categories": ["work", "health", "finance", "travel"]
@@ -149,10 +131,6 @@
       "message_threshold": 50,
       "min_salience_to_keep": 0.3,
       "store_reflections": true
-    },
-    "entities": {
-      "enabled": true,
-      "auto_extract": true
     },
     "graph": {
       "enabled": false

@@ -10,6 +10,7 @@ This module is part of MDB_ENGINE - MongoDB Engine.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import TYPE_CHECKING, Any
@@ -117,8 +118,8 @@ class ConnectionManager:
                 try:
                     from .csfle import build_auto_encryption_opts
 
-                    auto_enc_opts = build_auto_encryption_opts(
-                        self.csfle_config, self.mongo_uri, self.db_name
+                    auto_enc_opts = await asyncio.to_thread(
+                        build_auto_encryption_opts, self.csfle_config, self.mongo_uri, self.db_name
                     )
                     if auto_enc_opts:
                         client_kwargs["auto_encryption_opts"] = auto_enc_opts
@@ -127,20 +128,16 @@ class ConnectionManager:
                             "CSFLE auto-encryption enabled",
                             extra={
                                 "kms_provider": self.csfle_config.kms_provider,
-                                "encrypted_collections": list(
-                                    self.csfle_config.encrypted_collections.keys()
-                                ),
+                                "encrypted_collections": list(self.csfle_config.encrypted_collections.keys()),
                             },
                         )
                     else:
                         contextual_logger.warning(
-                            "CSFLE requested but could not be configured. "
-                            "Continuing without field-level encryption."
+                            "CSFLE requested but could not be configured. " "Continuing without field-level encryption."
                         )
                 except (ValueError, TypeError, AttributeError, RuntimeError) as e:
                     contextual_logger.warning(
-                        f"Failed to configure CSFLE: {e}. "
-                        f"Continuing without field-level encryption."
+                        f"Failed to configure CSFLE: {e}. " f"Continuing without field-level encryption."
                     )
 
             # Connect to MongoDB
@@ -258,9 +255,7 @@ class ConnectionManager:
             raise RuntimeError(
                 "ConnectionManager not initialized. Call initialize() first.",
             )
-        assert (
-            self._mongo_client is not None
-        ), "MongoDB client should not be None after initialization"
+        assert self._mongo_client is not None, "MongoDB client should not be None after initialization"
         return self._mongo_client
 
     @property

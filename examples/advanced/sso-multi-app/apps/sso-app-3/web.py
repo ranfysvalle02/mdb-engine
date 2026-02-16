@@ -1,18 +1,32 @@
 #!/usr/bin/env python3
 """
-SSO App 3 - AI Chat Application with SSO Authentication & Smart Document Memory
+SSO App 3 - AI Chat with True Perfect Recall & the Full Power of mdb-engine Memory
 
-This example demonstrates:
-- CognitiveEngine Integration: Complete RAG pipeline orchestration via CognitiveEngine
-- Gemini LLM Support: Uses Google Gemini via LLMProvider abstraction
-- Document Processing: Advanced file processing with metadata extraction
+This is the definitive example of what mdb-engine's memory system can do.
+It showcases every layer of the cognitive architecture:
+
+Memory Features Demonstrated:
+- True Perfect Recall: Every memory is always searchable, forever. No decay, no forgetting.
+- Emotion-Weighted Recall: Emotionally charged memories rank higher (amygdala effect)
+- Temporal Recency Bias: Recent memories get a configurable boost
+- Spreading Activation: Graph-connected memories discovered via associative recall
+- Salience-Gated Encoding: Low-value messages skip expensive LLM extraction
+- Prospective Memory: "Remember to do X when Y happens" -- intention-based triggers
+- GraphRAG: Knowledge graph with multi-hop reasoning and community detection
+- Shared Memory: Privacy-safe group memory with anonymized promotion
+- Memory Vetoes: User-controlled "never share" flags
+- Reflective Memory: Meta-cognitive insights about behavior patterns
+- Predictive Memory: Counterfactuals and validated predictions
+- Memory Versioning: Track how beliefs evolve over time
+- Timeline Branching: Multiverse support for counterfactual reasoning
+- Memory Consolidation: Episodic-to-semantic knowledge distillation
+- Context Engineering: Dynamic persona adaptation from memory layers
+
+Infrastructure:
+- CognitiveEngine with Gemini: Full RAG pipeline via LLMProvider abstraction
+- Document Processing: Advanced file processing with atomic fact extraction
 - SSO Authentication: Shared authentication across multi-app deployments
-
-Key Features:
-- CognitiveEngine with Gemini: Uses GeminiProvider (extends LLMProvider) for Google Gemini support
-- Automatic Memory Extraction: Facts are automatically extracted and stored to LTM
-- Document Memory: Advanced document processing with atomic fact extraction
-- Best Practices: Demonstrates CognitiveEngine usage with non-OpenAI LLM providers via LLMProvider abstraction
+- CSFLE Encryption: Client-Side Field Level Encryption for memory content
 """
 
 import asyncio
@@ -35,7 +49,8 @@ from starlette.requests import Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from mdb_engine.llm import LLMService, get_llm_service
-from mdb_engine.dependencies import get_scoped_db, get_memory_service
+from mdb_engine.dependencies import get_scoped_db, get_memory_service, get_profile_service
+from mdb_engine.graph.service import get_graph_service as get_graph_service_factory
 from pydantic import BaseModel, Field
 
 # Optional imports
@@ -56,7 +71,21 @@ from mdb_engine import MongoDBEngine
 from mdb_engine.core import build_csfle_config_from_manifest
 from mdb_engine.embeddings.service import EmbeddingServiceError, get_embedding_service
 from mdb_engine.routing.websockets import broadcast_to_app
-from mdb_engine.memory import CognitiveEngine
+from mdb_engine.memory import (
+    CognitiveEngine,
+    SharedMemory,
+    ReflectiveMemory,
+    PredictiveMemory,
+    QueryAwareRecall,
+    MemoryVeto,
+    MemoryVersioning,
+    CognitiveMemory,
+    TimelineService,
+    ProspectiveMemory,
+)
+from mdb_engine.memory.consolidator import MemoryConsolidator
+from mdb_engine.memory.hygiene import run_daily_hygiene
+from mdb_engine.memory.reflection import ReflectionService
 
 # Import shared security utilities
 try:
@@ -71,6 +100,11 @@ except ImportError:
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Suppress RuntimeWarning from LiteLLM's async logging (coroutine not awaited)
+# This is a known issue in LiteLLM where async_success_handler is not properly awaited
+import warnings
+warnings.filterwarnings("ignore", message="coroutine.*was never awaited", category=RuntimeWarning)
 
 APP_SLUG = "ai-chat"
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
@@ -212,7 +246,7 @@ class RawContentService:
         if not self.enabled or not self.embedding_service:
             return None
         try:
-            db = self.engine.get_scoped_db(self.app_slug)
+            db = await self.engine.get_scoped_db(self.app_slug)
             collection = getattr(db, self.collection_name)
             embeddings = await self.embedding_service.embed(raw_content)
             if not embeddings:
@@ -239,7 +273,7 @@ class RawContentService:
         if not self.enabled:
             return None
         try:
-            db = self.engine.get_scoped_db(self.app_slug)
+            db = await self.engine.get_scoped_db(self.app_slug)
             doc = await getattr(db, self.collection_name).find_one(
                 {"bucket_id": bucket_id, "user_id": str(user_id)}, sort=[("created_at", -1)]
             )
@@ -252,6 +286,19 @@ class RawContentService:
 raw_content_service: RawContentService | None = None
 cognitive_engine: CognitiveEngine | None = None
 llm_service: LLMService | None = None
+
+# Perfect Brain components
+shared_memory: Any | None = None
+reflective_memory: Any | None = None
+predictive_memory: Any | None = None
+query_aware_recall: Any | None = None
+memory_veto: Any | None = None
+prospective_memory: Any | None = None
+memory_versioning: Any | None = None
+cognitive_memory: Any | None = None
+timeline_service: TimelineService | None = None
+memory_consolidator: Any | None = None
+reflection_service: Any | None = None
 
 
 # Load manifest and build CSFLE config for encrypted memory
@@ -274,6 +321,10 @@ engine = MongoDBEngine(
 
 async def on_startup(app, engine, manifest):
     global raw_content_service, cognitive_engine, llm_service
+    global shared_memory, reflective_memory, predictive_memory
+    global query_aware_recall, memory_veto, prospective_memory
+    global memory_versioning, cognitive_memory, timeline_service
+    global memory_consolidator, reflection_service
     
     raw_content_config = manifest.get("raw_content_config", {})
     if raw_content_config.get("enabled", False):
@@ -286,47 +337,34 @@ async def on_startup(app, engine, manifest):
     # Initialize CognitiveEngine for complete RAG pipeline
     memory_service = engine.get_memory_service(APP_SLUG)
     if memory_service:
+        # Inject LLM service into memory service if not already injected
+        # This is required for background memory extraction operations (e.g., _detect_memory_type)
+        if hasattr(memory_service, '_injected_llm_service'):
+            if memory_service._injected_llm_service is None:
+                memory_service._injected_llm_service = llm_service
+                memory_service.llm_available = True
+                logger.info("✅ Injected LLM service into memory service for background extraction")
+        else:
+            # If the attribute doesn't exist, set it
+            memory_service._injected_llm_service = llm_service
+            memory_service.llm_available = True
+            logger.info("✅ Injected LLM service into memory service (attribute created)")
+        
         try:
-            # Get collections from MDB-Engine connection manager
+            # Get async scoped collection for chat history
+            # MUST be an async Motor collection (ScopedCollectionWrapper), NOT a
+            # synchronous pymongo.Collection. Using motor_client.delegate would
+            # return a sync collection whose create_index() returns a string,
+            # causing "TypeError: object str can't be used in 'await' expression".
+            scoped_db = await engine.get_scoped_db(APP_SLUG)
+            chat_history_collection = scoped_db["chat_history"]
+            
+            # Sync PyMongo refs needed for Perfect Brain component initialization
+            # (SharedMemory, MemoryConsolidator, etc. accept sync pymongo collections).
+            # Route handlers use Motor async collections instead -- see below.
             motor_client = engine._connection_manager.mongo_client
             pymongo_client = motor_client.delegate
             pymongo_db = pymongo_client[engine.db_name]
-            
-            chat_history_collection = pymongo_db["chat_history"]
-            
-            # Get the LLMProvider from the service for CognitiveEngine
-            # CognitiveEngine expects an LLMProvider instance (sync interface)
-            from mdb_engine.memory.orchestrator import LLMProvider as OrchestratorLLMProvider
-            
-            # Create a wrapper that adapts our async LLMService to CognitiveEngine's sync LLMProvider interface
-            class LLMServiceProvider(OrchestratorLLMProvider):
-                """Adapter to use async LLMService with sync CognitiveEngine LLMProvider interface."""
-                def __init__(self, llm_service):
-                    self.llm_service = llm_service
-                    self._loop = None
-                
-                def generate_chat_completion(self, messages, model=None, **kwargs):
-                    """Generate chat completion using LLMService (sync wrapper for async)."""
-                    import asyncio
-                    try:
-                        # Try to get the current event loop
-                        loop = asyncio.get_running_loop()
-                        # If we're in an async context, we need to run in a thread
-                        import concurrent.futures
-                        with concurrent.futures.ThreadPoolExecutor() as executor:
-                            future = executor.submit(
-                                lambda: asyncio.run(
-                                    self.llm_service.chat_completion(messages, model=model, **kwargs)
-                                )
-                            )
-                            return future.result(timeout=300)  # 5 minute timeout
-                    except RuntimeError:
-                        # No running loop, we can use asyncio.run
-                        return asyncio.run(
-                            self.llm_service.chat_completion(messages, model=model, **kwargs)
-                        )
-            
-            llm_provider = LLMServiceProvider(llm_service)
             
             cognitive_engine = CognitiveEngine(
                 app_slug=APP_SLUG,
@@ -335,14 +373,102 @@ async def on_startup(app, engine, manifest):
                 stm_context_limit=10,
                 ltm_search_limit=12,  # Match current limit
                 auto_summarize_threshold=20,
-                llm_provider=llm_provider,  # Use LLMService via adapter
+                llm_service=llm_service,
                 # Context Engineering configuration
                 enable_context_engineering=True,
                 stm_raw_window=5,
                 enable_entity_extraction=True,
                 enable_dynamic_persona=True,
+                # GraphRAG configuration - thresholds for when graph context is included
+                # These control when CognitiveEngine includes graph context in responses
+                graph_min_nodes=3,  # Minimum nodes required to include graph context (more meaningful threshold)
+                graph_min_hop_distance=0,  # Minimum hop distance for graph_context nodes (0 = include entry nodes)
+                graph_min_edges=0,  # Minimum edges required for graph_context nodes
             )
             logger.info("✅ Cognitive Engine Online: Complete RAG Pipeline with Context Engineering Ready")
+            
+            # Initialize Perfect Brain components
+            try:
+                # Get collections for Perfect Brain features
+                entity_collection = pymongo_db["entity_memory"]
+                shared_collection = pymongo_db.get_collection("entity_memory")  # Use same collection with scope="shared"
+                reflective_collection = pymongo_db["reflective_memory"]
+                predictive_collection = pymongo_db["predictive_memory"]
+                veto_collection = pymongo_db["memory_vetoes"]
+                timelines_collection = pymongo_db["timelines"]
+                
+                # Initialize TimelineService (Cognitive OS feature)
+                timelines_wrapper = (await engine.get_scoped_db(APP_SLUG)).timelines
+                timeline_service = TimelineService(timelines_wrapper)
+                
+                # Initialize SharedMemory
+                shared_memory = SharedMemory(
+                    semantic_collection=entity_collection,
+                    shared_collection=shared_collection,
+                )
+                
+                # Initialize ReflectiveMemory
+                reflective_memory = ReflectiveMemory(collection=reflective_collection)
+                
+                # Initialize PredictiveMemory
+                predictive_memory = PredictiveMemory(collection=predictive_collection)
+                
+                # Initialize QueryAwareRecall
+                query_aware_recall = QueryAwareRecall()
+                
+                # Initialize MemoryVeto
+                memory_veto = MemoryVeto(collection=veto_collection)
+                
+                # Initialize ProspectiveMemory (intention-based triggers)
+                prospective_collection = pymongo_db["prospective_triggers"]
+                prospective_memory = ProspectiveMemory(
+                    collection=prospective_collection,
+                    embedding_model=manifest.get("memory_config", {}).get("embedding_model", "text-embedding-3-small"),
+                )
+                
+                # Initialize MemoryVersioning
+                memory_versioning = MemoryVersioning(collection=entity_collection)
+                
+                # Get scoped collections for CognitiveMemory
+                scoped_db = await engine.get_scoped_db(APP_SLUG)
+                episodic_collection = pymongo_db["episodic"]
+                procedural_collection = pymongo_db["procedural"]
+                
+                # Initialize CognitiveMemory (multi-tier memory system)
+                # Requires embedding_service from engine
+                app_embedding_service = engine.get_embedding_service(APP_SLUG)
+                cognitive_memory = CognitiveMemory(
+                    collection=scoped_db.entity_memory,  # Use scoped collection wrapper
+                    model=manifest.get("llm_config", {}).get("providers", {}).get("chat", "openai/gpt-4o"),
+                    embed_model=manifest.get("memory_config", {}).get("embedding_model", "text-embedding-3-small"),
+                    embedding_service=app_embedding_service,
+                )
+                
+                # Initialize MemoryConsolidator (episodic → semantic consolidation)
+                memory_consolidator = MemoryConsolidator(
+                    db_client=pymongo_client,
+                    db_name=engine.db_name,
+                    model=manifest.get("llm_config", {}).get("providers", {}).get("chat", "openai/gpt-4o"),
+                    episodic_collection=episodic_collection,
+                    entity_collection=entity_collection,
+                    procedural_collection=procedural_collection,
+                    memory_veto=memory_veto,  # Use existing veto instance
+                )
+                
+                # Initialize ReflectionService (periodic memory consolidation)
+                reflection_config = manifest.get("memory_config", {}).get("reflection", {})
+                if reflection_config.get("enabled", True):
+                    reflection_service = ReflectionService(
+                        app_slug=APP_SLUG,
+                        memories_collection=memory_service.collection,
+                        config=reflection_config,
+                        llm_service=llm_service,
+                    )
+                    logger.info("✅ ReflectionService initialized")
+                
+                logger.info("✅ Perfect Brain Features Initialized: SharedMemory, ReflectiveMemory, PredictiveMemory, QueryAwareRecall, MemoryVeto, ProspectiveMemory, MemoryVersioning, TimelineService, MemoryConsolidator, ReflectionService")
+            except Exception as e:
+                logger.error(f"⚠️ Failed to initialize Perfect Brain components: {e}", exc_info=True)
         except Exception as e:
             logger.error(f"❌ Failed to initialize CognitiveEngine: {e}", exc_info=True)
             cognitive_engine = None
@@ -372,125 +498,9 @@ app = engine.create_app(
 # --- CORE LOGIC (AI PROCESSING) ---
 
 
-async def _fallback_rag_chat(db, svc, user_id, cid, full_input, message, category):
-    """Fallback RAG chat when CognitiveEngine is not available."""
-    # Store user message
-    await db.messages.insert_one(
-        {
-            "conversation_id": cid,
-            "user_id": user_id,
-            "role": "user",
-            "content": full_input,
-            "created_at": datetime.utcnow(),
-        }
-    )
-    
-    # Manual RAG search
-    rag_context = []
-    if svc and message.strip():
-        try:
-            query_lower = message.lower()
-            is_author_query = any(
-                keyword in query_lower
-                for keyword in ["author", "who wrote", "who created", "who is the author"]
-            )
-            
-            mems = await asyncio.to_thread(
-                svc.search, query=message[:500], user_id=user_id, limit=12
-            )
-            
-            if is_author_query and len(mems) < 5:
-                all_mems = await asyncio.to_thread(svc.get_all, user_id=user_id, limit=200)
-                author_mems = [
-                    m
-                    for m in all_mems
-                    if m.get("metadata", {}).get("doc_author")
-                    and m.get("metadata", {}).get("doc_author") != "Unknown"
-                ]
-                existing_ids = {
-                    m.get("id") or m.get("_id") for m in mems if m.get("id") or m.get("_id")
-                }
-                for am in author_mems:
-                    if (am.get("id") or am.get("_id")) not in existing_ids:
-                        mems.append(am)
-                mems = mems[:15]
-            
-            if category != "general" and mems:
-                filtered = [
-                    m
-                    for m in mems
-                    if m.get("metadata", {}).get("category") == category
-                    or m.get("metadata", {}).get("category") == "general"
-                ]
-                if filtered:
-                    mems = filtered[:10]
-            
-            for m in mems:
-                memory_text = m.get("memory")
-                if not memory_text:
-                    continue
-                meta = m.get("metadata", {})
-                doc_info_parts = []
-                if meta.get("doc_author") and meta.get("doc_author") != "Unknown":
-                    doc_info_parts.append(f"Author: {meta['doc_author']}")
-                if meta.get("doc_title"):
-                    doc_info_parts.append(f"Document: {meta['doc_title']}")
-                if meta.get("doc_org") and meta.get("doc_org") != "Unknown":
-                    doc_info_parts.append(f"Organization: {meta['doc_org']}")
-                
-                enriched_memory = memory_text
-                if doc_info_parts:
-                    enriched_memory = (
-                        f"[Document Context: {', '.join(doc_info_parts)}]\n{memory_text}"
-                    )
-                rag_context.append(enriched_memory)
-        except Exception as e:
-            logger.error(f"RAG search failed: {e}", exc_info=True)
-    
-    # Generate response using LLM service (LiteLLM)
-    memory_context_str = (
-        "\n".join([f"- {mem}" for mem in rag_context])
-        if rag_context
-        else "No relevant memories found."
-    )
-    
-    messages = [
-        {
-            "role": "system",
-            "content": "You are Orby, an AI assistant with access to stored memories."
-        },
-        {
-            "role": "user",
-            "content": f"""MEMORY CONTEXT (use this information to answer questions):
-{memory_context_str}
-
-IMPORTANT: When answering questions about document authors, titles, or metadata,
-pay special attention to the [Document Context] information in the memories above.
-
-User: {full_input}"""
-        }
-    ]
-    
-    try:
-        if llm_service:
-            ai_text = await llm_service.chat_completion(messages=messages)
-        else:
-            ai_text = "LLM service not initialized"
-    except Exception as e:
-        ai_text = f"AI Error: {e}"
-    
-    # Store assistant message
-    await db.messages.insert_one(
-        {
-            "conversation_id": cid,
-            "user_id": user_id,
-            "role": "assistant",
-            "content": ai_text,
-            "created_at": datetime.utcnow(),
-        }
-    )
-    
-    return ai_text
+# REMOVED: _fallback_rag_chat function - NO FALLBACKS policy
+# Failures must be explicit so they can be addressed properly
+# If CognitiveEngine is unavailable, the endpoint will raise HTTPException with clear error details
 
 
 async def convert_file_to_markdown(file: UploadFile) -> dict:
@@ -558,6 +568,7 @@ async def extract_global_metadata(
         messages = [{"role": "user", "content": prompt}]
         response_text = await llm_service.chat_completion(
             messages=messages,
+            provider_name="chat",
             temperature=1.0,
             response_format=DocumentMetadata,  # Pass Pydantic model directly
         )
@@ -630,6 +641,7 @@ async def extract_facts_from_chunk(
             messages = [{"role": "user", "content": prompt}]
             response_text = await llm_service.chat_completion(
                 messages=messages,
+                provider_name="chat",
                 temperature=1.0,
                 response_format=ChunkInsights,  # Pass Pydantic model directly
             )
@@ -858,8 +870,7 @@ async def process_and_store_file_memory(
                     }
                 )
 
-                await asyncio.to_thread(
-                    svc.add,
+                await svc.add(
                     messages=[{"role": "user", "content": fact.statement}],
                     user_id=user_id,
                     bucket_id=file_bucket_id,
@@ -905,6 +916,7 @@ async def process_and_store_file_memory(
         },
         user_id=None,
     )
+
     await asyncio.sleep(0.2)  # Brief pause before final event
     
     await broadcast_to_app(
@@ -1124,26 +1136,22 @@ async def get_persona_page(request: Request):
     return templates.TemplateResponse("persona.html", {"request": request, "user": user})
 
 
-@app.get("/perceptions", response_class=HTMLResponse)
-async def get_perceptions_page(request: Request):
-    """Perceptions visualization page"""
-    user = get_current_user(request)
-    if not user:
-        return RedirectResponse(url="/login")
-    
-    return templates.TemplateResponse("perceptions.html", {"request": request, "user": user})
-
-
 @app.get("/conversations/{cid}", response_class=HTMLResponse)
 async def conversation_view(
     request: Request,
     cid: str,
+    fork: Optional[str] = None,  # Original conversation ID
+    fork_at: Optional[str] = None,  # Message ID to fork at
     db=Depends(get_scoped_db),
 ):
     """
     Get a specific conversation by ID.
     
     Best Practice: Uses dependency injection for database access.
+    
+    URL Parameters:
+    - fork: Original conversation ID (for fork indicator)
+    - fork_at: Message ID to fork at (for fork indicator)
     """
     user = get_current_user(request)
     if not user:
@@ -1156,12 +1164,21 @@ async def conversation_view(
     # Get last active context from conversation document (persisted from last message)
     last_active_context = convo.get("last_active_context", [])
     
+    # Handle fork parameters
+    fork_data = None
+    if fork:
+        fork_data = {
+            "original_conversation_id": fork,
+            "fork_at_message_id": fork_at,
+        }
+    
     return templates.TemplateResponse(
         request, "conversation.html", {
             "user": user,
             "conversation": convo,
             "messages": msgs,
             "last_active_context": last_active_context,
+            "fork_data": fork_data,  # Pass to template
         }
     )
 
@@ -1218,15 +1235,33 @@ async def send_message(
         try:
             form = await request.form()
             file_list = [v for v in form.getlist("files") if isinstance(v, UploadFile)]
-        except Exception:  # noqa: BLE001
-            pass
+        except (ValueError, TypeError, KeyError) as exc:  # noqa: BLE001
+            logger.debug("Could not parse form for file list: %s", exc)
 
-    for f in file_list:
-        if f.filename:
-            data = await convert_file_to_markdown(f)
-            if data["raw_text"]:
-                processed_files.append(data)
-                file_context += f"\n{data['content']}"
+    # Process files in parallel for better performance
+    async def process_single_file(file: UploadFile) -> dict | None:
+        """Process a single file and return its data."""
+        if file.filename:
+            try:
+                data = await convert_file_to_markdown(file)
+                if data["raw_text"]:
+                    return data
+            except Exception as e:
+                logger.error(f"❌ Error processing file {file.filename}: {e}", exc_info=True)
+        return None
+    
+    # Process all files in parallel
+    if file_list:
+        file_results = await asyncio.gather(*[
+            process_single_file(f) for f in file_list
+        ], return_exceptions=True)
+        
+        for result in file_results:
+            if isinstance(result, Exception):
+                logger.error(f"❌ File processing error: {result}", exc_info=True)
+            elif result:
+                processed_files.append(result)
+                file_context += f"\n{result['content']}"
 
     # 2. Use CognitiveEngine for complete RAG pipeline (if available)
     full_input = message + file_context
@@ -1240,6 +1275,7 @@ async def send_message(
     dynamic_instructions = ""
     stm_summary = None
     prompt_template = None
+    graph_context_result = None  # Store graph context for response
     
     if cognitive_engine and svc and message.strip():
         try:
@@ -1336,6 +1372,23 @@ async def send_message(
                     rag_context.append(enriched_memory)
             
             retrieved_memories = ltm_memories
+            
+            # Store GraphRAG context for response (CognitiveEngine returns standardized format)
+            graph_context_result = result.get("graph_context")
+            if graph_context_result:
+                entry_nodes = graph_context_result.get("entry_nodes", [])
+                context_nodes = graph_context_result.get("context_nodes", [])
+                community_summaries = graph_context_result.get("community_summaries", [])
+                query_type = graph_context_result.get("query_type", "unknown")
+                total_graph_nodes = len(entry_nodes) + len(context_nodes)
+                logger.info(
+                    f"🕸️ [GraphRAG] Graph context retrieved (query_type: {query_type}): "
+                    f"{len(entry_nodes)} entry nodes, {len(context_nodes)} context nodes, "
+                    f"{len(community_summaries)} community summaries"
+                )
+            else:
+                logger.debug("🕸️ [GraphRAG] No graph context found for this query")
+            
             logger.info(
                 f"✅ CognitiveEngine processed message (fast mode): {len(ltm_memories)} memories retrieved"
             )
@@ -1357,22 +1410,50 @@ async def send_message(
             }
             await db.messages.insert_many([user_msg_doc, ai_msg_doc])
             
-            # BACKGROUND MEMORY EXTRACTION: Extract facts after returning response
-            # This provides fast response times while memory extraction happens asynchronously
-            # The UI will be notified via WebSocket when extraction completes
-            # 
-            # NOTE: extract_facts=False above is INTENTIONAL - it's a performance optimization.
-            # Memory extraction is expensive (LLM call), so we do it in the background after
-            # returning the response. This gives users instant responses while memories are
-            # extracted and stored asynchronously. The log message "Skipping memory storage"
-            # is expected and normal - extraction happens via _extract_memories_background() below.
+            # Record episodic memory and set working context (multi-tier memory system)
+            if cognitive_memory:
+                try:
+                    # Record user episode
+                    await cognitive_memory.record_episode(
+                        session_id=cid,
+                        role="user",
+                        content=full_input,
+                        scope="user",
+                        user_id=user_id,
+                        bucket_id=memory_bucket_id,
+                    )
+                    # Record assistant episode
+                    await cognitive_memory.record_episode(
+                        session_id=cid,
+                        role="assistant",
+                        content=ai_text,
+                        scope="user",
+                        user_id=user_id,
+                        bucket_id=memory_bucket_id,
+                    )
+                    # Set working context for this session
+                    await cognitive_memory.set_working_context(
+                        session_id=cid,
+                        data={
+                            "current_topic": message[:100] if message else "",
+                            "category": category,
+                            "last_message": full_input[:200] if full_input else "",
+                        },
+                    )
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to record episodic memory or set working context: {e}")
+            
+            # IMMEDIATE MEMORY EXTRACTION: Extract memories immediately from user prompt
+            # This allows memories to be displayed while AI response is being generated
+            # After response completes, memories will be refined with AI context
+            immediate_memories_task = None
             if svc and message.strip():
                 logger.info(
-                    f"📡 [Background Extraction] Scheduling memory extraction: "
+                    f"⚡ [Immediate Extraction] Starting immediate memory extraction: "
                     f"user_id={user_id}, bucket_id={memory_bucket_id}"
                 )
-                extraction_task = asyncio.create_task(
-                    _extract_memories_background(
+                immediate_memories_task = asyncio.create_task(
+                    _extract_memories_immediate(
                         user_id=user_id,
                         conversation_id=cid,
                         message=full_input,
@@ -1380,128 +1461,86 @@ async def send_message(
                         bucket_id=memory_bucket_id,
                         bucket_type="category",
                         category=category,
-                        ai_response=ai_text,
                     )
                 )
                 # Add error callback to log task failures without disrupting main flow
-                extraction_task.add_done_callback(
+                immediate_memories_task.add_done_callback(
                     lambda t: logger.error(
-                        f"❌ Background extraction task failed: {t.exception()}"
+                        f"❌ Immediate extraction task failed: {t.exception()}"
                     ) if t.exception() else None
                 )
             
-        except Exception as e:
-            logger.error(f"❌ CognitiveEngine chat failed: {e}", exc_info=True)
-            # Fallback to manual RAG
-            ai_text = await _fallback_rag_chat(
-                db, svc, user_id, cid, full_input, message, category
-            )
-            retrieved_memories = []
-            
-            # IMPORTANT: Store memories even when CognitiveEngine fails (like chit_chat)
-            # This ensures memories are always stored for the conversation
-            if svc and message.strip():
+            # REFINE MEMORIES: After AI response completes, refine memories with context
+            if immediate_memories_task and ai_text and ai_text.strip():
                 try:
-                    # Use category-based bucket for bucket awareness
-                    fallback_bucket_id = f"category:{category}:{user_id}"
-                    logger.info(f"💾 [Fallback] Storing memory for failed CognitiveEngine chat: user_id={user_id}, bucket_id={fallback_bucket_id}, message='{message[:50]}...'")
+                    # Wait for immediate extraction to complete and get memory IDs
+                    initial_memory_ids = await immediate_memories_task
                     
-                    # Combine user message and AI response for extraction context
-                    extraction_text = full_input
-                    if ai_text:
-                        extraction_text = f"User: {full_input}\nAI: {ai_text}"
-
-                    # Use add_async for optimal performance with parallel processing
-                    stored = await svc.add_async(
-                        messages=extraction_text,
-                        user_id=user_id,
-                        metadata={
-                            "source": "chat_session",
-                            "session_id": cid,
-                            "category": category,
-                            "associated_bucket_id": fallback_bucket_id,  # For unified bucket search
-                            "raw_input": full_input,
-                            "raw_output": ai_text,
-                        },
-                        bucket_id=fallback_bucket_id,
-                        bucket_type="category",
-                    )
-                    if stored and isinstance(stored, list) and len(stored) > 0:
-                        logger.info(f"✅ [Fallback] Stored {len(stored)} memories after CognitiveEngine failure")
-                        # Broadcast memory storage event
-                        broadcast_task = asyncio.create_task(
-                            _broadcast_memory_stored(
+                    if initial_memory_ids:
+                        logger.info(
+                            f"🔧 [Refinement] Starting memory refinement: "
+                            f"user_id={user_id}, memory_ids={len(initial_memory_ids)}"
+                        )
+                        refinement_task = asyncio.create_task(
+                            _refine_memories_with_context(
                                 user_id=user_id,
                                 conversation_id=cid,
+                                initial_memory_ids=initial_memory_ids,
+                                ai_response=ai_text,
                                 memory_service=svc,
-                                new_memories=stored,
+                                bucket_id=memory_bucket_id,
                             )
                         )
-                        broadcast_task.add_done_callback(
+                        refinement_task.add_done_callback(
                             lambda t: logger.error(
-                                f"❌ Memory broadcast task failed: {t.exception()}"
+                                f"❌ Refinement task failed: {t.exception()}"
                             ) if t.exception() else None
                         )
                     else:
-                        logger.warning(f"⚠️ [Fallback] Memory storage returned empty: {stored}")
-                except Exception as mem_error:
-                    logger.error(f"❌ [Fallback] Failed to store memory: {mem_error}", exc_info=True)
-    else:
-        # Fallback if CognitiveEngine not available
-        logger.warning("⚠️ CognitiveEngine not available, using fallback RAG")
-        ai_text = await _fallback_rag_chat(
-            db, svc, user_id, cid, full_input, message, category
-        )
-        retrieved_memories = []
-        
-        # IMPORTANT: Store memories even when CognitiveEngine not available (like chit_chat)
-        # This ensures memories are always stored for the conversation
-        if svc and message.strip():
-            try:
-                # Use category-based bucket for bucket awareness
-                fallback_bucket_id = f"category:{category}:{user_id}"
-                logger.info(f"💾 [Fallback] Storing memory when CognitiveEngine unavailable: user_id={user_id}, bucket_id={fallback_bucket_id}, message='{message[:50]}...'")
-                
-                # Combine user message and AI response for extraction context
-                extraction_text = full_input
-                if ai_text:
-                    extraction_text = f"User: {full_input}\nAI: {ai_text}"
-
-                # Use add_async for optimal performance with parallel processing
-                stored = await svc.add_async(
-                    messages=extraction_text,
-                    user_id=user_id,
-                    metadata={
-                        "source": "chat_session",
-                        "session_id": cid,
-                        "category": category,
-                        "associated_bucket_id": fallback_bucket_id,  # For unified bucket search
-                        "raw_input": full_input,
-                        "raw_output": ai_text,
-                    },
-                    bucket_id=fallback_bucket_id,
-                    bucket_type="category",
-                )
-                if stored and isinstance(stored, list) and len(stored) > 0:
-                    logger.info(f"✅ [Fallback] Stored {len(stored)} memories when CognitiveEngine unavailable")
-                    # Broadcast memory storage event
-                    broadcast_task = asyncio.create_task(
-                        _broadcast_memory_stored(
-                            user_id=user_id,
-                            conversation_id=cid,
-                            memory_service=svc,
-                            new_memories=stored,
+                        logger.info(
+                            f"ℹ️ [Refinement] No memories to refine (user_id={user_id})"
                         )
+                except Exception as e:
+                    logger.error(
+                        f"❌ [Refinement] Failed to start refinement: {e}",
+                        exc_info=True
                     )
-                    broadcast_task.add_done_callback(
-                        lambda t: logger.error(
-                            f"❌ Memory broadcast task failed: {t.exception()}"
-                        ) if t.exception() else None
-                    )
-                else:
-                    logger.warning(f"⚠️ [Fallback] Memory storage returned empty: {stored}")
-            except Exception as mem_error:
-                logger.error(f"❌ [Fallback] Failed to store memory: {mem_error}", exc_info=True)
+                    # Don't fail the request if refinement fails
+            
+        except Exception as e:
+            logger.error(
+                f"❌ CognitiveEngine chat FAILED: {e}. "
+                f"NO FALLBACK - This failure needs to be addressed. "
+                f"user_id={user_id}, conversation_id={cid}",
+                exc_info=True
+            )
+            # NO FALLBACK: Failures are explicit - raise error so caller can handle it properly
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "error": "CognitiveEngine unavailable or failed",
+                    "message": "The AI service encountered an error. Please check logs and fix the root cause.",
+                    "error_type": "cognitive_engine_failure",
+                    "user_id": user_id,
+                    "conversation_id": cid,
+                }
+            ) from e
+    
+    if not cognitive_engine:
+        logger.error(
+            f"❌ CognitiveEngine not available. NO FALLBACK - This needs to be fixed. "
+            f"user_id={user_id}, conversation_id={cid}"
+        )
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "CognitiveEngine not configured",
+                "message": "The AI service is not available. Please configure CognitiveEngine properly.",
+                "error_type": "service_unavailable",
+                "user_id": user_id,
+                "conversation_id": cid,
+            }
+        )
 
     # 3. Background Memory Task (for file processing - CognitiveEngine handles chat memory automatically)
     if svc and processed_files:
@@ -1513,17 +1552,33 @@ async def send_message(
                 # Note: Chat memory is handled automatically by CognitiveEngine when extract_facts=True
                 # Only process file memories here
                 
-                # File Memory
-                for pf in processed_files:
+                # File Memory - process in parallel for better performance
+                async def process_single_file_memory(file_data: dict) -> tuple[int, str | None]:
+                    """Process a single file memory and return (count, error)."""
                     try:
                         count = await process_and_store_file_memory(
-                            svc=svc, user_id=user_id, file_data=pf, category=category
+                            svc=svc, user_id=user_id, file_data=file_data, category=category
                         )
-                        total_memories += count
+                        return count, None
                     except Exception as e:
-                        error_msg = f"Error processing {pf.get('filename')}: {e}"
+                        error_msg = f"Error processing {file_data.get('filename')}: {e}"
                         logger.error(f"❌ {error_msg}", exc_info=True)
-                        errors.append(error_msg)
+                        return 0, error_msg
+                
+                # Process all files in parallel
+                if processed_files:
+                    memory_results = await asyncio.gather(*[
+                        process_single_file_memory(pf) for pf in processed_files
+                    ], return_exceptions=True)
+                    
+                    for result in memory_results:
+                        if isinstance(result, Exception):
+                            errors.append(f"Unexpected error: {result}")
+                        elif isinstance(result, tuple):
+                            count, error = result
+                            total_memories += count
+                            if error:
+                                errors.append(error)
 
                 await broadcast_to_app(
                     APP_SLUG,
@@ -1617,7 +1672,729 @@ async def send_message(
         if context_engineering_metadata:
             response_data["context_engineering"] = context_engineering_metadata
     
+    # Add GraphRAG context if available
+    if cognitive_engine and cognitive_engine.has_graph_service and graph_context_result:
+            entry_nodes = graph_context_result.get("entry_nodes", [])
+            context_nodes = graph_context_result.get("context_nodes", [])
+            community_summaries = graph_context_result.get("community_summaries", [])
+            query_type = graph_context_result.get("query_type", "unknown")
+            total_graph_nodes = len(entry_nodes) + len(context_nodes)
+            
+            if total_graph_nodes > 0:
+                # Prepare graph data for frontend display
+                graph_context_nodes_raw = graph_context_result.get("graph_context", [])
+                if not graph_context_nodes_raw and context_nodes:
+                    graph_context_nodes_raw = context_nodes
+                
+                # Normalize graph_context_nodes to a consistent format
+                graph_context_nodes = []
+                for item in graph_context_nodes_raw:
+                    if isinstance(item, dict):
+                        if "node" in item:
+                            graph_context_nodes.append(item)
+                        else:
+                            graph_context_nodes.append({"node": item})
+                    else:
+                        continue
+                
+                # Collect relationship types
+                all_relations = set()
+                for node in entry_nodes:
+                    for edge in node.get("edges", []):
+                        if edge.get("active", True):
+                            all_relations.add(edge.get("relation", ""))
+                for item in graph_context_nodes:
+                    node_data = item.get("node", {})
+                    if isinstance(node_data, dict):
+                        for edge in node_data.get("edges", []):
+                            if edge.get("active", True):
+                                all_relations.add(edge.get("relation", ""))
+                
+                response_data["graph_context"] = {
+                    "has_graph": True,
+                    "query_type": query_type,
+                    "total_nodes": total_graph_nodes,
+                    "entry_nodes_count": len(entry_nodes),
+                    "context_nodes_count": len(graph_context_nodes),
+                    "community_summaries_count": len(community_summaries),
+                    "relationship_types": sorted(list(all_relations)),
+                    "entry_nodes": [
+                        {
+                            "id": str(node.get("_id", "")),
+                            "name": node.get("name", ""),
+                            "type": node.get("type", ""),
+                            "edges": [
+                                {
+                                    "relation": edge.get("relation", ""),
+                                    "target": edge.get("target", ""),
+                                    "active": edge.get("active", True),
+                                }
+                                for edge in node.get("edges", [])[:10]
+                            ],
+                        }
+                        for node in entry_nodes
+                    ],
+                    "related_nodes": [
+                        {
+                            "id": str(item.get("node", {}).get("_id", "")),
+                            "name": item.get("node", {}).get("name", ""),
+                            "type": item.get("node", {}).get("type", ""),
+                            "hop_distance": item.get("hop_distance", 0),
+                            "edges": [
+                                {
+                                    "relation": edge.get("relation", ""),
+                                    "target": edge.get("target", ""),
+                                    "active": edge.get("active", True),
+                                }
+                                for edge in item.get("node", {}).get("edges", [])[:5]
+                            ],
+                        }
+                        for item in graph_context_nodes
+                    ],
+                    "community_summaries": [
+                        {
+                            "community_id": str(s.get("community_id", "")),
+                            "summary": s.get("summary", ""),
+                            "level": s.get("level", 0),
+                            "size": s.get("size", 0),
+                        }
+                        for s in community_summaries[:5]
+                    ],
+                }
+    
     return JSONResponse(response_data)
+
+
+# --- PREVIEW ENDPOINT FOR CONTEXT ENGINEERING MODAL ---
+@app.post("/api/conversations/{cid}/preview-prompt", response_class=JSONResponse)
+async def preview_prompt(
+    request: Request,
+    cid: str,
+    query: str = Form(""),
+    category: str = Form("general"),
+    db=Depends(get_scoped_db),
+    svc=Depends(get_memory_service),
+):
+    """
+    Generate a preview of the context-engineered prompt that would be used for a query.
+    Uses the actual CognitiveEngine to ensure accuracy.
+    """
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    user_id = str(user["_id"])
+    
+    if not query.strip():
+        raise HTTPException(status_code=400, detail="Query is required")
+    
+    if not cognitive_engine:
+        raise HTTPException(status_code=500, detail="CognitiveEngine not available")
+    
+    # Build bucket_id for bucket-aware memory isolation
+    memory_bucket_id = f"category:{category}:{user_id}"
+    
+    try:
+        # Get persona
+        persona_used = None
+        persona_engine = getattr(svc, "persona_engine", None)
+        if persona_engine:
+            try:
+                persona_used = await persona_engine.get_persona()
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to get persona for preview: {e}")
+                persona_used = None
+        
+        # Search LTM with bucket filtering
+        ltm_filters = {"metadata": {"associated_bucket_id": memory_bucket_id}}
+        relevant_memories = []
+        try:
+            relevant_memories = await svc.search(
+                query=query,
+                user_id=user_id,
+                limit=cognitive_engine.ltm_search_limit,
+                filters=ltm_filters,
+            )
+        except Exception as e:
+            logger.warning(f"⚠️ LTM search failed for preview: {e}")
+            relevant_memories = []
+        
+        # Extract entity facts using the actual method
+        entity_facts = {}
+        if cognitive_engine.enable_entity_extraction:
+            entity_facts = cognitive_engine._extract_entity_facts(user_id, relevant_memories)
+        
+        # Build dynamic instructions using the actual method
+        dynamic_instructions = ""
+        if cognitive_engine.enable_dynamic_persona:
+            dynamic_instructions = cognitive_engine._build_dynamic_persona(
+                persona_used, entity_facts, relevant_memories
+            )
+        
+        # Format LTM context (same format as actual system)
+        ltm_context = ""
+        if relevant_memories:
+            ltm_context = "RELEVANT FACTS FROM LONG-TERM MEMORY:\n"
+            for mem in relevant_memories:
+                memory_text = mem.get("memory", "") or mem.get("text", "")
+                if memory_text:
+                    ltm_context += f"- {memory_text}\n"
+            ltm_context += "\n"
+        
+        # Get graph context using CognitiveEngine's automatic GraphRAG
+        # CognitiveEngine handles query classification and routing automatically
+        graph_context = ""
+        graph_results = None
+        graph_meets_threshold = False
+        graph_search_error = None
+        
+        # Use CognitiveEngine's internal graph fetching (same as chat() method)
+        if cognitive_engine.has_graph_service:
+            try:
+                # CognitiveEngine automatically classifies queries and routes to appropriate search method
+                query_type = cognitive_engine.graph_service.classify_query(query)
+                logger.info(f"🔍 [GraphRAG Preview] Query classified as: {query_type}")
+                
+                # Route to appropriate GraphRAG search method
+                if query_type == "local":
+                    graph_results = await cognitive_engine.graph_service.local_search(
+                        query=query,
+                        user_id=user_id,
+                        max_depth=2,
+                    )
+                elif query_type == "global":
+                    graph_results = await cognitive_engine.graph_service.global_search(
+                        query=query,
+                        user_id=user_id,
+                        max_communities=10,
+                    )
+                elif query_type == "drift":
+                    graph_results = await cognitive_engine.graph_service.drift_search(
+                        query=query,
+                        user_id=user_id,
+                        max_depth=2,
+                    )
+                else:
+                    # Fallback to hybrid search
+                    graph_results = await cognitive_engine.graph_service.hybrid_search(
+                        query=query,
+                        user_id=user_id,
+                        max_depth=2,
+                    )
+                
+                # Deduplicate graph against memories (same as CognitiveEngine does)
+                if graph_results:
+                    graph_results = await cognitive_engine._deduplicate_graph_against_memories(
+                        graph_results,
+                        relevant_memories,
+                        similarity_threshold=cognitive_engine.graph_deduplication_threshold,
+                    )
+                    
+                    # Format graph context if meets threshold
+                    if graph_results:
+                        entry_nodes = graph_results.get("entry_nodes", [])
+                        # Handle both old format (graph_context) and new format (context_nodes)
+                        graph_context_nodes_raw = graph_results.get("graph_context", [])
+                        if not graph_context_nodes_raw and graph_results.get("context_nodes"):
+                            graph_context_nodes_raw = graph_results.get("context_nodes", [])
+                        
+                        # Normalize graph_context_nodes to a consistent format (same as display code)
+                        graph_context_nodes = []
+                        for item in graph_context_nodes_raw:
+                            if isinstance(item, dict):
+                                # Check if it's already in the format {"node": {...}, "hop_distance": ..., etc}
+                                if "node" in item:
+                                    graph_context_nodes.append(item)
+                                else:
+                                    # It's a direct node dict, wrap it
+                                    graph_context_nodes.append({"node": item})
+                            else:
+                                # Skip non-dict items
+                                continue
+                        
+                        community_summaries = graph_results.get("community_summaries", [])
+                        
+                        # Count consistently with display code
+                        total_graph_nodes = len(entry_nodes) + len(graph_context_nodes)
+                        
+                        if total_graph_nodes >= cognitive_engine.graph_min_nodes:
+                            graph_meets_threshold = True
+                            graph_context = cognitive_engine.graph_service.format_graph_context(
+                                graph_results,
+                                max_nodes=15,
+                                include_edges=True,
+                            )
+                            if graph_context:
+                                graph_context += "\n\n"
+                                logger.info(
+                                    f"✅ [GraphRAG Preview] Graph context included: "
+                                    f"{len(entry_nodes)} entry nodes, {len(graph_context_nodes)} context nodes, "
+                                    f"query_type: {query_type}"
+                                )
+            except Exception as e:
+                logger.warning(f"⚠️ Graph search failed for preview: {e}", exc_info=True)
+                graph_results = None
+                graph_search_error = str(e)
+        
+        # Get STM context (for chat history)
+        stm_context = []
+        try:
+            stm_context = await asyncio.to_thread(
+                cognitive_engine.stm.get_context,
+                session_id=cid,
+                limit=cognitive_engine.stm_context_limit,
+                user_id=user_id,
+            )
+        except Exception as e:
+            logger.warning(f"⚠️ STM context fetch failed for preview: {e}")
+            stm_context = []
+        
+        # Format chat history
+        chat_history = ""
+        if stm_context:
+            chat_history = "\n".join([
+                f"{msg.get('role', 'user').capitalize()}: {msg.get('content', '')}"
+                for msg in stm_context[-10:]
+            ])
+        else:
+            chat_history = "[No chat history yet - this will be populated after you send messages]"
+        
+        # Build the actual prompt using the same method (without STM summary for preview)
+        system_prompt = cognitive_engine._construct_context_engineered_prompt(
+            persona=persona_used,
+            entity_facts=entity_facts,
+            ltm_context=ltm_context,
+            graph_context=graph_context,
+            dynamic_instructions=dynamic_instructions,
+            stm_summary=None,  # Don't summarize for preview
+        )
+        
+        # Add chat history to the end (as it's added separately in the actual system)
+        if chat_history and chat_history != "[No chat history yet - this will be populated after you send messages]":
+            system_prompt += f"\n\n[CHAT HISTORY]\n{chat_history}"
+        
+        # Add user query at the end
+        system_prompt += f"\n\n[USER QUERY]\n{query}"
+        
+        # Prepare graph data for frontend display (always show if graph service exists)
+        graph_data = None
+        if cognitive_engine.has_graph_service:
+            if graph_results:
+                entry_nodes = graph_results.get("entry_nodes", [])
+                # Handle both old format (graph_context) and new format (context_nodes)
+                graph_context_nodes_raw = graph_results.get("graph_context", [])
+                if not graph_context_nodes_raw and graph_results.get("context_nodes"):
+                    graph_context_nodes_raw = graph_results.get("context_nodes", [])
+                
+                # Normalize graph_context_nodes to a consistent format
+                # Each item should be a dict with node data and metadata
+                graph_context_nodes = []
+                for item in graph_context_nodes_raw:
+                    if isinstance(item, dict):
+                        # Check if it's already in the format {"node": {...}, "hop_distance": ..., etc}
+                        if "node" in item:
+                            graph_context_nodes.append(item)
+                        else:
+                            # It's a direct node dict, wrap it
+                            graph_context_nodes.append({"node": item})
+                    else:
+                        # Skip non-dict items
+                        continue
+                
+                total_nodes = len(entry_nodes) + len(graph_context_nodes)
+                strategy = graph_results.get("strategy", "neighborhood")  # Get strategy from advanced search
+                
+                # Collect all relationship types found for summary
+                all_relations = set()
+                for node in entry_nodes:
+                    for edge in node.get("edges", []):
+                        if edge.get("active", True):
+                            all_relations.add(edge.get("relation", ""))
+                for item in graph_context_nodes:
+                    # Extract node data safely
+                    node_data = item.get("node", {})
+                    if isinstance(node_data, dict):
+                        for edge in node_data.get("edges", []):
+                            if edge.get("active", True):
+                                all_relations.add(edge.get("relation", ""))
+                
+                # Ensure meets_threshold uses same node count as total_nodes display
+                calculated_total = len(entry_nodes) + len(graph_context_nodes)
+                meets_threshold_calculated = calculated_total >= cognitive_engine.graph_min_nodes
+                
+                graph_data = {
+                    "has_graph": True,
+                    "meets_threshold": meets_threshold_calculated,
+                    "strategy": strategy,  # Include strategy for frontend display
+                    "entry_nodes": [
+                        {
+                            "id": node.get("_id", ""),
+                            "name": node.get("name", ""),
+                            "type": node.get("type", ""),
+                            "edges": [
+                                {
+                                    "relation": edge.get("relation", ""),
+                                    "target": edge.get("target", ""),
+                                    "active": edge.get("active", True),
+                                }
+                                for edge in node.get("edges", [])[:15]  # Increased limit
+                            ],
+                        }
+                        for node in entry_nodes
+                    ],
+                    "related_nodes": [
+                        {
+                            "id": item.get("node", {}).get("_id", ""),
+                            "name": item.get("node", {}).get("name", ""),
+                            "type": item.get("node", {}).get("type", ""),
+                            "hop_distance": item.get("hop_distance", 0),
+                            "relation": item.get("relation", ""),  # Direct relation from entry node
+                            "priority": item.get("priority", 0.5),  # Priority score
+                            "edges": [
+                                {
+                                    "relation": edge.get("relation", ""),
+                                    "target": edge.get("target", ""),
+                                    "active": edge.get("active", True),
+                                }
+                                for edge in item.get("node", {}).get("edges", [])[:8]  # Increased limit
+                            ],
+                        }
+                        for item in graph_context_nodes
+                    ],
+                    "total_nodes": total_nodes,
+                    "relationship_types": sorted(list(all_relations)),  # All unique relationship types
+                    "min_nodes_required": cognitive_engine.graph_min_nodes,
+                    "formatted_context": graph_context,
+                    "search_found_nodes": True,
+                }
+            else:
+                # Graph service exists but search returned no results
+                graph_data = {
+                    "has_graph": True,
+                    "meets_threshold": False,
+                    "entry_nodes": [],
+                    "related_nodes": [],
+                    "total_nodes": 0,
+                    "min_nodes_required": cognitive_engine.graph_min_nodes,
+                    "formatted_context": "",
+                    "search_found_nodes": False,
+                    "message": "Graph relationships exist but vector search found no matches. This usually means nodes don't have embeddings yet. The system will try name-based fallback automatically. To fix permanently, use POST /api/graph/backfill-embeddings to generate embeddings for all nodes.",
+                    "error": graph_search_error,
+                }
+        else:
+            graph_data = {"has_graph": False}
+        
+        return {
+            "success": True,
+            "preview": system_prompt,
+            "persona": persona_used,
+            "entity_facts": entity_facts,
+            "dynamic_instructions": dynamic_instructions,
+            "ltm_memories": relevant_memories,
+            "graph_context": graph_context,
+            "graph_data": graph_data,
+            "chat_history": chat_history,
+        }
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+    except Exception as e:
+        logger.error(f"Error generating preview: {e}", exc_info=True)
+        error_detail = str(e)
+        # Provide more helpful error messages
+        if "CognitiveEngine" in error_detail or "not available" in error_detail:
+            error_detail = "CognitiveEngine is not initialized. Please check server configuration."
+        raise HTTPException(status_code=500, detail=error_detail)
+
+
+# --- PREVIEW RESPONSE ENDPOINT ---
+@app.post("/api/conversations/{cid}/preview-response", response_class=JSONResponse)
+async def preview_response(
+    request: Request,
+    cid: str,
+    message: str = Form(""),
+    category: str = Form("general"),
+    db=Depends(get_scoped_db),
+    svc=Depends(get_memory_service),
+):
+    """
+    Generate a preview response without saving to STM/LTM.
+    Uses CognitiveEngine but skips persistence steps.
+    """
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    user_id = str(user["_id"])
+    
+    if not message.strip():
+        raise HTTPException(status_code=400, detail="Message is required")
+    
+    if not cognitive_engine:
+        raise HTTPException(status_code=500, detail="CognitiveEngine not available")
+    
+    memory_bucket_id = f"category:{category}:{user_id}"
+    
+    try:
+        # Get STM context WITHOUT adding the new message
+        stm_context = await asyncio.to_thread(
+            cognitive_engine.stm.get_context,
+            session_id=cid,
+            limit=cognitive_engine.stm_context_limit,
+            user_id=user_id,
+        )
+        
+        # Add user query to context temporarily (for preview only)
+        preview_stm_context = stm_context + [{"role": "user", "content": message}]
+        
+        # Get LTM memories
+        ltm_filters = {"metadata": {"associated_bucket_id": memory_bucket_id}}
+        relevant_memories = []
+        try:
+            relevant_memories = await svc.search(
+                query=message,
+                user_id=user_id,
+                limit=cognitive_engine.ltm_search_limit,
+                filters=ltm_filters,
+            )
+        except Exception as e:
+            logger.warning(f"⚠️ LTM search failed for preview response: {e}")
+            relevant_memories = []
+        
+        # Get persona and build context (same as regular flow)
+        persona_used = None
+        persona_engine = getattr(svc, "persona_engine", None)
+        if persona_engine:
+            try:
+                persona_used = await persona_engine.get_persona()
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to get persona for preview response: {e}")
+                persona_used = None
+        
+        entity_facts = {}
+        if cognitive_engine.enable_entity_extraction:
+            entity_facts = cognitive_engine._extract_entity_facts(user_id, relevant_memories)
+        
+        dynamic_instructions = ""
+        if cognitive_engine.enable_dynamic_persona:
+            dynamic_instructions = cognitive_engine._build_dynamic_persona(
+                persona_used, entity_facts, relevant_memories
+            )
+        
+        # Format LTM context
+        ltm_context = ""
+        if relevant_memories:
+            ltm_context = "RELEVANT FACTS FROM LONG-TERM MEMORY:\n"
+            for mem in relevant_memories:
+                memory_text = mem.get("memory", "") or mem.get("text", "")
+                if memory_text:
+                    ltm_context += f"- {memory_text}\n"
+            ltm_context += "\n"
+        
+        # Get graph context using CognitiveEngine's automatic GraphRAG
+        graph_context = ""
+        if cognitive_engine.has_graph_service:
+            try:
+                # CognitiveEngine automatically classifies queries and routes to appropriate search method
+                query_type = cognitive_engine.graph_service.classify_query(message)
+                
+                # Route to appropriate GraphRAG search method
+                if query_type == "local":
+                    graph_results = await cognitive_engine.graph_service.local_search(
+                        query=message,
+                        user_id=user_id,
+                        max_depth=2,
+                    )
+                elif query_type == "global":
+                    graph_results = await cognitive_engine.graph_service.global_search(
+                        query=message,
+                        user_id=user_id,
+                        max_communities=10,
+                    )
+                elif query_type == "drift":
+                    graph_results = await cognitive_engine.graph_service.drift_search(
+                        query=message,
+                        user_id=user_id,
+                        max_depth=2,
+                    )
+                else:
+                    # Fallback to hybrid search
+                    graph_results = await cognitive_engine.graph_service.hybrid_search(
+                        query=message,
+                        user_id=user_id,
+                        max_depth=2,
+                    )
+                
+                # Deduplicate graph against memories (same as CognitiveEngine does)
+                if graph_results:
+                    graph_results = await cognitive_engine._deduplicate_graph_against_memories(
+                        graph_results, relevant_memories,
+                        similarity_threshold=cognitive_engine.graph_deduplication_threshold,
+                    )
+                    if graph_results:
+                        entry_nodes = graph_results.get("entry_nodes", [])
+                        # Handle both old format (graph_context) and new format (context_nodes)
+                        graph_context_nodes_raw = graph_results.get("graph_context", [])
+                        if not graph_context_nodes_raw and graph_results.get("context_nodes"):
+                            graph_context_nodes_raw = graph_results.get("context_nodes", [])
+                        
+                        # Normalize graph_context_nodes to a consistent format
+                        graph_context_nodes = []
+                        for item in graph_context_nodes_raw:
+                            if isinstance(item, dict):
+                                if "node" in item:
+                                    graph_context_nodes.append(item)
+                                else:
+                                    graph_context_nodes.append({"node": item})
+                            else:
+                                continue
+                        
+                        # Count consistently
+                        total_graph_nodes = len(entry_nodes) + len(graph_context_nodes)
+                        if total_graph_nodes >= cognitive_engine.graph_min_nodes:
+                            graph_context = cognitive_engine.graph_service.format_graph_context(
+                                graph_results, max_nodes=10, include_edges=True,  # Increased from 8 for consistency
+                            )
+                            if graph_context:
+                                graph_context += "\n\n"
+            except Exception as e:
+                logger.warning(f"⚠️ Graph search failed for preview response: {e}")
+        
+        # Build system prompt
+        system_prompt = cognitive_engine._construct_context_engineered_prompt(
+            persona=persona_used,
+            entity_facts=entity_facts,
+            ltm_context=ltm_context,
+            graph_context=graph_context,
+            dynamic_instructions=dynamic_instructions,
+            stm_summary=None,
+        )
+        
+        # Prepare messages for LLM (without saving)
+        messages = [{"role": "system", "content": system_prompt}]
+        messages.extend(preview_stm_context)
+        
+        # Generate response (without saving)
+        chat_model = None  # Use default
+        ai_response = await cognitive_engine.llm_service.chat_completion(
+            messages=messages, model=chat_model
+        )
+        
+        return {
+            "success": True,
+            "response": ai_response,
+            "preview_id": str(uuid4()),  # Unique ID for this preview
+            "persona": persona_used,
+            "entity_facts": entity_facts,
+            "ltm_memories": relevant_memories,
+        }
+    except Exception as e:
+        logger.error(f"Error generating preview response: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- FORK CONVERSATION ENDPOINT ---
+@app.post("/api/conversations/{cid}/fork", response_class=JSONResponse)
+async def fork_conversation(
+    request: Request,
+    cid: str,
+    preview_id: str = Form(""),
+    preview_response: str = Form(""),
+    fork_at_message_id: str = Form(""),  # Optional: fork at specific message
+    db=Depends(get_scoped_db),
+    svc=Depends(get_memory_service),
+):
+    """
+    Fork a conversation: create new conversation with messages up to a point,
+    optionally including a previewed response.
+    """
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    user_id = str(user["_id"])
+    
+    # Verify original conversation belongs to user
+    original_convo = await db.conversations.find_one({
+        "_id": ObjectId(cid),
+        "user_id": user_id
+    })
+    if not original_convo:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    
+    # Get messages up to fork point
+    query = {"conversation_id": cid}
+    if fork_at_message_id and fork_at_message_id.strip():
+        # Get messages up to and including the fork point
+        try:
+            fork_msg = await db.messages.find_one({"_id": ObjectId(fork_at_message_id)})
+            if fork_msg:
+                query["created_at"] = {"$lte": fork_msg["created_at"]}
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to find fork message: {e}")
+    
+    messages = await db.messages.find(query).sort("created_at", 1).to_list(1000)
+    
+    # Create new conversation
+    new_convo = await db.conversations.insert_one({
+        "user_id": user_id,
+        "title": f"{original_convo.get('title', 'New Chat')} (Fork)",
+        "created_at": datetime.utcnow(),
+        "updated_at": datetime.utcnow(),
+    })
+    new_cid = str(new_convo.inserted_id)
+    
+    # Copy messages to new conversation
+    if messages:
+        new_messages = []
+        for msg in messages:
+            new_messages.append({
+                "conversation_id": new_cid,
+                "user_id": user_id,
+                "role": msg["role"],
+                "content": msg["content"],
+                "created_at": msg["created_at"],
+            })
+        await db.messages.insert_many(new_messages)
+    
+    # Add previewed response if provided
+    if preview_response:
+        await db.messages.insert_one({
+            "conversation_id": new_cid,
+            "user_id": user_id,
+            "role": "assistant",
+            "content": preview_response,
+            "created_at": datetime.utcnow(),
+        })
+    
+    # Copy STM context to new conversation
+    if cognitive_engine:
+        try:
+            stm_context = await asyncio.to_thread(
+                cognitive_engine.stm.get_context,
+                session_id=cid,
+                limit=100,
+                user_id=user_id,
+            )
+            for msg in stm_context:
+                cognitive_engine.stm.add_message(
+                    session_id=new_cid,
+                    role=msg["role"],
+                    content=msg["content"],
+                    user_id=user_id,
+                )
+            if preview_response:
+                cognitive_engine.stm.add_message(
+                    session_id=new_cid,
+                    role="assistant",
+                    content=preview_response,
+                    user_id=user_id,
+                )
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to copy STM context: {e}")
+    
+    return {
+        "success": True,
+        "conversation": {"_id": new_cid},
+        "forked_from": cid,
+    }
 
 
 # --- STREAMING ENDPOINT FOR REAL-TIME AI RESPONSES ---
@@ -1678,6 +2455,31 @@ async def send_message_stream(
         "created_at": datetime.utcnow(),
     })
     
+    # Record episodic memory and set working context (multi-tier memory system)
+    memory_bucket_id = f"category:{category}:{user_id}"
+    if cognitive_memory:
+        try:
+            # Record user episode
+            await cognitive_memory.record_episode(
+                session_id=cid,
+                role="user",
+                content=message,
+                scope="user",
+                user_id=user_id,
+                bucket_id=memory_bucket_id,
+            )
+            # Set working context for this session
+            await cognitive_memory.set_working_context(
+                session_id=cid,
+                data={
+                    "current_topic": message[:100] if message else "",
+                    "category": category,
+                    "last_message": message[:200] if message else "",
+                },
+            )
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to record episodic memory or set working context: {e}")
+    
     async def generate_stream():
         """Async generator that yields SSE events."""
         full_response = ""
@@ -1687,8 +2489,34 @@ async def send_message_stream(
         entity_facts_stream = {}
         dynamic_instructions_stream = ""
         prompt_template_stream = None
+        rag_context = []  # Initialize before try block to avoid UnboundLocalError
+        graph_context_result_stream = None  # Store graph context for streaming response
+        immediate_memories_task = None  # Track immediate extraction task
         
         try:
+            # 0. Extract memories IMMEDIATELY from user prompt (before AI response)
+            if svc and message.strip():
+                logger.info(
+                    f"⚡ [Immediate Extraction] Starting immediate memory extraction: "
+                    f"user_id={user_id}, bucket_id={memory_bucket_id}"
+                )
+                immediate_memories_task = asyncio.create_task(
+                    _extract_memories_immediate(
+                        user_id=user_id,
+                        conversation_id=cid,
+                        message=message,
+                        memory_service=svc,
+                        bucket_id=memory_bucket_id,
+                        bucket_type="category",
+                        category=category,
+                    )
+                )
+                # Add error callback to log task failures without disrupting main flow
+                immediate_memories_task.add_done_callback(
+                    lambda t: logger.error(
+                        f"❌ Immediate extraction task failed: {t.exception()}"
+                    ) if t.exception() else None
+                )
             # 1. Use CognitiveEngine with Context Engineering to build context
             # For streaming, we get context from CognitiveEngine then stream the LLM response separately
             if cognitive_engine and svc and message.strip():
@@ -1713,6 +2541,7 @@ async def send_message_stream(
                     retrieved_memories = result.get("ltm_memories", [])
                     stm_context = result.get("stm_context", [])
                     graph_context_result = result.get("graph_context")
+                    graph_context_result_stream = graph_context_result  # Store for done event
                     stm_summary_stream = result.get("stm_summary")
                     
                     # Build prompt template with placeholders
@@ -1808,78 +2637,35 @@ async def send_message_stream(
                     )
                     
                 except Exception as e:
-                    logger.error(f"❌ CognitiveEngine context building failed: {e}", exc_info=True)
-                    # Fallback to manual RAG
-                    if svc and message.strip():
-                        try:
-                            mems = await asyncio.to_thread(
-                                svc.search, query=message[:500], user_id=user_id, limit=12
-                            )
-                            for m in mems:
-                                memory_text = m.get("memory")
-                                if memory_text:
-                                    rag_context.append(memory_text)
-                                    retrieved_memories.append({
-                                        "id": m.get("id"),
-                                        "memory": m.get("memory"),
-                                        "score": m.get("score", m.get("similarity", 0.0)),
-                                    })
-                        except Exception as e2:
-                            logger.error(f"Fallback RAG search failed: {e2}", exc_info=True)
-                    
-                    # Build fallback messages
-                    memory_context_str = (
-                        "\n".join([f"- {mem}" for mem in rag_context])
-                        if rag_context
-                        else "No relevant memories found."
+                    logger.error(
+                        f"❌ CognitiveEngine context building FAILED: {e}. "
+                        f"NO FALLBACK - This failure needs to be addressed.",
+                        exc_info=True
                     )
-                    
-                    messages = [
-                        {
-                            "role": "system",
-                            "content": "You are Orby, an AI assistant with access to stored memories."
-                        },
-                        {
-                            "role": "user",
-                            "content": f"MEMORY CONTEXT:\n{memory_context_str}\n\nUser: {message}"
-                        }
-                    ]
-            else:
-                # Fallback if CognitiveEngine not available
-                rag_context = []
-                if svc and message.strip():
-                    try:
-                        mems = await asyncio.to_thread(
-                            svc.search, query=message[:500], user_id=user_id, limit=12
-                        )
-                        for m in mems:
-                            memory_text = m.get("memory")
-                            if memory_text:
-                                rag_context.append(memory_text)
-                                retrieved_memories.append({
-                                    "id": m.get("id"),
-                                    "memory": m.get("memory"),
-                                    "score": m.get("score", m.get("similarity", 0.0)),
-                                })
-                    except Exception as e:
-                        logger.error(f"RAG search failed: {e}", exc_info=True)
-                
-                memory_context_str = (
-                    "\n".join([f"- {mem}" for mem in rag_context])
-                    if rag_context
-                    else "No relevant memories found."
-                )
-                
-                messages = [
-                    {
-                        "role": "system",
-                        "content": "You are Orby, an AI assistant with access to stored memories."
-                    },
-                    {
-                        "role": "user",
-                        "content": f"MEMORY CONTEXT:\n{memory_context_str}\n\nUser: {message}"
+                    # NO FALLBACK: Failures are explicit - yield error event and stop
+                    error_data = {
+                        'type': 'error',
+                        'error': 'CognitiveEngine failed',
+                        'message': 'The AI service encountered an error. Please check logs and fix the root cause.',
+                        'error_type': 'cognitive_engine_failure'
                     }
-                ]
+                    yield f"data: {json_module.dumps(error_data)}\n\n"
+                    return
+            
+            if not cognitive_engine:
+                logger.error(
+                    f"❌ CognitiveEngine not available for streaming. "
+                    f"NO FALLBACK - This needs to be fixed."
+                )
+                # NO FALLBACK: Failures are explicit - yield error event and stop
+                error_data = {
+                    'type': 'error',
+                    'error': 'CognitiveEngine not configured',
+                    'message': 'The AI service is not available. Please configure CognitiveEngine properly.',
+                    'error_type': 'service_unavailable'
+                }
+                yield f"data: {json_module.dumps(error_data)}\n\n"
+                return
             
             # Send context event with Context Engineering metadata
             context_event = {
@@ -1925,6 +2711,7 @@ async def send_message_stream(
                     
                     async for chunk in llm_service.chat_completion_stream(
                         messages=messages,
+                        provider_name="chat",
                         reasoning_effort=effective_reasoning,
                         stream_reasoning=True,  # Enable thinking bubbles
                     ):
@@ -1955,9 +2742,42 @@ async def send_message_stream(
                         
                 except Exception as e:
                     logger.error(f"Streaming LLM failed: {e}", exc_info=True)
-                    error_event = {"type": "error", "message": str(e)}
+                    
+                    # Provide user-friendly error messages for common issues
+                    error_message = str(e)
+                    error_type = "error"
+                    
+                    # Check for model overloaded (503) errors
+                    if "503" in error_message or "overloaded" in error_message.lower() or "ServiceUnavailableError" in str(type(e).__name__):
+                        error_message = "The AI model is currently overloaded. Please try again in a few moments."
+                        error_type = "retry"
+                    # Check for rate limiting
+                    elif "429" in error_message or "rate limit" in error_message.lower():
+                        error_message = "Rate limit exceeded. Please wait a moment before trying again."
+                        error_type = "retry"
+                    # Check for authentication errors
+                    elif "401" in error_message or "403" in error_message or "unauthorized" in error_message.lower():
+                        error_message = "Authentication error. Please refresh the page and try again."
+                        error_type = "auth_error"
+                    # Check for timeout errors
+                    elif "timeout" in error_message.lower() or "timed out" in error_message.lower():
+                        error_message = "Request timed out. Please try again."
+                        error_type = "retry"
+                    # Check for mid-stream fallback errors (model switching)
+                    elif "MidStreamFallbackError" in str(type(e).__name__):
+                        error_message = "The AI model encountered an issue and switched to a fallback. Please try again."
+                        error_type = "retry"
+                    else:
+                        # For other errors, provide a generic but helpful message
+                        error_message = "An error occurred while generating the response. Please try again."
+                    
+                    error_event = {
+                        "type": error_type,
+                        "message": error_message,
+                        "technical_details": str(e) if error_type != "error" else None  # Include technical details for debugging
+                    }
                     yield f"data: {json_module.dumps(error_event)}\n\n"
-                    full_response = f"Error generating response: {e}"
+                    full_response = error_message
             else:
                 full_response = "LLM service not initialized"
                 error_event = {"type": "error", "message": full_response}
@@ -1972,32 +2792,153 @@ async def send_message_stream(
                 "created_at": datetime.utcnow(),
             })
             
+            # Record assistant episode (multi-tier memory system)
+            if cognitive_memory:
+                try:
+                    await cognitive_memory.record_episode(
+                        session_id=cid,
+                        role="assistant",
+                        content=full_response,
+                        scope="user",
+                        user_id=user_id,
+                        bucket_id=memory_bucket_id,
+                    )
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to record assistant episode: {e}")
+            
+            # 5. Prepare graph context for done event (if available)
+            graph_context_for_response = None
+            if graph_context_result_stream and cognitive_engine and cognitive_engine.has_graph_service:
+                entry_nodes = graph_context_result_stream.get("entry_nodes", [])
+                context_nodes = graph_context_result_stream.get("context_nodes", [])
+                community_summaries = graph_context_result_stream.get("community_summaries", [])
+                query_type = graph_context_result_stream.get("query_type", "unknown")
+                total_graph_nodes = len(entry_nodes) + len(context_nodes)
+                
+                if total_graph_nodes > 0:
+                    # Normalize graph_context_nodes
+                    graph_context_nodes_raw = graph_context_result_stream.get("graph_context", [])
+                    if not graph_context_nodes_raw and context_nodes:
+                        graph_context_nodes_raw = context_nodes
+                    
+                    graph_context_nodes = []
+                    for item in graph_context_nodes_raw:
+                        if isinstance(item, dict):
+                            if "node" in item:
+                                graph_context_nodes.append(item)
+                            else:
+                                graph_context_nodes.append({"node": item})
+                    
+                    # Collect relationship types
+                    all_relations = set()
+                    for node in entry_nodes:
+                        for edge in node.get("edges", []):
+                            if edge.get("active", True):
+                                all_relations.add(edge.get("relation", ""))
+                    for item in graph_context_nodes:
+                        node_data = item.get("node", {})
+                        if isinstance(node_data, dict):
+                            for edge in node_data.get("edges", []):
+                                if edge.get("active", True):
+                                    all_relations.add(edge.get("relation", ""))
+                    
+                    graph_context_for_response = {
+                        "has_graph": True,
+                        "query_type": query_type,
+                        "total_nodes": total_graph_nodes,
+                        "entry_nodes_count": len(entry_nodes),
+                        "context_nodes_count": len(graph_context_nodes),
+                        "community_summaries_count": len(community_summaries),
+                        "relationship_types": sorted(list(all_relations)),
+                        "entry_nodes": [
+                            {
+                                "id": str(node.get("_id", "")),
+                                "name": node.get("name", ""),
+                                "type": node.get("type", ""),
+                                "edges": [
+                                    {
+                                        "relation": edge.get("relation", ""),
+                                        "target": edge.get("target", ""),
+                                        "active": edge.get("active", True),
+                                    }
+                                    for edge in node.get("edges", [])[:10]
+                                ],
+                            }
+                            for node in entry_nodes
+                        ],
+                        "related_nodes": [
+                            {
+                                "id": str(item.get("node", {}).get("_id", "")),
+                                "name": item.get("node", {}).get("name", ""),
+                                "type": item.get("node", {}).get("type", ""),
+                                "hop_distance": item.get("hop_distance", 0),
+                                "edges": [
+                                    {
+                                        "relation": edge.get("relation", ""),
+                                        "target": edge.get("target", ""),
+                                        "active": edge.get("active", True),
+                                    }
+                                    for edge in item.get("node", {}).get("edges", [])[:5]
+                                ],
+                            }
+                            for item in graph_context_nodes
+                        ],
+                        "community_summaries": [
+                            {
+                                "community_id": str(s.get("community_id", "")),
+                                "summary": s.get("summary", ""),
+                                "level": s.get("level", 0),
+                                "size": s.get("size", 0),
+                            }
+                            for s in community_summaries[:5]
+                        ],
+                    }
+            
             # 5. Send done event with full response
             done_event = {
                 "type": "done",
                 "full_response": full_response,
                 "memories_used": len(retrieved_memories),
             }
+            if graph_context_for_response:
+                done_event["graph_context"] = graph_context_for_response
             yield f"data: {json_module.dumps(done_event)}\n\n"
             
-            # 6. Trigger background memory extraction
-            if svc and message.strip():
-                extraction_task = asyncio.create_task(
-                    _extract_memories_background(
-                        user_id=user_id,
-                        conversation_id=cid,
-                        message=message,
-                        memory_service=svc,
-                        bucket_id=memory_bucket_id,
-                        bucket_type="category",
-                        category=category,
-                        ai_response=full_response,
+            # 6. Refine memories with AI response context (if immediate extraction happened)
+            if immediate_memories_task and full_response and full_response.strip():
+                try:
+                    # Wait for immediate extraction to complete and get memory IDs
+                    initial_memory_ids = await immediate_memories_task
+                    
+                    if initial_memory_ids:
+                        logger.info(
+                            f"🔧 [Refinement] Starting memory refinement: "
+                            f"user_id={user_id}, memory_ids={len(initial_memory_ids)}"
+                        )
+                        refinement_task = asyncio.create_task(
+                            _refine_memories_with_context(
+                                user_id=user_id,
+                                conversation_id=cid,
+                                initial_memory_ids=initial_memory_ids,
+                                ai_response=full_response,
+                                memory_service=svc,
+                                bucket_id=memory_bucket_id,
+                            )
+                        )
+                        refinement_task.add_done_callback(
+                            lambda t: logger.error(f"Refinement failed: {t.exception()}")
+                            if t.exception() else None
+                        )
+                    else:
+                        logger.info(
+                            f"ℹ️ [Refinement] No memories to refine (user_id={user_id})"
+                        )
+                except Exception as e:
+                    logger.error(
+                        f"❌ [Refinement] Failed to start refinement: {e}",
+                        exc_info=True
                     )
-                )
-                extraction_task.add_done_callback(
-                    lambda t: logger.error(f"Background extraction failed: {t.exception()}")
-                    if t.exception() else None
-                )
+                    # Don't fail the request if refinement fails
                 
         except Exception as e:
             logger.error(f"Streaming error: {e}", exc_info=True)
@@ -2142,11 +3083,14 @@ async def _extract_memories_background(
             "raw_output": ai_response,
         }
         
-        # Combine user message and AI response for extraction context
-        # This allows the memory system to understand the full interaction
+        # Extract memories from user message only
+        # AI responses are conversational and shouldn't be stored as memories
+        # We include AI response as context to help understand user's question, but only extract from user message
         extraction_text = message
         if ai_response:
-            extraction_text = f"User: {message}\nAI: {ai_response}"
+            # Include AI response as context, but extraction should focus on user message
+            # The cognitive extraction prompt already instructs to ignore AI responses
+            extraction_text = f"User: {message}\nAI: {ai_response}\n\nNote: Only extract facts from the USER message above, not from the AI response."
         
         # Stage 3: Preparing extraction
         await _send_extraction_status(
@@ -2194,25 +3138,35 @@ async def _extract_memories_background(
         heartbeat_task = asyncio.create_task(send_extraction_heartbeat())
         
         try:
-            # Format messages for perception analysis (if AI response available)
-            # Perception analysis requires both user and assistant messages
+            # CRITICAL: Only extract facts from USER messages, not AI responses
+            # AI responses are conversational advice and should NOT be stored as memories
+            # We include AI response in metadata for context, but extraction only uses user message
             if ai_response:
-                extraction_messages = [
-                    {"role": "user", "content": message},
-                    {"role": "assistant", "content": ai_response}
-                ]
+                # Only pass user message for extraction - AI response goes in metadata only
+                extraction_messages = message  # String format - user message only
+                # Store AI response in metadata for reference, but don't extract from it
+                storage_metadata["ai_response_context"] = ai_response[:200]  # Truncated for metadata
             else:
-                extraction_messages = extraction_text  # Use string format if no AI response
+                extraction_messages = message  # Use string format
             
             # Extract and store memories (this uses LLM for fact extraction)
-            # PERFORMANCE OPTIMIZATION: Use add_async for ~5x faster parallel processing
-            # Batch embeddings, parallel vector searches, and concurrent importance assessments
-            stored = await memory_service.add_async(
-                messages=extraction_messages,  # Pass messages list if AI response available
+            # Progress callback for real-time updates during extraction
+            async def progress_callback(stage: str, message: str, progress: int):
+                """Send progress updates via WebSocket during extraction."""
+                await _send_extraction_status(
+                    user_id, conversation_id,
+                    stage=stage,
+                    message=message,
+                    progress=progress,
+                )
+            
+            stored = await memory_service.add(
+                messages=extraction_messages,  # Only user message - AI responses not extracted
                 user_id=user_id,
                 metadata=storage_metadata,
                 bucket_id=storage_bucket_id,
                 bucket_type=bucket_type,
+                progress_callback=progress_callback,
             )
         finally:
             # Stop heartbeat
@@ -2335,6 +3289,349 @@ async def _extract_memories_background(
         # Don't re-raise - background task failures shouldn't affect main flow
 
 
+async def _extract_memories_immediate(
+    user_id: str,
+    conversation_id: str,
+    message: str,
+    memory_service: "BaseMemoryService",
+    bucket_id: Optional[str] = None,
+    bucket_type: str = "conversation",
+    category: str = "general",
+) -> List[str]:
+    """
+    Extract memories IMMEDIATELY from user prompt (before AI response).
+    
+    This function extracts memories from the user message right away, allowing
+    them to be displayed while the AI response is streaming. The memories are
+    marked with refinement_pending=True and will be refined later with the
+    AI response context.
+    
+    Args:
+        user_id: User ID for scoping memory operations
+        conversation_id: Conversation/session ID for metadata
+        message: The user message to extract facts from
+        memory_service: Memory service instance for storage
+        bucket_id: Optional bucket ID for memory isolation
+        bucket_type: Type of bucket (category, conversation, etc.)
+        category: Memory category for metadata
+    
+    Returns:
+        List of memory IDs that were extracted (for later refinement)
+    
+    Note:
+        This function is designed to run as a background task via asyncio.create_task().
+        Failures are logged but do not affect the main request/response cycle.
+    """
+    if not user_id or not message.strip():
+        logger.warning("⚠️ _extract_memories_immediate called with empty user_id or message, skipping")
+        return []
+    
+    if not memory_service:
+        logger.warning("⚠️ _extract_memories_immediate called with None memory_service, skipping")
+        return []
+    
+    try:
+        # Stage 1: Starting immediate extraction
+        await _send_extraction_status(
+            user_id, conversation_id,
+            stage="starting",
+            message="🔄 Extracting memories immediately...",
+            progress=10,
+        )
+        
+        logger.info(
+            f"⚡ [Immediate Extraction] Starting immediate memory extraction: "
+            f"user_id={user_id}, message='{message[:50]}...'"
+        )
+        
+        # Build storage metadata with refinement_pending flag
+        storage_bucket_id = bucket_id or f"session:{conversation_id}"
+        storage_metadata = {
+            "source": "chat_session",
+            "session_id": conversation_id,
+            "category": category,
+            "associated_bucket_id": storage_bucket_id,
+            "raw_input": message,
+            "refinement_pending": True,
+            "initial_extraction_time": datetime.utcnow().isoformat(),
+        }
+        
+        # Stage 2: Extracting (the LLM call happens here)
+        await _send_extraction_status(
+            user_id, conversation_id,
+            stage="extracting",
+            message="🧠 Analyzing message with AI...",
+            progress=45,
+        )
+        
+        # Progress callback for real-time updates during extraction
+        async def progress_callback(stage: str, message: str, progress: int):
+            """Send progress updates via WebSocket during extraction."""
+            await _send_extraction_status(
+                user_id, conversation_id,
+                stage=stage,
+                message=message,
+                progress=progress,
+            )
+        
+        # Extract and store memories (this uses LLM for fact extraction)
+        stored = await memory_service.add(
+            messages=message,  # User message only - no AI response yet
+            user_id=user_id,
+            metadata=storage_metadata,
+            bucket_id=storage_bucket_id,
+            bucket_type=bucket_type,
+            progress_callback=progress_callback,
+        )
+        
+        memories_count = len(stored) if isinstance(stored, list) else 0
+        memory_ids = []
+        
+        if memories_count > 0:
+            # Extract memory IDs from stored memories
+            for memory in stored:
+                memory_id = memory.get("id") or memory.get("_id")
+                if memory_id:
+                    memory_ids.append(str(memory_id))
+            
+            # Stage 3: Complete with memories
+            await _send_extraction_status(
+                user_id, conversation_id,
+                stage="complete",
+                message=f"✅ Extracted {memories_count} memories (refining after response)...",
+                progress=100,
+                details={
+                    "count": memories_count,
+                    "memory_ids": memory_ids,
+                    "refinement_pending": True,
+                },
+            )
+            
+            # Send immediate extraction event with new memories
+            await broadcast_to_app(
+                APP_SLUG,
+                {
+                    "type": "memory_extracted_immediate",
+                    "user_id": user_id,
+                    "conversation_id": conversation_id,
+                    "new_memories": stored[:MAX_NEW_MEMORIES_TO_DISPLAY],
+                    "memory_ids": memory_ids,
+                    "total_count": memories_count,
+                },
+                user_id=user_id,
+            )
+            
+            # Broadcast memory_stored event to update Memory Explorer
+            await _broadcast_memory_stored(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                memory_service=memory_service,
+                new_memories=stored,
+            )
+            
+            logger.info(
+                f"✅ [Immediate Extraction] Extracted {memories_count} memories "
+                f"(refinement_pending=True) for user_id={user_id}"
+            )
+        else:
+            # No memories extracted
+            await _send_extraction_status(
+                user_id, conversation_id,
+                stage="complete",
+                message="ℹ️ No new facts to remember from this message",
+                progress=100,
+                details={"count": 0},
+            )
+            
+            logger.info(
+                f"ℹ️ [Immediate Extraction] No new facts extracted from message "
+                f"(user_id={user_id})"
+            )
+        
+        return memory_ids
+        
+    except asyncio.CancelledError:
+        logger.debug(f"🔄 Immediate extraction task cancelled for user_id={user_id}")
+        raise
+    except Exception as e:
+        # Stage: Error
+        await _send_extraction_status(
+            user_id, conversation_id,
+            stage="error",
+            message=f"❌ Immediate memory extraction failed: {str(e)[:50]}",
+            progress=0,
+            details={"error": str(e)},
+        )
+        
+        logger.error(
+            f"❌ [Immediate Extraction] Failed: user_id={user_id}, error={e}",
+            exc_info=True
+        )
+        # Return empty list on error - don't re-raise
+        return []
+
+
+async def _refine_memories_with_context(
+    user_id: str,
+    conversation_id: str,
+    initial_memory_ids: List[str],
+    ai_response: str,
+    memory_service: "BaseMemoryService",
+    bucket_id: Optional[str] = None,
+) -> None:
+    """
+    Refine memories with AI response context.
+    
+    This function takes initial memories extracted from user prompt and refines them
+    using the AI response context. It makes a lightweight LLM call to refine/extend
+    memories and updates them in-place.
+    
+    Args:
+        user_id: User ID for scoping memory operations
+        conversation_id: Conversation/session ID for metadata
+        initial_memory_ids: List of memory IDs to refine
+        ai_response: The AI response text used for refinement context
+        memory_service: Memory service instance for refinement
+        bucket_id: Optional bucket ID for memory isolation
+    
+    Note:
+        This function is designed to run as a background task via asyncio.create_task().
+        Failures are logged but do not affect the main request/response cycle.
+    """
+    if not user_id or not initial_memory_ids:
+        logger.warning("⚠️ _refine_memories_with_context called with empty user_id or memory_ids, skipping")
+        return
+    
+    if not memory_service:
+        logger.warning("⚠️ _refine_memories_with_context called with None memory_service, skipping")
+        return
+    
+    if not ai_response or not ai_response.strip():
+        logger.warning("⚠️ _refine_memories_with_context called with empty ai_response, skipping")
+        return
+    
+    try:
+        # Stage 1: Starting refinement
+        await _send_extraction_status(
+            user_id, conversation_id,
+            stage="refinement_started",
+            message="🔧 Refining memories with AI context...",
+            progress=10,
+        )
+        
+        # Send refinement started event
+        await broadcast_to_app(
+            APP_SLUG,
+            {
+                "type": "memory_refinement_started",
+                "user_id": user_id,
+                "conversation_id": conversation_id,
+                "memory_ids": initial_memory_ids,
+            },
+            user_id=user_id,
+        )
+        
+        logger.info(
+            f"🔧 [Refinement] Starting memory refinement: "
+            f"user_id={user_id}, memory_ids={len(initial_memory_ids)}"
+        )
+        
+        # Check if memory_service has refine_memories_with_context method
+        if hasattr(memory_service, 'refine_memories_with_context'):
+            # Progress callback for real-time updates during refinement
+            async def progress_callback(stage: str, message: str, progress: int):
+                """Send progress updates via WebSocket during refinement."""
+                await _send_extraction_status(
+                    user_id, conversation_id,
+                    stage=stage,
+                    message=message,
+                    progress=progress,
+                )
+            
+            # Call refinement method
+            refined_memories = await memory_service.refine_memories_with_context(
+                memory_ids=initial_memory_ids,
+                ai_response=ai_response,
+                user_id=user_id,
+                progress_callback=progress_callback,
+            )
+            
+            if refined_memories:
+                # Stage 2: Refinement complete
+                await _send_extraction_status(
+                    user_id, conversation_id,
+                    stage="refinement_complete",
+                    message=f"✅ Refined {len(refined_memories)} memories",
+                    progress=100,
+                    details={"count": len(refined_memories)},
+                )
+                
+                # Send refinement complete event with refined memories
+                await broadcast_to_app(
+                    APP_SLUG,
+                    {
+                        "type": "memory_refined",
+                        "user_id": user_id,
+                        "conversation_id": conversation_id,
+                        "refined_memories": refined_memories[:MAX_NEW_MEMORIES_TO_DISPLAY],
+                        "memory_ids": initial_memory_ids,
+                        "total_count": len(refined_memories),
+                    },
+                    user_id=user_id,
+                )
+                
+                # Broadcast memory_stored event to update Memory Explorer
+                await _broadcast_memory_stored(
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    memory_service=memory_service,
+                    new_memories=refined_memories,
+                )
+                
+                logger.info(
+                    f"✅ [Refinement] Refined {len(refined_memories)} memories "
+                    f"for user_id={user_id}"
+                )
+            else:
+                # No memories were refined (maybe they were already accurate)
+                await _send_extraction_status(
+                    user_id, conversation_id,
+                    stage="refinement_complete",
+                    message="ℹ️ Memories were already accurate",
+                    progress=100,
+                    details={"count": 0},
+                )
+                
+                logger.info(
+                    f"ℹ️ [Refinement] No memories needed refinement "
+                    f"(user_id={user_id})"
+                )
+        else:
+            logger.warning(
+                "⚠️ [Refinement] Memory service does not support refine_memories_with_context, "
+                "skipping refinement"
+            )
+            
+    except asyncio.CancelledError:
+        logger.debug(f"🔄 Refinement task cancelled for user_id={user_id}")
+        raise
+    except Exception as e:
+        # Stage: Error
+        await _send_extraction_status(
+            user_id, conversation_id,
+            stage="error",
+            message=f"❌ Memory refinement failed: {str(e)[:50]}",
+            progress=0,
+            details={"error": str(e)},
+        )
+        
+        logger.error(
+            f"❌ [Refinement] Failed: user_id={user_id}, error={e}",
+            exc_info=True
+        )
+        # Don't re-raise - background task failures shouldn't affect main flow
+
+
 async def _broadcast_memory_stored(
     user_id: str,
     conversation_id: str,
@@ -2384,10 +3681,8 @@ async def _broadcast_memory_stored(
         await asyncio.sleep(VECTOR_INDEX_UPDATE_DELAY_SECONDS)
         
         # Fetch fresh memories to broadcast (ensures we have the latest state)
-        # Use asyncio.to_thread to run synchronous memory service methods safely
         try:
-            fresh_memories = await asyncio.to_thread(
-                memory_service.get_all,
+            fresh_memories = await memory_service.get_all(
                 user_id=str(user_id),
                 limit=MAX_MEMORIES_TO_FETCH
             )
@@ -2506,9 +3801,7 @@ async def get_bucket_files(
     if bucket_id.startswith("file:"):
         parts = bucket_id.split(":")
         if len(parts) >= 2:
-            mems = await asyncio.to_thread(
-                svc.get_all, user_id=user_id, filters={"bucket_id": bucket_id}, limit=1
-            )
+            mems = await svc.get_all(user_id=user_id, filters={"bucket_id": bucket_id}, limit=1)
             if mems:
                 files_list.append(
                     {
@@ -2520,9 +3813,7 @@ async def get_bucket_files(
                 )
     else:
         # Get by association
-        mems = await asyncio.to_thread(
-            svc.get_all, user_id=user_id, filters={"associated_bucket_id": bucket_id}, limit=500
-        )
+        mems = await svc.get_all(user_id=user_id, filters={"associated_bucket_id": bucket_id}, limit=500)
         seen = set()
         for m in mems:
             meta = m.get("metadata", {})
@@ -2568,8 +3859,8 @@ async def add_file_to_bucket(
         try:
             form = await request.form()
             file_list = [v for v in form.getlist("files") if isinstance(v, UploadFile)]
-        except Exception:  # noqa: BLE001
-            pass
+        except (ValueError, TypeError, KeyError) as exc:  # noqa: BLE001
+            logger.debug("Could not parse form for file list: %s", exc)
     if not file_list:
         return JSONResponse({"success": False, "error": "No files provided"})
 
@@ -2612,7 +3903,7 @@ async def get_all_memories(
     if not svc:
         return JSONResponse({"success": True, "memories": [], "count": 0})
 
-    memories = await asyncio.to_thread(svc.get_all, user_id=str(user["_id"]), limit=limit)
+    memories = await svc.get_all(user_id=str(user["_id"]), limit=limit)
     normalized = normalize_memories(memories)
     return JSONResponse({"success": True, "memories": normalized, "count": len(normalized)})
 
@@ -2633,7 +3924,7 @@ async def get_memory_stats(
     if not svc:
         return JSONResponse({"success": False, "error": "No service"})
 
-    all_mems = await asyncio.to_thread(svc.get_all, user_id=str(user["_id"]), limit=2000)
+    all_mems = await svc.get_all(user_id=str(user["_id"]), limit=2000)
     stats = {"file_contexts": {}, "general_buckets": {}, "bucket_files": {}}
     buckets = {}
 
@@ -2675,6 +3966,120 @@ async def get_memory_stats(
             stats["general_buckets"][bid] = {"name": cat, "count": b["memory_count"]}
 
     stats["bucket_files"] = {k: list(v.values()) for k, v in stats["bucket_files"].items()}
+    
+    # Add Perfect Brain feature counts
+    perfect_brain_stats = {}
+    user_id = str(user["_id"])
+    
+    try:
+        # Shared memory stats
+        if shared_memory:
+            # Count shared memories for groups this user belongs to
+            # Note: This is a simplified version - in production, track user-group relationships
+            motor_client = engine._connection_manager.mongo_client
+            motor_db = motor_client[engine.db_name]
+            shared_collection = motor_db.get_collection("entity_memory")
+            shared_count = await shared_collection.count_documents({"scope": "shared"})
+            perfect_brain_stats["shared_memories"] = shared_count
+        
+        # Reflective memory stats
+        if reflective_memory:
+            motor_client = engine._connection_manager.mongo_client
+            motor_db = motor_client[engine.db_name]
+            reflective_collection = motor_db.get_collection("reflective_memory")
+            reflective_count = await reflective_collection.count_documents({"user_id": user_id})
+            perfect_brain_stats["reflections"] = reflective_count
+        
+        # Predictive memory stats
+        if predictive_memory:
+            motor_client = engine._connection_manager.mongo_client
+            motor_db = motor_client[engine.db_name]
+            predictive_collection = motor_db.get_collection("predictive_memory")
+            predictive_total = await predictive_collection.count_documents({"user_id": user_id})
+            predictive_validated = await predictive_collection.count_documents({"user_id": user_id, "validated": True})
+            predictive_unvalidated = await predictive_collection.count_documents({"user_id": user_id, "validated": False})
+            perfect_brain_stats["predictions"] = {
+                "total": predictive_total,
+                "validated": predictive_validated,
+                "unvalidated": predictive_unvalidated,
+            }
+        
+        # Memory veto stats
+        if memory_veto:
+            vetoes = await asyncio.to_thread(memory_veto.get_user_vetoes, user_id=user_id)
+            perfect_brain_stats["vetoes"] = len(vetoes)
+        
+        # Version history stats (count entities with history)
+        if memory_versioning:
+            # This would require querying for entities with history - simplified for now
+            perfect_brain_stats["versioned_entities"] = 0  # Placeholder
+        
+        # Multi-tier memory stats
+        motor_client = engine._connection_manager.mongo_client
+        motor_db = motor_client[engine.db_name]
+        
+        # Episodic memory stats
+        episodic_collection = motor_db.get_collection("episodic")
+        episodic_total = await episodic_collection.count_documents({"user_id": user_id})
+        episodic_consolidated = await episodic_collection.count_documents({"user_id": user_id, "consolidated": True})
+        episodic_unconsolidated = await episodic_collection.count_documents({"user_id": user_id, "consolidated": {"$ne": True}})
+        perfect_brain_stats["episodic"] = {
+            "total": episodic_total,
+            "consolidated": episodic_consolidated,
+            "unconsolidated": episodic_unconsolidated,
+        }
+        
+        # Procedural memory stats
+        procedural_collection = motor_db.get_collection("procedural")
+        procedural_total = await procedural_collection.count_documents({"user_id": user_id})
+        perfect_brain_stats["procedural"] = {
+            "total": procedural_total,
+        }
+        
+        # Working memory stats (active sessions)
+        working_collection = motor_db.get_collection("working_memory")
+        working_active = await working_collection.count_documents({"user_id": user_id})
+        perfect_brain_stats["working"] = {
+            "active_sessions": working_active,
+        }
+        
+        # Semantic entity stats
+        entity_collection = motor_db.get_collection("entity_memory")
+        semantic_total = await entity_collection.count_documents({"user_id": user_id, "scope": "user"})
+        perfect_brain_stats["semantic"] = {
+            "total_entities": semantic_total,
+        }
+        
+        # Consolidation stats (if consolidator available)
+        if memory_consolidator:
+            # Get last consolidation run info (would need to track this)
+            perfect_brain_stats["consolidation"] = {
+                "available": True,
+                "last_run": None,  # Would need to track this
+            }
+        
+        # GraphRAG stats
+        graph_service = get_graph_service_from_request(request, svc)
+        if graph_service:
+            try:
+                graph_stats = await graph_service.get_stats()
+                perfect_brain_stats["graphrag"] = {
+                    "enabled": True,
+                    "total_nodes": graph_stats.get("total_nodes", 0),
+                    "total_edges": graph_stats.get("total_edges", 0),
+                    "node_types": graph_stats.get("node_types", {}),
+                }
+            except Exception as graph_error:
+                logger.warning(f"Failed to get GraphRAG stats: {graph_error}")
+                perfect_brain_stats["graphrag"] = {"enabled": True, "error": str(graph_error)}
+        else:
+            perfect_brain_stats["graphrag"] = {"enabled": False}
+        
+    except Exception as e:
+        logger.warning(f"Failed to get Perfect Brain stats: {e}")
+        perfect_brain_stats["error"] = str(e)
+    
+    stats["perfect_brain"] = perfect_brain_stats
     return JSONResponse({"success": True, "stats": stats})
 
 
@@ -2700,9 +4105,7 @@ async def get_memories_by_context(
     if not svc:
         return JSONResponse({"success": True, "memories": [], "memoryCount": 0})
     # Use associated_bucket_id for bucket-aware filtering (finds both conversation and file memories)
-    mems = await asyncio.to_thread(
-        svc.get_all, user_id=str(user["_id"]), filters={"metadata": {"associated_bucket_id": bucket_id}}, limit=limit
-    )
+    mems = await svc.get_all(user_id=str(user["_id"]), filters={"metadata": {"associated_bucket_id": bucket_id}}, limit=limit)
     normalized = normalize_memories(mems)
     return JSONResponse({"success": True, "memories": normalized, "memoryCount": len(normalized)})
 
@@ -2715,10 +4118,18 @@ async def search_memories(
     category: str | None = None,  # Convenience: constructs bucket_id server-side
     search_all: bool = False,
     limit: int = 50,
+    task_type: str = "general",  # QueryAwareRecall: "fast_answer", "critical_decision", "general", "exploration"
+    risk_tolerance: str = "medium",  # QueryAwareRecall: "low", "medium", "high"
+    latency_budget: str = "normal",  # QueryAwareRecall: "fast", "normal", "deep"
+    timeline_id: str = "root",  # Cognitive OS: Timeline ID to search in (default: "root")
     svc=Depends(get_memory_service),
 ):
     """
-    Search memories using semantic search with explicit bucket scoping.
+    Search memories using True Perfect Recall semantic search.
+    
+    **True Perfect Recall**: Every memory is always searchable, forever.
+    Ranking (similarity, importance, emotion, recency, access count) handles relevance.
+    No confidence filtering -- all memories are accessible.
     
     **Security**: Requires explicit bucket scoping to prevent accidental cross-bucket data leakage.
     
@@ -2726,21 +4137,9 @@ async def search_memories(
     - query: Search query string (required)
     - bucket_id: Full bucket ID to search within (e.g., "category:work:user123") - required UNLESS search_all=true
     - category: Category name (e.g., "work", "coding") - convenience parameter that constructs bucket_id server-side
-                 Cannot be used with bucket_id (mutually exclusive)
     - search_all: If true, search across all buckets for the user (explicit opt-in)
     - limit: Maximum number of results (default: 50)
-    
-    **Validation**:
-    - Either bucket_id OR category OR search_all=true must be provided
-    - bucket_id and category are mutually exclusive (cannot provide both)
-    - bucket_id and search_all are mutually exclusive
-    - category and search_all are mutually exclusive
-    - If neither provided: Returns 400 error
-    - Always scoped by user_id (enforced server-side)
-    
-    Uses associated_bucket_id for bucket-aware filtering, which finds:
-    - Conversation memories in the bucket
-    - File memories associated with the bucket
+    - timeline_id: Timeline ID to search in (default: "root") - Cognitive OS feature
     
     Best Practice: Uses dependency injection for memory service.
     """
@@ -2783,20 +4182,84 @@ async def search_memories(
             status_code=400
         )
     
-    # Build filters based on search mode
-    filters = None
-    if search_all:
-        # Cross-bucket search: Only filter by user_id (already enforced in svc.search)
-        filters = None
-        logger.info(f"🔍 [Memory Search] Cross-bucket search requested for user_id={user_id}")
+    # Use QueryAwareRecall if available, otherwise fall back to standard search
+    if query_aware_recall and svc:
+        try:
+            # Get the semantic collection for QueryAwareRecall
+            # QueryAwareRecall works with collections directly
+            motor_client = engine._connection_manager.mongo_client
+            motor_db = motor_client[engine.db_name]
+            semantic_collection = motor_db.get_collection(svc.collection_name if hasattr(svc, 'collection_name') else "user_memories")
+            
+            # Determine scope based on bucket_id
+            scope = "user"
+            group_id = None
+            if bucket_id and ":" in bucket_id:
+                # Extract group_id from bucket_id if it's a group bucket
+                parts = bucket_id.split(":")
+                if len(parts) >= 3 and parts[0] in ["category", "bucket"]:
+                    # Check if it's a group bucket (doesn't end with user_id)
+                    if not bucket_id.endswith(user_id):
+                        scope = "shared"
+                        # Extract group_id (e.g., "category:CODE:team-001" -> "team-001")
+                        group_id = parts[-1] if len(parts) > 2 else None
+            
+            # Use QueryAwareRecall
+            recall_result = await asyncio.to_thread(
+                query_aware_recall.recall,
+                query=query,
+                user_id=user_id,
+                collection=semantic_collection,
+                task_type=task_type,
+                risk_tolerance=risk_tolerance,
+                latency_budget=latency_budget,
+                scope=scope,
+                group_id=group_id,
+                bucket_id=bucket_id if not search_all else None,
+                memory_veto=memory_veto,
+            )
+            
+            results = recall_result.get("memories", [])
+            policy = recall_result.get("policy", {})
+            
+            logger.info(f"🔍 [QueryAwareRecall] task_type={task_type}, risk_tolerance={risk_tolerance}, latency_budget={latency_budget}, found {len(results)} results")
+        except Exception as e:
+            logger.warning(f"QueryAwareRecall failed, falling back to standard search: {e}")
+            # Fall back to standard search
+            filters = None
+            if search_all:
+                filters = None
+                logger.info(f"🔍 [Memory Search] Cross-bucket search requested for user_id={user_id}")
+            else:
+                filters = {"metadata": {"associated_bucket_id": bucket_id}}
+                logger.info(f"🔍 [Memory Search] Scoped search: bucket_id={bucket_id}, user_id={user_id}")
+            
+            results = await svc.search(
+                query=query, 
+                user_id=user_id, 
+                limit=limit, 
+                filters=filters,
+                timeline_id=timeline_id,
+            )
+            policy = None
     else:
-        # Scoped search: Filter by associated_bucket_id
-        filters = {"metadata": {"associated_bucket_id": bucket_id}}
-        logger.info(f"🔍 [Memory Search] Scoped search: bucket_id={bucket_id}, user_id={user_id}")
-    
-    results = await asyncio.to_thread(
-        svc.search, query=query, user_id=user_id, limit=limit, filters=filters
-    )
+        # Standard search (True Perfect Recall: no confidence filtering)
+        filters = None
+        if search_all:
+            filters = None
+            logger.info(f"🔍 [Memory Search] Cross-bucket search requested for user_id={user_id}")
+        else:
+            filters = {"metadata": {"associated_bucket_id": bucket_id}}
+            logger.info(f"🔍 [Memory Search] Scoped search: bucket_id={bucket_id}, user_id={user_id}")
+        
+        results = await svc.search(
+            query=query, 
+            user_id=user_id, 
+            limit=limit, 
+            filters=filters,
+            timeline_id=timeline_id,
+        )
+        policy = None
 
     normalized_results = []
     if isinstance(results, list):
@@ -2816,14 +4279,189 @@ async def search_memories(
             elif isinstance(res, str):
                 normalized_results.append({"memory": res})
 
-    return JSONResponse(
-        {
-            "success": True,
-            "results": normalized_results,
-            "count": len(normalized_results),
-            "query": query,
-        }
-    )
+    response_data = {
+        "success": True,
+        "results": normalized_results,
+        "count": len(normalized_results),
+        "query": query,
+    }
+    
+    # Add QueryAwareRecall policy info if available
+    if policy:
+        response_data["policy"] = policy
+        response_data["recall_method"] = "query_aware"
+    else:
+        response_data["recall_method"] = "standard"
+    
+    return JSONResponse(response_data)
+
+
+@app.post("/api/memories/timelines/fork", response_class=JSONResponse)
+async def fork_timeline_endpoint(
+    request: Request,
+    svc=Depends(get_memory_service),
+):
+    """
+    Fork a new timeline for counterfactual reasoning.
+    
+    Creates a new timeline branching from the current timeline, enabling
+    parallel memory timelines for "what if" scenarios.
+    
+    Body:
+    - current_timeline: Timeline ID to fork from (default: "root")
+    - new_name: Display name for the new timeline (required)
+    
+    Returns:
+    - timeline_id: New timeline ID
+    """
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Auth required"}, status_code=401)
+    if not svc:
+        return JSONResponse({"success": False, "error": "Memory service not available"}, status_code=503)
+    
+    user_id = str(user["_id"])
+    
+    try:
+        body = await request.json()
+        current_timeline = body.get("current_timeline", "root")
+        new_name = body.get("new_name")
+        
+        if not new_name:
+            return JSONResponse({"error": "new_name is required"}, status_code=400)
+        
+        new_timeline_id = await svc.fork_timeline(current_timeline, new_name, user_id)
+        return JSONResponse({"success": True, "timeline_id": new_timeline_id})
+    except Exception as e:
+        logger.error(f"Failed to fork timeline: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/memories/timelines", response_class=JSONResponse)
+async def list_timelines_endpoint(request: Request):
+    """
+    List all timelines for the current user.
+    
+    Returns:
+    - timelines: List of timeline documents with _id, name, parent, created_at
+    """
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Auth required"}, status_code=401)
+    if not timeline_service:
+        return JSONResponse({"success": False, "error": "TimelineService not available"}, status_code=503)
+    
+    user_id = str(user["_id"])
+    
+    try:
+        timelines = await timeline_service.list_timelines_async(user_id=user_id)
+        return JSONResponse({"success": True, "timelines": timelines})
+    except Exception as e:
+        logger.error(f"Failed to list timelines: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/memories/timelines/{timeline_id}/ancestry", response_class=JSONResponse)
+async def get_timeline_ancestry_endpoint(
+    request: Request,
+    timeline_id: str,
+):
+    """
+    Get timeline ancestry chain (for inheritance).
+    
+    Returns the hierarchical chain from the specified timeline to root,
+    enabling understanding of timeline inheritance.
+    
+    Example: If timeline C is child of B, which is child of root:
+    Returns: ["branch_c", "branch_b", "root"]
+    
+    This shows which timelines are searched when querying in this timeline.
+    
+    Returns:
+    - ancestry: List of timeline IDs from current to root (inclusive)
+    """
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Auth required"}, status_code=401)
+    if not timeline_service:
+        return JSONResponse({"success": False, "error": "TimelineService not available"}, status_code=503)
+    
+    try:
+        ancestry = await timeline_service.get_timeline_ancestry_async(timeline_id)
+        return JSONResponse({"success": True, "ancestry": ancestry})
+    except Exception as e:
+        logger.error(f"Failed to get timeline ancestry: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/memories/timelines/current", response_class=JSONResponse)
+async def get_current_timeline_endpoint(
+    request: Request,
+    svc=Depends(get_memory_service),
+):
+    """
+    Get user's current active timeline.
+    
+    Returns the timeline ID that is currently active for the user.
+    This is the timeline used by default for memory operations.
+    
+    Returns:
+    - timeline_id: Current active timeline ID (default: "root")
+    """
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Auth required"}, status_code=401)
+    if not svc:
+        return JSONResponse({"success": False, "error": "Memory service not available"}, status_code=503)
+    
+    user_id = str(user["_id"])
+    
+    try:
+        current_timeline = await svc.get_current_timeline(user_id)
+        return JSONResponse({"success": True, "timeline_id": current_timeline})
+    except Exception as e:
+        logger.error(f"Failed to get current timeline: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/memories/timelines/switch", response_class=JSONResponse)
+async def switch_timeline_endpoint(
+    request: Request,
+    svc=Depends(get_memory_service),
+):
+    """
+    Switch user's active timeline context.
+    
+    Changes the default timeline used for memory operations.
+    This enables users to work in different "realities" or contexts.
+    
+    Body:
+    - timeline_id: Timeline ID to switch to (required)
+    
+    Returns:
+    - success: True if timeline was switched successfully
+    - timeline_id: New active timeline ID
+    """
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Auth required"}, status_code=401)
+    if not svc:
+        return JSONResponse({"success": False, "error": "Memory service not available"}, status_code=503)
+    
+    user_id = str(user["_id"])
+    
+    try:
+        body = await request.json()
+        timeline_id = body.get("timeline_id")
+        
+        if not timeline_id:
+            return JSONResponse({"error": "timeline_id is required"}, status_code=400)
+        
+        await svc.switch_timeline(user_id, timeline_id)
+        return JSONResponse({"success": True, "timeline_id": timeline_id})
+    except Exception as e:
+        logger.error(f"Failed to switch timeline: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
 
 
 @app.get("/api/memories/{memory_id}/raw", response_class=JSONResponse)
@@ -2844,7 +4482,7 @@ async def get_memory_raw(
         return JSONResponse({"success": False, "error": "Memory service not available"})
     user_id = str(user["_id"])
 
-    memory = await asyncio.to_thread(svc.get, memory_id=memory_id, user_id=user_id)
+    memory = await svc.get(memory_id=memory_id, user_id=user_id)
     bucket_id = memory_id
     if memory:
         bucket_id = memory.get("metadata", {}).get("bucket_id") or memory.get("metadata", {}).get(
@@ -2977,8 +4615,7 @@ async def inject_memory(
         )
         
         # Inject memory without inference
-        injected_memory = await asyncio.to_thread(
-            svc.inject,
+        injected_memory = await svc.inject(
             memory=memory_content,
             user_id=user_id,
             metadata=metadata,
@@ -3118,9 +4755,7 @@ async def update_memory(
         )
         
         # Update memory content - automatically regenerates embeddings if text changes
-        updated_memory = await asyncio.to_thread(
-            svc.update, memory_id=memory_id, memory=data, user_id=user_id
-        )
+        updated_memory = await svc.update(memory_id=memory_id, memory=data, user_id=user_id)
         
         if updated_memory is None:
             return JSONResponse(
@@ -3197,7 +4832,7 @@ async def delete_memory(
         )
     
     user_id = str(user["_id"])
-    success = await asyncio.to_thread(svc.delete, memory_id=memory_id, user_id=user_id)
+    success = await svc.delete(memory_id=memory_id, user_id=user_id)
     
     # Broadcast memory deletion event (refresh UI)
     if svc and success:
@@ -3265,8 +4900,7 @@ async def get_memory_analytics(
                 "error": "Analytics not available for this memory provider",
             }, status_code=501)
         
-        analytics = await asyncio.to_thread(
-            svc.get_memory_analytics,
+        analytics = await svc.get_memory_analytics(
             user_id=user_id,
         )
         
@@ -3287,16 +4921,21 @@ async def get_memory_analytics(
         }, status_code=500)
 
 
-@app.get("/api/memories/cold-storage", response_class=JSONResponse)
-async def get_cold_storage(
+@app.get("/api/memories/health", response_class=JSONResponse)
+async def get_memory_health(
     request: Request,
-    limit: int = 50,
     svc=Depends(get_memory_service),
 ):
     """
-    Get memories from cold storage (pruned/inactive memories).
+    Get memory health insights and recommendations.
     
-    Cold storage provides paper trail for analytics and recovery.
+    Processes analytics data into actionable health insights including:
+    - Health score breakdown
+    - Access pattern insights
+    - Quality recommendations
+    - Graph integration status
+    - Timeline organization
+    - Actionable recommendations
     """
     user = get_current_user(request)
     if not user:
@@ -3311,31 +4950,144 @@ async def get_cold_storage(
     user_id = str(user["_id"])
     
     try:
-        if not hasattr(svc, 'get_cold_storage'):
+        if not hasattr(svc, 'get_memory_analytics'):
             return JSONResponse({
                 "success": False,
-                "error": "Cold storage not available",
+                "error": "Analytics not available for this memory provider",
             }, status_code=501)
         
-        cold_memories = await asyncio.to_thread(
-            svc.get_cold_storage,
-            user_id=user_id,
-            limit=limit,
-            include_reason=True,
-        )
+        # Get comprehensive analytics
+        analytics = await svc.get_memory_analytics(user_id=user_id)
+        
+        if "error" in analytics:
+            return JSONResponse({
+                "success": False,
+                "error": analytics["error"],
+            }, status_code=500)
+        
+        # Process analytics into health insights
+        quality_metrics = analytics.get("quality_metrics", {})
+        access_patterns = analytics.get("access_patterns", {})
+        graph_connectivity = analytics.get("graph_connectivity", {})
+        timeline_org = analytics.get("timeline_organization", {})
+        
+        health_score = quality_metrics.get("health_score", 0)
+        
+        # Calculate health breakdown
+        importance_score = (quality_metrics.get("avg_importance", 0) * 40)
+        confidence_score = (quality_metrics.get("avg_confidence", 0) * 30)
+        avg_access = access_patterns.get("avg_access_count", 0)
+        access_score = min((avg_access / 10.0) * 20, 20)
+        total_memories = analytics.get("total_memories", 0)
+        memories_with_links = graph_connectivity.get("memories_with_links", 0)
+        graph_score = min((memories_with_links / max(total_memories, 1)) * 10, 10)
+        
+        # Generate recommendations
+        recommendations = []
+        
+        if quality_metrics.get("confidence_distribution", {}).get("low", 0) > 0:
+            low_conf_count = quality_metrics["confidence_distribution"]["low"]
+            recommendations.append({
+                "message": f"Consider reinforcing {low_conf_count} low-confidence memories to improve reliability",
+                "priority": "warning",
+            })
+        
+        if access_patterns.get("access_distribution", {}).get("low", 0) > total_memories * 0.5:
+            low_access_count = access_patterns["access_distribution"]["low"]
+            recommendations.append({
+                "message": f"{low_access_count} memories haven't been accessed recently. Consider reviewing them",
+                "priority": "info",
+            })
+        
+        if memories_with_links < total_memories * 0.3 and total_memories > 5:
+            unlinked = total_memories - memories_with_links
+            recommendations.append({
+                "message": f"{unlinked} memories aren't connected to the knowledge graph. Enable GraphRAG for better context",
+                "priority": "info",
+            })
+        
+        if health_score < 50:
+            recommendations.append({
+                "message": "Memory health score is below optimal. Focus on adding high-importance memories",
+                "priority": "warning",
+            })
+        
+        if quality_metrics.get("importance_distribution", {}).get("high", 0) < 3 and total_memories > 10:
+            recommendations.append({
+                "message": "Consider adding more high-importance memories to strengthen your knowledge base",
+                "priority": "info",
+            })
+        
+        # Access insights
+        access_dist = access_patterns.get("access_distribution", {})
+        underutilized_count = 0  # Would need to query for high importance + low access
+        
+        # Generate heatmap data (last 7 days) - simplified version
+        # In a real implementation, you'd query access logs by date
+        heatmap_data = [0] * 7  # Placeholder - would need date-based access tracking
+        
+        # Quality insights
+        quality_insights = {
+            "low_confidence_count": quality_metrics.get("confidence_distribution", {}).get("low", 0),
+            "high_importance_count": quality_metrics.get("importance_distribution", {}).get("high", 0),
+        }
+        
+        # Find memory gaps (categories with few memories)
+        categories = analytics.get("categories", {})
+        memory_gaps = []
+        if categories:
+            avg_per_category = sum(categories.values()) / len(categories)
+            for cat, count in categories.items():
+                if count < avg_per_category * 0.3 and count < 3:
+                    memory_gaps.append(cat)
+        
+        quality_insights["memory_gaps"] = memory_gaps[:5]  # Top 5 gaps
+        
+        # Graph status
+        graph_status = {
+            "connected_count": memories_with_links,
+            "total_memories": total_memories,
+            "unlinked_count": total_memories - memories_with_links,
+            "connectivity_percentage": (memories_with_links / max(total_memories, 1)) * 100,
+        }
+        
+        # Timeline organization
+        timeline_dist = timeline_org.get("timeline_distribution", {})
+        timeline_organization = {
+            "timeline_count": len(timeline_dist),
+            "avg_memories_per_timeline": timeline_org.get("memories_per_timeline", 0),
+            "timeline_distribution": dict(list(timeline_dist.items())[:10]),  # Top 10 timelines
+        }
+        
+        health_data = {
+            "health_score": health_score,
+            "health_breakdown": {
+                "importance_score": round(importance_score, 1),
+                "confidence_score": round(confidence_score, 1),
+                "access_score": round(access_score, 1),
+                "graph_score": round(graph_score, 1),
+            },
+            "recommendations": recommendations,
+            "access_insights": {
+                "underutilized_count": underutilized_count,
+                "heatmap_data": heatmap_data,
+            },
+            "quality_insights": quality_insights,
+            "graph_status": graph_status,
+            "timeline_organization": timeline_organization,
+        }
         
         return JSONResponse({
             "success": True,
-            "memories": cold_memories,
-            "count": len(cold_memories),
+            "health": health_data,
         })
     except NotImplementedError:
         return JSONResponse({
             "success": False,
-            "error": "Cold storage not supported",
+            "error": "Health insights not supported by this memory provider",
         }, status_code=501)
     except Exception as e:
-        logger.error(f"Failed to get cold storage: {e}", exc_info=True)
+        logger.error(f"Failed to get memory health: {e}", exc_info=True)
         return JSONResponse({
             "success": False,
             "error": str(e),
@@ -3370,8 +5122,7 @@ async def restore_from_cold_storage(
                 "error": "Restore not available",
             }, status_code=501)
         
-        restored_memory = await asyncio.to_thread(
-            svc.restore_from_cold_storage,
+        restored_memory = await svc.restore_from_cold_storage(
             memory_id=memory_id,
             user_id=user_id,
         )
@@ -3429,22 +5180,10 @@ async def check_knowledge_conflict(
         if not new_fact:
             raise HTTPException(status_code=400, detail="Missing 'fact' field")
         
-        if hasattr(svc, 'detect_knowledge_conflict_sync'):
-            conflict = await asyncio.to_thread(
-                svc.detect_knowledge_conflict_sync,
-                user_id=user_id,
-                new_fact=new_fact,
-            )
-        elif hasattr(svc, 'detect_knowledge_conflict'):
-            conflict = await svc.detect_knowledge_conflict(
-                user_id=user_id,
-                new_fact=new_fact,
-            )
-        else:
-            return JSONResponse({
-                "success": False,
-                "error": "Conflict detection not available",
-            }, status_code=501)
+        conflict = await svc.detect_knowledge_conflict(
+            user_id=user_id,
+            new_fact=new_fact,
+        )
         
         return JSONResponse({
             "success": True,
@@ -3487,8 +5226,8 @@ async def trigger_pruning(
         body = {}
         try:
             body = await request.json()
-        except Exception:
-            pass
+        except (ValueError, TypeError) as exc:
+            logger.debug("Could not parse JSON body: %s", exc)
         
         max_capacity = body.get("max_capacity")
         reason = body.get("reason", "manual_trigger")
@@ -3499,8 +5238,7 @@ async def trigger_pruning(
                 "error": "Pruning not available",
             }, status_code=501)
         
-        pruned_count = await asyncio.to_thread(
-            svc.prune_memories,
+        pruned_count = await svc.prune_memories(
             user_id=user_id,
             max_capacity=max_capacity,
             reason=reason,
@@ -3522,6 +5260,1351 @@ async def trigger_pruning(
             "success": False,
             "error": str(e),
         }, status_code=500)
+
+
+# ============================================================================
+# PERFECT BRAIN FEATURES ENDPOINTS
+# ============================================================================
+
+@app.post("/api/memories/shared/promote", response_class=JSONResponse)
+async def promote_to_shared(
+    request: Request,
+    svc=Depends(get_memory_service),
+):
+    """
+    Promote a user memory to shared/group memory.
+    
+    Request body:
+    {
+        "fact": "We prefer async/await patterns",
+        "source_user_ids": ["user1", "user2"],
+        "group_id": "team-001",
+        "bucket_id": "category:CODE:team-001",
+        "bucket_type": "category",
+        "confidence": 0.85
+    }
+    """
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Auth required"}, status_code=401)
+    if not shared_memory:
+        return JSONResponse({"success": False, "error": "SharedMemory not available"}, status_code=503)
+    
+    user_id = str(user["_id"])
+    
+    try:
+        body = await request.json()
+        fact = body.get("fact")
+        source_user_ids = body.get("source_user_ids", [user_id])
+        group_id = body.get("group_id")
+        bucket_id = body.get("bucket_id")
+        bucket_type = body.get("bucket_type", "category")
+        confidence = body.get("confidence", 0.8)
+        sensitivity = body.get("sensitivity", "low")
+        
+        if not fact:
+            return JSONResponse({"error": "fact is required"}, status_code=400)
+        if not group_id:
+            return JSONResponse({"error": "group_id is required"}, status_code=400)
+        
+        # Check promotion rules
+        if not shared_memory.check_promotion_rules(fact, source_user_ids, sensitivity):
+            return JSONResponse({
+                "success": False,
+                "error": "Fact does not meet promotion rules",
+                "reason": "Must have multiple users, low sensitivity, and no sensitive keywords"
+            }, status_code=400)
+        
+        # Check for vetoes
+        if memory_veto:
+            for source_id in source_user_ids:
+                if memory_veto.check_veto("", source_id, target_scope="shared"):
+                    return JSONResponse({
+                        "success": False,
+                        "error": "Memory veto prevents promotion",
+                        "user_id": source_id
+                    }, status_code=403)
+        
+        # Promote to shared
+        result = await asyncio.to_thread(
+            shared_memory.promote_to_shared,
+            fact=fact,
+            source_user_ids=source_user_ids,
+            confidence=confidence,
+            group_id=group_id,
+            bucket_id=bucket_id,
+            bucket_type=bucket_type,
+        )
+        
+        return JSONResponse({
+            "success": True,
+            "shared_memory": result,
+        })
+    except Exception as e:
+        logger.error(f"Failed to promote to shared: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/memories/shared", response_class=JSONResponse)
+async def get_shared_memories(
+    request: Request,
+    group_id: str,
+    query: str | None = None,
+    bucket_id: str | None = None,
+    category: str | None = None,
+    min_confidence: float = 0.7,
+    limit: int = 10,
+):
+    """
+    Get shared/group memories with optional bucket filtering.
+    
+    Parameters:
+    - group_id: Generic group identifier (team, family, org, etc.)
+    - query: Optional search query for vector search
+    - bucket_id: Optional bucket ID to filter by
+    - category: Optional category name (constructs bucket_id)
+    - min_confidence: Minimum confidence threshold (default: 0.7)
+    - limit: Maximum number of results (default: 10)
+    """
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Auth required"}, status_code=401)
+    if not shared_memory:
+        return JSONResponse({"success": False, "error": "SharedMemory not available"}, status_code=503)
+    
+    user_id = str(user["_id"])
+    
+    try:
+        # Construct bucket_id from category if provided
+        if category and not bucket_id:
+            bucket_id = f"category:{category}:{group_id}"
+        
+        results = await asyncio.to_thread(
+            shared_memory.get_shared_memory,
+            group_id=group_id,
+            query=query,
+            min_confidence=min_confidence,
+            limit=limit,
+            bucket_id=bucket_id,
+        )
+        
+        return JSONResponse({
+            "success": True,
+            "memories": results,
+            "count": len(results),
+            "group_id": group_id,
+            "bucket_id": bucket_id,
+        })
+    except Exception as e:
+        logger.error(f"Failed to get shared memories: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/memories/shared/stats", response_class=JSONResponse)
+async def get_shared_memory_stats(
+    request: Request,
+    group_id: str,
+    bucket_id: str | None = None,
+):
+    """
+    Get statistics about shared memory for a group.
+    """
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Auth required"}, status_code=401)
+    if not shared_memory:
+        return JSONResponse({"success": False, "error": "SharedMemory not available"}, status_code=503)
+    
+    try:
+        stats = await asyncio.to_thread(
+            shared_memory.get_shared_stats,
+            group_id=group_id,
+            bucket_id=bucket_id,
+        )
+        
+        return JSONResponse({
+            "success": True,
+            "stats": stats,
+            "group_id": group_id,
+            "bucket_id": bucket_id,
+        })
+    except Exception as e:
+        logger.error(f"Failed to get shared memory stats: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/memories/reflections", response_class=JSONResponse)
+async def store_reflection(
+    request: Request,
+    svc=Depends(get_memory_service),
+):
+    """
+    Store a meta-cognitive reflection.
+    
+    Request body:
+    {
+        "reflection": "I tend to over-weight recent conversations",
+        "trigger": "performance_review",
+        "confidence": 0.8,
+        "scope": "user",
+        "bucket_id": "category:CODE:user123"
+    }
+    """
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Auth required"}, status_code=401)
+    if not cognitive_memory:
+        return JSONResponse({"success": False, "error": "CognitiveMemory not available"}, status_code=503)
+    
+    user_id = str(user["_id"])
+    
+    try:
+        body = await request.json()
+        reflection = body.get("reflection")
+        trigger = body.get("trigger", "manual")
+        confidence = body.get("confidence", 0.7)
+        scope = body.get("scope", "user")
+        bucket_id = body.get("bucket_id")
+        bucket_type = body.get("bucket_type")
+        group_id = body.get("group_id")
+        
+        if not reflection:
+            return JSONResponse({"error": "reflection is required"}, status_code=400)
+        
+        result = await cognitive_memory.store_reflection(
+            reflection=reflection,
+            trigger=trigger,
+            confidence=confidence,
+            scope=scope,
+            user_id=user_id if scope == "user" else None,
+            group_id=group_id,
+            bucket_id=bucket_id,
+            bucket_type=bucket_type,
+        )
+        
+        return JSONResponse({
+            "success": True,
+            "reflection": result,
+        })
+    except Exception as e:
+        logger.error(f"Failed to store reflection: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/memories/reflections", response_class=JSONResponse)
+async def get_reflections_perfect_brain(
+    request: Request,
+    scope: str = "user",
+    bucket_id: str | None = None,
+    category: str | None = None,
+    min_confidence: float = 0.5,
+    limit: int = 10,
+):
+    """
+    Get meta-cognitive reflections with bucket filtering.
+    
+    Note: This is different from /api/reflections which returns consolidated summaries.
+    This endpoint returns ReflectiveMemory (meta-cognitive insights).
+    """
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Auth required"}, status_code=401)
+    if not cognitive_memory:
+        return JSONResponse({"success": False, "error": "CognitiveMemory not available"}, status_code=503)
+    
+    user_id = str(user["_id"])
+    
+    try:
+        # Construct bucket_id from category if provided
+        if category and not bucket_id:
+            bucket_id = f"category:{category}:{user_id}"
+        
+        results = await cognitive_memory.get_reflections(
+            scope=scope,
+            user_id=user_id if scope == "user" else None,
+            min_confidence=min_confidence,
+            limit=limit,
+        )
+        
+        return JSONResponse({
+            "success": True,
+            "reflections": results,
+            "count": len(results),
+        })
+    except Exception as e:
+        logger.error(f"Failed to get reflections: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/memories/predictions", response_class=JSONResponse)
+async def store_prediction(
+    request: Request,
+    svc=Depends(get_memory_service),
+):
+    """
+    Store a prediction or counterfactual scenario.
+    
+    Request body:
+    {
+        "scenario": "If we switch to TypeScript, we'll reduce bugs by 30%",
+        "origin": "pattern_analysis",
+        "confidence": 0.7,
+        "scope": "shared",
+        "group_id": "team-001",
+        "bucket_id": "category:CODE:team-001"
+    }
+    """
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Auth required"}, status_code=401)
+    if not cognitive_memory:
+        return JSONResponse({"success": False, "error": "CognitiveMemory not available"}, status_code=503)
+    
+    user_id = str(user["_id"])
+    
+    try:
+        body = await request.json()
+        scenario = body.get("scenario")
+        origin = body.get("origin", "manual")
+        confidence = body.get("confidence", 0.7)
+        validated = body.get("validated", False)
+        scope = body.get("scope", "user")
+        bucket_id = body.get("bucket_id")
+        bucket_type = body.get("bucket_type")
+        group_id = body.get("group_id")
+        
+        if not scenario:
+            return JSONResponse({"error": "scenario is required"}, status_code=400)
+        
+        result = await cognitive_memory.store_prediction(
+            scenario=scenario,
+            origin=origin,
+            confidence=confidence,
+            validated=validated,
+            scope=scope,
+            user_id=user_id if scope == "user" else None,
+            group_id=group_id,
+            bucket_id=bucket_id,
+            bucket_type=bucket_type,
+        )
+        
+        return JSONResponse({
+            "success": True,
+            "prediction": result,
+        })
+    except Exception as e:
+        logger.error(f"Failed to store prediction: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/memories/predictions/{prediction_id}/validate", response_class=JSONResponse)
+async def validate_prediction(
+    request: Request,
+    prediction_id: str,
+):
+    """
+    Validate a prediction when outcome is known.
+    
+    Request body:
+    {
+        "actual_outcome": "Bug rate reduced by 25%",
+        "was_correct": true
+    }
+    """
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Auth required"}, status_code=401)
+    if not predictive_memory:
+        return JSONResponse({"success": False, "error": "PredictiveMemory not available"}, status_code=503)
+    
+    try:
+        body = await request.json()
+        actual_outcome = body.get("actual_outcome")
+        was_correct = body.get("was_correct", False)
+        
+        if actual_outcome is None:
+            return JSONResponse({"error": "actual_outcome is required"}, status_code=400)
+        
+        result = await asyncio.to_thread(
+            predictive_memory.validate_prediction,
+            prediction_id=prediction_id,
+            actual_outcome=actual_outcome,
+            was_correct=was_correct,
+        )
+        
+        return JSONResponse({
+            "success": True,
+            "prediction": result,
+        })
+    except Exception as e:
+        logger.error(f"Failed to validate prediction: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/memories/predictions", response_class=JSONResponse)
+async def get_predictions(
+    request: Request,
+    scope: str = "user",
+    bucket_id: str | None = None,
+    category: str | None = None,
+    validated: bool | None = None,
+    min_confidence: float = 0.5,
+    limit: int = 10,
+):
+    """
+    Get predictions with bucket filtering.
+    """
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Auth required"}, status_code=401)
+    if not cognitive_memory:
+        return JSONResponse({"success": False, "error": "CognitiveMemory not available"}, status_code=503)
+    
+    user_id = str(user["_id"])
+    
+    try:
+        # Construct bucket_id from category if provided
+        if category and not bucket_id:
+            bucket_id = f"category:{category}:{user_id}"
+        
+        results = await cognitive_memory.get_predictions(
+            scope=scope,
+            user_id=user_id if scope == "user" else None,
+            validated=validated,
+            min_confidence=min_confidence,
+            limit=limit,
+        )
+        
+        return JSONResponse({
+            "success": True,
+            "predictions": results,
+            "count": len(results),
+        })
+    except Exception as e:
+        logger.error(f"Failed to get predictions: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/memories/vetoes", response_class=JSONResponse)
+async def add_memory_veto(
+    request: Request,
+):
+    """
+    Add a memory veto to prevent sharing.
+    
+    Request body:
+    {
+        "memory_id": "mem123",
+        "scope": "shared"
+    }
+    """
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Auth required"}, status_code=401)
+    if not memory_veto:
+        return JSONResponse({"success": False, "error": "MemoryVeto not available"}, status_code=503)
+    
+    user_id = str(user["_id"])
+    
+    try:
+        body = await request.json()
+        memory_id = body.get("memory_id")
+        scope = body.get("scope", "shared")
+        
+        if not memory_id:
+            return JSONResponse({"error": "memory_id is required"}, status_code=400)
+        
+        result = await asyncio.to_thread(
+            memory_veto.add_veto,
+            memory_id=memory_id,
+            user_id=user_id,
+            scope=scope,
+        )
+        
+        return JSONResponse({
+            "success": True,
+            "veto": result,
+        })
+    except Exception as e:
+        logger.error(f"Failed to add veto: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.delete("/api/memories/vetoes/{memory_id}", response_class=JSONResponse)
+async def remove_memory_veto(
+    request: Request,
+    memory_id: str,
+):
+    """
+    Remove a memory veto.
+    """
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Auth required"}, status_code=401)
+    if not memory_veto:
+        return JSONResponse({"success": False, "error": "MemoryVeto not available"}, status_code=503)
+    
+    user_id = str(user["_id"])
+    
+    try:
+        body = await request.json() if await request.body() else {}
+        scope = body.get("scope", "shared")
+        
+        await asyncio.to_thread(
+            memory_veto.remove_veto,
+            memory_id=memory_id,
+            user_id=user_id,
+            scope=scope,
+        )
+        
+        return JSONResponse({
+            "success": True,
+            "message": "Veto removed",
+        })
+    except Exception as e:
+        logger.error(f"Failed to remove veto: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/memories/vetoes", response_class=JSONResponse)
+async def get_memory_vetoes(
+    request: Request,
+):
+    """
+    Get user's memory vetoes.
+    """
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Auth required"}, status_code=401)
+    if not memory_veto:
+        return JSONResponse({"success": False, "error": "MemoryVeto not available"}, status_code=503)
+    
+    user_id = str(user["_id"])
+    
+    try:
+        vetoes = await asyncio.to_thread(
+            memory_veto.get_user_vetoes,
+            user_id=user_id,
+        )
+        
+        return JSONResponse({
+            "success": True,
+            "vetoes": vetoes,
+            "count": len(vetoes),
+        })
+    except Exception as e:
+        logger.error(f"Failed to get vetoes: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+# =============================================================================
+# Prospective Memory API - "Remember to do X when Y happens"
+# =============================================================================
+
+
+@app.post("/api/prospective/triggers", response_class=JSONResponse)
+async def set_prospective_trigger(request: Request):
+    """
+    Set a prospective memory trigger ("remember to do X when Y happens").
+    
+    This is an AI superpower -- intention-based memory that fires when context matches.
+    The system stores a condition embedding and checks every incoming query against it.
+    When the condition matches, the action is surfaced as a reminder in the AI's response.
+    
+    Body:
+    - condition: When to trigger (e.g., "user mentions project deadline")
+    - action: What to do (e.g., "Remind about the pending risk assessment")
+    - one_shot: If true, trigger fires once and deactivates (default: true)
+    - metadata: Optional metadata dict
+    
+    Example:
+    ```bash
+    POST /api/prospective/triggers
+    {
+      "condition": "user asks about pricing or costs",
+      "action": "Suggest the enterprise plan with volume discounts",
+      "one_shot": false
+    }
+    ```
+    """
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Auth required"}, status_code=401)
+    if not prospective_memory:
+        return JSONResponse({"success": False, "error": "ProspectiveMemory not available"}, status_code=503)
+    
+    try:
+        body = await request.json()
+        condition = body.get("condition", "")
+        action = body.get("action", "")
+        one_shot = body.get("one_shot", True)
+        metadata = body.get("metadata")
+        
+        if not condition or not action:
+            return JSONResponse(
+                {"error": "Both 'condition' and 'action' are required"}, status_code=400
+            )
+        
+        user_id = str(user["_id"])
+        trigger_id = await prospective_memory.set_trigger(
+            condition=condition,
+            action=action,
+            user_id=user_id,
+            one_shot=one_shot,
+            metadata=metadata,
+        )
+        
+        return JSONResponse({
+            "success": True,
+            "trigger_id": trigger_id,
+            "condition": condition,
+            "action": action,
+            "one_shot": one_shot,
+        })
+    except Exception as e:
+        logger.error(f"Failed to set prospective trigger: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/prospective/triggers", response_class=JSONResponse)
+async def list_prospective_triggers(request: Request):
+    """
+    List all active (unfired) prospective memory triggers for the current user.
+    
+    Returns triggers that are waiting to fire. Each trigger has a condition
+    (when to fire) and an action (what to remind about).
+    """
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Auth required"}, status_code=401)
+    if not prospective_memory:
+        return JSONResponse({"success": True, "triggers": []})
+    
+    try:
+        user_id = str(user["_id"])
+        triggers = await prospective_memory.get_active_triggers(user_id=user_id)
+        return JSONResponse({"success": True, "triggers": triggers, "count": len(triggers)})
+    except Exception as e:
+        logger.error(f"Failed to list prospective triggers: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.delete("/api/prospective/triggers/{trigger_id}", response_class=JSONResponse)
+async def deactivate_prospective_trigger(request: Request, trigger_id: str):
+    """
+    Manually deactivate a prospective memory trigger.
+    """
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Auth required"}, status_code=401)
+    if not prospective_memory:
+        return JSONResponse({"success": False, "error": "ProspectiveMemory not available"}, status_code=503)
+    
+    try:
+        result = await prospective_memory.deactivate_trigger(trigger_id)
+        return JSONResponse({"success": result, "trigger_id": trigger_id})
+    except Exception as e:
+        logger.error(f"Failed to deactivate trigger: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/memories/consolidate", response_class=JSONResponse)
+async def consolidate_memories(
+    request: Request,
+):
+    """
+    Trigger manual memory consolidation (episodic → semantic).
+    Consolidates unprocessed episodic memories into semantic facts and procedural lessons.
+    """
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Auth required"}, status_code=401)
+    if not memory_consolidator:
+        return JSONResponse({"success": False, "error": "MemoryConsolidator not available"}, status_code=503)
+    
+    try:
+        body = await request.json() if await request.body() else {}
+        user_id = str(user["_id"])
+        limit = body.get("limit", 10)
+        force = body.get("force", False)
+        
+        result = await asyncio.to_thread(
+            memory_consolidator.consolidate_episodes,
+            agent_id=user_id,
+            limit=limit,
+            force=force,
+        )
+        
+        return JSONResponse({
+            "success": True,
+            "result": result,
+            "entities_extracted": result.get("entities_extracted", 0),
+            "procedures_created": result.get("procedures_created", 0),
+            "episodes_processed": result.get("episodes_processed", 0),
+        })
+    except Exception as e:
+        logger.error(f"Failed to consolidate memories: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/memories/episodic", response_class=JSONResponse)
+async def record_episode(
+    request: Request,
+):
+    """
+    Record an episodic memory (raw chronological interaction).
+    """
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Auth required"}, status_code=401)
+    if not cognitive_memory:
+        return JSONResponse({"success": False, "error": "CognitiveMemory not available"}, status_code=503)
+    
+    try:
+        body = await request.json()
+        session_id = body.get("session_id")
+        role = body.get("role", "user")
+        content = body.get("content")
+        bucket_id = body.get("bucket_id")
+        
+        if not session_id or not content:
+            return JSONResponse({"success": False, "error": "session_id and content required"}, status_code=400)
+        
+        user_id = str(user["_id"])
+        result = await cognitive_memory.record_episode(
+            session_id=session_id,
+            role=role,
+            content=content,
+            scope="user",
+            user_id=user_id,
+            bucket_id=bucket_id,
+        )
+        
+        return JSONResponse({"success": True, "episode": result})
+    except Exception as e:
+        logger.error(f"Failed to record episode: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/memories/episodic", response_class=JSONResponse)
+async def get_episodic_memories(
+    request: Request,
+    session_id: Optional[str] = None,
+    consolidated: Optional[bool] = None,
+    bucket_id: Optional[str] = None,
+    limit: int = 50,
+):
+    """
+    Query episodic memories with filters.
+    """
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Auth required"}, status_code=401)
+    if not cognitive_memory:
+        return JSONResponse({"success": False, "error": "CognitiveMemory not available"}, status_code=503)
+    
+    try:
+        user_id = str(user["_id"])
+        motor_client = engine._connection_manager.mongo_client
+        motor_db = motor_client[engine.db_name]
+        episodic_collection = motor_db["episodic"]
+        
+        query = {"user_id": user_id}
+        if session_id:
+            query["session_id"] = session_id
+        if consolidated is not None:
+            query["consolidated"] = consolidated
+        if bucket_id:
+            query["bucket_id"] = bucket_id
+        
+        episodes = await episodic_collection.find(query).sort("timestamp", -1).to_list(length=limit)
+        
+        # Serialize ObjectId and datetime
+        for ep in episodes:
+            if "_id" in ep:
+                ep["_id"] = str(ep["_id"])
+            if "timestamp" in ep:
+                ep["timestamp"] = ep["timestamp"].isoformat() if hasattr(ep["timestamp"], "isoformat") else str(ep["timestamp"])
+        
+        return JSONResponse({"success": True, "episodes": episodes, "count": len(episodes)})
+    except Exception as e:
+        logger.error(f"Failed to get episodic memories: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/memories/episodic/{episode_id}", response_class=JSONResponse)
+async def get_episode(
+    request: Request,
+    episode_id: str,
+):
+    """
+    Get a specific episode by ID.
+    """
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Auth required"}, status_code=401)
+    
+    try:
+        motor_client = engine._connection_manager.mongo_client
+        motor_db = motor_client[engine.db_name]
+        episodic_collection = motor_db["episodic"]
+        
+        from bson import ObjectId
+        episode = await episodic_collection.find_one({"_id": ObjectId(episode_id), "user_id": str(user["_id"])})
+        
+        if not episode:
+            return JSONResponse({"success": False, "error": "Episode not found"}, status_code=404)
+        
+        if "_id" in episode:
+            episode["_id"] = str(episode["_id"])
+        if "timestamp" in episode:
+            episode["timestamp"] = episode["timestamp"].isoformat() if hasattr(episode["timestamp"], "isoformat") else str(episode["timestamp"])
+        
+        return JSONResponse({"success": True, "episode": episode})
+    except Exception as e:
+        logger.error(f"Failed to get episode: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/memories/procedural", response_class=JSONResponse)
+async def store_procedural_memory(
+    request: Request,
+):
+    """
+    Store procedural knowledge (skills, workflows, executable procedures).
+    """
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Auth required"}, status_code=401)
+    if not cognitive_memory:
+        return JSONResponse({"success": False, "error": "CognitiveMemory not available"}, status_code=503)
+    
+    try:
+        body = await request.json()
+        task_type = body.get("task_type")
+        procedure = body.get("procedure")
+        success_rate = body.get("success_rate", 0.5)
+        bucket_id = body.get("bucket_id")
+        
+        if not task_type or not procedure:
+            return JSONResponse({"success": False, "error": "task_type and procedure required"}, status_code=400)
+        
+        user_id = str(user["_id"])
+        motor_client = engine._connection_manager.mongo_client
+        motor_db = motor_client[engine.db_name]
+        procedural_collection = motor_db["procedural"]
+        
+        doc = {
+            "user_id": user_id,
+            "task_type": task_type,
+            "procedure": procedure,
+            "success_rate": success_rate,
+            "bucket_id": bucket_id,
+            "created_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow(),
+        }
+        
+        result = await procedural_collection.insert_one(doc)
+        doc["_id"] = str(result.inserted_id)
+        
+        return JSONResponse({"success": True, "procedure": doc})
+    except Exception as e:
+        logger.error(f"Failed to store procedural memory: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/memories/procedural", response_class=JSONResponse)
+async def get_procedural_memories(
+    request: Request,
+    task_type: Optional[str] = None,
+    bucket_id: Optional[str] = None,
+    limit: int = 50,
+):
+    """
+    Query procedural memories.
+    """
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Auth required"}, status_code=401)
+    
+    try:
+        user_id = str(user["_id"])
+        motor_client = engine._connection_manager.mongo_client
+        motor_db = motor_client[engine.db_name]
+        procedural_collection = motor_db["procedural"]
+        
+        query = {"user_id": user_id}
+        if task_type:
+            query["task_type"] = task_type
+        if bucket_id:
+            query["bucket_id"] = bucket_id
+        
+        procedures = await procedural_collection.find(query).sort("success_rate", -1).to_list(length=limit)
+        
+        # Serialize ObjectId and datetime
+        for proc in procedures:
+            if "_id" in proc:
+                proc["_id"] = str(proc["_id"])
+            if "created_at" in proc:
+                proc["created_at"] = proc["created_at"].isoformat() if hasattr(proc["created_at"], "isoformat") else str(proc["created_at"])
+            if "updated_at" in proc:
+                proc["updated_at"] = proc["updated_at"].isoformat() if hasattr(proc["updated_at"], "isoformat") else str(proc["updated_at"])
+        
+        return JSONResponse({"success": True, "procedures": procedures, "count": len(procedures)})
+    except Exception as e:
+        logger.error(f"Failed to get procedural memories: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/memories/procedural/{procedure_id}", response_class=JSONResponse)
+async def get_procedure(
+    request: Request,
+    procedure_id: str,
+):
+    """
+    Get a specific procedure by ID.
+    """
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Auth required"}, status_code=401)
+    
+    try:
+        motor_client = engine._connection_manager.mongo_client
+        motor_db = motor_client[engine.db_name]
+        procedural_collection = motor_db["procedural"]
+        
+        from bson import ObjectId
+        procedure = await procedural_collection.find_one({"_id": ObjectId(procedure_id), "user_id": str(user["_id"])})
+        
+        if not procedure:
+            return JSONResponse({"success": False, "error": "Procedure not found"}, status_code=404)
+        
+        if "_id" in procedure:
+            procedure["_id"] = str(procedure["_id"])
+        if "created_at" in procedure:
+            procedure["created_at"] = procedure["created_at"].isoformat() if hasattr(procedure["created_at"], "isoformat") else str(procedure["created_at"])
+        if "updated_at" in procedure:
+            procedure["updated_at"] = procedure["updated_at"].isoformat() if hasattr(procedure["updated_at"], "isoformat") else str(procedure["updated_at"])
+        
+        return JSONResponse({"success": True, "procedure": procedure})
+    except Exception as e:
+        logger.error(f"Failed to get procedure: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.put("/api/memories/procedural/{procedure_id}", response_class=JSONResponse)
+async def update_procedure(
+    request: Request,
+    procedure_id: str,
+):
+    """
+    Update a procedure (e.g., success rate, procedure steps).
+    """
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Auth required"}, status_code=401)
+    
+    try:
+        body = await request.json()
+        motor_client = engine._connection_manager.mongo_client
+        motor_db = motor_client[engine.db_name]
+        procedural_collection = motor_db["procedural"]
+        
+        from bson import ObjectId
+        update_data = {"updated_at": datetime.utcnow()}
+        if "success_rate" in body:
+            update_data["success_rate"] = body["success_rate"]
+        if "procedure" in body:
+            update_data["procedure"] = body["procedure"]
+        if "task_type" in body:
+            update_data["task_type"] = body["task_type"]
+        
+        result = await procedural_collection.update_one(
+            {"_id": ObjectId(procedure_id), "user_id": str(user["_id"])},
+            {"$set": update_data}
+        )
+        
+        if result.matched_count == 0:
+            return JSONResponse({"success": False, "error": "Procedure not found"}, status_code=404)
+        
+        return JSONResponse({"success": True, "updated": result.modified_count > 0})
+    except Exception as e:
+        logger.error(f"Failed to update procedure: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/memories/working/context", response_class=JSONResponse)
+async def set_working_context(
+    request: Request,
+):
+    """
+    Set working context for a session (short-term active context).
+    """
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Auth required"}, status_code=401)
+    if not cognitive_memory:
+        return JSONResponse({"success": False, "error": "CognitiveMemory not available"}, status_code=503)
+    
+    try:
+        body = await request.json()
+        session_id = body.get("session_id")
+        context = body.get("context", {})
+        
+        if not session_id:
+            return JSONResponse({"success": False, "error": "session_id required"}, status_code=400)
+        
+        result = await cognitive_memory.set_working_context(
+            session_id=session_id,
+            data=context,
+        )
+        
+        return JSONResponse({"success": True, "context": result})
+    except Exception as e:
+        logger.error(f"Failed to set working context: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/memories/working/context", response_class=JSONResponse)
+async def get_working_context(
+    request: Request,
+    session_id: str,
+):
+    """
+    Get working context for a session.
+    """
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Auth required"}, status_code=401)
+    if not cognitive_memory:
+        return JSONResponse({"success": False, "error": "CognitiveMemory not available"}, status_code=503)
+    
+    try:
+        context = await cognitive_memory.get_working_context(
+            session_id=session_id,
+        )
+        
+        return JSONResponse({"success": True, "context": context})
+    except Exception as e:
+        logger.error(f"Failed to get working context: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.delete("/api/memories/working/context", response_class=JSONResponse)
+async def clear_working_context(
+    request: Request,
+    session_id: str,
+):
+    """
+    Clear working context for a session.
+    """
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Auth required"}, status_code=401)
+    if not cognitive_memory:
+        return JSONResponse({"success": False, "error": "CognitiveMemory not available"}, status_code=503)
+    
+    try:
+        result = await cognitive_memory.set_working_context(
+            session_id=session_id,
+            data={},
+        )
+        
+        return JSONResponse({"success": True, "cleared": True})
+    except Exception as e:
+        logger.error(f"Failed to clear working context: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/memories/semantic/entity", response_class=JSONResponse)
+async def update_semantic_entity(
+    request: Request,
+):
+    """
+    Update or create a semantic entity (structured facts).
+    """
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Auth required"}, status_code=401)
+    if not cognitive_memory:
+        return JSONResponse({"success": False, "error": "CognitiveMemory not available"}, status_code=503)
+    
+    try:
+        body = await request.json()
+        entity_name = body.get("entity_name")
+        attributes = body.get("attributes", {})
+        confidence = body.get("confidence", 0.8)
+        bucket_id = body.get("bucket_id")
+        
+        if not entity_name:
+            return JSONResponse({"success": False, "error": "entity_name required"}, status_code=400)
+        
+        user_id = str(user["_id"])
+        result = await cognitive_memory.update_entity(
+            entity_name=entity_name,
+            attributes=attributes,
+            confidence=confidence,
+            scope="user",
+            user_id=user_id,
+            bucket_id=bucket_id,
+        )
+        
+        return JSONResponse({"success": True, "entity": result})
+    except Exception as e:
+        logger.error(f"Failed to update semantic entity: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/memories/semantic/entity", response_class=JSONResponse)
+async def search_semantic_entities(
+    request: Request,
+    query: Optional[str] = None,
+    bucket_id: Optional[str] = None,
+    limit: int = 20,
+):
+    """
+    Search semantic entities.
+    """
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Auth required"}, status_code=401)
+    if not cognitive_memory:
+        return JSONResponse({"success": False, "error": "CognitiveMemory not available"}, status_code=503)
+    
+    try:
+        user_id = str(user["_id"])
+        if query:
+            entities = await cognitive_memory.search_entities(
+                query=query,
+                scope="user",
+                user_id=user_id,
+                bucket_id=bucket_id,
+            )
+        else:
+            # Get all entities for user
+            motor_client = engine._connection_manager.mongo_client
+            motor_db = motor_client[engine.db_name]
+            entity_collection = motor_db["entity_memory"]
+            
+            query_filter = {"user_id": user_id, "scope": "user"}
+            if bucket_id:
+                query_filter["bucket_id"] = bucket_id
+            
+            entities = await entity_collection.find(query_filter).to_list(length=limit)
+            for ent in entities:
+                if "_id" in ent:
+                    ent["_id"] = str(ent["_id"])
+        
+        return JSONResponse({"success": True, "entities": entities, "count": len(entities) if isinstance(entities, list) else 1})
+    except Exception as e:
+        logger.error(f"Failed to search semantic entities: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/memories/semantic/entity/{entity_name}", response_class=JSONResponse)
+async def get_semantic_entity(
+    request: Request,
+    entity_name: str,
+    bucket_id: Optional[str] = None,
+):
+    """
+    Get a specific semantic entity by name.
+    """
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Auth required"}, status_code=401)
+    
+    try:
+        user_id = str(user["_id"])
+        motor_client = engine._connection_manager.mongo_client
+        motor_db = motor_client[engine.db_name]
+        entity_collection = motor_db["entity_memory"]
+        
+        query = {"user_id": user_id, "entity": entity_name, "scope": "user"}
+        if bucket_id:
+            query["bucket_id"] = bucket_id
+        
+        entity = await entity_collection.find_one(query)
+        
+        if not entity:
+            return JSONResponse({"success": False, "error": "Entity not found"}, status_code=404)
+        
+        if "_id" in entity:
+            entity["_id"] = str(entity["_id"])
+        
+        return JSONResponse({"success": True, "entity": entity})
+    except Exception as e:
+        logger.error(f"Failed to get semantic entity: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/memories/reflection/run", response_class=JSONResponse)
+async def run_reflection(
+    request: Request,
+):
+    """
+    Trigger reflection/consolidation using ReflectionService.
+    """
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Auth required"}, status_code=401)
+    if not reflection_service:
+        return JSONResponse({"success": False, "error": "ReflectionService not available"}, status_code=503)
+    
+    try:
+        user_id = str(user["_id"])
+        result = await reflection_service.reflect(user_id=user_id)
+        
+        return JSONResponse({
+            "success": True,
+            "result": result,
+            "memories_consolidated": result.get("memories_consolidated", 0),
+            "reflections_created": result.get("reflections_created", 0),
+        })
+    except Exception as e:
+        logger.error(f"Failed to run reflection: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/memories/{entity_name}/history", response_class=JSONResponse)
+async def get_memory_history(
+    request: Request,
+    entity_name: str,
+):
+    """
+    Get version history for an entity (belief evolution over time).
+    """
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Auth required"}, status_code=401)
+    if not memory_versioning:
+        return JSONResponse({"success": False, "error": "MemoryVersioning not available"}, status_code=503)
+    
+    user_id = str(user["_id"])
+    
+    try:
+        history = await asyncio.to_thread(
+            memory_versioning.get_version_history,
+            entity_name=entity_name,
+            user_id=user_id,
+        )
+        
+        return JSONResponse({
+            "success": True,
+            "entity_name": entity_name,
+            "history": history,
+            "versions": len(history),
+        })
+    except Exception as e:
+        logger.error(f"Failed to get memory history: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+# ============================================================================
+# GRAPH LINKS ENDPOINTS (Cognitive OS)
+# ============================================================================
+
+
+@app.post("/api/memories/{memory_id}/contradict", response_class=JSONResponse)
+async def mark_contradiction_endpoint(
+    request: Request,
+    memory_id: str,
+    svc=Depends(get_memory_service),
+):
+    """
+    Mark a memory as contradicting another (Bayesian update).
+    
+    When new information contradicts existing memory:
+    1. Old memory is marked as deprecated with low confidence (0.1)
+    2. Bidirectional graph links are created between the memories
+    3. Both memories are preserved for audit trail
+    
+    Body:
+    - contradicted_memory_id: ID of the old memory being contradicted (required)
+    
+    Returns:
+    - success: True if contradiction was marked successfully
+    """
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Auth required"}, status_code=401)
+    if not svc:
+        return JSONResponse({"success": False, "error": "Memory service not available"}, status_code=503)
+    
+    user_id = str(user["_id"])
+    
+    try:
+        body = await request.json()
+        contradicted_memory_id = body.get("contradicted_memory_id")
+        
+        if not contradicted_memory_id:
+            return JSONResponse({"error": "contradicted_memory_id is required"}, status_code=400)
+        
+        await svc.mark_contradiction(memory_id, contradicted_memory_id, user_id)
+        return JSONResponse({"success": True})
+    except Exception as e:
+        logger.error(f"Failed to mark contradiction: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/memories/with-links", response_class=JSONResponse)
+async def add_memory_with_links_endpoint(
+    request: Request,
+    svc=Depends(get_memory_service),
+):
+    """
+    Create a memory with explicit graph links.
+    
+    Allows creating memories with explicit relationships to other memories:
+    - derived_from: Memory IDs this memory is derived from (semantic distillation)
+    - contradicts: Memory IDs this memory contradicts
+    - timeline_id: Timeline ID (default: "root")
+    - confidence: Confidence score (default: 0.8)
+    
+    Body:
+    - content: Memory content (required)
+    - derived_from: List of memory IDs (optional)
+    - contradicts: List of memory IDs (optional)
+    - timeline_id: Timeline ID (optional, default: "root")
+    - confidence: Confidence score 0.0-1.0 (optional, default: 0.8)
+    - metadata: Additional metadata dictionary (optional)
+    - bucket_id: Bucket ID for filtering (optional)
+    - bucket_type: Bucket type (optional)
+    
+    Returns:
+    - success: True if memory was created
+    - memory: Created memory document
+    """
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Auth required"}, status_code=401)
+    if not svc:
+        return JSONResponse({"success": False, "error": "Memory service not available"}, status_code=503)
+    
+    user_id = str(user["_id"])
+    
+    try:
+        body = await request.json()
+        content = body.get("content")
+        
+        if not content:
+            return JSONResponse({"error": "content is required"}, status_code=400)
+        
+        memory = await svc.add_memory_with_links(
+            content=content,
+            user_id=user_id,
+            derived_from=body.get("derived_from", []),
+            contradicts=body.get("contradicts", []),
+            timeline_id=body.get("timeline_id", "root"),
+            confidence=body.get("confidence", 0.8),
+            metadata=body.get("metadata"),
+            bucket_id=body.get("bucket_id"),
+            bucket_type=body.get("bucket_type"),
+        )
+        return JSONResponse({"success": True, "memory": memory})
+    except Exception as e:
+        logger.error(f"Failed to create memory with links: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
 
 
 # ============================================================================
@@ -3597,6 +6680,75 @@ async def get_reflections(
 # GRAPH ENDPOINTS (Knowledge Graph / GraphRAG)
 # ============================================================================
 
+def get_graph_service_from_request(request: Request, svc=None):
+    """
+    Helper to get graph service from memory service or engine.
+    Checks memory service's _graph_service attribute first, then falls back to engine, then manifest config.
+    """
+    app = request.app
+    
+    # Try to get graph service from memory service first (injected via dependency injection)
+    if svc and hasattr(svc, "_graph_service") and svc._graph_service:
+        return svc._graph_service
+    
+    # Check if service is already cached in app state
+    if hasattr(app.state, "graph_service") and app.state.graph_service is not None:
+        return app.state.graph_service
+    
+    # Try to get from engine (if using MDB-Engine)
+    engine = getattr(app.state, "engine", None)
+    if engine:
+        # Try to get slug from app state first, then fall back to APP_SLUG
+        slug = getattr(app.state, "app_slug", None) or getattr(app.state, "slug", None) or APP_SLUG
+        service = engine.get_graph_service(slug)
+        if service:
+            app.state.graph_service = service
+            return service
+    
+    # Fallback: create from manifest config if available
+    if hasattr(app.state, "manifest") and app.state.manifest is not None:
+        manifest = app.state.manifest
+        graph_config = manifest.get("graph_config", {})
+        
+        if graph_config.get("enabled", True):
+            # Get required dependencies
+            llm_service = getattr(app.state, "llm_service", None)
+            embedding_service = getattr(app.state, "embedding_service", None)
+            
+            # Get collection (requires engine)
+            if engine:
+                slug = manifest.get("slug", APP_SLUG)
+                # Match dependency logic: default to "kg" if not specified
+                base_collection_name = graph_config.get("collection_name", "kg")
+                # Normalize legacy "__kg" to "kg" (private attributes are blocked by ScopedMongoWrapper)
+                if base_collection_name == "__kg":
+                    base_collection_name = "kg"
+                # Prefix with slug if not already prefixed
+                if base_collection_name.startswith(f"{slug}_"):
+                    collection_name = base_collection_name
+                else:
+                    collection_name = f"{slug}_{base_collection_name}"
+                
+                try:
+                    # Use Motor async collections directly - forward-facing DI
+                    motor_client = engine._connection_manager.mongo_client  # noqa: SLF001
+                    motor_db = motor_client[engine.db_name]
+                    collection = motor_db[collection_name]  # Motor AsyncIOMotorCollection
+                    
+                    service = get_graph_service_factory(
+                        app_slug=slug,
+                        collection=collection,
+                        config=graph_config,
+                        llm_service=llm_service,
+                        embedding_service=embedding_service,
+                    )
+                    app.state.graph_service = service
+                    return service
+                except (AttributeError, RuntimeError, KeyError) as e:
+                    logger.warning(f"Failed to create GraphService from manifest: {e}")
+    
+    return None
+
 
 @app.get("/api/graph/stats", response_class=JSONResponse)
 async def get_graph_stats(
@@ -3608,12 +6760,13 @@ async def get_graph_stats(
     if not user:
         raise HTTPException(status_code=401, detail="Authentication required")
 
-    if not svc or not getattr(svc, "graph_store", None):
+    graph_service = get_graph_service_from_request(request, svc)
+    if not graph_service:
         return JSONResponse(
             {"success": True, "enabled": False, "total_nodes": 0, "total_edges": 0}
         )
 
-    stats = await asyncio.to_thread(svc.graph_store.get_stats)
+    stats = await graph_service.get_stats()
     return JSONResponse({"success": True, "enabled": True, **stats})
 
 
@@ -3625,27 +6778,58 @@ async def graph_hybrid_search(
     limit: int = 10,
     svc=Depends(get_memory_service),
 ):
-    """Hybrid search combining vector similarity and graph traversal"""
+    """
+    GraphRAG search endpoint using automatic query classification.
+    Routes queries to appropriate search method (local/global/drift/hybrid) based on query type.
+    """
     user = get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Authentication required")
 
-    graph_store = getattr(svc, "graph_store", None) if svc else None
+    graph_service = get_graph_service_from_request(request, svc)
     
-    if not graph_store:
+    if not graph_service:
         return JSONResponse(
-            {"success": True, "entry_nodes": [], "graph_context": [], "total_nodes": 0}
+            {"success": True, "query_type": "none", "entry_nodes": [], "graph_context": [], "total_nodes": 0}
         )
 
     user_id = str(user["_id"])
     
-    results = await asyncio.to_thread(
-        graph_store.hybrid_search,
-        query=query,
-        user_id=user_id,
-        max_depth=max_depth,
-        vector_limit=limit
-    )
+    # Use GraphRAG query classification to determine search method
+    query_type = graph_service.classify_query(query)
+    logger.info(f"🔍 [GraphRAG API] Query classified as: {query_type}")
+    
+    # Route to appropriate GraphRAG search method
+    if query_type == "local":
+        results = await graph_service.local_search(
+            query=query,
+            user_id=user_id,
+            max_depth=max_depth,
+        )
+    elif query_type == "global":
+        results = await graph_service.global_search(
+            query=query,
+            user_id=user_id,
+            max_communities=limit,
+        )
+    elif query_type == "drift":
+        results = await graph_service.drift_search(
+            query=query,
+            user_id=user_id,
+            max_depth=max_depth,
+        )
+    else:
+        # Fallback to hybrid search
+        results = await graph_service.hybrid_search(
+            query=query,
+            user_id=user_id,
+            max_depth=max_depth,
+            vector_limit=limit
+        )
+    
+    # Ensure query_type is included in results
+    if results and "query_type" not in results:
+        results["query_type"] = query_type
     
     # Serialize datetime objects for JSON response
     serialized_results = serialize_for_json(results)
@@ -3664,13 +6848,12 @@ async def graph_traverse(
     if not user:
         raise HTTPException(status_code=401, detail="Authentication required")
 
-    graph_store = getattr(svc, "graph_store", None) if svc else None
+    graph_service = get_graph_service_from_request(request, svc)
     
-    if not graph_store:
+    if not graph_service:
         return JSONResponse({"success": True, "nodes": []})
 
-    results = await asyncio.to_thread(
-        graph_store.traverse,
+    results = await graph_service.traverse(
         start_id=node_id,
         max_depth=max_depth
     )
@@ -3692,15 +6875,14 @@ async def list_graph_nodes(
     if not user:
         raise HTTPException(status_code=401, detail="Authentication required")
 
-    graph_store = getattr(svc, "graph_store", None) if svc else None
+    graph_service = get_graph_service_from_request(request, svc)
     
-    if not graph_store:
+    if not graph_service:
         return JSONResponse({"success": True, "nodes": []})
 
     user_id = str(user["_id"])
     
-    nodes = await asyncio.to_thread(
-        graph_store.list_nodes,
+    nodes = await graph_service.list_nodes(
         node_type=node_type,
         user_id=user_id,
         limit=limit
@@ -3709,6 +6891,397 @@ async def list_graph_nodes(
     # Serialize datetime objects for JSON response
     serialized_nodes = serialize_for_json(nodes)
     return JSONResponse({"success": True, "nodes": serialized_nodes})
+
+
+@app.get("/api/graph/nodes/{node_id}", response_class=JSONResponse)
+async def get_graph_node(
+    request: Request,
+    node_id: str,
+    svc=Depends(get_memory_service),
+):
+    """Get a specific graph node by ID"""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    graph_service = get_graph_service_from_request(request, svc)
+    
+    if not graph_service:
+        return JSONResponse({"success": False, "error": "Graph service not available"}, status_code=503)
+
+    node = await asyncio.to_thread(graph_service.get_node, node_id=node_id)
+    
+    if not node:
+        return JSONResponse({"success": False, "error": "Node not found"}, status_code=404)
+    
+    serialized_node = serialize_for_json(node)
+    return JSONResponse({"success": True, "node": serialized_node})
+
+
+@app.post("/api/graph/nodes", response_class=JSONResponse)
+async def create_graph_node(
+    request: Request,
+    svc=Depends(get_memory_service),
+):
+    """Create or update a graph node"""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    graph_service = get_graph_service_from_request(request, svc)
+    
+    if not graph_service:
+        return JSONResponse({"success": False, "error": "Graph service not available"}, status_code=503)
+
+    try:
+        body = await request.json()
+        node_id = body.get("node_id")
+        node_type = body.get("node_type")
+        name = body.get("name")
+        properties = body.get("properties", {})
+        embedding = body.get("embedding")  # Optional
+        
+        if not node_id or not node_type or not name:
+            return JSONResponse({"success": False, "error": "node_id, node_type, and name are required"}, status_code=400)
+        
+        user_id = str(user["_id"])
+        
+        node = await asyncio.to_thread(
+            graph_service.upsert_node,
+            node_id=node_id,
+            node_type=node_type,
+            name=name,
+            properties=properties,
+            user_id=user_id,
+            embedding=embedding,
+        )
+        
+        serialized_node = serialize_for_json(node)
+        return JSONResponse({"success": True, "node": serialized_node})
+    except Exception as e:
+        logger.error(f"Failed to create graph node: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.delete("/api/graph/nodes/{node_id}", response_class=JSONResponse)
+async def delete_graph_node(
+    request: Request,
+    node_id: str,
+    svc=Depends(get_memory_service),
+):
+    """Delete a graph node and all its edges"""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    graph_service = get_graph_service_from_request(request, svc)
+    
+    if not graph_service:
+        return JSONResponse({"success": False, "error": "Graph service not available"}, status_code=503)
+
+    try:
+        deleted = await asyncio.to_thread(graph_service.delete_node, node_id=node_id)
+        return JSONResponse({"success": True, "deleted": deleted})
+    except Exception as e:
+        logger.error(f"Failed to delete graph node: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/graph/edges", response_class=JSONResponse)
+async def create_graph_edge(
+    request: Request,
+    svc=Depends(get_memory_service),
+):
+    """Create an edge between two nodes"""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    graph_service = get_graph_service_from_request(request, svc)
+    
+    if not graph_service:
+        return JSONResponse({"success": False, "error": "Graph service not available"}, status_code=503)
+
+    try:
+        body = await request.json()
+        source_id = body.get("source_id")
+        relation = body.get("relation")
+        target_id = body.get("target_id")
+        properties = body.get("properties", {})
+        weight = body.get("weight", 1.0)
+        
+        if not source_id or not relation or not target_id:
+            return JSONResponse({"success": False, "error": "source_id, relation, and target_id are required"}, status_code=400)
+        
+        edge = await asyncio.to_thread(
+            graph_service.add_edge,
+            source_id=source_id,
+            relation=relation,
+            target_id=target_id,
+            properties=properties,
+            weight=weight,
+        )
+        
+        return JSONResponse({"success": True, "edge": edge})
+    except Exception as e:
+        logger.error(f"Failed to create graph edge: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.delete("/api/graph/edges", response_class=JSONResponse)
+async def delete_graph_edge(
+    request: Request,
+    svc=Depends(get_memory_service),
+):
+    """Remove an edge between two nodes"""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    graph_service = get_graph_service_from_request(request, svc)
+    
+    if not graph_service:
+        return JSONResponse({"success": False, "error": "Graph service not available"}, status_code=503)
+
+    try:
+        body = await request.json()
+        source_id = body.get("source_id")
+        relation = body.get("relation")
+        target_id = body.get("target_id")
+        
+        if not source_id or not relation or not target_id:
+            return JSONResponse({"success": False, "error": "source_id, relation, and target_id are required"}, status_code=400)
+        
+        removed = await asyncio.to_thread(
+            graph_service.remove_edge,
+            source_id=source_id,
+            relation=relation,
+            target_id=target_id,
+        )
+        
+        return JSONResponse({"success": True, "removed": removed})
+    except Exception as e:
+        logger.error(f"Failed to delete graph edge: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/graph/path", response_class=JSONResponse)
+async def find_graph_path(
+    request: Request,
+    source_id: str,
+    target_id: str,
+    max_depth: int = 5,
+    svc=Depends(get_memory_service),
+):
+    """Find a path between two nodes in the graph"""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    graph_service = get_graph_service_from_request(request, svc)
+    
+    if not graph_service:
+        return JSONResponse({"success": False, "error": "Graph service not available"}, status_code=503)
+
+    try:
+        path = await asyncio.to_thread(
+            graph_service.find_path,
+            source_id=source_id,
+            target_id=target_id,
+            max_depth=max_depth,
+        )
+        
+        serialized_path = serialize_for_json(path)
+        return JSONResponse({"success": True, "path": serialized_path})
+    except Exception as e:
+        logger.error(f"Failed to find graph path: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/graph/neighbors", response_class=JSONResponse)
+async def get_graph_neighbors(
+    request: Request,
+    node_id: str,
+    relation: Optional[str] = None,
+    svc=Depends(get_memory_service),
+):
+    """Get neighbors of a node (directly connected nodes)"""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    graph_service = get_graph_service_from_request(request, svc)
+    
+    if not graph_service:
+        return JSONResponse({"success": False, "error": "Graph service not available"}, status_code=503)
+
+    try:
+        neighbors = await asyncio.to_thread(
+            graph_service.get_neighbors,
+            node_id=node_id,
+            relation=relation,
+        )
+        
+        serialized_neighbors = serialize_for_json(neighbors)
+        return JSONResponse({"success": True, "neighbors": serialized_neighbors})
+    except Exception as e:
+        logger.error(f"Failed to get graph neighbors: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/graph/extract", response_class=JSONResponse)
+async def extract_graph_from_text(
+    request: Request,
+    svc=Depends(get_memory_service),
+):
+    """Extract entities and relationships from text and add them to the graph (GraphRAG extraction)"""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    graph_service = get_graph_service_from_request(request, svc)
+    
+    if not graph_service:
+        return JSONResponse({"success": False, "error": "Graph service not available"}, status_code=503)
+
+    try:
+        body = await request.json()
+        text = body.get("text")
+        
+        if not text:
+            return JSONResponse({"success": False, "error": "text is required"}, status_code=400)
+        
+        user_id = str(user["_id"])
+        
+        # Use async extraction method
+        result = await graph_service.extract_graph_from_text(
+            text=text,
+            user_id=user_id,
+        )
+        
+        serialized_result = serialize_for_json(result)
+        return JSONResponse({"success": True, "result": serialized_result})
+    except Exception as e:
+        logger.error(f"Failed to extract graph from text: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/graph/backfill-embeddings", response_class=JSONResponse)
+async def backfill_graph_embeddings(
+    request: Request,
+    batch_size: int = 50,
+    limit: Optional[int] = None,
+    svc=Depends(get_memory_service),
+):
+    """
+    Backfill embeddings for existing graph nodes that don't have them.
+    
+    This fixes the issue where GraphRAG returns 0 results because nodes
+    were created before embeddings were enabled or when embedding service
+    wasn't available.
+    """
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    graph_service = get_graph_service_from_request(request, svc)
+    
+    if not graph_service:
+        return JSONResponse({"success": False, "error": "Graph service not available"}, status_code=503)
+
+    try:
+        user_id = str(user["_id"])
+        
+        result = await graph_service.backfill_embeddings(
+            user_id=user_id,
+            batch_size=batch_size,
+            limit=limit,
+        )
+        
+        return JSONResponse({"success": True, "result": result})
+    except Exception as e:
+        logger.error(f"Failed to backfill graph embeddings: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/graph/visualize", response_class=JSONResponse)
+async def visualize_graph(
+    request: Request,
+    node_id: Optional[str] = None,
+    max_depth: int = 2,
+    limit: int = 50,
+    svc=Depends(get_memory_service),
+):
+    """Get graph data formatted for visualization (nodes and edges)"""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    graph_service = get_graph_service_from_request(request, svc)
+    
+    if not graph_service:
+        return JSONResponse({"success": False, "error": "Graph service not available"}, status_code=503)
+
+    try:
+        user_id = str(user["_id"])
+        
+        if node_id:
+            # Traverse from specific node
+            nodes = await graph_service.traverse(
+                start_id=node_id,
+                max_depth=max_depth,
+            )
+        else:
+            # Get all nodes for user
+            nodes = await graph_service.list_nodes(
+                user_id=user_id,
+                limit=limit,
+            )
+        
+        # Format for visualization (nodes and edges)
+        visualization_data = {
+            "nodes": [],
+            "edges": [],
+        }
+        
+        node_ids_seen = set()
+        
+        for node_data in nodes:
+            if isinstance(node_data, dict):
+                node = node_data.get("node", node_data)
+            else:
+                node = node_data
+            
+            node_id = node.get("_id")
+            if not node_id or node_id in node_ids_seen:
+                continue
+            
+            node_ids_seen.add(node_id)
+            
+            visualization_data["nodes"].append({
+                "id": node_id,
+                "type": node.get("type"),
+                "name": node.get("name"),
+                "properties": node.get("properties", {}),
+            })
+            
+            # Extract edges
+            edges = node.get("edges", [])
+            for edge in edges:
+                if edge.get("active", True):  # Only active edges
+                    visualization_data["edges"].append({
+                        "source": node_id,
+                        "target": edge.get("target"),
+                        "relation": edge.get("relation"),
+                        "weight": edge.get("weight", 1.0),
+                        "properties": edge.get("properties", {}),
+                    })
+        
+        serialized_data = serialize_for_json(visualization_data)
+        return JSONResponse({"success": True, "graph": serialized_data})
+    except Exception as e:
+        logger.error(f"Failed to visualize graph: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
 
 
 # ============================================================================
@@ -3731,7 +7304,7 @@ async def get_persona(
             "error": "Persona feature not enabled"
         })
     
-    persona = svc.get_persona()
+    persona = await svc.get_persona()
     return JSONResponse({
         "success": True,
         "persona": serialize_for_json(persona) if persona else None
@@ -3757,7 +7330,7 @@ async def update_persona(
         description = data.get("description")
         traits = data.get("traits")
         
-        updated = svc.update_persona(
+        updated = await svc.update_persona(
             role=role,
             description=description,
             traits=traits,
@@ -3772,132 +7345,1262 @@ async def update_persona(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ============================================================================
-# Perceptions API Endpoints
-# ============================================================================
+# =============================================================================
+# PROFILE SERVICE ENDPOINTS
+# =============================================================================
 
-@app.get("/api/perceptions/user", response_class=JSONResponse)
-async def get_user_perceptions(
+
+@app.get("/api/profile", response_class=JSONResponse)
+async def get_user_profile(
     request: Request,
-    svc=Depends(get_memory_service),
+    profile_svc=Depends(get_profile_service),
 ):
-    """Get user perceptions for the current user"""
+    """
+    Get the current user's materialized profile.
+
+    Returns the LLM-synthesized profile with identity, preferences,
+    relationships, active context, safety alerts, and narrative.
+    This is a single MongoDB read -- no LLM calls.
+    """
     user = get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Authentication required")
-    
-    if not svc or not hasattr(svc, "perception_engine") or not svc.perception_engine:
-        return JSONResponse({
-            "success": False,
-            "error": "Perception feature not enabled"
-        })
-    
+
     user_id = str(user["_id"])
-    perception = svc.perception_engine.get_user_perception(user_id)
-    
-    return JSONResponse({
-        "success": True,
-        "perception": serialize_for_json(perception) if perception else None
-    })
+
+    try:
+        profile = await profile_svc.get_user_profile(user_id)
+        if not profile:
+            return JSONResponse({
+                "success": True,
+                "profile": None,
+                "message": "No profile exists yet. Call POST /api/profile/build to create one.",
+            })
+
+        return JSONResponse({
+            "success": True,
+            "profile": serialize_for_json(profile),
+        })
+    except Exception as e:
+        logger.error(f"Failed to get user profile: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/perceptions/self", response_class=JSONResponse)
-async def get_self_perceptions(
+@app.get("/api/profile/text", response_class=JSONResponse)
+async def get_user_profile_text(
     request: Request,
-    svc=Depends(get_memory_service),
+    profile_svc=Depends(get_profile_service),
 ):
-    """Get self-perceptions (robot's view of itself)"""
+    """
+    Get the user's profile formatted for prompt injection.
+
+    Returns a concise text block suitable for the [USER PROFILE]
+    section of a conversation system prompt. Always surfaces
+    safety-critical facts (allergies, medical).
+    """
     user = get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Authentication required")
-    
-    if not svc or not hasattr(svc, "perception_engine") or not svc.perception_engine:
+
+    user_id = str(user["_id"])
+
+    try:
+        text = await profile_svc.get_user_profile_text(user_id)
         return JSONResponse({
-            "success": False,
-            "error": "Perception feature not enabled"
+            "success": True,
+            "text": text,
         })
-    
-    perception = svc.perception_engine.get_self_perception()
-    
-    return JSONResponse({
-        "success": True,
-        "perception": serialize_for_json(perception) if perception else None
-    })
+    except Exception as e:
+        logger.error(f"Failed to get profile text: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/perceptions/history", response_class=JSONResponse)
-async def get_perception_history(
+@app.post("/api/profile/build", response_class=JSONResponse)
+async def build_user_profile(
     request: Request,
-    user_id: Optional[str] = None,
-    perception_type: Optional[str] = None,
-    limit: int = 100,
-    svc=Depends(get_memory_service),
+    profile_svc=Depends(get_profile_service),
 ):
-    """Get perception history for temporal analysis"""
+    """
+    Trigger a full profile rebuild from all memories and graph nodes.
+
+    This is expensive (1 LLM call + memory fetch + graph fetch) and
+    should be called periodically, not on every request. Use
+    POST /api/profile/incremental for lightweight updates.
+    """
     user = get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Authentication required")
-    
-    if not svc or not hasattr(svc, "perception_engine") or not svc.perception_engine:
+
+    user_id = str(user["_id"])
+
+    try:
+        profile = await profile_svc.build_user_profile(user_id)
         return JSONResponse({
-            "success": False,
-            "error": "Perception feature not enabled"
+            "success": True,
+            "profile": serialize_for_json(profile),
+            "message": "Full profile rebuild complete.",
         })
-    
-    # Use current user's ID if not specified
-    if not user_id:
-        user_id = str(user["_id"])
-    
-    history = svc.perception_engine.get_perception_history(
+    except Exception as e:
+        logger.error(f"Failed to build user profile: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/profile/incremental", response_class=JSONResponse)
+async def incremental_profile_update(
+    request: Request,
+    profile_svc=Depends(get_profile_service),
+    svc=Depends(get_memory_service),
+):
+    """
+    Trigger an incremental profile update with recent memories.
+
+    Fetches the most recent memories and merges them into the
+    existing profile via a lightweight LLM call. If no profile
+    exists yet, triggers a full build instead.
+    """
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    user_id = str(user["_id"])
+
+    try:
+        # Get recent memories to merge
+        body = await request.json() if await request.body() else {}
+        limit = body.get("limit", 20)
+
+        recent_memories = await svc.get_all(user_id=user_id, limit=limit)
+        if not recent_memories:
+            return JSONResponse({
+                "success": True,
+                "message": "No memories found to update profile with.",
+            })
+
+        profile = await profile_svc.incremental_update(user_id, recent_memories)
+        return JSONResponse({
+            "success": True,
+            "profile": serialize_for_json(profile) if profile else None,
+            "memories_merged": len(recent_memories),
+        })
+    except Exception as e:
+        logger.error(f"Failed incremental profile update: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/profile", response_class=JSONResponse)
+async def delete_user_profile(
+    request: Request,
+    profile_svc=Depends(get_profile_service),
+):
+    """
+    Delete the current user's profile (GDPR compliance).
+    """
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    user_id = str(user["_id"])
+
+    try:
+        deleted = await profile_svc.delete_user_profile(user_id)
+        return JSONResponse({
+            "success": True,
+            "deleted": deleted,
+        })
+    except Exception as e:
+        logger.error(f"Failed to delete user profile: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# COMMUNITY PROFILE ENDPOINTS
+# =============================================================================
+
+
+@app.get("/api/community/profile", response_class=JSONResponse)
+async def get_community_profile(
+    request: Request,
+    profile_svc=Depends(get_profile_service),
+):
+    """
+    Get the community profile for this app.
+
+    Returns anonymous aggregate statistics across all users:
+    population, common preferences, shared knowledge, and
+    memory landscape. No LLM calls -- pure MongoDB aggregation.
+    """
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    try:
+        profile = await profile_svc.get_community_profile()
+        if not profile:
+            return JSONResponse({
+                "success": True,
+                "profile": None,
+                "message": "No community profile exists yet. Call POST /api/community/profile/build to create one.",
+            })
+
+        return JSONResponse({
+            "success": True,
+            "profile": serialize_for_json(profile),
+        })
+    except Exception as e:
+        logger.error(f"Failed to get community profile: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/community/profile/build", response_class=JSONResponse)
+async def build_community_profile(
+    request: Request,
+    profile_svc=Depends(get_profile_service),
+):
+    """
+    Trigger a full rebuild of the community profile.
+
+    Uses MongoDB aggregation (no LLM calls) to aggregate anonymous
+    statistics across all users of this app. Includes population
+    stats, common preferences, shared knowledge from the graph,
+    and memory landscape distribution.
+    """
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    try:
+        profile = await profile_svc.build_community_profile()
+        if not profile:
+            return JSONResponse({
+                "success": True,
+                "profile": None,
+                "message": "Community profiles are not enabled or not enough users.",
+            })
+
+        return JSONResponse({
+            "success": True,
+            "profile": serialize_for_json(profile),
+            "message": "Community profile rebuild complete.",
+        })
+    except Exception as e:
+        logger.error(f"Failed to build community profile: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/community/profile/text", response_class=JSONResponse)
+async def get_community_profile_text(
+    request: Request,
+    profile_svc=Depends(get_profile_service),
+):
+    """
+    Get the community profile formatted for prompt injection.
+
+    Returns a concise text summary suitable for injecting into
+    an LLM system prompt to provide community context.
+    """
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    try:
+        text = await profile_svc.get_community_profile_text()
+        return JSONResponse({
+            "success": True,
+            "text": text if text else "No community profile data available.",
+        })
+    except Exception as e:
+        logger.error(f"Failed to get community profile text: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# DAILY HYGIENE / SCHEDULED MAINTENANCE ENDPOINTS
+# =============================================================================
+
+# In-memory storage for last hygiene run results (per user)
+_hygiene_results: dict[str, dict[str, Any]] = {}
+
+
+@app.post("/api/maintenance/hygiene", response_class=JSONResponse)
+async def trigger_daily_hygiene(
+    request: Request,
+    svc=Depends(get_memory_service),
+    db=Depends(get_scoped_db),
+):
+    """
+    Trigger daily brain hygiene for the current user.
+
+    Runs the memory consolidation process that transforms episodic
+    memories into semantic facts and procedural lessons. This is
+    the "learning" maintenance for the Perfect Brain.
+
+    True Perfect Recall: no decay, no forgetting. This only
+    consolidates episodic memories into reusable knowledge.
+    """
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    user_id = str(user["_id"])
+
+    try:
+        # Get engine references from app state
+        engine = getattr(request.app.state, "engine", None)
+        if not engine:
+            return JSONResponse(
+                {"success": False, "error": "Engine not available"},
+                status_code=503,
+            )
+
+        # Get LLM and embedding services if available
+        llm_service = None
+        embedding_service = None
+        try:
+            slug = getattr(request.app.state, "app_slug", None)
+            if slug and engine._service_initializer:
+                llm_service = engine._service_initializer._llm_services.get(slug) if hasattr(engine._service_initializer, '_llm_services') else None
+        except (AttributeError, KeyError):
+            pass
+
+        result = await run_daily_hygiene(
+            agent_id=user_id,
+            db_client=db,
+            db_name=engine.db_name,
+            llm_service=llm_service,
+            embedding_service=embedding_service,
+        )
+
+        # Store result for status endpoint
+        _hygiene_results[user_id] = {
+            "last_run": datetime.utcnow().isoformat() + "Z",
+            "result": result,
+        }
+
+        return JSONResponse({
+            "success": result.get("success", False),
+            "result": serialize_for_json(result),
+        })
+    except Exception as e:
+        logger.error(f"Daily hygiene failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/maintenance/status", response_class=JSONResponse)
+async def get_maintenance_status(
+    request: Request,
+):
+    """
+    Get the status of the last daily hygiene run for the current user.
+
+    Returns the timestamp and results of the most recent hygiene run,
+    including how many episodes were consolidated, entities extracted,
+    and procedures created.
+    """
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    user_id = str(user["_id"])
+
+    status = _hygiene_results.get(user_id)
+    if not status:
+        return JSONResponse({
+            "success": True,
+            "status": None,
+            "message": "No hygiene run recorded yet. Call POST /api/maintenance/hygiene to run.",
+        })
+
+    return JSONResponse({
+        "success": True,
+        "status": serialize_for_json(status),
+    })
+
+
+# =============================================================================
+# MEMORY VERIFICATION ENDPOINTS (JIT Citation Checking)
+# =============================================================================
+
+
+@app.post("/api/memories/verify", response_class=JSONResponse)
+async def verify_memories_batch(
+    request: Request,
+    svc=Depends(get_memory_service),
+):
+    """
+    Verify a batch of memories by checking their citations.
+
+    For each memory with metadata.citations (file_path + content_hash),
+    checks if the source file still exists and its hash matches.
+
+    Each memory gets a verification_status:
+    - 'verified': Citation checks out
+    - 'stale': File changed or deleted
+    - 'unverified': No citation or verification disabled
+    - 'skipped': File too large or other skip condition
+    """
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    user_id = str(user["_id"])
+
+    try:
+        body = await request.json() if await request.body() else {}
+        limit = body.get("limit", 50)
+
+        # Fetch memories to verify
+        memories = await svc.get_all(user_id=user_id, limit=limit)
+        if not memories:
+            return JSONResponse({
+                "success": True,
+                "verified": [],
+                "message": "No memories found to verify.",
+            })
+
+        # Check if verification is available
+        if not hasattr(svc, 'verify_memories'):
+            return JSONResponse({
+                "success": False,
+                "error": "Memory verification not available. Enable verification in memory_config.",
+            }, status_code=501)
+
+        verified = await svc.verify_memories(memories)
+
+        # Collect stats
+        stats = {"verified": 0, "stale": 0, "unverified": 0, "skipped": 0}
+        for m in verified:
+            status = m.get("verification_status", "unverified")
+            if status in stats:
+                stats[status] += 1
+
+        return JSONResponse({
+            "success": True,
+            "verified": serialize_for_json(verified),
+            "stats": stats,
+            "total": len(verified),
+        })
+    except Exception as e:
+        logger.error(f"Memory verification failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/memories/{memory_id}/verify", response_class=JSONResponse)
+async def verify_single_memory(
+    request: Request,
+    memory_id: str,
+    svc=Depends(get_memory_service),
+):
+    """
+    Verify a single memory's citations.
+
+    Checks if the source files referenced by this memory still
+    match their stored content hashes.
+    """
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    user_id = str(user["_id"])
+
+    try:
+        # Get the specific memory
+        memory = await svc.get(memory_id, user_id=user_id)
+        if not memory:
+            raise HTTPException(status_code=404, detail="Memory not found")
+
+        if not hasattr(svc, 'verify_memories'):
+            return JSONResponse({
+                "success": False,
+                "error": "Memory verification not available.",
+            }, status_code=501)
+
+        verified = await svc.verify_memories([memory])
+        result = verified[0] if verified else memory
+
+        return JSONResponse({
+            "success": True,
+            "memory": serialize_for_json(result),
+            "verification_status": result.get("verification_status", "unverified"),
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Single memory verification failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/memories/citation", response_class=JSONResponse)
+async def generate_memory_citation(
+    request: Request,
+    svc=Depends(get_memory_service),
+):
+    """
+    Generate a citation object for a file path.
+
+    Creates a content hash that can be stored with a memory to
+    enable future JIT verification. Useful when creating memories
+    from file content.
+
+    Request body:
+        file_path: str - Path to the file
+        line_start: int (optional) - Start line for partial citation
+        line_end: int (optional) - End line for partial citation
+    """
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    try:
+        body = await request.json()
+        file_path = body.get("file_path")
+        if not file_path:
+            raise HTTPException(status_code=400, detail="file_path is required")
+
+        line_start = body.get("line_start")
+        line_end = body.get("line_end")
+
+        if not hasattr(svc, 'generate_citation'):
+            return JSONResponse({
+                "success": False,
+                "error": "Citation generation not available.",
+            }, status_code=501)
+
+        citation = await svc.generate_citation(
+            file_path=file_path,
+            line_start=line_start,
+            line_end=line_end,
+        )
+
+        if not citation:
+            return JSONResponse({
+                "success": False,
+                "error": "Could not generate citation. File may not exist or is too large.",
+            })
+
+        return JSONResponse({
+            "success": True,
+            "citation": serialize_for_json(citation),
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Citation generation failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# COLD STORAGE BROWSER ENDPOINTS
+# =============================================================================
+
+
+@app.get("/api/memories/cold-storage", response_class=JSONResponse)
+async def list_cold_storage_memories(
+    request: Request,
+    svc=Depends(get_memory_service),
+    db=Depends(get_scoped_db),
+):
+    """
+    Browse memories in cold storage (pruned/archived).
+
+    Cold storage is where memories go after pruning (soft delete).
+    These memories are not returned in normal searches but can
+    be browsed and restored via POST /api/memories/{id}/restore.
+
+    Query params:
+        limit: int - Max results (default: 50)
+        skip: int - Offset for pagination (default: 0)
+    """
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    user_id = str(user["_id"])
+
+    try:
+        limit = int(request.query_params.get("limit", "50"))
+        skip = int(request.query_params.get("skip", "0"))
+
+        # Query for pruned/cold-storage memories
+        collection_name = "user_memories"
+        collection = getattr(db, collection_name, None)
+        if collection is None:
+            return JSONResponse({
+                "success": True,
+                "memories": [],
+                "total": 0,
+                "message": "Memory collection not found.",
+            })
+
+        # Cold storage memories have status "cold_storage" or pruned=True
+        cold_filter = {
+            "user_id": user_id,
+            "$or": [
+                {"status": "cold_storage"},
+                {"pruned": True},
+                {"metadata.status": "cold_storage"},
+                {"metadata.pruned": True},
+            ],
+        }
+
+        cursor = collection.find(cold_filter).sort("updated_at", -1).skip(skip).limit(limit)
+        memories = await cursor.to_list(limit)
+        total = await collection.count_documents(cold_filter)
+
+        return JSONResponse({
+            "success": True,
+            "memories": serialize_for_json(memories),
+            "total": total,
+            "skip": skip,
+            "limit": limit,
+        })
+    except Exception as e:
+        logger.error(f"Failed to list cold storage: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/memories/cold-storage/stats", response_class=JSONResponse)
+async def get_cold_storage_stats(
+    request: Request,
+    db=Depends(get_scoped_db),
+):
+    """
+    Get statistics about memories in cold storage.
+
+    Returns count, date range, and category breakdown of
+    archived/pruned memories.
+    """
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    user_id = str(user["_id"])
+
+    try:
+        collection_name = "user_memories"
+        collection = getattr(db, collection_name, None)
+        if collection is None:
+            return JSONResponse({
+                "success": True,
+                "stats": {"total": 0},
+            })
+
+        cold_filter = {
+            "user_id": user_id,
+            "$or": [
+                {"status": "cold_storage"},
+                {"pruned": True},
+                {"metadata.status": "cold_storage"},
+                {"metadata.pruned": True},
+            ],
+        }
+
+        total = await collection.count_documents(cold_filter)
+
+        # Get date range and category breakdown via aggregation
+        stats: dict[str, Any] = {"total": total}
+
+        if total > 0:
+            # Get oldest and newest
+            pipeline = [
+                {"$match": cold_filter},
+                {
+                    "$group": {
+                        "_id": None,
+                        "oldest": {"$min": "$created_at"},
+                        "newest": {"$max": "$created_at"},
+                    }
+                },
+            ]
+            date_results = []
+            async for doc in collection.aggregate(pipeline):
+                date_results.append(doc)
+
+            if date_results:
+                stats["oldest"] = serialize_for_json(date_results[0].get("oldest"))
+                stats["newest"] = serialize_for_json(date_results[0].get("newest"))
+
+            # Category breakdown
+            cat_pipeline = [
+                {"$match": cold_filter},
+                {
+                    "$group": {
+                        "_id": {
+                            "$ifNull": [
+                                "$category",
+                                {"$ifNull": ["$metadata.category", "unknown"]},
+                            ]
+                        },
+                        "count": {"$sum": 1},
+                    }
+                },
+                {"$sort": {"count": -1}},
+            ]
+            categories: dict[str, int] = {}
+            async for doc in collection.aggregate(cat_pipeline):
+                categories[doc["_id"] or "unknown"] = doc["count"]
+
+            stats["categories"] = categories
+
+        return JSONResponse({
+            "success": True,
+            "stats": stats,
+        })
+    except Exception as e:
+        logger.error(f"Failed to get cold storage stats: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# Family Nexus -- Domain-Specific Endpoints (OSI + Knowledge Graph)
+# ---------------------------------------------------------------------------
+# These endpoints provide a structured, Family-Nexus-style REST API on top
+# of the OSI-typed knowledge graph.  Each endpoint queries or mutates graph
+# nodes whose *type* matches an OSI dataset name (family_member, grocery_item,
+# chore, etc.).  This demonstrates the core OSI + MongoDB value proposition:
+#   "Define your semantic model once; the graph and the API stay in sync."
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/family/members", response_class=JSONResponse)
+async def get_family_members(
+    request: Request,
+    svc=Depends(get_memory_service),
+):
+    """Retrieve all family_member nodes from the knowledge graph."""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    graph_service = get_graph_service_from_request(request, svc)
+    if not graph_service:
+        return JSONResponse({"success": True, "members": []})
+
+    user_id = str(user["_id"])
+    nodes = await graph_service.list_nodes(
+        node_type="family_member",
         user_id=user_id,
-        perception_type=perception_type,
-        limit=limit,
+        limit=100,
     )
-    
     return JSONResponse({
         "success": True,
-        "history": serialize_for_json(history)
+        "members": serialize_for_json(nodes),
+        "total": len(nodes) if isinstance(nodes, list) else 0,
     })
 
 
-@app.get("/api/perceptions/stats", response_class=JSONResponse)
-async def get_perception_stats(
+@app.get("/api/family/members/{name}/location", response_class=JSONResponse)
+async def get_member_location(
     request: Request,
+    name: str,
     svc=Depends(get_memory_service),
 ):
-    """Get perception statistics"""
+    """Get the last known location / status of a family member.
+
+    Looks up the member by name, then traverses to connected
+    device_location nodes.
+    """
     user = get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Authentication required")
-    
-    if not svc or not hasattr(svc, "perception_engine") or not svc.perception_engine:
-        return JSONResponse({
-            "success": False,
-            "error": "Perception feature not enabled"
-        })
-    
+
+    graph_service = get_graph_service_from_request(request, svc)
+    if not graph_service:
+        return JSONResponse({"success": False, "error": "Graph service not available"}, status_code=503)
+
     user_id = str(user["_id"])
-    user_perception = svc.perception_engine.get_user_perception(user_id)
-    self_perception = svc.perception_engine.get_self_perception()
-    
-    stats = {
-        "user_perception_exists": user_perception is not None,
-        "self_perception_exists": self_perception is not None,
-    }
-    
-    if user_perception:
-        stats["user_interaction_count"] = user_perception.get("interaction_count", 0)
-        stats["user_last_updated"] = user_perception.get("last_updated")
-        stats["user_attributes"] = user_perception.get("attributes", {})
-    
-    if self_perception:
-        stats["self_interaction_count"] = self_perception.get("interaction_count", 0)
-        stats["self_last_updated"] = self_perception.get("last_updated")
-        stats["self_attributes"] = self_perception.get("attributes", {})
-    
+    name_lower = name.lower()
+
+    members = await graph_service.list_nodes(
+        node_type="family_member",
+        user_id=user_id,
+        limit=200,
+    )
+    member_node = None
+    for m in (members or []):
+        node_name = (m.get("name") or "").lower()
+        if node_name == name_lower or name_lower in node_name:
+            member_node = m
+            break
+
+    if not member_node:
+        return JSONResponse({"success": False, "error": f"Member '{name}' not found"}, status_code=404)
+
+    member_id = member_node.get("_id")
+    try:
+        neighbors = await asyncio.to_thread(
+            graph_service.get_neighbors,
+            node_id=member_id,
+            relation=None,
+        )
+        locations = [
+            n for n in (neighbors or [])
+            if (n.get("type") or n.get("node_type") or "") == "device_location"
+        ]
+    except Exception:
+        locations = []
+
     return JSONResponse({
         "success": True,
-        "stats": serialize_for_json(stats)
+        "member": serialize_for_json(member_node),
+        "locations": serialize_for_json(locations),
+    })
+
+
+@app.get("/api/family/members/{name}/health", response_class=JSONResponse)
+async def get_member_health(
+    request: Request,
+    name: str,
+    svc=Depends(get_memory_service),
+):
+    """Aggregate health data for a family member.
+
+    Returns allergies, medications, medical conditions, and vaccinations
+    connected to the named member in the knowledge graph.
+    """
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    graph_service = get_graph_service_from_request(request, svc)
+    if not graph_service:
+        return JSONResponse({"success": False, "error": "Graph service not available"}, status_code=503)
+
+    user_id = str(user["_id"])
+    name_lower = name.lower()
+
+    members = await graph_service.list_nodes(
+        node_type="family_member",
+        user_id=user_id,
+        limit=200,
+    )
+    member_node = None
+    for m in (members or []):
+        node_name = (m.get("name") or "").lower()
+        if node_name == name_lower or name_lower in node_name:
+            member_node = m
+            break
+
+    if not member_node:
+        return JSONResponse({"success": False, "error": f"Member '{name}' not found"}, status_code=404)
+
+    member_id = member_node.get("_id")
+    health_types = {"allergy", "medication", "medical_condition", "vaccination"}
+
+    try:
+        neighbors = await asyncio.to_thread(
+            graph_service.get_neighbors,
+            node_id=member_id,
+            relation=None,
+        )
+    except Exception:
+        neighbors = []
+
+    health: dict[str, list] = {t: [] for t in health_types}
+    for n in (neighbors or []):
+        ntype = n.get("type") or n.get("node_type") or ""
+        if ntype in health_types:
+            health[ntype].append(n)
+
+    return JSONResponse({
+        "success": True,
+        "member": serialize_for_json(member_node),
+        "allergies": serialize_for_json(health["allergy"]),
+        "medications": serialize_for_json(health["medication"]),
+        "conditions": serialize_for_json(health["medical_condition"]),
+        "vaccinations": serialize_for_json(health["vaccination"]),
+    })
+
+
+# --- Grocery / Shopping ---------------------------------------------------
+
+
+@app.get("/api/lists/grocery", response_class=JSONResponse)
+async def get_grocery_list(
+    request: Request,
+    status: Optional[str] = None,
+    svc=Depends(get_memory_service),
+):
+    """Get the current grocery list (all grocery_item graph nodes).
+
+    Optional *status* filter: 'pending', 'purchased', etc.
+    """
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    graph_service = get_graph_service_from_request(request, svc)
+    if not graph_service:
+        return JSONResponse({"success": True, "items": []})
+
+    user_id = str(user["_id"])
+    nodes = await graph_service.list_nodes(
+        node_type="grocery_item",
+        user_id=user_id,
+        limit=200,
+    )
+
+    if status:
+        nodes = [
+            n for n in (nodes or [])
+            if (n.get("properties", {}).get("status") or "").lower() == status.lower()
+        ]
+
+    return JSONResponse({
+        "success": True,
+        "items": serialize_for_json(nodes),
+        "total": len(nodes) if isinstance(nodes, list) else 0,
+    })
+
+
+@app.post("/api/lists/grocery", response_class=JSONResponse)
+async def add_to_grocery_list(
+    request: Request,
+    svc=Depends(get_memory_service),
+):
+    """Add one or more items to the grocery list.
+
+    Body:
+        items (list[str]): Item names (e.g. ["Milk", "Eggs"]).
+        requested_by (str, optional): Name of the family member.
+        store (str, optional): Target store.
+    """
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    graph_service = get_graph_service_from_request(request, svc)
+    if not graph_service:
+        return JSONResponse({"success": False, "error": "Graph service not available"}, status_code=503)
+
+    user_id = str(user["_id"])
+    body = await request.json()
+    items = body.get("items", [])
+    requested_by = body.get("requested_by", "")
+    store = body.get("store", "")
+
+    if not items:
+        return JSONResponse({"success": False, "error": "'items' list is required"}, status_code=400)
+
+    created = []
+    for item_name in items:
+        node_id = f"grocery_item:{item_name.lower().replace(' ', '_')}"
+        node = await asyncio.to_thread(
+            graph_service.upsert_node,
+            node_id=node_id,
+            node_type="grocery_item",
+            name=item_name,
+            properties={
+                "status": "pending",
+                "requested_by": requested_by,
+                "store": store,
+            },
+            user_id=user_id,
+        )
+        created.append(node)
+
+    return JSONResponse({
+        "success": True,
+        "items_added": len(created),
+        "items": serialize_for_json(created),
+    })
+
+
+# --- Chores ----------------------------------------------------------------
+
+
+@app.get("/api/chores", response_class=JSONResponse)
+async def get_chores(
+    request: Request,
+    status: Optional[str] = None,
+    assigned_to: Optional[str] = None,
+    svc=Depends(get_memory_service),
+):
+    """List chore nodes with optional filters.
+
+    Query params:
+        status: 'pending', 'completed', 'overdue'
+        assigned_to: Family member name
+    """
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    graph_service = get_graph_service_from_request(request, svc)
+    if not graph_service:
+        return JSONResponse({"success": True, "chores": []})
+
+    user_id = str(user["_id"])
+    nodes = await graph_service.list_nodes(
+        node_type="chore",
+        user_id=user_id,
+        limit=200,
+    )
+
+    filtered = nodes or []
+    if status:
+        filtered = [
+            n for n in filtered
+            if (n.get("properties", {}).get("status") or "").lower() == status.lower()
+        ]
+    if assigned_to:
+        at_lower = assigned_to.lower()
+        filtered = [
+            n for n in filtered
+            if at_lower in (n.get("properties", {}).get("assigned_to") or "").lower()
+        ]
+
+    return JSONResponse({
+        "success": True,
+        "chores": serialize_for_json(filtered),
+        "total": len(filtered),
+    })
+
+
+@app.post("/api/chores", response_class=JSONResponse)
+async def assign_chore(
+    request: Request,
+    svc=Depends(get_memory_service),
+):
+    """Create a chore and optionally link it to a family member.
+
+    Body:
+        name (str): Chore name.
+        assigned_to (str, optional): Family member name.
+        due_date (str, optional): ISO date string.
+        reward (str, optional): Reward description.
+        difficulty (str, optional): easy / medium / hard.
+    """
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    graph_service = get_graph_service_from_request(request, svc)
+    if not graph_service:
+        return JSONResponse({"success": False, "error": "Graph service not available"}, status_code=503)
+
+    user_id = str(user["_id"])
+    body = await request.json()
+    chore_name = body.get("name", "").strip()
+    if not chore_name:
+        return JSONResponse({"success": False, "error": "'name' is required"}, status_code=400)
+
+    node_id = f"chore:{chore_name.lower().replace(' ', '_')}"
+    props = {
+        "status": "pending",
+        "assigned_to": body.get("assigned_to", ""),
+        "due_date": body.get("due_date", ""),
+        "reward": body.get("reward", ""),
+        "difficulty": body.get("difficulty", ""),
+        "recurrence": body.get("recurrence", "one-time"),
+    }
+
+    node = await asyncio.to_thread(
+        graph_service.upsert_node,
+        node_id=node_id,
+        node_type="chore",
+        name=chore_name,
+        properties=props,
+        user_id=user_id,
+    )
+
+    # Link to member if assigned_to is given
+    assigned_to_name = body.get("assigned_to", "")
+    if assigned_to_name:
+        members = await graph_service.list_nodes(
+            node_type="family_member",
+            user_id=user_id,
+            limit=200,
+        )
+        for m in (members or []):
+            if assigned_to_name.lower() in (m.get("name") or "").lower():
+                try:
+                    await asyncio.to_thread(
+                        graph_service.add_edge,
+                        source_id=node_id,
+                        relation="assigned_to",
+                        target_id=m.get("_id"),
+                        properties={},
+                        weight=1.0,
+                    )
+                except Exception as edge_err:
+                    logger.warning(f"Could not link chore to member: {edge_err}")
+                break
+
+    return JSONResponse({
+        "success": True,
+        "chore": serialize_for_json(node),
+    })
+
+
+# --- Schedule --------------------------------------------------------------
+
+
+@app.get("/api/schedule", response_class=JSONResponse)
+async def get_schedule(
+    request: Request,
+    member: Optional[str] = None,
+    svc=Depends(get_memory_service),
+):
+    """Get the family schedule: appointments + routines.
+
+    Optional *member* filter narrows results to nodes connected to
+    a specific family member.
+    """
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    graph_service = get_graph_service_from_request(request, svc)
+    if not graph_service:
+        return JSONResponse({"success": True, "appointments": [], "routines": []})
+
+    user_id = str(user["_id"])
+
+    appointments = await graph_service.list_nodes(
+        node_type="appointment",
+        user_id=user_id,
+        limit=200,
+    )
+    routines = await graph_service.list_nodes(
+        node_type="routine",
+        user_id=user_id,
+        limit=200,
+    )
+
+    if member:
+        member_lower = member.lower()
+
+        members = await graph_service.list_nodes(
+            node_type="family_member",
+            user_id=user_id,
+            limit=200,
+        )
+        member_ids = {
+            m.get("_id") for m in (members or [])
+            if member_lower in (m.get("name") or "").lower()
+        }
+
+        if member_ids:
+            connected_ids: set[str] = set()
+            for mid in member_ids:
+                try:
+                    neighbors = await asyncio.to_thread(
+                        graph_service.get_neighbors,
+                        node_id=mid,
+                        relation=None,
+                    )
+                    for n in (neighbors or []):
+                        connected_ids.add(n.get("_id", ""))
+                except Exception:
+                    pass
+
+            appointments = [a for a in (appointments or []) if a.get("_id") in connected_ids]
+            routines = [r for r in (routines or []) if r.get("_id") in connected_ids]
+
+    return JSONResponse({
+        "success": True,
+        "appointments": serialize_for_json(appointments or []),
+        "routines": serialize_for_json(routines or []),
+        "total": len(appointments or []) + len(routines or []),
+    })
+
+
+# --- Budget ----------------------------------------------------------------
+
+
+@app.get("/api/budget/summary", response_class=JSONResponse)
+async def get_budget_summary(
+    request: Request,
+    svc=Depends(get_memory_service),
+):
+    """Aggregate budget_entry nodes into a spending summary.
+
+    Returns all budget entries and totals grouped by category.
+    """
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    graph_service = get_graph_service_from_request(request, svc)
+    if not graph_service:
+        return JSONResponse({"success": True, "entries": [], "by_category": {}, "total": 0.0})
+
+    user_id = str(user["_id"])
+    nodes = await graph_service.list_nodes(
+        node_type="budget_entry",
+        user_id=user_id,
+        limit=500,
+    )
+
+    by_category: dict[str, float] = {}
+    grand_total = 0.0
+    for n in (nodes or []):
+        props = n.get("properties", {})
+        try:
+            amount = float(props.get("amount", 0))
+        except (TypeError, ValueError):
+            amount = 0.0
+        category = props.get("category", "other")
+        by_category[category] = by_category.get(category, 0.0) + amount
+        grand_total += amount
+
+    return JSONResponse({
+        "success": True,
+        "entries": serialize_for_json(nodes or []),
+        "by_category": by_category,
+        "total": grand_total,
+        "count": len(nodes or []),
+    })
+
+
+# --- Homework --------------------------------------------------------------
+
+
+@app.get("/api/homework", response_class=JSONResponse)
+async def get_homework(
+    request: Request,
+    status: Optional[str] = None,
+    member: Optional[str] = None,
+    svc=Depends(get_memory_service),
+):
+    """List homework / school assignment nodes.
+
+    Query params:
+        status: 'pending', 'completed', 'late', 'submitted'
+        member: Family member name to filter by.
+    """
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    graph_service = get_graph_service_from_request(request, svc)
+    if not graph_service:
+        return JSONResponse({"success": True, "assignments": []})
+
+    user_id = str(user["_id"])
+    nodes = await graph_service.list_nodes(
+        node_type="homework",
+        user_id=user_id,
+        limit=200,
+    )
+
+    filtered = nodes or []
+    if status:
+        filtered = [
+            n for n in filtered
+            if (n.get("properties", {}).get("status") or "").lower() == status.lower()
+        ]
+    if member:
+        member_lower = member.lower()
+        filtered = [
+            n for n in filtered
+            if member_lower in (n.get("properties", {}).get("assigned_to") or n.get("name") or "").lower()
+        ]
+
+    return JSONResponse({
+        "success": True,
+        "assignments": serialize_for_json(filtered),
+        "total": len(filtered),
     })
 
 

@@ -65,9 +65,7 @@ def dashboard_manifest():
 class TestSecureCrossAppAccess:
     """Test secure cross-app access with real MongoDB."""
 
-    async def test_click_tracker_registration(
-        self, mongodb_engine_with_secrets, click_tracker_manifest, master_key
-    ):
+    async def test_click_tracker_registration(self, mongodb_engine_with_secrets, click_tracker_manifest, master_key):
         """Test registering ClickTracker app with secret generation."""
         engine = mongodb_engine_with_secrets
         await engine.initialize()
@@ -79,9 +77,7 @@ class TestSecureCrossAppAccess:
         secret_exists = await engine._app_secrets_manager.app_secret_exists("click_tracker")  # noqa: SLF001
         assert secret_exists is True
 
-    async def test_dashboard_registration(
-        self, mongodb_engine_with_secrets, dashboard_manifest, master_key
-    ):
+    async def test_dashboard_registration(self, mongodb_engine_with_secrets, dashboard_manifest, master_key):
         """Test registering Dashboard app with secret generation."""
         engine = mongodb_engine_with_secrets
         await engine.initialize()
@@ -95,9 +91,7 @@ class TestSecureCrossAppAccess:
         )
         assert secret_exists is True
 
-    async def test_click_tracker_tracks_clicks(
-        self, mongodb_engine_with_secrets, click_tracker_manifest, master_key
-    ):
+    async def test_click_tracker_tracks_clicks(self, mongodb_engine_with_secrets, click_tracker_manifest, master_key):
         """Test that ClickTracker can write to its own collections."""
         engine = mongodb_engine_with_secrets
         await engine.initialize()
@@ -108,7 +102,7 @@ class TestSecureCrossAppAccess:
         secret = await engine._app_secrets_manager.get_app_secret("click_tracker")  # noqa: SLF001
 
         # Get scoped database with token
-        db = engine.get_scoped_db("click_tracker", app_token=secret)
+        db = await engine.get_scoped_db("click_tracker", app_token=secret)
 
         # Insert click
         click_doc = {
@@ -148,7 +142,7 @@ class TestSecureCrossAppAccess:
         )
 
         # Insert click via ClickTracker
-        tracker_db = engine.get_scoped_db("click_tracker", app_token=tracker_secret)
+        tracker_db = await engine.get_scoped_db("click_tracker", app_token=tracker_secret)
         click_doc = {
             "user_id": "user@example.com",
             "timestamp": datetime.utcnow(),
@@ -158,12 +152,10 @@ class TestSecureCrossAppAccess:
         await tracker_db.clicks.insert_one(click_doc)
 
         # Read click via Dashboard (cross-app access)
-        dashboard_db = engine.get_scoped_db("click_tracker_dashboard", app_token=dashboard_secret)
+        dashboard_db = await engine.get_scoped_db("click_tracker_dashboard", app_token=dashboard_secret)
 
         # Access ClickTracker's collection
-        clicks = (
-            await dashboard_db.get_collection("click_tracker_clicks").find({}).to_list(length=100)
-        )
+        clicks = await dashboard_db.get_collection("click_tracker_clicks").find({}).to_list(length=100)
 
         assert len(clicks) > 0
         assert clicks[0]["app_id"] == "click_tracker"
@@ -186,7 +178,7 @@ class TestSecureCrossAppAccess:
             "click_tracker_dashboard"
         )
 
-        dashboard_db = engine.get_scoped_db("click_tracker_dashboard", app_token=dashboard_secret)
+        dashboard_db = await engine.get_scoped_db("click_tracker_dashboard", app_token=dashboard_secret)
 
         # Try to write to ClickTracker's collection (should fail validation)
         # Note: The scoped wrapper will add app_id="click_tracker_dashboard"
@@ -197,9 +189,7 @@ class TestSecureCrossAppAccess:
         result = await dashboard_db.dashboard_data.insert_one({"test": "data"})
         assert result.inserted_id is not None
 
-    async def test_invalid_token_rejected(
-        self, mongodb_engine_with_secrets, click_tracker_manifest, master_key
-    ):
+    async def test_invalid_token_rejected(self, mongodb_engine_with_secrets, click_tracker_manifest, master_key):
         """Test that invalid token blocks access."""
         engine = mongodb_engine_with_secrets
         await engine.initialize()
@@ -211,9 +201,7 @@ class TestSecureCrossAppAccess:
         with pytest.raises(ValueError, match="Invalid app token"):
             await engine.get_scoped_db_async("click_tracker", app_token="invalid_token")
 
-    async def test_missing_token_rejected(
-        self, mongodb_engine_with_secrets, click_tracker_manifest, master_key
-    ):
+    async def test_missing_token_rejected(self, mongodb_engine_with_secrets, click_tracker_manifest, master_key):
         """Test that missing token blocks access when secret exists."""
         engine = mongodb_engine_with_secrets
         await engine.initialize()
@@ -238,7 +226,7 @@ class TestSecureCrossAppAccess:
 
         # Try to access unauthorized scope
         with pytest.raises(ValueError, match="not authorized to read from"):
-            engine.get_scoped_db(
+            await engine.get_scoped_db(
                 "click_tracker",
                 app_token=tracker_secret,
                 read_scopes=["click_tracker", "unauthorized_app"],
@@ -266,9 +254,7 @@ class TestSecureCrossAppAccess:
         )
         assert is_invalid is False
 
-    async def test_secret_rotation_flow(
-        self, mongodb_engine_with_secrets, click_tracker_manifest, master_key
-    ):
+    async def test_secret_rotation_flow(self, mongodb_engine_with_secrets, click_tracker_manifest, master_key):
         """Test secret rotation flow."""
         engine = mongodb_engine_with_secrets
         await engine.initialize()
@@ -323,11 +309,11 @@ class TestSecureCrossAppAccess:
         other_secret = await engine._app_secrets_manager.get_app_secret("other_app")  # noqa: SLF001
 
         # Insert data in ClickTracker
-        tracker_db = engine.get_scoped_db("click_tracker", app_token=tracker_secret)
+        tracker_db = await engine.get_scoped_db("click_tracker", app_token=tracker_secret)
         await tracker_db.clicks.insert_one({"test": "data"})
 
         # Other app should not be able to read ClickTracker data
-        other_db = engine.get_scoped_db("other_app", app_token=other_secret)
+        other_db = await engine.get_scoped_db("other_app", app_token=other_secret)
 
         # Query should only return other_app's data (empty)
         clicks = await other_db.get_collection("click_tracker_clicks").find({}).to_list(length=100)

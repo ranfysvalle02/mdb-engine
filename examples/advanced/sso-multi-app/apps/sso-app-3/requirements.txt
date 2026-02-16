@@ -1,8 +1,7 @@
-# Requirements for SSO App 3 (ChitChat Clone with SSO)
-# Install MDB_ENGINE first: pip install mdb-engine
-# Or install from source: pip install -e ../..
+# Requirements for SSO App 3 (AI Chat with OSI Family Model)
+# Install mdb-engine from source (NOT published to PyPI):
+#   pip install -e "../../../../..[osi,ai]"
 
-mdb-engine>=0.1.0
 fastapi>=0.104.0
 uvicorn[standard]>=0.24.0
 jinja2>=3.1.2
@@ -17,6 +16,7 @@ pymongo>=4.0.0
 mem0ai>=0.1.0
 
 # AI/LLM Dependencies (install at least one provider)
+litellm>=1.0.0
 # OpenAI (recommended)
 openai>=1.12.0
 # Anthropic (alternative)
@@ -28,6 +28,9 @@ google-genai>=0.1.0
 
 # Demo seeding script
 aiohttp>=3.9.0
+
+# Semantic text splitting for raw content chunking
+semantic-text-splitter>=0.2.0
 
 # File processing libraries for document upload support
 python-docx>=1.1.0

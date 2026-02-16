@@ -120,9 +120,7 @@ class TestAutoRoleAssignment:
         # Should succeed (role auto-assigned)
         call_next.assert_called_once()
         # Should call update_user_roles
-        mock_user_pool.update_user_roles.assert_called_once_with(
-            "test@example.com", "test_app", ["viewer"]
-        )
+        mock_user_pool.update_user_roles.assert_called_once_with("test@example.com", "test_app", ["viewer"])
 
     @pytest.mark.asyncio
     async def test_auto_role_assignment_not_applied_if_user_has_roles(self, mock_user_pool):

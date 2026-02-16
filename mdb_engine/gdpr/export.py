@@ -6,8 +6,9 @@ Exports user data in various formats for GDPR compliance (Right to Access).
 This module is part of MDB_ENGINE - MongoDB Engine.
 """
 
+import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -56,9 +57,7 @@ class DataExportService:
             Dictionary with exported data and metadata
         """
         # Discover collections with user data
-        collections = await self.discovery_service.discover_user_collections(
-            user_identifier, identifier_type, app_slug
-        )
+        collections = await self.discovery_service.discover_user_collections(user_identifier, identifier_type, app_slug)
 
         export_data = {}
         total_documents = 0
@@ -84,10 +83,7 @@ class DataExportService:
                 export_data[collection_name] = serialized_docs
                 total_documents += len(serialized_docs)
 
-                logger.debug(
-                    f"Exported {len(serialized_docs)} documents from "
-                    f"collection '{collection_name}'"
-                )
+                logger.debug(f"Exported {len(serialized_docs)} documents from " f"collection '{collection_name}'")
             except PyMongoError:
                 logger.exception(f"Error exporting from collection '{collection_name}'")
                 export_data[collection_name] = []
@@ -98,7 +94,7 @@ class DataExportService:
             return {
                 "data": export_data,
                 "metadata": {
-                    "export_date": datetime.utcnow().isoformat(),
+                    "export_date": datetime.now(timezone.utc).isoformat(),
                     "format": "json",
                     "collections": list(export_data.keys()),
                     "total_documents": total_documents,
@@ -134,7 +130,7 @@ class DataExportService:
             return {
                 "data": csv_data,
                 "metadata": {
-                    "export_date": datetime.utcnow().isoformat(),
+                    "export_date": datetime.now(timezone.utc).isoformat(),
                     "format": "csv",
                     "collections": list(csv_data.keys()),
                     "total_documents": total_documents,
@@ -146,7 +142,7 @@ class DataExportService:
         else:  # report format - human-readable
             report_lines = [
                 "GDPR Data Export Report",
-                f"Generated: {datetime.utcnow().isoformat()}",
+                f"Generated: {datetime.now(timezone.utc).isoformat()}",
                 f"User Identifier: {user_identifier} ({identifier_type})",
                 f"App Slug: {app_slug or 'All Apps'}",
                 "",
@@ -165,8 +161,6 @@ class DataExportService:
                 # Show sample of first document
                 if documents:
                     report_lines.append("  Sample Document:")
-                    import json
-
                     sample = json.dumps(documents[0], indent=2)
                     for line in sample.split("\n"):
                         report_lines.append(f"    {line}")
@@ -178,7 +172,7 @@ class DataExportService:
                 "data": export_data,
                 "report": report_text,
                 "metadata": {
-                    "export_date": datetime.utcnow().isoformat(),
+                    "export_date": datetime.now(timezone.utc).isoformat(),
                     "format": "report",
                     "collections": list(export_data.keys()),
                     "total_documents": total_documents,

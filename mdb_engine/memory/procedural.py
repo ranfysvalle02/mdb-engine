@@ -1,299 +1,534 @@
 """
-Procedural Memory Service - Cognitive Blueprint v2.0
+Procedural Memory System
+Stores executable "recipes," tool definitions, and task workflows.
 
-Manages procedural memory: how-to workflows, code snippets, and step-by-step procedures.
-Procedural memories are permanent and track success counts for optimization.
+Procedural memory contains skills and procedures that the agent can execute:
+- Tool definitions (JSON Schema)
+- Successful code snippets
+- Task workflows and sequences
+- "Golden Examples" of successful operations
+
+This memory type enables the agent to get faster and more reliable over time
+by reusing proven procedures rather than re-reasoning the same problems.
 """
 
-import asyncio
+import json
 import logging
 from datetime import datetime, timezone
 from typing import Any
 
+from ._async_compat import cursor_to_list as _cursor_to_list
+from ._async_compat import maybe_await as _maybe_await
+
 try:
-    from pymongo.errors import PyMongoError
+    from pymongo.errors import OperationFailure, PyMongoError
+
+    PYMONGO_AVAILABLE = True
 except ImportError:
-    PyMongoError = Exception  # Fallback if pymongo not available
+    raise ImportError("pip install pymongo") from None
+
+from .base import MemoryServiceError
 
 logger = logging.getLogger(__name__)
 
 
-class ProceduralMemoryService:
-    """
-    Service for managing procedural memories (workflows, code, procedures).
+class ProceduralMemoryError(MemoryServiceError):
+    """Base exception for Procedural Memory errors."""
 
-    Procedural memories store:
-    - Task type (e.g., "Data_Cleaning", "API_Integration")
-    - Step-by-step instructions
-    - Associated tools/libraries
-    - Success count (for optimization)
+    pass
+
+
+async def retrieve_procedural_memory(
+    collection: Any,
+    task_description: str,
+    embedding_service: Any = None,
+    embed_model: str = "text-embedding-3-small",
+    limit: int = 1,
+) -> dict[str, Any] | None:
+    """
+    Search for procedural memory (skills/tools) for a specific task.
+
+    Uses vector search to find the most relevant procedural memory based on
+    task description similarity.
+
+    Args:
+        collection: MongoDB collection for procedural memory
+        task_description: Description of the task to find procedure for
+        embedding_service: EmbeddingService instance for generating embeddings
+        embed_model: Embedding model to use (default: "text-embedding-3-small")
+        limit: Maximum number of results to return (default: 1)
+
+    Returns:
+        Most relevant procedural memory document, or None if not found
+
+    Example:
+        ```python
+        from mdb_engine.memory.procedural import retrieve_procedural_memory
+
+        procedure = await retrieve_procedural_memory(
+            collection=procedural_collection,
+            task_description="Deploy Docker container",
+            embedding_service=embedding_service,
+            limit=1
+        )
+        if procedure:
+            print(f"Found procedure: {procedure['name']}")
+            print(f"Steps: {procedure['steps']}")
+        ```
+    """
+    if embedding_service is None:
+        raise ProceduralMemoryError("embedding_service is required. Pass an EmbeddingService instance.")
+
+    try:
+        # Generate query vector
+        vectors = await embedding_service.embed([task_description])
+        if not vectors:
+            raise ProceduralMemoryError("Empty embedding response")
+        query_vector = vectors[0]
+
+        # Use MongoDB Atlas Vector Search if available
+        try:
+            results = collection.aggregate(
+                [
+                    {
+                        "$vectorSearch": {
+                            "index": "proc_vector_index",
+                            "path": "vector",
+                            "queryVector": query_vector,
+                            "numCandidates": limit * 10,
+                            "limit": limit,
+                        }
+                    },
+                    {
+                        "$match": {
+                            "is_active": True,  # Only active procedures
+                            "success_rate": {"$gte": 0.7},  # Only successful procedures
+                        }
+                    },
+                ]
+            )
+            procedures = await _cursor_to_list(results, limit)
+            return procedures[0] if procedures else None
+        except (PyMongoError, OperationFailure):
+            # Fallback: simple text search if vector index not available
+            logger.debug("Vector search index not available, using text search")
+            cursor = (
+                collection.find(
+                    {
+                        "is_active": True,
+                        "success_rate": {"$gte": 0.7},
+                        "$text": {"$search": task_description},
+                    },
+                    {"score": {"$meta": "textScore"}},
+                )
+                .sort([("score", {"$meta": "textScore"})])
+                .limit(limit)
+            )
+            results = await _cursor_to_list(cursor, limit)
+            return results[0] if results else None
+
+    except (AttributeError, KeyError, TypeError, ValueError, RuntimeError) as e:
+        logger.error(f"Procedural memory retrieval failed: {e}", exc_info=True)
+        raise ProceduralMemoryError(f"Failed to retrieve procedural memory: {e}") from e
+
+
+class ProceduralMemory:
+    """
+    Manager for procedural memory (skills, tools, workflows).
+
+    Procedural memory stores executable knowledge:
+    - Tool definitions (JSON Schema)
+    - Successful code snippets
+    - Task workflows
+    - "Golden Examples" tagged with is_successful_procedure: true
+
+    Example:
+        ```python
+        from mdb_engine.memory.procedural import ProceduralMemory
+
+        proc_memory = ProceduralMemory(collection=procedural_collection)
+
+        # Store a successful procedure
+        await proc_memory.store_procedure(
+            name="Docker Deployment Workflow",
+            task_type="deployment",
+            steps=["docker build", "docker push", "docker deploy"],
+            code_snippet="docker build -t app . && docker push app && docker deploy",
+            success_rate=1.0,
+            metadata={"environment": "production"}
+        )
+
+        # Retrieve a procedure
+        procedure = await proc_memory.get_procedure("Docker Deployment Workflow")
+        ```
     """
 
     def __init__(
         self,
-        app_slug: str,
         collection: Any,
-        llm_service: Any | None = None,
-        config: dict[str, Any] | None = None,
+        embedding_service: Any = None,
+        embed_model: str = "text-embedding-3-small",
     ):
         """
-        Initialize Procedural Memory Service.
+        Initialize ProceduralMemory manager.
 
         Args:
-            app_slug: Application slug
-            collection: MongoDB collection (for reference to database)
-            llm_service: Optional LLM service for procedural extraction
-            config: Procedural memory configuration
+            collection: MongoDB collection for procedural memory
+            embedding_service: EmbeddingService instance for generating embeddings
+            embed_model: Embedding model for vector generation
         """
-        self.app_slug = app_slug
+        if embedding_service is None:
+            raise ProceduralMemoryError("embedding_service is required. Pass an EmbeddingService instance.")
+
         self.collection = collection
-        self.llm_service = llm_service
-        self.config = config or {}
+        self._embedding_service = embedding_service
+        self.embed_model = embed_model
+        self._indexes_ensured = False
 
-        # Configuration
-        self.enabled = self.config.get("enabled", True)
-        self.auto_extract = self.config.get("auto_extract", True)
-        self.detect_code = self.config.get("detect_code", True)
-        self.detect_workflows = self.config.get("detect_workflows", True)
+    async def _ensure_ready(self) -> None:
+        """Lazily create indexes on first operation."""
+        if self._indexes_ensured:
+            return
+        await self._ensure_indexes()
+        self._indexes_ensured = True
 
-        # LLM availability - only available if llm_service is provided
-        self.llm_available = llm_service is not None
-
-        if self.enabled:
-            logger.info(f"✅ Procedural Memory Service initialized for {app_slug}")
-
-    def detect_procedural_content(self, text: str) -> dict[str, Any] | None:
-        """
-        Detect if text contains procedural content (code, workflows, procedures).
-
-        Args:
-            text: Text to analyze
-
-        Returns:
-            Dictionary with procedural information or None if not procedural
-        """
-        if not self.enabled or not self.auto_extract:
-            return None
-
-        if not self.llm_available:
-            # Simple heuristic fallback
-            code_indicators = ["def ", "import ", "function", "procedure", "step", "how to"]
-            if any(indicator in text.lower() for indicator in code_indicators):
-                return {
-                    "task_type": "General",
-                    "steps": [text],
-                    "associated_tools": [],
-                }
-            return None
-
+    async def _ensure_indexes(self):
+        """Create necessary indexes for procedural memory."""
         try:
-            prompt = f"""Analyze this text and determine if it contains procedural content:
-- Code snippets or programming instructions
-- Step-by-step workflows or procedures
-- How-to instructions
+            await _maybe_await(self.collection.create_index([("task_type", 1), ("success_rate", -1)]))
+            await _maybe_await(self.collection.create_index([("name", 1)], unique=True))
+            await _maybe_await(self.collection.create_index("is_active"))
+            logger.info("Procedural memory indexes created")
+        except (PyMongoError, OperationFailure) as e:
+            logger.warning(f"Index creation warning (may already exist): {e}")
 
-Text: {text}
+    async def _get_vector(self, text: str) -> list[float]:
+        """Generate embedding vector for text."""
+        try:
+            vectors = await self._embedding_service.embed([text])
+            if not vectors:
+                raise ProceduralMemoryError("Empty embedding response")
+            return vectors[0]
+        except (AttributeError, KeyError, TypeError, ValueError, RuntimeError) as e:
+            logger.error(f"Embedding generation failed: {e}", exc_info=True)
+            raise ProceduralMemoryError(f"Failed to generate embedding: {e}") from e
 
-If procedural, return JSON:
-{{
-    "is_procedural": true,
-    "task_type": "Task category (e.g., Data_Cleaning, API_Integration)",
-    "steps": ["step 1", "step 2", ...],
-    "associated_tools": ["tool1", "tool2", ...]
-}}
-
-If NOT procedural, return:
-{{"is_procedural": false}}
-
-Return ONLY valid JSON."""
-
-            # Use LLM service if available
-            if not self.llm_service:
-                logger.debug("LLM service not available for procedural detection")
-                return None
-
-            try:
-                # Call async chat_completion from sync context
-                # Check if we're in an async context
-                try:
-                    asyncio.get_running_loop()
-                    # We're in an async context, need to use a different approach
-                    # For now, return None and let caller handle async version
-                    logger.debug("Cannot call async LLM from sync method in async context")
-                    return None
-                except RuntimeError:
-                    # No running loop, safe to use asyncio.run()
-                    result_text = asyncio.run(
-                        self.llm_service.chat_completion(
-                            messages=[{"role": "user", "content": prompt}],
-                            model=None,  # Use LLM service default
-                            temperature=0.3,
-                        )
-                    )
-            except (
-                AttributeError,
-                RuntimeError,
-                ConnectionError,
-                TimeoutError,
-                ValueError,
-                TypeError,
-            ) as e:
-                logger.warning(f"LLM call failed for procedural detection: {e}")
-                return None
-
-            # Parse JSON response
-            import json
-
-            try:
-                # Extract JSON from response
-                if "```json" in result_text:
-                    result_text = result_text.split("```json")[1].split("```")[0].strip()
-                elif "```" in result_text:
-                    result_text = result_text.split("```")[1].split("```")[0].strip()
-
-                result = json.loads(result_text)
-
-                if result.get("is_procedural"):
-                    return {
-                        "task_type": result.get("task_type", "General"),
-                        "steps": result.get("steps", []),
-                        "associated_tools": result.get("associated_tools", []),
-                    }
-                return None
-            except json.JSONDecodeError as e:
-                logger.warning(f"Failed to parse procedural detection JSON: {e}")
-                return None
-
-        except (
-            AttributeError,
-            RuntimeError,
-            ValueError,
-            TypeError,
-            json.JSONDecodeError,
-        ) as e:
-            logger.warning(f"Procedural detection failed: {e}", exc_info=True)
-            return None
-
-    def create_procedural_memory(
+    async def store_procedure(
         self,
-        text: str,
-        user_id: str,
-        task_type: str | None = None,
+        name: str,
+        task_type: str,
         steps: list[str] | None = None,
-        associated_tools: list[str] | None = None,
+        code_snippet: str | None = None,
+        tool_schema: dict[str, Any] | None = None,
+        success_rate: float = 1.0,
+        metadata: dict[str, Any] | None = None,
+        is_successful_procedure: bool = True,
     ) -> dict[str, Any]:
         """
-        Create a procedural memory document.
+        Store a procedural memory (skill/tool/workflow).
 
         Args:
-            text: The procedural content text
-            user_id: User ID
-            task_type: Task type (auto-detected if not provided)
-            steps: Step-by-step instructions (auto-extracted if not provided)
-            associated_tools: Associated tools/libraries (auto-extracted if not provided)
+            name: Name/identifier of the procedure
+            task_type: Type of task (e.g., "deployment", "debugging", "data_processing")
+            steps: List of step descriptions (optional)
+            code_snippet: Executable code snippet (optional)
+            tool_schema: JSON Schema for tool definition (optional)
+            success_rate: Success rate (0.0 to 1.0, default: 1.0)
+            metadata: Optional metadata dictionary
+            is_successful_procedure: Mark as successful procedure (default: True)
 
         Returns:
-            Procedural memory document
+            Created procedure document
+
+        Example:
+            ```python
+            await proc_memory.store_procedure(
+                name="Clear Cache Workflow",
+                task_type="maintenance",
+                steps=["Run --force flag", "Verify cache cleared"],
+                code_snippet="cache --force",
+                success_rate=0.95,
+                metadata={"command": "cache --force"}
+            )
+            ```
         """
-        if not self.enabled:
-            return {}
-
-        # Auto-detect if not provided
-        if not task_type or not steps:
-            detected = self.detect_procedural_content(text)
-            if detected:
-                task_type = task_type or detected.get("task_type", "General")
-                steps = steps or detected.get("steps", [text])
-                associated_tools = associated_tools or detected.get("associated_tools", [])
-            else:
-                # Fallback
-                task_type = task_type or "General"
-                steps = steps or [text]
-                associated_tools = associated_tools or []
-
-        procedural_doc = {
-            "memory_type": "procedural",
-            "text": text,
-            "task_type": task_type,
-            "steps": steps,
-            "associated_tools": associated_tools,
-            "success_count": 0,
-            "user_id": str(user_id),
-            "created_at": datetime.now(timezone.utc),
-            "updated_at": datetime.now(timezone.utc),
-        }
-
-        return procedural_doc
-
-    def increment_success(self, memory_id: str, user_id: str) -> bool:
-        """
-        Increment success count for a procedural memory.
-
-        Args:
-            memory_id: Memory document ID
-            user_id: User ID for security
-
-        Returns:
-            True if successful
-        """
-        if not self.enabled:
-            return False
+        await self._ensure_ready()
 
         try:
-            from bson import ObjectId
+            # Generate vector from combined content
+            content_parts = []
+            if steps:
+                content_parts.extend(steps)
+            if code_snippet:
+                content_parts.append(code_snippet)
+            if tool_schema:
+                content_parts.append(json.dumps(tool_schema))
 
-            result = self.collection.update_one(
-                {
-                    "_id": ObjectId(memory_id),
-                    "user_id": str(user_id),
-                    "memory_type": "procedural",
-                },
-                {
-                    "$inc": {"success_count": 1},
-                    "$set": {"updated_at": datetime.now(timezone.utc)},
-                },
+            content_text = " ".join(content_parts) if content_parts else name
+            vector = await self._get_vector(content_text)
+
+            procedure_doc = {
+                "name": name,
+                "task_type": task_type,
+                "vector": vector,
+                "success_rate": success_rate,
+                "is_active": True,
+                "is_successful_procedure": is_successful_procedure,
+                "created_at": datetime.now(timezone.utc),
+                "last_used": datetime.now(timezone.utc),
+                "usage_count": 0,
+            }
+
+            if steps:
+                procedure_doc["steps"] = steps
+            if code_snippet:
+                procedure_doc["code_snippet"] = code_snippet
+            if tool_schema:
+                procedure_doc["tool_schema"] = tool_schema
+            if metadata:
+                procedure_doc["metadata"] = metadata
+
+            # Upsert (update if exists, insert if new)
+            await _maybe_await(
+                self.collection.update_one(
+                    {"name": name},
+                    {
+                        "$set": procedure_doc,
+                        "$setOnInsert": {"created_at": datetime.now(timezone.utc)},
+                    },
+                    upsert=True,
+                )
             )
 
-            return result.modified_count > 0
-        except (PyMongoError, AttributeError, TypeError) as e:
-            logger.warning(f"Failed to increment success count: {e}")
-            return False
+            logger.info(f"Procedure stored: {name} (task_type: {task_type})")
+            return procedure_doc
 
-    def get_by_task_type(
-        self, task_type: str, user_id: str, limit: int = 10
+        except (PyMongoError, OperationFailure, ProceduralMemoryError) as e:
+            logger.error(f"Failed to store procedure: {e}", exc_info=True)
+            raise ProceduralMemoryError(f"Failed to store procedure: {e}") from e
+
+    async def get_procedure(self, name: str) -> dict[str, Any] | None:
+        """
+        Retrieve a procedure by name.
+
+        Args:
+            name: Procedure name
+
+        Returns:
+            Procedure document or None if not found
+        """
+        await self._ensure_ready()
+
+        try:
+            return await _maybe_await(self.collection.find_one({"name": name, "is_active": True}))
+        except (PyMongoError, OperationFailure) as e:
+            logger.warning(f"Failed to get procedure: {e}")
+            return None
+
+    async def search_procedures(
+        self,
+        task_description: str,
+        task_type: str | None = None,
+        min_success_rate: float = 0.7,
+        limit: int = 5,
     ) -> list[dict[str, Any]]:
         """
-        Get procedural memories by task type.
+        Search for procedures using vector similarity.
 
         Args:
-            task_type: Task type to search for
-            user_id: User ID
-            limit: Maximum results
+            task_description: Description of the task
+            task_type: Optional filter by task type
+            min_success_rate: Minimum success rate threshold (default: 0.7)
+            limit: Maximum number of results
 
         Returns:
-            List of procedural memory documents
+            List of matching procedure documents
         """
-        if not self.enabled:
-            return []
+        await self._ensure_ready()
 
         try:
-            memories = list(
-                self.collection.find(
+            query_vector = await self._get_vector(task_description)
+
+            # Build match filter
+            match_filter = {
+                "is_active": True,
+                "success_rate": {"$gte": min_success_rate},
+            }
+            if task_type:
+                match_filter["task_type"] = task_type
+
+            # Use MongoDB Atlas Vector Search if available
+            try:
+                pipeline = [
                     {
-                        "user_id": str(user_id),
-                        "memory_type": "procedural",
-                        "task_type": task_type,
-                        "is_active": True,
-                    }
+                        "$vectorSearch": {
+                            "index": "proc_vector_index",
+                            "path": "vector",
+                            "queryVector": query_vector,
+                            "numCandidates": limit * 10,
+                            "limit": limit,
+                        }
+                    },
+                    {"$match": match_filter},
+                ]
+                results = self.collection.aggregate(pipeline)
+                return await _cursor_to_list(results, limit)
+            except (PyMongoError, OperationFailure):
+                # Fallback: simple text search
+                logger.debug("Vector search index not available, using text search")
+                text_filter = {"$text": {"$search": task_description}}
+                text_filter.update(match_filter)
+                cursor = (
+                    self.collection.find(text_filter, {"score": {"$meta": "textScore"}})
+                    .sort([("score", {"$meta": "textScore"})])
+                    .limit(limit)
                 )
-                .sort("success_count", -1)  # Sort by success count (most successful first)
-                .limit(limit)
-            )
+                return await _cursor_to_list(cursor, limit)
 
-            for m in memories:
-                m["_id"] = str(m["_id"])
-
-            return memories
-        except (PyMongoError, AttributeError, TypeError) as e:
-            logger.warning(f"Failed to get procedural memories: {e}")
+        except (PyMongoError, OperationFailure, ProceduralMemoryError) as e:
+            logger.warning(f"Procedure search failed: {e}")
             return []
+
+    async def mark_procedure_used(self, name: str, success: bool = True) -> None:
+        """
+        Mark a procedure as used and update success rate.
+
+        Args:
+            name: Procedure name
+            success: Whether the usage was successful
+        """
+        await self._ensure_ready()
+
+        try:
+            # Update usage count and success rate
+            procedure = await _maybe_await(self.collection.find_one({"name": name}))
+            if not procedure:
+                logger.warning(f"Procedure not found: {name}")
+                return
+
+            usage_count = procedure.get("usage_count", 0) + 1
+            current_success_rate = procedure.get("success_rate", 1.0)
+
+            # Update success rate (moving average)
+            if success:
+                new_success_rate = (current_success_rate * (usage_count - 1) + 1.0) / usage_count
+            else:
+                new_success_rate = (current_success_rate * (usage_count - 1) + 0.0) / usage_count
+
+            await _maybe_await(
+                self.collection.update_one(
+                    {"name": name},
+                    {
+                        "$set": {
+                            "success_rate": new_success_rate,
+                            "last_used": datetime.now(timezone.utc),
+                        },
+                        "$inc": {"usage_count": 1},
+                    },
+                )
+            )
+            logger.debug(f"Procedure usage updated: {name} (success_rate: {new_success_rate:.2f})")
+
+        except (PyMongoError, OperationFailure) as e:
+            logger.warning(f"Failed to mark procedure used: {e}")
+
+    @staticmethod
+    def format_for_prompt(procedures: list[dict[str, Any]]) -> str:
+        """
+        Format a list of procedures as a context string for injection into the
+        system prompt.
+
+        Args:
+            procedures: List of procedure documents from ``search_procedures()``.
+
+        Returns:
+            Formatted string suitable for inclusion in the system prompt.
+            Returns empty string if *procedures* is empty.
+
+        Example output::
+
+            [AVAILABLE SKILLS]
+            Skill: "Clear Cache Workflow" (success_rate: 0.95, used 47 times)
+              Type: maintenance
+              Steps: 1. Run --force flag  2. Verify cache cleared
+              Code: cache --force
+        """
+        if not procedures:
+            return ""
+
+        lines: list[str] = ["[AVAILABLE SKILLS]"]
+        for proc in procedures:
+            name = proc.get("name", "unnamed")
+            rate = proc.get("success_rate", 0.0)
+            uses = proc.get("usage_count", 0)
+            task_type = proc.get("task_type", "general")
+            lines.append(f'Skill: "{name}" (success_rate: {rate:.2f}, used {uses} times)')
+            lines.append(f"  Type: {task_type}")
+
+            steps = proc.get("steps")
+            if steps:
+                numbered = "  ".join(f"{i}. {s}" for i, s in enumerate(steps, 1))
+                lines.append(f"  Steps: {numbered}")
+
+            snippet = proc.get("code_snippet")
+            if snippet:
+                lines.append(f"  Code: {snippet}")
+
+            description = proc.get("description") or proc.get("metadata", {}).get("description")
+            if description:
+                lines.append(f"  Description: {description}")
+
+            lines.append("")  # blank line between skills
+
+        return "\n".join(lines)
+
+    async def deactivate_below_threshold(
+        self,
+        min_success_rate: float = 0.5,
+        min_usage_count: int = 5,
+    ) -> int:
+        """
+        Deactivate (prune) procedures that have fallen below quality thresholds.
+
+        Only deactivates procedures that have been used enough times to have
+        statistically meaningful success rates.
+
+        Args:
+            min_success_rate: Procedures below this rate are deactivated.
+            min_usage_count: Minimum usage count before pruning can trigger
+                (prevents pruning skills that haven't been tried enough).
+
+        Returns:
+            Number of procedures deactivated.
+        """
+        await self._ensure_ready()
+
+        try:
+            result = await _maybe_await(
+                self.collection.update_many(
+                    {
+                        "is_active": True,
+                        "success_rate": {"$lt": min_success_rate},
+                        "usage_count": {"$gte": min_usage_count},
+                    },
+                    {
+                        "$set": {
+                            "is_active": False,
+                            "deactivated_at": datetime.now(timezone.utc),
+                            "deactivation_reason": (
+                                f"success_rate below {min_success_rate} " f"after {min_usage_count}+ uses"
+                            ),
+                        },
+                    },
+                )
+            )
+            count = result.modified_count if hasattr(result, "modified_count") else 0
+            if count:
+                logger.info(
+                    f"Pruned {count} low-performing procedures "
+                    f"(success_rate < {min_success_rate}, uses >= {min_usage_count})"
+                )
+            return count
+        except (PyMongoError, OperationFailure) as e:
+            logger.warning(f"Failed to prune procedures: {e}")
+            return 0

@@ -1,33 +1,39 @@
 # mdb-engine
 
-**The MongoDB Engine for Python Apps** — Auto-sandboxing, index management, and auth in one package.
+**The MongoDB Engine for Python Apps** — Auto-sandboxing, index management, and AI services in one package.
 
 [![PyPI](https://img.shields.io/pypi/v/mdb-engine)](https://pypi.org/project/mdb-engine/)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](https://opensource.org/licenses/AGPL-3.0)
 
-## 🎯 manifest.json: The Key to Everything
+## Quickstart (3 lines, no config files)
 
-**`manifest.json` is the foundation of your application.** It's a single configuration file that defines your app's identity, data structure, authentication, indexes, and services. Everything flows from this file.
+```python
+from mdb_engine import quickstart
+from mdb_engine.dependencies import get_scoped_db
+from fastapi import Depends
 
-### Your First manifest.json
+app = quickstart("my_app")
 
-Create a `manifest.json` file with just 3 fields:
-
-```json
-{
-  "schema_version": "2.0",
-  "slug": "my_app",
-  "name": "My App"
-}
+@app.get("/items")
+async def list_items(db=Depends(get_scoped_db)):
+    return await db.items.find({}).to_list(10)
 ```
 
-That's it! This minimal manifest gives you:
-- ✅ Automatic data scoping (all queries filtered by `app_id`)
-- ✅ Collection name prefixing (`db.tasks` → `my_app_tasks`)
-- ✅ App registration and lifecycle management
+```bash
+pip install mdb-engine fastapi uvicorn
+uvicorn web:app --reload
+```
 
-**Learn more**: [Quick Start Guide](docs/QUICK_START.md) | [Manifest Deep Dive](docs/MANIFEST_DEEP_DIVE.md)
+> Requires MongoDB running on `localhost:27017` (or set `MONGODB_URI` env var).
+> See [MongoDB Setup](#prerequisites-mongodb-must-be-running) below.
+
+**What you get automatically:**
+
+- **Data isolation** — every query is scoped by `app_id`; you cannot accidentally leak data across apps
+- **Collection prefixing** — `db.items` transparently becomes `my_app_items`
+- **Lifecycle management** — engine startup/shutdown handled for you
+- **Dependency injection** — `get_scoped_db`, `get_memory_service`, etc. ready to use
 
 ---
 
@@ -39,312 +45,99 @@ pip install mdb-engine
 
 ---
 
-## ⚠️ Prerequisites: MongoDB Must Be Running
+## Feature Layers
 
-**IMPORTANT**: MDB-Engine requires a running MongoDB instance. Make sure MongoDB is running before starting your application.
+mdb-engine is designed for progressive adoption. Start with Layer 0 and add features as you need them.
 
-### Quick MongoDB Setup Options
-
-#### Option 1: Docker Compose (Recommended for Development)
-
-Create a `docker-compose.yml` file:
-
-```yaml
-services:
-  mongodb:
-    image: mongo:7.0
-    container_name: mdb_mongodb
-    ports:
-      - "27017:27017"
-    volumes:
-      - mongodb_data:/data/db
-    healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-volumes:
-  mongodb_data:
-```
-
-Start MongoDB:
-```bash
-docker-compose up -d mongodb
-```
-
-#### Option 2: Docker Run (Quick Start)
-
-```bash
-docker run -d \
-  --name mdb_mongodb \
-  -p 27017:27017 \
-  -v mongodb_data:/data/db \
-  mongo:7.0
-```
-
-#### Option 3: Local MongoDB Installation
-
-**macOS (Homebrew):**
-```bash
-brew tap mongodb/brew
-brew install mongodb-community
-brew services start mongodb-community
-```
-
-**Linux (Ubuntu/Debian):**
-```bash
-sudo apt-get install -y mongodb
-sudo systemctl start mongodb
-```
-
-**Windows:**
-Download and install from [MongoDB Download Center](https://www.mongodb.com/try/download/community)
-
-#### Option 4: MongoDB Atlas (Cloud)
-
-1. Sign up at [MongoDB Atlas](https://www.mongodb.com/cloud/atlas)
-2. Create a free cluster
-3. Get your connection string: `mongodb+srv://user:password@cluster.mongodb.net/`
-
-### Verify MongoDB is Running
-
-```bash
-# Check if MongoDB is accessible
-mongosh "mongodb://localhost:27017" --eval "db.adminCommand('ping')"
-
-# Or using curl (if mongosh not available)
-curl http://localhost:27017
-```
-
-**Expected output:** `{ "ok": 1 }` or connection successful
-
-### Common Connection Strings
-
-- **Local MongoDB (default)**: `mongodb://localhost:27017`
-- **Docker MongoDB**: `mongodb://localhost:27017` (if port mapped)
-- **MongoDB Atlas**: `mongodb+srv://user:password@cluster.mongodb.net/dbname`
+| Layer | What it gives you | How to enable |
+|-------|-------------------|---------------|
+| **0: Scoped DB + Indexes** | Auto-sandboxed collections, declarative indexes | `quickstart("slug")` or minimal manifest |
+| **1: Auth + GDPR** | JWT, RBAC (Casbin/OSO), SSO, data export/deletion | Add `auth` section to manifest |
+| **2: LLM + Embeddings + Memory** | Persistent AI memory, semantic search, fact extraction | Add `llm_config` + `memory_config` to manifest |
+| **3: GraphRAG + ChatEngine** | Knowledge graphs, conversation orchestration with STM + LTM | Add `graph_config`, use `ChatEngine` |
 
 ---
 
-## 30-Second Quick Start: Build a Todo List API
+## Three Ways to Create an App
 
-Let's build a complete CRUD todo list app in 3 steps!
+### 1. Zero-config (quickstart)
 
-> **⚠️ Before you start**: Make sure MongoDB is running! See [Prerequisites](#-prerequisites-mongodb-must-be-running) section above.
-
-### Step 1: Create `manifest.json`
-
-```json
-{
-  "schema_version": "2.0",
-  "slug": "todo_app",
-  "name": "Todo List App",
-  "managed_indexes": {
-    "todos": [
-      {
-        "type": "regular",
-        "keys": {"completed": 1, "created_at": -1},
-        "name": "completed_sort"
-      }
-    ]
-  }
-}
-```
-
-### Step 2: Create `app.py` with Full CRUD
+No manifest file, no explicit connection string. Best for getting started.
 
 ```python
-from datetime import datetime
-from pathlib import Path
-from typing import Optional
+from mdb_engine import quickstart
 
-from bson import ObjectId
-from fastapi import Depends, HTTPException
-from pydantic import BaseModel
+app = quickstart("my_app")
+```
 
+### 2. Inline manifest (dict)
+
+Pass configuration directly in Python. Good for programmatic setups.
+
+```python
 from mdb_engine import MongoDBEngine
-from mdb_engine.dependencies import get_scoped_db
 
-# Initialize engine
-# ⚠️ Make sure MongoDB is running at mongodb://localhost:27017
-engine = MongoDBEngine(
-    mongo_uri="mongodb://localhost:27017",  # Change if using Docker/Atlas
-    db_name="my_database"
-)
-
-# Create app - manifest.json loaded automatically!
+engine = MongoDBEngine()
 app = engine.create_app(
-    slug="todo_app",
-    manifest=Path("manifest.json")
+    slug="my_app",
+    manifest={
+        "schema_version": "2.0",
+        "slug": "my_app",
+        "name": "My App",
+        "managed_indexes": {
+            "tasks": [{"type": "regular", "keys": {"status": 1}, "name": "status_idx"}]
+        },
+    },
 )
-
-# Pydantic models
-class TodoCreate(BaseModel):
-    title: str
-    description: Optional[str] = None
-
-class TodoUpdate(BaseModel):
-    title: Optional[str] = None
-    description: Optional[str] = None
-    completed: Optional[bool] = None
-
-# CREATE - Add a new todo
-@app.post("/todos")
-async def create_todo(todo: TodoCreate, db=Depends(get_scoped_db)):
-    doc = {
-        **todo.dict(),
-        "completed": False,
-        "created_at": datetime.utcnow()
-    }
-    result = await db.todos.insert_one(doc)
-    return {"id": str(result.inserted_id), "message": "Todo created"}
-
-# READ - List all todos
-@app.get("/todos")
-async def list_todos(completed: Optional[bool] = None, db=Depends(get_scoped_db)):
-    query = {}
-    if completed is not None:
-        query["completed"] = completed
-    
-    todos = await db.todos.find(query).sort("created_at", -1).to_list(length=100)
-    for todo in todos:
-        todo["_id"] = str(todo["_id"])
-    return {"todos": todos, "count": len(todos)}
-
-# READ - Get single todo
-@app.get("/todos/{todo_id}")
-async def get_todo(todo_id: str, db=Depends(get_scoped_db)):
-    todo = await db.todos.find_one({"_id": ObjectId(todo_id)})
-    if not todo:
-        raise HTTPException(status_code=404, detail="Todo not found")
-    todo["_id"] = str(todo["_id"])
-    return todo
-
-# UPDATE - Update a todo
-@app.put("/todos/{todo_id}")
-async def update_todo(todo_id: str, todo: TodoUpdate, db=Depends(get_scoped_db)):
-    updates = {k: v for k, v in todo.dict(exclude_unset=True).items() if v is not None}
-    if not updates:
-        raise HTTPException(status_code=400, detail="No fields to update")
-    
-    updates["updated_at"] = datetime.utcnow()
-    result = await db.todos.update_one(
-        {"_id": ObjectId(todo_id)},
-        {"$set": updates}
-    )
-    
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Todo not found")
-    return {"message": "Todo updated"}
-
-# DELETE - Delete a todo
-@app.delete("/todos/{todo_id}")
-async def delete_todo(todo_id: str, db=Depends(get_scoped_db)):
-    result = await db.todos.delete_one({"_id": ObjectId(todo_id)})
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Todo not found")
-    return {"message": "Todo deleted"}
 ```
 
-### Step 3: Run It!
+### 3. File-based manifest (recommended for production)
 
-```bash
-# ⚠️ IMPORTANT: Make sure MongoDB is running first!
-# See "Prerequisites: MongoDB Must Be Running" section above
+The full-featured approach. A single `manifest.json` defines your app's identity, indexes, auth, AI services, and more.
 
-# Install dependencies
-pip install mdb-engine fastapi uvicorn
+```python
+from pathlib import Path
+from mdb_engine import MongoDBEngine
 
-# Run the app
-uvicorn app:app --reload
+engine = MongoDBEngine(
+    mongo_uri="mongodb+srv://...",  # or set MONGODB_URI env var
+    db_name="production"
+)
+app = engine.create_app(slug="my_app", manifest=Path("manifest.json"))
 ```
 
-**If MongoDB is not running**, you'll see connection errors. Make sure MongoDB is started before running your app!
-
-**Quick MongoDB check:**
-```bash
-# Option 1: Docker Compose
-docker-compose up -d mongodb
-
-# Option 2: Docker Run
-docker run -d --name mdb_mongodb -p 27017:27017 mongo:7.0
-
-# Option 3: Local MongoDB
-mongod  # or brew services start mongodb-community (macOS)
-```
-
-**Test your API:**
-```bash
-# Create a todo
-curl -X POST http://localhost:8000/todos \
-  -H "Content-Type: application/json" \
-  -d '{"title": "Buy groceries", "description": "Milk and eggs"}'
-
-# List todos
-curl http://localhost:8000/todos
-
-# Update a todo (replace {id} with actual ID)
-curl -X PUT http://localhost:8000/todos/{id} \
-  -H "Content-Type: application/json" \
-  -d '{"completed": true}'
-
-# Delete a todo
-curl -X DELETE http://localhost:8000/todos/{id}
-```
-
-**What just happened?**
-- ✅ **Automatic scoping**: All queries filtered by `app_id` — your data is isolated
-- ✅ **Indexes created**: The `completed_sort` index was created automatically
-- ✅ **Lifecycle managed**: Startup/shutdown handled automatically
-- ✅ **Zero boilerplate**: No connection setup, no index scripts, no auth handlers
-
-**That's it!** You now have a fully functional, production-ready todo API with automatic data sandboxing, index management, and lifecycle handling.
-
----
-
-## Basic Examples
-
-### 1. Index Management
-
-Define indexes in your `manifest.json` — they're auto-created on startup:
+**Minimal manifest.json (3 fields):**
 
 ```json
 {
   "schema_version": "2.0",
   "slug": "my_app",
-  "name": "My App",
-  "status": "active",
-  "managed_indexes": {
-    "tasks": [
-      {
-        "type": "regular",
-        "keys": {"status": 1, "created_at": -1},
-        "name": "status_sort"
-      },
-      {
-        "type": "regular",
-        "keys": {"priority": -1},
-        "name": "priority_idx"
-      }
-    ],
-    "users": [
-      {
-        "type": "regular",
-        "keys": {"email": 1},
-        "name": "email_unique",
-        "unique": true
-      }
-    ]
-  }
+  "name": "My App"
 }
 ```
 
-Supported index types: `regular`, `text`, `vector`, `ttl`, `compound`.
+**Learn more**: [Manifest Reference](docs/MANIFEST_REFERENCE.md) | [Quick Start Guide](docs/QUICK_START.md)
 
-### 2. CRUD Operations (Auto-Scoped)
+---
 
-All database operations are automatically scoped to your app. Use `Depends(get_scoped_db)` in route handlers:
+## Examples Ladder
+
+Start simple, add complexity when you need it.
+
+| Example | What it shows | Lines of code |
+|---------|---------------|:---:|
+| [hello_world](examples/basic/hello_world/) | Zero-config CRUD, no manifest | ~15 |
+| [memory_quickstart](examples/basic/memory_quickstart/) | AI memory with semantic search | ~25 |
+| [chit_chat](examples/basic/chit_chat/) | Full AI chat with ChatEngine, auth, WebSockets | ~2400 |
+| [interactive_rag](examples/basic/interactive_rag/) | RAG with vector search | — |
+| [simple_app](examples/advanced/simple_app/) | Task management with `create_app()` pattern | — |
+| [sso-multi-app](examples/advanced/sso-multi-app/) | SSO with shared user pool across apps | — |
+
+---
+
+## CRUD Operations (Auto-Scoped)
+
+All database operations are automatically scoped to your app:
 
 ```python
 from mdb_engine.dependencies import get_scoped_db
@@ -357,19 +150,10 @@ async def create_task(task: dict, db=Depends(get_scoped_db)):
 @app.get("/tasks")
 async def list_tasks(db=Depends(get_scoped_db)):
     return await db.tasks.find({"status": "pending"}).to_list(length=10)
-
-@app.put("/tasks/{task_id}")
-async def update_task(task_id: str, db=Depends(get_scoped_db)):
-    await db.tasks.update_one({"_id": task_id}, {"$set": {"status": "done"}})
-    return {"updated": True}
-
-@app.delete("/tasks/{task_id}")
-async def delete_task(task_id: str, db=Depends(get_scoped_db)):
-    await db.tasks.delete_one({"_id": task_id})
-    return {"deleted": True}
 ```
 
-**What happens under the hood:**
+**Under the hood:**
+
 ```python
 # You write:
 await db.tasks.find({}).to_list(length=10)
@@ -379,53 +163,83 @@ await db.tasks.find({}).to_list(length=10)
 # Query: {"app_id": "my_app"}
 ```
 
-### 3. Health Checks
+---
 
-Built-in observability:
+## AI Memory (MemoryService)
+
+Add persistent, searchable AI memory to any app.
 
 ```python
-@app.get("/health")
-async def health():
-    status = await engine.get_health_status()
-    return {"status": status.get("status", "unknown")}
+from mdb_engine.dependencies import get_memory_service
+
+@app.post("/remember")
+async def remember(text: str, memory=Depends(get_memory_service)):
+    result = await memory.add(messages=text, user_id="user1")
+    return {"stored": result}
+
+@app.get("/recall")
+async def recall(q: str, memory=Depends(get_memory_service)):
+    results = await memory.search(query=q, user_id="user1")
+    return {"results": results}
+```
+
+> **Note**: All memory operations are async. Use `await` directly in your routes.
+
+Enable in your manifest:
+
+```json
+{
+  "llm_config": {"enabled": true, "default_model": "openai/gpt-4o-mini"},
+  "embedding_config": {"enabled": true, "default_embedding_model": "text-embedding-3-small"},
+  "memory_config": {"enabled": true, "provider": "cognitive", "infer": true}
+}
+```
+
+Optional cognitive features (add to `memory_config`):
+
+- **Importance scoring**: AI evaluates memory significance
+- **Memory reinforcement**: Similar memories strengthen each other
+- **Memory decay**: Less relevant memories fade over time
+- **Memory merging**: Related memories combined intelligently
+
+---
+
+## ChatEngine (Conversation Orchestration)
+
+`ChatEngine` (formerly `CognitiveEngine`) orchestrates full conversations with short-term memory (chat history) + long-term memory (semantic search):
+
+```python
+from mdb_engine.memory import ChatEngine
+
+cognitive = ChatEngine(
+    app_slug="my_app",
+    memory_service=memory_service,
+    chat_history_collection=db.chat_history,
+    llm_provider=llm_provider,
+)
+
+result = await cognitive.chat(
+    user_id="user123",
+    session_id="session456",
+    user_query="What did we discuss about the project?",
+    system_prompt="You are a helpful assistant.",
+    extract_facts=True,
+)
 ```
 
 ---
 
-## Why mdb-engine?
-
-- **manifest.json is everything** — Single source of truth for your entire app configuration
-- **Zero boilerplate** — No more connection setup, index creation scripts, or auth handlers
-- **Data isolation** — Multi-tenant ready with automatic app sandboxing
-- **Manifest-driven** — Define your app's "DNA" in JSON, not scattered code
-- **Incremental adoption** — Start minimal, add features as needed
-- **No lock-in** — Standard Motor/PyMongo underneath; export anytime with `mongodump --query='{"app_id":"my_app"}'`
-
----
-
-## Advanced Features
-
-| Feature | Description | Learn More |
-|---------|-------------|------------|
-| **Authentication** | JWT + Casbin/OSO RBAC | [Auth Guide](https://github.com/ranfysvalle02/mdb-engine/blob/main/docs/AUTHZ.md) |
-| **Vector Search** | Atlas Vector Search + embeddings | [RAG Example](https://github.com/ranfysvalle02/mdb-engine/tree/main/examples/basic/interactive_rag) |
-| **Memory Service** | Persistent AI memory with MongoDB Atlas Vector Search | [Chat Example](https://github.com/ranfysvalle02/mdb-engine/tree/main/examples/basic/chit_chat) |
-| **WebSockets** | Real-time updates from manifest | [Docs](https://github.com/ranfysvalle02/mdb-engine/blob/main/docs/ARCHITECTURE.md) |
-| **Multi-App** | Secure cross-app data access | [Multi-App Example](https://github.com/ranfysvalle02/mdb-engine/tree/main/examples/advanced/multi_app) |
-| **SSO** | Shared auth across apps | [Shared Auth Example](https://github.com/ranfysvalle02/mdb-engine/tree/main/examples/advanced/multi_app_shared) |
-
-### AppContext — All Services in One Place ✨
+## RequestContext (All Services in One Place)
 
 ```python
-from fastapi import Depends
-from mdb_engine.dependencies import AppContext
+from mdb_engine import RequestContext, get_request_context
 
 @app.post("/ai-chat")
-async def chat(query: str, ctx: AppContext = Depends()):
-    user = ctx.require_user()  # 401 if not logged in
-    ctx.require_role("user")   # 403 if missing role
-    
-    # Everything available: ctx.db, ctx.embedding_service, ctx.memory, ctx.llm
+async def chat(query: str, ctx: RequestContext = Depends(get_request_context)):
+    user = ctx.require_user()       # 401 if not logged in
+    ctx.require_role("user")        # 403 if missing role
+
+    # ctx.db, ctx.memory, ctx.llm, ctx.embedding_service — all available
     if ctx.llm:
         response = ctx.llm.chat.completions.create(
             model=ctx.llm_model,
@@ -436,99 +250,113 @@ async def chat(query: str, ctx: AppContext = Depends()):
 
 ---
 
-## Full Examples
+## Index Management
 
-Clone and run:
+Define indexes in `manifest.json` — they're auto-created on startup:
+
+```json
+{
+  "managed_indexes": {
+    "tasks": [
+      {"type": "regular", "keys": {"status": 1, "created_at": -1}, "name": "status_sort"},
+      {"type": "regular", "keys": {"email": 1}, "name": "email_unique", "unique": true}
+    ]
+  }
+}
+```
+
+Supported index types: `regular`, `text`, `vector`, `ttl`, `compound`.
+
+---
+
+## Advanced Features
+
+| Feature | Description | Learn More |
+|---------|-------------|------------|
+| **Authentication** | JWT + Casbin/OSO RBAC | [Bible: Auth](MDB_ENGINE_BIBLE.md#authentication-and-authorization) |
+| **Vector Search** | Atlas Vector Search + embeddings | [RAG Example](examples/basic/interactive_rag) |
+| **MemoryService** | Persistent AI memory with cognitive features | [Memory Docs](docs/MEMORY_SERVICE.md) |
+| **GraphService** | Knowledge graph with `$graphLookup` traversal | [Graph Docs](docs/GRAPH_SERVICE.md) |
+| **ChatEngine** | Full RAG pipeline with STM + LTM | [Chat Example](examples/basic/chit_chat) |
+| **WebSockets** | Real-time updates from manifest config | [Bible: WebSockets](MDB_ENGINE_BIBLE.md#websocket-system) |
+| **Multi-App** | Secure cross-app data access | [SSO Example](examples/advanced/sso-multi-app) |
+| **SSO** | Shared auth across apps | [SSO Example](examples/advanced/sso-multi-app) |
+| **GDPR** | Data discovery, export, deletion, rectification | [Bible: GDPR](MDB_ENGINE_BIBLE.md#gdpr-compliance) |
+
+---
+
+## Prerequisites: MongoDB Must Be Running
+
+MDB-Engine requires a running MongoDB instance.
+
+### Quick Setup
+
+**Docker (recommended):**
 
 ```bash
-git clone https://github.com/ranfysvalle02/mdb-engine.git
-cd mdb-engine/examples/basic/chit_chat
-
-# Examples include docker-compose.yml with MongoDB
-# This will start both MongoDB and your app
-docker-compose up --build
+docker run -d --name mdb_mongodb -p 27017:27017 -v mongodb_data:/data/db mongo:7.0
 ```
 
-**Note**: All examples include `docker-compose.yml` files that start MongoDB automatically. If running examples without Docker, make sure MongoDB is running first!
+**macOS (Homebrew):**
 
-### Basic Examples
+```bash
+brew tap mongodb/brew
+brew install mongodb-community
+brew services start mongodb-community
+```
 
-| Example | Description |
-|---------|-------------|
-| [chit_chat](https://github.com/ranfysvalle02/mdb-engine/tree/main/examples/basic/chit_chat) | AI chat with persistent memory |
-| [interactive_rag](https://github.com/ranfysvalle02/mdb-engine/tree/main/examples/basic/interactive_rag) | RAG with vector search |
-| [oso_hello_world](https://github.com/ranfysvalle02/mdb-engine/tree/main/examples/basic/oso_hello_world) | OSO Cloud authorization |
-| [parallax](https://github.com/ranfysvalle02/mdb-engine/tree/main/examples/basic/parallax) | Dynamic schema generation |
-| [vector_hacking](https://github.com/ranfysvalle02/mdb-engine/tree/main/examples/basic/vector_hacking) | Vector embeddings & attacks |
+**MongoDB Atlas (cloud):**
 
-### Advanced Examples
+1. Sign up at [MongoDB Atlas](https://www.mongodb.com/cloud/atlas)
+2. Create a free cluster
+3. Set `MONGODB_URI=mongodb+srv://user:password@cluster.mongodb.net/`
 
-| Example | Description |
-|---------|-------------|
-| [simple_app](https://github.com/ranfysvalle02/mdb-engine/tree/main/examples/advanced/simple_app) | Task management with `create_app()` pattern |
-| [multi_app](https://github.com/ranfysvalle02/mdb-engine/tree/main/examples/advanced/multi_app) | Multi-tenant with cross-app access |
-| [multi_app_shared](https://github.com/ranfysvalle02/mdb-engine/tree/main/examples/advanced/multi_app_shared) | SSO with shared user pool |
+### Connection Strings
+
+| Setup | URI |
+|-------|-----|
+| Local/Docker | `mongodb://localhost:27017` (default) |
+| Atlas | `mongodb+srv://user:password@cluster.mongodb.net/dbname` |
+
+Set via env var (`MONGODB_URI`) or pass to `MongoDBEngine(mongo_uri=...)`.
 
 ---
 
-## Manual Setup (Alternative)
+## Environment Variables
 
-If you need more control over the FastAPI lifecycle:
+```bash
+# MongoDB (optional — defaults to localhost:27017)
+MONGODB_URI=mongodb://localhost:27017
+MDB_DB_NAME=my_database
 
-```python
-from pathlib import Path
-from fastapi import FastAPI
-from mdb_engine import MongoDBEngine
+# LLM (for AI features — pick your provider)
+OPENAI_API_KEY=sk-...
+ANTHROPIC_API_KEY=...
+GEMINI_API_KEY=...
 
-# ⚠️ Make sure MongoDB is running before initializing the engine
-app = FastAPI()
-engine = MongoDBEngine(mongo_uri="mongodb://localhost:27017", db_name="my_database")
-
-@app.on_event("startup")
-async def startup():
-    await engine.initialize()
-    manifest = await engine.load_manifest(Path("manifest.json"))
-    await engine.register_app(manifest, create_indexes=True)
-
-@app.on_event("shutdown")
-async def shutdown():
-    await engine.shutdown()
-
-@app.get("/items")
-async def get_items():
-    db = engine.get_scoped_db("my_app")
-    return await db.items.find({}).to_list(length=10)
+# Auth (for shared auth mode)
+MDB_ENGINE_JWT_SECRET=your-secret-key
 ```
 
 ---
 
-## Understanding manifest.json
+## Why mdb-engine?
 
-Your `manifest.json` is the heart of your application. It defines:
-
-- **App Identity**: `slug`, `name`, `description`
-- **Data Access**: `data_access.read_scopes`, `data_access.write_scope`
-- **Indexes**: `managed_indexes` (regular, vector, text, TTL, compound)
-- **Authentication**: `auth.policy`, `auth.users` (Casbin/OSO, demo users)
-- **AI Services**: `embedding_config`, `memory_config`
-- **Real-time**: `websockets` endpoints
-- **CORS**: `cors` settings
-
-**Start minimal, grow as needed.** You can begin with just `slug`, `name`, and `schema_version`, then add features incrementally.
-
-**📖 Learn More:**
-- [Quick Start Guide](docs/QUICK_START.md) - Get started with manifest.json
-- [Manifest Deep Dive](docs/MANIFEST_DEEP_DIVE.md) - Comprehensive manifest.json guide
-- [Examples](examples/) - Real-world manifest.json files
+- **Zero to running in 3 lines** — `quickstart("my_app")` and go
+- **Data isolation built in** — multi-tenant ready with automatic app sandboxing
+- **manifest.json is everything** — single source of truth for your app config
+- **Incremental adoption** — start minimal, add features as needed
+- **No lock-in** — standard Motor/PyMongo underneath; export with `mongodump --query='{"app_id":"my_app"}'`
 
 ---
 
 ## Links
 
 - [GitHub Repository](https://github.com/ranfysvalle02/mdb-engine)
-- [Documentation](https://github.com/ranfysvalle02/mdb-engine/tree/main/docs)
-- [All Examples](https://github.com/ranfysvalle02/mdb-engine/tree/main/examples)
-- [Quick Start Guide](docs/QUICK_START.md) - **Start here!**
+- [Documentation](docs/)
+- [All Examples](examples/)
+- [Quick Start Guide](docs/QUICK_START.md) — **Start here!**
+- [Manifest Reference](docs/MANIFEST_REFERENCE.md)
 - [Contributing](CONTRIBUTING.md)
 
 ---

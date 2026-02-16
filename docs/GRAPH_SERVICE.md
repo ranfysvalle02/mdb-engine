@@ -15,14 +15,30 @@ The Graph Service (`mdb_engine.graph`) is a standalone service for building and 
 │  └──────────────┘    └──────────────┘    └──────────────┘       │
 │                                                                  │
 │  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐       │
-│  │ Hybrid Search│    │ LLM Extract  │    │ Context      │       │
-│  │ (Vector+Graph)│   │ (Entities)   │    │ Formatting   │       │
+│  │ GraphRAG     │    │ LLM Extract  │    │ Context      │       │
+│  │ (Local/     │    │ (Entities)   │    │ Formatting   │       │
+│  │  Global/    │    │              │    │              │       │
+│  │  DRIFT)     │    │              │    │              │       │
 │  └──────────────┘    └──────────────┘    └──────────────┘       │
 │                                                                  │
 ├─────────────────────────────────────────────────────────────────┤
 │  Dependencies: LLMService, EmbeddingService, MongoDB Collection  │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+### Mixin-Based Architecture
+
+`GraphService` is composed from five specialized mixins:
+
+| Mixin | Module | Responsibility |
+|---|---|---|
+| `NodeOperationsMixin` | `mdb_engine.graph.nodes` | Node CRUD, embedding backfill, memory reference cleanup |
+| `EdgeOperationsMixin` | `mdb_engine.graph.edges` | Edge CRUD, soft-delete (deactivate), neighbor queries |
+| `TraversalMixin` | `mdb_engine.graph.traversal` | `$graphLookup`-powered traversal, BFS path finding |
+| `SearchMixin` | `mdb_engine.graph.search` | Hybrid search, GraphRAG strategies (local/global/drift), query classification |
+| `ExtractionMixin` | `mdb_engine.graph.extraction` | LLM-powered entity/relationship extraction from text |
+
+Supporting modules: `CommunityService` (`mdb_engine.graph.community`), `QueryClassifier` (`mdb_engine.graph.query_classifier`), LLM prompt templates (`mdb_engine.graph.prompts`).
 
 ## Installation
 
@@ -377,6 +393,90 @@ results = graph.hybrid_search(
 # }
 ```
 
+#### GraphRAG Search Methods (Recommended)
+
+GraphRAG provides specialized search methods that automatically classify queries and route to the appropriate strategy:
+
+**Query Classification:**
+```python
+query_type = graph.classify_query("What does Alex like?")
+# Returns: "local", "global", "drift", or "basic"
+```
+
+**Local Search** - Entity-focused queries:
+```python
+results = await graph.local_search(
+    query="What does Alex like?",  # Entity-focused query
+    user_id="user123",
+    max_depth=2,
+)
+
+# Returns:
+# {
+#   "query_type": "local",
+#   "entry_nodes": [...],           # Vector search results
+#   "graph_context": [...],         # Traversed nodes
+#   "community_summaries": [...],    # Community summaries for context
+#   "total_nodes": 8
+# }
+```
+
+**Global Search** - Thematic queries:
+```python
+results = await graph.global_search(
+    query="What are common interests?",  # Thematic query
+    user_id="user123",
+    max_communities=10,
+)
+
+# Returns:
+# {
+#   "query_type": "global",
+#   "communities": [...],           # Relevant communities
+#   "partial_responses": [...],     # Partial responses per community
+#   "synthesized_answer": "...",    # Final synthesized answer
+#   "total_communities": 5
+# }
+```
+
+**DRIFT Search** - Entity queries with community context:
+```python
+results = await graph.drift_search(
+    query="What is the context around Project X?",  # Entity + community
+    user_id="user123",
+    max_depth=2,
+)
+
+# Returns:
+# {
+#   "query_type": "drift",
+#   "entry_nodes": [...],
+#   "graph_context": [...],
+#   "community_summaries": [...],
+#   "total_nodes": 12
+# }
+```
+
+**Automatic Routing:**
+GraphRAG automatically classifies queries and routes to the appropriate method. You can also use `classify_query()` to determine the query type before searching.
+
+#### `advanced_graph_search()` (Legacy - Use GraphRAG methods instead)
+
+Microsoft Research-style GraphRAG with query decomposition and pathfinding. **Note**: For new code, use `local_search()`, `global_search()`, or `drift_search()` instead, which provide automatic query classification.
+
+```python
+results = await graph.advanced_graph_search(
+    query="How is Alex related to Project Hades?",
+    user_id="user123",
+    max_depth=2,
+)
+```
+
+**When to Use:**
+- Use GraphRAG methods (`local_search`, `global_search`, `drift_search`) for automatic query classification
+- Use `advanced_graph_search()` only if you need the specific pathfinding strategy
+- Use `hybrid_search()` for simple semantic similarity queries
+
 #### `format_graph_context()`
 
 Format search results as LLM context.
@@ -394,6 +494,27 @@ context = graph.format_graph_context(
 #   → likes → interest:golf
 # - Golf (interest)
 #   → related_to → product:golf_clubs
+```
+
+#### `format_graph_narrative()`
+
+Format advanced search results with strategy-aware narrative generation.
+
+```python
+narrative = graph.format_graph_narrative(
+    graph_result=advanced_results,  # From advanced_graph_search()
+    max_nodes=10,
+)
+
+# Returns formatted string with strategy context:
+# [RAW GRAPH DATA]
+# Search Strategy: pathfinding
+# Entry Entities: Alex, Project Hades
+# 
+# Node: Alex (person) [hop=0] [PATH NODE]. Links: works_at Google, likes Coffee
+# Node: Google (organization) [hop=1] [PATH NODE]. Links: owns Project Hades
+# Node: Project Hades (project) [hop=2] [PATH NODE]. Links: ...
+# [/RAW GRAPH DATA]
 ```
 
 ### LLM-Based Extraction
@@ -427,12 +548,12 @@ result = await graph.extract_graph_from_text(
 # }
 ```
 
-#### `extract_graph_from_memory()` (sync)
+#### `extract_graph_from_memory()` (async)
 
-Synchronous wrapper for memory service integration.
+Convenience wrapper used by the memory service for automatic graph extraction.
 
 ```python
-result = graph.extract_graph_from_memory(
+result = await graph.extract_graph_from_memory(
     memory_text="My colleague Sarah works at Google",
     user_id="user123",
 )

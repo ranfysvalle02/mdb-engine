@@ -37,9 +37,7 @@ class TestMetricsCollectorThreadSafety:
                     thread_id=thread_id,
                 )
 
-        threads = [
-            threading.Thread(target=record_operations, args=(i,)) for i in range(num_threads)
-        ]
+        threads = [threading.Thread(target=record_operations, args=(i,)) for i in range(num_threads)]
 
         for thread in threads:
             thread.start()
@@ -52,9 +50,7 @@ class TestMetricsCollectorThreadSafety:
         metrics = collector.get_metrics()
         total_recorded = sum(m["count"] for m in metrics["metrics"].values())
 
-        assert (
-            total_recorded == total_expected
-        ), f"Expected {total_expected} operations, got {total_recorded}"
+        assert total_recorded == total_expected, f"Expected {total_expected} operations, got {total_recorded}"
 
     def test_concurrent_get_metrics(self):
         """Test that concurrent get_metrics calls are thread-safe."""

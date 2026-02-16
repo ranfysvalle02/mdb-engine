@@ -21,10 +21,7 @@ This example showcases the recommended way to build FastAPI apps with MDB Engine
 from mdb_engine import MongoDBEngine
 from pathlib import Path
 
-engine = MongoDBEngine(
-    mongo_uri="mongodb://localhost:27017",
-    db_name="mdb_runtime",
-)
+engine = MongoDBEngine()  # reads MONGODB_URI from env, defaults to localhost
 
 # One line - automatic lifecycle management
 app = engine.create_app(
@@ -38,12 +35,17 @@ async def get_items():
     return await db.items.find({}).to_list(10)
 ```
 
+> **Tip:** For the absolute simplest start (no manifest), use `quickstart()`:
+> ```python
+> from mdb_engine import quickstart
+> app = quickstart("simple_app")
+> ```
+
 ## Key Features Demonstrated
 
 - **`engine.create_app()`** - Automatic initialization, manifest loading, and cleanup
 - **Scoped Database Access** - All queries automatically filtered by app_id
 - **Manifest-Driven Indexes** - Indexes auto-created from manifest.json
-- **Optional Ray Support** - Enable with `ENABLE_RAY=true`
 
 ## Quick Start
 
@@ -84,30 +86,6 @@ When you call `engine.create_app()`, it automatically:
 2. **On Shutdown:**
    - Closes MongoDB connections cleanly
    - Cleans up resources
-
-## Optional Ray Support
-
-Enable Ray for distributed processing:
-
-```python
-engine = MongoDBEngine(
-    mongo_uri="mongodb://localhost:27017",
-    db_name="mdb_runtime",
-    enable_ray=True,  # Enable Ray
-)
-```
-
-Or via environment variable:
-
-```bash
-ENABLE_RAY=true docker-compose up
-```
-
-Check Ray status:
-
-```bash
-curl http://localhost:8000/api/status
-```
 
 ## API Endpoints
 

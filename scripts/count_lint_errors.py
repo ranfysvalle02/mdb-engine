@@ -3,9 +3,7 @@
 
 try:
     with open("/tmp/flake8_output.txt") as f:
-        flake8_count = sum(
-            1 for line in f if any(line.startswith(p) for p in ["mdb_engine", "tests", "scripts"])
-        )
+        flake8_count = sum(1 for line in f if any(line.startswith(p) for p in ["mdb_engine", "tests", "scripts"]))
 except OSError:
     flake8_count = 0
 

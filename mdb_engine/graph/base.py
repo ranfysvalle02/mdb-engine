@@ -7,8 +7,10 @@ Defines the abstract interface that all graph service implementations must follo
 from abc import ABC, abstractmethod
 from typing import Any
 
+from ..exceptions import MongoDBEngineError
 
-class GraphServiceError(Exception):
+
+class GraphServiceError(MongoDBEngineError):
     """Base exception for Graph Service failures."""
 
     pass
@@ -33,7 +35,7 @@ class BaseGraphService(ABC):
     # ========================================================================
 
     @abstractmethod
-    def upsert_node(
+    async def upsert_node(
         self,
         node_id: str,
         node_type: str,
@@ -41,6 +43,7 @@ class BaseGraphService(ABC):
         properties: dict[str, Any] | None = None,
         user_id: str | None = None,
         embedding: list[float] | None = None,
+        source_memory_ids: list[str] | None = None,
     ) -> dict[str, Any]:
         """
         Create or update a node in the graph.
@@ -52,6 +55,9 @@ class BaseGraphService(ABC):
             properties: Optional type-specific properties
             user_id: Optional user ID for ownership
             embedding: Optional embedding vector for hybrid search
+            source_memory_ids: Optional list of memory IDs that produced this node.
+                Appended (not replaced) on upsert so multiple memories can
+                reference the same entity.
 
         Returns:
             The upserted node document
@@ -60,6 +66,22 @@ class BaseGraphService(ABC):
             GraphServiceError: If upsert fails
         """
         pass
+
+    async def remove_memory_references(self, memory_id: str) -> int:
+        """
+        Remove a memory reference from all graph nodes.
+
+        Pulls *memory_id* from every node's ``source_memory_ids`` array.
+        Nodes that become orphaned (empty ``source_memory_ids``) are deleted
+        along with any edges pointing to them.
+
+        Args:
+            memory_id: The memory ID to remove.
+
+        Returns:
+            Number of nodes deleted (orphaned).
+        """
+        raise NotImplementedError
 
     @abstractmethod
     def get_node(self, node_id: str) -> dict[str, Any] | None:
@@ -88,7 +110,7 @@ class BaseGraphService(ABC):
         pass
 
     @abstractmethod
-    def list_nodes(
+    async def list_nodes(
         self,
         node_type: str | None = None,
         user_id: str | None = None,
@@ -112,7 +134,7 @@ class BaseGraphService(ABC):
     # ========================================================================
 
     @abstractmethod
-    def add_edge(
+    async def add_edge(
         self,
         source_id: str,
         relation: str,
@@ -206,7 +228,7 @@ class BaseGraphService(ABC):
     # ========================================================================
 
     @abstractmethod
-    def traverse(
+    async def traverse(
         self,
         start_id: str,
         max_depth: int | None = None,
@@ -252,7 +274,7 @@ class BaseGraphService(ABC):
         pass
 
     @abstractmethod
-    def find_path(
+    async def find_path(
         self,
         start_id: str,
         end_id: str,
@@ -276,13 +298,15 @@ class BaseGraphService(ABC):
     # ========================================================================
 
     @abstractmethod
-    def hybrid_search(
+    async def hybrid_search(
         self,
         query: str,
         user_id: str | None = None,
         max_depth: int | None = None,
         vector_limit: int = 5,
         include_inactive: bool = False,
+        min_hop_distance: int | None = None,
+        min_edge_count: int | None = None,
     ) -> dict[str, Any]:
         """
         Hybrid GraphRAG: Vector search finds entry points, graph traversal expands context.
@@ -297,6 +321,9 @@ class BaseGraphService(ABC):
             user_id: Optional user ID to scope search
             max_depth: Traversal depth
             vector_limit: Max entry nodes from vector search
+            include_inactive: Include inactive edges in traversal
+            min_hop_distance: Minimum hop distance for graph_context nodes (filters shallow nodes)
+            min_edge_count: Minimum edges required for graph_context nodes (filters isolated nodes)
             include_inactive: Include inactive edges in traversal
 
         Returns:
@@ -364,12 +391,89 @@ class BaseGraphService(ABC):
     # ========================================================================
 
     @abstractmethod
-    def get_stats(self) -> dict[str, Any]:
+    async def get_stats(self) -> dict[str, Any]:
         """
         Get graph service statistics.
 
         Returns:
             Dict with node counts, edge counts, etc.
+        """
+        pass
+
+    # ========================================================================
+    # GraphRAG Search Methods
+    # ========================================================================
+
+    @abstractmethod
+    async def local_search(
+        self,
+        query: str,
+        user_id: str | None = None,
+        max_depth: int = 2,
+    ) -> dict[str, Any]:
+        """
+        Local Search: Entity-focused queries using graph traversal and community summaries.
+
+        Args:
+            query: User query string
+            user_id: Optional user ID for scoping
+            max_depth: Maximum traversal depth
+
+        Returns:
+            Dict with entry_nodes, graph_context, community_summaries, etc.
+        """
+        pass
+
+    @abstractmethod
+    async def global_search(
+        self,
+        query: str,
+        user_id: str | None = None,
+        max_communities: int = 10,
+    ) -> dict[str, Any]:
+        """
+        Global Search: Thematic queries using map-reduce over community summaries.
+
+        Args:
+            query: User query string
+            user_id: Optional user ID for scoping
+            max_communities: Maximum number of communities to process
+
+        Returns:
+            Dict with communities, partial_responses, synthesized_answer, etc.
+        """
+        pass
+
+    @abstractmethod
+    async def drift_search(
+        self,
+        query: str,
+        user_id: str | None = None,
+        max_depth: int = 2,
+    ) -> dict[str, Any]:
+        """
+        DRIFT Search: Entity-focused queries with community context.
+
+        Args:
+            query: User query string
+            user_id: Optional user ID for scoping
+            max_depth: Maximum traversal depth
+
+        Returns:
+            Dict with entry_nodes, graph_context, community_context, etc.
+        """
+        pass
+
+    @abstractmethod
+    async def classify_query(self, query: str) -> str:
+        """
+        Classify a query to determine the appropriate search method.
+
+        Args:
+            query: User query string
+
+        Returns:
+            One of: "local", "global", "drift", or "basic"
         """
         pass
 

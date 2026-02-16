@@ -4,7 +4,7 @@
 
 Context Engineering is the architectural discipline of constructing the "present moment" for an LLM. Since models are stateless, the **Context** is the only reality they know. To optimize this, you must treat the Context Window not as a garbage dump for all history, but as a carefully curated stage.
 
-MDB-Engine's Memory Service implements Context Engineering through the `CognitiveEngine`, which dynamically assembles context from multiple layers according to the equation:
+MDB-Engine's Memory Service implements Context Engineering through the `ChatEngine` (also known as `ChatEngine`), which dynamically assembles context from multiple layers according to the equation:
 
 ```
 Context = P_static + M_relevant + Q_current
@@ -55,10 +55,10 @@ The `PersonaEngine` is automatically integrated into system prompt construction 
 
 **Example**:
 ```python
-from mdb_engine.memory import CognitiveEngine
+from mdb_engine.memory import ChatEngine  # preferred name (CognitiveEngine also works)
 
 # PersonaEngine is automatically accessed from memory_service
-cognitive_engine = CognitiveEngine(
+chat_engine = ChatEngine(
     app_slug="my_app",
     memory_service=memory_service,  # Contains PersonaEngine
     chat_history_collection=chat_collection,
@@ -66,7 +66,7 @@ cognitive_engine = CognitiveEngine(
 )
 
 # Persona is automatically retrieved and used in system prompt
-result = await cognitive_engine.chat(
+result = await chat_engine.chat(
     user_id="user123",
     session_id="session456",
     user_query="How do I optimize Python code?",
@@ -89,7 +89,7 @@ Entity facts are automatically extracted from retrieved memories and injected in
 # Memories with category="biographical" are analyzed
 # Entity facts are extracted and injected into system prompt
 
-result = await cognitive_engine.chat(...)
+result = await chat_engine.chat(...)
 print(result["entity_facts"])
 # {"Name": "Alice", "OS": "Ubuntu", "Language": "Python", "Expertise": "expert"}
 ```
@@ -121,7 +121,7 @@ To optimize token usage, the STM context uses a sliding window:
 
 **Configuration**:
 ```python
-cognitive_engine = CognitiveEngine(
+chat_engine = ChatEngine(
     app_slug="my_app",
     memory_service=memory_service,
     chat_history_collection=chat_collection,
@@ -161,10 +161,10 @@ Known Facts: {entity_facts_formatted}
 
 ## Configuration
 
-Context Engineering is enabled by default. You can configure it when creating `CognitiveEngine`:
+Context Engineering is enabled by default. You can configure it when creating `ChatEngine`:
 
 ```python
-cognitive_engine = CognitiveEngine(
+chat_engine = ChatEngine(
     app_slug="my_app",
     memory_service=memory_service,
     chat_history_collection=chat_collection,
@@ -181,10 +181,10 @@ cognitive_engine = CognitiveEngine(
 ### Basic Usage
 
 ```python
-from mdb_engine.memory import CognitiveEngine
+from mdb_engine.memory import ChatEngine
 
 # Create engine with Context Engineering enabled (default)
-cognitive_engine = CognitiveEngine(
+chat_engine = ChatEngine(
     app_slug="my_app",
     memory_service=memory_service,
     chat_history_collection=chat_collection,
@@ -192,7 +192,7 @@ cognitive_engine = CognitiveEngine(
 )
 
 # Chat with automatic context engineering
-result = await cognitive_engine.chat(
+result = await chat_engine.chat(
     user_id="user123",
     session_id="session456",
     user_query="How do I optimize Python code?",
@@ -209,7 +209,7 @@ print(result["stm_summary"])           # STM summary (if created)
 ### Setting Up Persona
 
 ```python
-# PersonaEngine is automatically initialized in CognitiveMemoryService
+# PersonaEngine is automatically initialized in MemoryService
 # You can update it via the memory service
 
 memory_service = get_memory_service(app_slug="my_app", collection=collection)
@@ -233,7 +233,7 @@ if memory_service.persona_engine:
 
 ```python
 # Disable all Context Engineering features
-cognitive_engine = CognitiveEngine(
+chat_engine = ChatEngine(
     app_slug="my_app",
     memory_service=memory_service,
     chat_history_collection=chat_collection,
@@ -253,7 +253,7 @@ cognitive_engine = CognitiveEngine(
 
 ### Step-by-Step Process
 
-1. **User Query Arrives**: `cognitive_engine.chat()` is called
+1. **User Query Arrives**: `chat_engine.chat()` is called
 2. **Parallel Fetch**: LTM, STM, and Graph context are fetched in parallel
 3. **Entity Extraction**: Entity facts are extracted from retrieved memories
 4. **Persona Retrieval**: Persona is retrieved from `PersonaEngine` (if available)
@@ -310,7 +310,7 @@ The **AI Chat** app (`examples/advanced/sso-multi-app/apps/sso-app-3`) is a comp
 
 ### Features Demonstrated
 
-- ✅ **Context Engineering enabled** in `CognitiveEngine` initialization
+- ✅ **Context Engineering enabled** in `ChatEngine` initialization
 - ✅ **Persona configuration** in `manifest.json` (Orby - AI Assistant)
 - ✅ **Entity extraction** from biographical memories
 - ✅ **Dynamic persona adaptation** based on user expertise
@@ -321,9 +321,9 @@ The **AI Chat** app (`examples/advanced/sso-multi-app/apps/sso-app-3`) is a comp
 
 ### Key Implementation Details
 
-**CognitiveEngine Initialization** (`web.py`):
+**ChatEngine Initialization** (`web.py`):
 ```python
-cognitive_engine = CognitiveEngine(
+chat_engine = ChatEngine(
     app_slug=APP_SLUG,
     memory_service=memory_service,
     chat_history_collection=chat_history_collection,
@@ -360,7 +360,7 @@ cognitive_engine = CognitiveEngine(
 
 **Response Handling**:
 ```python
-result = await cognitive_engine.chat(
+result = await chat_engine.chat(
     user_id=user_id,
     session_id=cid,
     user_query=full_input,
@@ -413,8 +413,8 @@ Access the app at http://localhost:8000/ai-chat (multi-app) or http://localhost:
 ## Related Documentation
 
 - [Memory Service Guide](./MEMORY_SERVICE.md) - Complete memory service documentation
-- [Cognitive Architecture](./COGNITIVE_ARCHITECTURE.md) - STM + LTM architecture
-- [Cognitive Memory](./COGNITIVE_MEMORY.md) - Advanced cognitive features
+- [Memory Service Guide](./MEMORY_SERVICE.md) - Complete memory service guide
+- [Memory System Complete Reference](./MEMORY_SYSTEM_COMPLETE.md) - Technical architecture details
 - [Best Practices](./BEST_PRACTICES.md) - Production patterns
 
 ## Summary

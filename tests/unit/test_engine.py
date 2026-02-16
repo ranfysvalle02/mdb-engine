@@ -119,7 +119,7 @@ class TestMongoDBEngineScopedDatabase:
     @pytest.mark.asyncio
     async def test_get_scoped_db_success(self, mongodb_engine):
         """Test successful scoped database creation."""
-        scoped_db = mongodb_engine.get_scoped_db("test_app")
+        scoped_db = await mongodb_engine.get_scoped_db("test_app")
 
         assert scoped_db is not None
         assert scoped_db._read_scopes == ["test_app"]  # noqa: SLF001
@@ -155,7 +155,7 @@ class TestMongoDBEngineScopedDatabase:
         app2_manifest["name"] = "App 2"
         await mongodb_engine.register_app(app2_manifest, create_indexes=False)
 
-        scoped_db = mongodb_engine.get_scoped_db(
+        scoped_db = await mongodb_engine.get_scoped_db(
             app_slug="test_app", read_scopes=["app1", "app2"], write_scope="app1"
         )
 
@@ -165,7 +165,7 @@ class TestMongoDBEngineScopedDatabase:
     @pytest.mark.asyncio
     async def test_get_scoped_db_has_validators_and_limiters(self, mongodb_engine):
         """Test that scoped database has query validators and resource limiters."""
-        scoped_db = mongodb_engine.get_scoped_db("test_app")
+        scoped_db = await mongodb_engine.get_scoped_db("test_app")
 
         # Verify validators and limiters are present
         assert hasattr(scoped_db, "_query_validator")
@@ -174,13 +174,11 @@ class TestMongoDBEngineScopedDatabase:
         assert scoped_db._resource_limiter is not None  # noqa: SLF001
 
     @pytest.mark.asyncio
-    async def test_get_scoped_db_collections_have_validators(
-        self, mongodb_engine, mock_mongo_database
-    ):
+    async def test_get_scoped_db_collections_have_validators(self, mongodb_engine, mock_mongo_database):
         """Test that collections created from scoped db have validators."""
         # Mock the database
         with patch.object(mongodb_engine._connection_manager, "mongo_db", mock_mongo_database):  # noqa: SLF001
-            scoped_db = mongodb_engine.get_scoped_db("test_app")
+            scoped_db = await mongodb_engine.get_scoped_db("test_app")
 
             # Mock collection
             from motor.motor_asyncio import AsyncIOMotorCollection
@@ -207,7 +205,7 @@ class TestMongoDBEngineScopedDatabase:
 
         # Mock the database
         with patch.object(mongodb_engine._connection_manager, "mongo_db", mock_mongo_database):  # noqa: SLF001
-            scoped_db = mongodb_engine.get_scoped_db("test_app")
+            scoped_db = await mongodb_engine.get_scoped_db("test_app")
 
             # Mock collection
             mock_collection = MagicMock(spec=AsyncIOMotorCollection)
@@ -224,12 +222,12 @@ class TestMongoDBEngineScopedDatabase:
     async def test_get_scoped_db_uninitialized(self, uninitialized_mongodb_engine):
         """Test getting scoped db before initialization raises error."""
         with pytest.raises(RuntimeError, match="not initialized"):
-            uninitialized_mongodb_engine.get_scoped_db("test_app")
+            await uninitialized_mongodb_engine.get_scoped_db("test_app")
 
     @pytest.mark.asyncio
     async def test_get_scoped_db_auto_index_disabled(self, mongodb_engine):
         """Test scoped database with auto_index disabled."""
-        scoped_db = mongodb_engine.get_scoped_db("test_app", auto_index=False)
+        scoped_db = await mongodb_engine.get_scoped_db("test_app", auto_index=False)
 
         assert scoped_db._auto_index is False  # noqa: SLF001
 
@@ -302,18 +300,18 @@ class TestMongoDBEngineGetScopedDbSecurity:
 
         # Empty read_scopes
         with pytest.raises(ValueError, match="cannot be empty"):
-            mongodb_engine.get_scoped_db("test_app", read_scopes=[])
+            await mongodb_engine.get_scoped_db("test_app", read_scopes=[])
 
         # Invalid type
         with pytest.raises(ValueError, match="must be a list"):
-            mongodb_engine.get_scoped_db("test_app", read_scopes="not_a_list")
+            await mongodb_engine.get_scoped_db("test_app", read_scopes="not_a_list")
 
         # Invalid app slug in read_scopes
         with pytest.raises(ValueError, match="Invalid app slug"):
-            mongodb_engine.get_scoped_db("test_app", read_scopes=[""])
+            await mongodb_engine.get_scoped_db("test_app", read_scopes=[""])
 
         with pytest.raises(ValueError, match="Invalid app slug"):
-            mongodb_engine.get_scoped_db("test_app", read_scopes=[None])
+            await mongodb_engine.get_scoped_db("test_app", read_scopes=[None])
 
     @pytest.mark.asyncio
     async def test_get_scoped_db_validates_write_scope(self, mongodb_engine):
@@ -322,10 +320,10 @@ class TestMongoDBEngineGetScopedDbSecurity:
 
         # Empty write_scope
         with pytest.raises(ValueError, match="non-empty string"):
-            mongodb_engine.get_scoped_db("test_app", write_scope="")
+            await mongodb_engine.get_scoped_db("test_app", write_scope="")
 
         # None write_scope (will default to app_slug, which is valid)
-        db = mongodb_engine.get_scoped_db("test_app", write_scope=None)
+        db = await mongodb_engine.get_scoped_db("test_app", write_scope=None)
         assert db is not None
 
     @pytest.mark.asyncio
@@ -355,11 +353,11 @@ class TestMongoDBEngineGetScopedDbSecurity:
         await mongodb_engine.register_app(other_app_manifest, create_indexes=False)
 
         # Valid single scope
-        db = mongodb_engine.get_scoped_db("test_app")
+        db = await mongodb_engine.get_scoped_db("test_app")
         assert db is not None
 
         # Valid multiple scopes (now authorized in manifest)
-        db = mongodb_engine.get_scoped_db("test_app", read_scopes=["test_app", "other_app"])
+        db = await mongodb_engine.get_scoped_db("test_app", read_scopes=["test_app", "other_app"])
         assert db is not None
 
 
@@ -523,9 +521,7 @@ class TestMongoDBEngineWebSocket:
         await mongodb_engine.register_app(sample_manifest, create_indexes=False)
 
         # Test nested auth config
-        websocket_config_nested = {
-            "endpoint1": {"path": "/ws/endpoint1", "auth": {"required": False}}
-        }
+        websocket_config_nested = {"endpoint1": {"path": "/ws/endpoint1", "auth": {"required": False}}}
         mongodb_engine._service_initializer._websocket_configs["test_experiment"] = (  # noqa: SLF001
             websocket_config_nested
         )
@@ -847,9 +843,7 @@ class TestMongoDBEngineHealthMetrics:
             engine.list_apps()
 
     @pytest.mark.asyncio
-    async def test_register_websocket_routes_auth_from_app_config(
-        self, mongodb_engine, sample_manifest
-    ):
+    async def test_register_websocket_routes_auth_from_app_config(self, mongodb_engine, sample_manifest):
         """Test WebSocket auth config from app's auth_policy."""
         # Register app with auth_policy
         manifest_with_auth = {
@@ -922,15 +916,14 @@ class TestMongoDBEngineHealthMetrics:
                                 assert "min_pool_size" in final_metrics
 
     @pytest.mark.asyncio
-    async def test_context_manager_sync(self, mongodb_engine):
-        """Test synchronous context manager."""
-        # __enter__ returns self
-        result = mongodb_engine.__enter__()  # noqa: SLF001
-        assert result is mongodb_engine
-
-        # __exit__ does nothing (synchronous)
-        result = mongodb_engine.__exit__(None, None, None)  # noqa: SLF001
-        assert result is None
+    async def test_no_sync_context_manager(self, mongodb_engine):
+        """Test that synchronous context manager is not available."""
+        # Sync __enter__/__exit__ were intentionally removed.
+        # Only async context manager (__aenter__/__aexit__) is supported.
+        assert not hasattr(mongodb_engine, "__enter__") or not callable(getattr(mongodb_engine, "__enter__", None))
+        # Verify async context manager is available
+        assert hasattr(mongodb_engine, "__aenter__")
+        assert hasattr(mongodb_engine, "__aexit__")
 
     @pytest.mark.asyncio
     async def test_get_health_status_pool_import_error(self, mongodb_engine):
@@ -1105,9 +1098,7 @@ class TestMongoDBEngineCallbackErrors:
             assert result is True
 
     @pytest.mark.asyncio
-    async def test_register_app_memory_callback_no_service_initializer(
-        self, mongodb_engine, sample_manifest
-    ):
+    async def test_register_app_memory_callback_no_service_initializer(self, mongodb_engine, sample_manifest):
         """Test register_app memory callback when service_initializer is None (line 294)."""
         # Add memory config to manifest
         manifest_with_memory = {
@@ -1151,8 +1142,6 @@ class TestMongoDBEngineCallbackErrors:
             raise Exception("Observability error")
 
         # Register app - the callback error should be caught internally
-        result = await mongodb_engine.register_app(
-            manifest_with_observability, create_indexes=False
-        )
+        result = await mongodb_engine.register_app(manifest_with_observability, create_indexes=False)
         # Registration should succeed even if callbacks fail
         assert result is True

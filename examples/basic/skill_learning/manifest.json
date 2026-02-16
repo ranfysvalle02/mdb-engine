@@ -1,0 +1,43 @@
+{
+  "schema_version": "2.0",
+  "slug": "skill_learning",
+  "name": "Nexus - AI SRE Skill Learning Demo",
+  "description": "Demonstrates Memory + Procedural Skill Learning: an AI SRE that gets smarter with every incident.",
+  "status": "active",
+
+  "memory_config": {
+    "enabled": true,
+    "provider": "cognitive",
+    "collection_name": "memories",
+    "embedding_model": "text-embedding-3-small",
+    "embedding_model_dims": 1536,
+    "infer": false,
+    "async_mode": true,
+    "enable_cognitive": true,
+    "max_depth": 200,
+    "similarity_threshold": 0.85,
+    "reinforcement_factor": 1.15,
+
+    "categories": {
+      "enabled": true,
+      "custom_categories": [
+        "infrastructure",
+        "incidents",
+        "team",
+        "sla",
+        "runbooks",
+        "postmortems"
+      ]
+    }
+  },
+
+  "embedding_config": {
+    "enabled": true,
+    "default_embedding_model": "text-embedding-3-small",
+    "max_tokens_per_chunk": 1000
+  },
+
+  "cors": {
+    "enabled": false
+  }
+}

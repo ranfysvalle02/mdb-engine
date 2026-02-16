@@ -7,7 +7,7 @@ This allows domain services to work with any data store implementation.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Generic, TypeVar
 
 from bson import ObjectId
@@ -274,7 +274,7 @@ class InMemoryRepository(Repository[T]):
         self._counter += 1
         id = str(self._counter)
         entity.id = id
-        entity.created_at = datetime.utcnow()
+        entity.created_at = datetime.now(timezone.utc)
         self._storage[id] = entity.to_dict()
         return id
 
@@ -285,7 +285,7 @@ class InMemoryRepository(Repository[T]):
         if id not in self._storage:
             return False
         entity.id = id
-        entity.updated_at = datetime.utcnow()
+        entity.updated_at = datetime.now(timezone.utc)
         self._storage[id] = entity.to_dict()
         return True
 
@@ -293,7 +293,7 @@ class InMemoryRepository(Repository[T]):
         if id not in self._storage:
             return False
         self._storage[id].update(fields)
-        self._storage[id]["updated_at"] = datetime.utcnow()
+        self._storage[id]["updated_at"] = datetime.now(timezone.utc)
         return True
 
     async def delete(self, id: str) -> bool:

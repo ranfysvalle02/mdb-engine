@@ -265,6 +265,60 @@ services:
     tmpfs:
       - /tmp:noexec,nosuid,size=100m
 
+  # Member - Cognitive Memory Showcase (Member Berries)
+  member:
+    build:
+      context: ../../..
+      dockerfile: examples/advanced/sso-multi-app/Dockerfile
+      args:
+        APP_USER: appuser
+        APP_UID: 1000
+        APP_GID: 1000
+    container_name: member_app
+    restart: unless-stopped
+    command: >
+      sh -c "
+      echo '=== Starting Member ===' 1>&2;
+      cd /app && exec python -u apps/member/web.py 2>&1
+      "
+    ports:
+      - "${MEMBER_PORT:-8004}:8000"
+    environment:
+      - MONGODB_URI=${MONGODB_URI:-mongodb://admin:password@mongodb:27017/?authSource=admin&directConnection=true}
+      - MONGODB_DB=${MONGODB_DB:-oblivio_apps}
+      - MDB_ENGINE_MASTER_KEY=${MDB_ENGINE_MASTER_KEY:-}
+      # SECURITY: MDB_ENGINE_JWT_SECRET must be set via environment variable for production
+      # For local development only, a default is provided (INSECURE - DO NOT USE IN PRODUCTION!)
+      # Generate a strong secret: python -c 'import secrets; print(secrets.token_urlsafe(32))'
+      # Production: Set MDB_ENGINE_JWT_SECRET in your environment before running docker-compose
+      - MDB_ENGINE_JWT_SECRET=${MDB_ENGINE_JWT_SECRET:-oblivio_jwt_secret_change_in_production_xyz789}
+      - AUTH_HUB_URL=${AUTH_HUB_URL:-http://auth-hub:8000}
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      auth-hub:
+        condition: service_started
+    networks:
+      - oblivio_network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    tmpfs:
+      - /tmp:noexec,nosuid,size=100m
+
 volumes:
   mongodb_data:
     driver: local

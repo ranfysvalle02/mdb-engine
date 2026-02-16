@@ -37,9 +37,16 @@ class TestScopedDataIsolation:
         await engine.register_app(app1_manifest, create_indexes=False)
         await engine.register_app(app2_manifest, create_indexes=False)
 
+        # Get app secrets if secrets manager is configured
+        app1_secret = None
+        app2_secret = None
+        if engine._app_secrets_manager:
+            app1_secret = await engine._app_secrets_manager.get_app_secret("app1")
+            app2_secret = await engine._app_secrets_manager.get_app_secret("app2")
+
         # Get scoped databases
-        db1 = engine.get_scoped_db("app1")
-        db2 = engine.get_scoped_db("app2")
+        db1 = await engine.get_scoped_db("app1", app_token=app1_secret)
+        db2 = await engine.get_scoped_db("app2", app_token=app2_secret)
 
         # Insert data into same collection name
         collection1 = db1.test_collection
@@ -75,7 +82,11 @@ class TestScopedDataIsolation:
 
         await engine.register_app(app_manifest, create_indexes=False)
 
-        scoped_db = engine.get_scoped_db("filter_test")
+        secret = None
+        if engine._app_secrets_manager:
+            secret = await engine._app_secrets_manager.get_app_secret("filter_test")
+
+        scoped_db = await engine.get_scoped_db("filter_test", app_token=secret)
         collection = scoped_db.test_collection
 
         # Insert documents
@@ -112,8 +123,14 @@ class TestScopedDataIsolation:
         await engine.register_app(app1_manifest, create_indexes=False)
         await engine.register_app(app2_manifest, create_indexes=False)
 
-        db1 = engine.get_scoped_db("write_app1")
-        db2 = engine.get_scoped_db("write_app2")
+        write_app1_secret = None
+        write_app2_secret = None
+        if engine._app_secrets_manager:
+            write_app1_secret = await engine._app_secrets_manager.get_app_secret("write_app1")
+            write_app2_secret = await engine._app_secrets_manager.get_app_secret("write_app2")
+
+        db1 = await engine.get_scoped_db("write_app1", app_token=write_app1_secret)
+        db2 = await engine.get_scoped_db("write_app2", app_token=write_app2_secret)
 
         collection1 = db1.shared_collection
         collection2 = db2.shared_collection
@@ -138,6 +155,7 @@ class TestScopedDataIsolation:
 
         # Register multiple apps
         apps = []
+        app_secrets = {}
         for i in range(3):
             manifest = {
                 "schema_version": "2.0",
@@ -147,11 +165,14 @@ class TestScopedDataIsolation:
                 "developer_id": "dev@example.com",
             }
             await engine.register_app(manifest, create_indexes=False)
-            apps.append(f"concurrent_app_{i}")
+            slug = f"concurrent_app_{i}"
+            apps.append(slug)
+            if engine._app_secrets_manager:
+                app_secrets[slug] = await engine._app_secrets_manager.get_app_secret(slug)
 
         # Concurrent writes
         async def write_data(app_slug):
-            db = engine.get_scoped_db(app_slug)
+            db = await engine.get_scoped_db(app_slug, app_token=app_secrets.get(app_slug))
             collection = db.test_collection
             for j in range(5):
                 await collection.insert_one({"app": app_slug, "index": j, "data": f"data_{j}"})
@@ -161,7 +182,7 @@ class TestScopedDataIsolation:
 
         # Verify each app only sees its own data
         for app_slug in apps:
-            db = engine.get_scoped_db(app_slug)
+            db = await engine.get_scoped_db(app_slug, app_token=app_secrets.get(app_slug))
             collection = db.test_collection
             docs = await collection.find({}).to_list(length=100)
 
@@ -195,9 +216,16 @@ class TestScopedDataIsolation:
         await engine.register_app(app1_manifest, create_indexes=False)
         await engine.register_app(app2_manifest, create_indexes=False)
 
+        ms_app1_secret = None
+        ms_app2_secret = None
+        if engine._app_secrets_manager:
+            ms_app1_secret = await engine._app_secrets_manager.get_app_secret("multi_scope_app1")
+            ms_app2_secret = await engine._app_secrets_manager.get_app_secret("multi_scope_app2")
+
         # Create scoped DB with multiple read scopes
-        db = engine.get_scoped_db(
+        db = await engine.get_scoped_db(
             app_slug="multi_scope_app1",
+            app_token=ms_app1_secret,
             read_scopes=["multi_scope_app1", "multi_scope_app2"],
             write_scope="multi_scope_app1",
         )
@@ -209,7 +237,7 @@ class TestScopedDataIsolation:
         await collection.insert_one({"data": "from_app1"})
 
         # Insert app2 data into app2's collection using app2's scoped DB
-        db2 = engine.get_scoped_db("multi_scope_app2")
+        db2 = await engine.get_scoped_db("multi_scope_app2", app_token=ms_app2_secret)
         await db2.shared_collection.insert_one({"data": "from_app2"})
 
         # Multi-scope read should see documents from both collections
@@ -237,7 +265,7 @@ class TestScopedDataIsolation:
         await collection.insert_one({"data": "written_by_multi_scope"})
 
         # Check that writes go to app1's collection
-        db1 = engine.get_scoped_db("multi_scope_app1")
+        db1 = await engine.get_scoped_db("multi_scope_app1", app_token=ms_app1_secret)
         app1_final_results = await db1.shared_collection.find({}).to_list(length=100)
         app2_final_results = await db2.shared_collection.find({}).to_list(length=100)
 
@@ -269,8 +297,14 @@ class TestScopedDataIsolation:
         await engine.register_app(app1_manifest, create_indexes=False)
         await engine.register_app(app2_manifest, create_indexes=False)
 
-        db1 = engine.get_scoped_db("findone_app1")
-        db2 = engine.get_scoped_db("findone_app2")
+        findone_app1_secret = None
+        findone_app2_secret = None
+        if engine._app_secrets_manager:
+            findone_app1_secret = await engine._app_secrets_manager.get_app_secret("findone_app1")
+            findone_app2_secret = await engine._app_secrets_manager.get_app_secret("findone_app2")
+
+        db1 = await engine.get_scoped_db("findone_app1", app_token=findone_app1_secret)
+        db2 = await engine.get_scoped_db("findone_app2", app_token=findone_app2_secret)
 
         # App1 inserts a document
         await db1.test_collection.insert_one({"name": "App1 Doc", "id": 1})

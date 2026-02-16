@@ -1,11 +1,10 @@
 """
-Tests for unified MongoDBEngine with FastAPI integration and Ray support.
+Tests for unified MongoDBEngine with FastAPI integration.
 
 Tests the functionality merged from AppFramework:
 - FastAPI integration via create_app()
 - Lifespan management
 - Auto app token retrieval
-- Optional Ray support
 """
 
 import os
@@ -28,13 +27,6 @@ class TestMongoDBEngineImports:
 
         assert MongoDBEngine is not None
 
-    def test_ray_available_import(self):
-        """Test RAY_AVAILABLE can be imported."""
-        from mdb_engine import RAY_AVAILABLE
-
-        # RAY_AVAILABLE is a boolean
-        assert isinstance(RAY_AVAILABLE, bool)
-
 
 class TestMongoDBEngineInstantiation:
     """Test MongoDBEngine instantiation with various configurations."""
@@ -50,22 +42,7 @@ class TestMongoDBEngineInstantiation:
 
         assert engine.mongo_uri == "mongodb://localhost:27017"
         assert engine.db_name == "test_db"
-        assert engine.enable_ray is False
         assert engine._initialized is False  # noqa: SLF001
-
-    def test_instantiation_with_ray(self):
-        """Test instantiation with Ray enabled."""
-        from mdb_engine import MongoDBEngine
-
-        engine = MongoDBEngine(
-            mongo_uri="mongodb://localhost:27017",
-            db_name="test_db",
-            enable_ray=True,
-            ray_namespace="test_namespace",
-        )
-
-        assert engine.enable_ray is True
-        assert engine.ray_namespace == "test_namespace"
 
     def test_instantiation_with_pool_config(self):
         """Test instantiation with pool configuration."""
@@ -84,18 +61,6 @@ class TestMongoDBEngineInstantiation:
 
 class TestMongoDBEngineProperties:
     """Test MongoDBEngine properties and state."""
-
-    def test_has_ray_false_before_init(self):
-        """Test has_ray is False before initialization."""
-        from mdb_engine import MongoDBEngine
-
-        engine = MongoDBEngine(
-            mongo_uri="mongodb://localhost:27017",
-            db_name="test_db",
-            enable_ray=True,
-        )
-
-        assert engine.has_ray is False
 
     def test_initialized_false_before_init(self):
         """Test _initialized is False before initialization."""
@@ -119,9 +84,7 @@ class TestMongoDBEngineCreateApp:
         from mdb_engine import MongoDBEngine
 
         manifest_path = tmp_path / "manifest.json"
-        manifest_path.write_text(
-            '{"slug": "test_app", "name": "Test App", "schema_version": "2.0"}'
-        )
+        manifest_path.write_text('{"slug": "test_app", "name": "Test App", "schema_version": "2.0"}')
 
         engine = MongoDBEngine(
             mongo_uri="mongodb://localhost:27017",
@@ -142,9 +105,7 @@ class TestMongoDBEngineCreateApp:
         from mdb_engine import MongoDBEngine
 
         manifest_path = tmp_path / "manifest.json"
-        manifest_path.write_text(
-            '{"slug": "test_app", "name": "Test App", "schema_version": "2.0"}'
-        )
+        manifest_path.write_text('{"slug": "test_app", "name": "Test App", "schema_version": "2.0"}')
 
         engine = MongoDBEngine(
             mongo_uri="mongodb://localhost:27017",
@@ -169,9 +130,7 @@ class TestMongoDBEngineLifespan:
         from mdb_engine import MongoDBEngine
 
         manifest_path = tmp_path / "manifest.json"
-        manifest_path.write_text(
-            '{"slug": "test_app", "name": "Test App", "schema_version": "2.0"}'
-        )
+        manifest_path.write_text('{"slug": "test_app", "name": "Test App", "schema_version": "2.0"}')
 
         engine = MongoDBEngine(
             mongo_uri="mongodb://localhost:27017",
@@ -233,26 +192,3 @@ class TestMongoDBEngineAppToken:
             assert engine._app_token_cache["test_app"] == "env_token"  # noqa: SLF001
         finally:
             del os.environ["TEST_APP_SECRET"]
-
-
-class TestRayIntegrationSmoke:
-    """Smoke tests for Ray integration."""
-
-    def test_ray_available_constant(self):
-        """Test RAY_AVAILABLE is accessible."""
-        from mdb_engine.core.ray_integration import RAY_AVAILABLE
-
-        assert isinstance(RAY_AVAILABLE, bool)
-
-    def test_ray_actor_import(self):
-        """Test AppRayActor can be imported."""
-        from mdb_engine.core.ray_integration import AppRayActor
-
-        assert AppRayActor is not None
-
-    def test_ray_decorator_import(self):
-        """Test ray_actor_decorator can be imported."""
-        from mdb_engine.core.ray_integration import ray_actor_decorator
-
-        assert ray_actor_decorator is not None
-        assert callable(ray_actor_decorator)

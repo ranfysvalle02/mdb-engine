@@ -14,15 +14,21 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from mdb_engine.core.service_initialization import ServiceInitializer
-from mdb_engine.database.scoped_wrapper import ScopedMongoWrapper
 
 
 @pytest.fixture
 def mock_get_scoped_db_fn():
-    """Create a mock get_scoped_db function."""
+    """Create a mock get_scoped_db function (async).
 
-    def get_scoped_db(slug: str):
-        mock_db = MagicMock(spec=ScopedMongoWrapper)
+    Returns an async function that produces a MagicMock WITHOUT spec
+    so dynamic attribute access (e.g., db.memories) works the same way
+    ScopedMongoWrapper.__getattr__ does for collection access.
+    """
+
+    async def get_scoped_db(slug: str):
+        mock_db = MagicMock()
+        mock_db._read_scopes = [slug]
+        mock_db._write_scope = slug
         return mock_db
 
     return get_scoped_db
@@ -41,6 +47,17 @@ def service_initializer(mock_get_scoped_db_fn):
 class TestMemoryServiceInitialization:
     """Test memory service initialization."""
 
+    def _setup_connection_manager(self, service_initializer):
+        """Helper to set up connection manager mock for memory service init."""
+        service_initializer._connection_manager = MagicMock()  # noqa: SLF001
+        service_initializer._connection_manager.initialized = True  # noqa: SLF001
+        service_initializer._connection_manager.mongo_client = MagicMock()  # noqa: SLF001
+        service_initializer._connection_manager.mongo_client.delegate = MagicMock()  # noqa: SLF001
+        service_initializer._connection_manager.mongo_client.delegate.__getitem__ = (  # noqa: SLF001
+            MagicMock(return_value=MagicMock())
+        )
+        service_initializer.db_name = "test_db"  # noqa: SLF001
+
     @pytest.mark.asyncio
     async def test_initialize_memory_service_success(self, service_initializer):
         """Test successful memory service initialization."""
@@ -55,7 +72,7 @@ class TestMemoryServiceInitialization:
         }
 
         # Patch get_memory_service factory function - patch at the source module
-        # Also need to mock _ensure_memory_vector_index to avoid AsyncAtlasIndexManager type checks
+        # Also need to mock _ensure_memory_vector_index and _ensure_memory_ttl_indexes
         with (
             patch(
                 "mdb_engine.memory.service.get_memory_service",
@@ -64,18 +81,17 @@ class TestMemoryServiceInitialization:
             patch.object(
                 service_initializer,
                 "_ensure_memory_vector_index",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch.object(
+                service_initializer,
+                "_ensure_memory_ttl_indexes",
+                new_callable=AsyncMock,
                 return_value=None,
             ),
         ):
-            # Also need to provide connection manager for initialization to succeed
-            service_initializer._connection_manager = MagicMock()  # noqa: SLF001
-            service_initializer._connection_manager.initialized = True  # noqa: SLF001
-            service_initializer._connection_manager.mongo_client = MagicMock()  # noqa: SLF001
-            service_initializer._connection_manager.mongo_client.delegate = MagicMock()  # noqa: SLF001
-            service_initializer._connection_manager.mongo_client.delegate.__getitem__ = (  # noqa: SLF001
-                MagicMock(return_value=MagicMock())
-            )
-            service_initializer.db_name = "test_db"  # noqa: SLF001
+            self._setup_connection_manager(service_initializer)
 
             await service_initializer.initialize_memory_service("test_app", memory_config)
             assert "test_app" in service_initializer._memory_services  # noqa: SLF001
@@ -107,8 +123,8 @@ class TestMemoryServiceInitialization:
     @pytest.mark.asyncio
     async def test_initialize_memory_service_config_extraction(self, service_initializer):
         """Test that config is filtered correctly."""
-        mock_memory_service = MagicMock()
-        mock_memory_service.memory = MagicMock()
+        mock_service_instance = MagicMock()
+        mock_service_instance.memory = MagicMock()
 
         memory_config = {
             "enabled": True,
@@ -123,11 +139,6 @@ class TestMemoryServiceInitialization:
             "invalid_key": "should_be_filtered",
         }
 
-        mock_service_instance = MagicMock()
-        mock_service_instance.memory = MagicMock()
-
-        # Patch at the source module since it's imported locally inside the method
-        # Also need to mock _ensure_memory_vector_index to avoid AsyncAtlasIndexManager type checks
         with (
             patch(
                 "mdb_engine.memory.service.get_memory_service",
@@ -136,43 +147,41 @@ class TestMemoryServiceInitialization:
             patch.object(
                 service_initializer,
                 "_ensure_memory_vector_index",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch.object(
+                service_initializer,
+                "_ensure_memory_ttl_indexes",
+                new_callable=AsyncMock,
                 return_value=None,
             ),
         ):
-            # Also need to provide connection manager for initialization to succeed
-            service_initializer._connection_manager = MagicMock()  # noqa: SLF001
-            service_initializer._connection_manager.initialized = True  # noqa: SLF001
-            service_initializer._connection_manager.mongo_client = MagicMock()  # noqa: SLF001
-            service_initializer._connection_manager.mongo_client.delegate = MagicMock()  # noqa: SLF001
-            service_initializer._connection_manager.mongo_client.delegate.__getitem__ = (  # noqa: SLF001
-                MagicMock(return_value=MagicMock())
-            )
-            service_initializer.db_name = "test_db"  # noqa: SLF001
+            self._setup_connection_manager(service_initializer)
 
             await service_initializer.initialize_memory_service("test_app", memory_config)
 
-            # Check that get_memory_service was called with filtered config
+            # Check that get_memory_service was called with config
+            # Note: only 'enabled' and 'provider' are excluded; all other
+            # keys pass through so the builder can read them (the old
+            # allowlist was silently dropping critical cognitive config).
             call_kwargs = mock_factory.call_args[1]
-            assert "invalid_key" not in call_kwargs["config"]
             assert "enabled" not in call_kwargs["config"]
             assert "collection_name" in call_kwargs["config"]
+            # Unknown keys are intentionally passed through (not filtered)
+            assert "invalid_key" in call_kwargs["config"]
 
     @pytest.mark.asyncio
     async def test_initialize_memory_service_collection_prefixing(self, service_initializer):
         """Test that collection names are prefixed with app slug."""
-        mock_memory_service = MagicMock()
-        mock_memory_service.memory = MagicMock()
+        mock_service_instance = MagicMock()
+        mock_service_instance.memory = MagicMock()
 
         memory_config = {
             "enabled": True,
             "collection_name": "memories",  # Not prefixed
         }
 
-        mock_service_instance = MagicMock()
-        mock_service_instance.memory = MagicMock()
-
-        # Patch at the source module since it's imported locally inside the method
-        # Also need to mock _ensure_memory_vector_index to avoid AsyncAtlasIndexManager type checks
         with (
             patch(
                 "mdb_engine.memory.service.get_memory_service",
@@ -181,18 +190,17 @@ class TestMemoryServiceInitialization:
             patch.object(
                 service_initializer,
                 "_ensure_memory_vector_index",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch.object(
+                service_initializer,
+                "_ensure_memory_ttl_indexes",
+                new_callable=AsyncMock,
                 return_value=None,
             ),
         ):
-            # Also need to provide connection manager for initialization to succeed
-            service_initializer._connection_manager = MagicMock()  # noqa: SLF001
-            service_initializer._connection_manager.initialized = True  # noqa: SLF001
-            service_initializer._connection_manager.mongo_client = MagicMock()  # noqa: SLF001
-            service_initializer._connection_manager.mongo_client.delegate = MagicMock()  # noqa: SLF001
-            service_initializer._connection_manager.mongo_client.delegate.__getitem__ = (  # noqa: SLF001
-                MagicMock(return_value=MagicMock())
-            )
-            service_initializer.db_name = "test_db"  # noqa: SLF001
+            self._setup_connection_manager(service_initializer)
 
             await service_initializer.initialize_memory_service("test_app", memory_config)
 
@@ -203,19 +211,14 @@ class TestMemoryServiceInitialization:
     @pytest.mark.asyncio
     async def test_initialize_memory_service_default_collection(self, service_initializer):
         """Test that default collection name is used when not provided."""
-        mock_memory_service = MagicMock()
-        mock_memory_service.memory = MagicMock()
+        mock_service_instance = MagicMock()
+        mock_service_instance.memory = MagicMock()
 
         memory_config = {
             "enabled": True,
             # No collection_name provided
         }
 
-        mock_service_instance = MagicMock()
-        mock_service_instance.memory = MagicMock()
-
-        # Patch at the source module since it's imported locally inside the method
-        # Also need to mock _ensure_memory_vector_index to avoid AsyncAtlasIndexManager type checks
         with (
             patch(
                 "mdb_engine.memory.service.get_memory_service",
@@ -224,18 +227,17 @@ class TestMemoryServiceInitialization:
             patch.object(
                 service_initializer,
                 "_ensure_memory_vector_index",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch.object(
+                service_initializer,
+                "_ensure_memory_ttl_indexes",
+                new_callable=AsyncMock,
                 return_value=None,
             ),
         ):
-            # Also need to provide connection manager for initialization to succeed
-            service_initializer._connection_manager = MagicMock()  # noqa: SLF001
-            service_initializer._connection_manager.initialized = True  # noqa: SLF001
-            service_initializer._connection_manager.mongo_client = MagicMock()  # noqa: SLF001
-            service_initializer._connection_manager.mongo_client.delegate = MagicMock()  # noqa: SLF001
-            service_initializer._connection_manager.mongo_client.delegate.__getitem__ = (  # noqa: SLF001
-                MagicMock(return_value=MagicMock())
-            )
-            service_initializer.db_name = "test_db"  # noqa: SLF001
+            self._setup_connection_manager(service_initializer)
 
             await service_initializer.initialize_memory_service("test_app", memory_config)
 
@@ -245,17 +247,31 @@ class TestMemoryServiceInitialization:
 
     @pytest.mark.asyncio
     async def test_initialize_memory_service_error_handling(self, service_initializer):
-        """Test handling CustomMemoryServiceError."""
-        from mdb_engine.memory import CustomMemoryServiceError
+        """Test handling CognitiveMemoryServiceError."""
+        from mdb_engine.memory.cognitive import CognitiveMemoryServiceError
 
         memory_config = {"enabled": True, "collection_name": "memories"}
 
         # Patch get_memory_service to raise an error during initialization
-        # Patch at the source module since it's imported locally inside the method
-        with patch(
-            "mdb_engine.memory.service.get_memory_service",
-            side_effect=CustomMemoryServiceError("Service error"),
+        with (
+            patch(
+                "mdb_engine.memory.service.get_memory_service",
+                side_effect=CognitiveMemoryServiceError("Service error"),
+            ),
+            patch.object(
+                service_initializer,
+                "_ensure_memory_vector_index",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch.object(
+                service_initializer,
+                "_ensure_memory_ttl_indexes",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
         ):
+            self._setup_connection_manager(service_initializer)
             # Should not raise, just log error
             await service_initializer.initialize_memory_service("test_app", memory_config)
 
@@ -387,7 +403,10 @@ class TestDataSeeding:
         mock_collection.insert_many = AsyncMock(return_value=MagicMock(inserted_ids=["id1", "id2"]))
         mock_db.__getitem__ = lambda name: mock_collection  # noqa: SLF001
 
-        service_initializer.get_scoped_db_fn = lambda slug: mock_db
+        async def _async_get_db(slug):
+            return mock_db
+
+        service_initializer.get_scoped_db_fn = _async_get_db
 
         with patch(
             "mdb_engine.core.seeding.seed_initial_data",
@@ -409,7 +428,7 @@ class TestDataSeeding:
         # Set the attribute directly (getattr is used in seeding.py line 45)
         mock_db.app_seeding_metadata = mock_metadata_collection
 
-        def get_scoped_db(slug):
+        async def get_scoped_db(slug):
             return mock_db
 
         service_initializer.get_scoped_db_fn = get_scoped_db
@@ -483,7 +502,10 @@ class TestDataSeeding:
         mock_collection.insert_many = AsyncMock(return_value=MagicMock(inserted_ids=["id1"]))
         mock_db.__getitem__ = lambda name: mock_collection  # noqa: SLF001
 
-        service_initializer.get_scoped_db_fn = lambda slug: mock_db
+        async def _async_get_db(slug):
+            return mock_db
+
+        service_initializer.get_scoped_db_fn = _async_get_db
 
         # The datetime parsing errors should be caught and handled gracefully
         with patch("mdb_engine.core.seeding.seed_initial_data") as mock_seed:
@@ -565,9 +587,7 @@ class TestObservabilitySetup:
         with patch("mdb_engine.core.service_initialization.contextual_logger") as mock_logger:
             # Simulate an error in the setup process
             mock_logger.info.side_effect = KeyError("Missing key")
-            await service_initializer.setup_observability(
-                "test_app", manifest, observability_config
-            )
+            await service_initializer.setup_observability("test_app", manifest, observability_config)
 
         # Should not raise, just log warning
 
@@ -723,8 +743,7 @@ class TestMemoryServiceMultiAppContext:
         # Service not initialized - should return None, not raise error
         service = service_initializer.get_memory_service("nonexistent_app")
         assert service is None, (
-            "get_memory_service should return None when service not initialized, "
-            "not raise an error"
+            "get_memory_service should return None when service not initialized, " "not raise an error"
         )
 
     @pytest.mark.asyncio
@@ -745,8 +764,6 @@ class TestMemoryServiceMultiAppContext:
             "embedding_model_dims": 1536,
         }
 
-        # Patch at the source module since it's imported locally inside the method
-        # Also need to mock _ensure_memory_vector_index to avoid AsyncAtlasIndexManager type checks
         with (
             patch(
                 "mdb_engine.memory.service.get_memory_service",
@@ -755,10 +772,17 @@ class TestMemoryServiceMultiAppContext:
             patch.object(
                 service_initializer,
                 "_ensure_memory_vector_index",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch.object(
+                service_initializer,
+                "_ensure_memory_ttl_indexes",
+                new_callable=AsyncMock,
                 return_value=None,
             ),
         ):
-            # Also need to provide connection manager for initialization to succeed
+            # Set up connection manager
             service_initializer._connection_manager = MagicMock()  # noqa: SLF001
             service_initializer._connection_manager.initialized = True  # noqa: SLF001
             service_initializer._connection_manager.mongo_client = MagicMock()  # noqa: SLF001
@@ -767,6 +791,7 @@ class TestMemoryServiceMultiAppContext:
                 MagicMock(return_value=MagicMock())
             )
             service_initializer.db_name = "test_db"  # noqa: SLF001
+
             # Initialize first time
             await service_initializer.initialize_memory_service("test_app", memory_config)
             first_service = service_initializer.get_memory_service("test_app")
@@ -802,9 +827,7 @@ class TestMemoryServiceMultiAppContext:
         assert service is None, "Memory service should not be initialized when enabled: false"
 
     @pytest.mark.asyncio
-    async def test_memory_service_initialization_skips_when_missing_config(
-        self, service_initializer
-    ):
+    async def test_memory_service_initialization_skips_when_missing_config(self, service_initializer):
         """
         Test that memory service initialization handles missing config gracefully.
 

@@ -7,7 +7,7 @@ This module is part of MDB_ENGINE - MongoDB Engine.
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from bson.objectid import ObjectId
@@ -67,17 +67,13 @@ class SessionManager:
 
         try:
             # Index for user session queries
-            await self.collection.create_index(
-                [("user_id", 1), ("last_seen", -1)], name="user_id_last_seen_idx"
-            )
+            await self.collection.create_index([("user_id", 1), ("last_seen", -1)], name="user_id_last_seen_idx")
 
             # Index for device lookup
             await self.collection.create_index("device_id", name="device_id_idx")
 
             # Index for refresh token lookup
-            await self.collection.create_index(
-                "refresh_jti", unique=True, name="refresh_jti_unique_idx"
-            )
+            await self.collection.create_index("refresh_jti", unique=True, name="refresh_jti_unique_idx")
 
             self._indexes_created = True
             logger.info("Session manager indexes created successfully")
@@ -130,7 +126,7 @@ class SessionManager:
                         oldest = active_sessions[-1]  # Last in sorted list (oldest)
                         await self.revoke_session(oldest["_id"])
 
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             session_doc = {
                 "user_id": user_id,
                 "device_id": device_id,
@@ -158,9 +154,7 @@ class SessionManager:
             result = await self.collection.insert_one(session_doc)
             session_doc["_id"] = result.inserted_id
 
-            logger.debug(
-                f"Created session {result.inserted_id} for user {user_id} on device {device_id}"
-            )
+            logger.debug(f"Created session {result.inserted_id} for user {user_id} on device {device_id}")
             return session_doc
         except (
             OperationFailure,
@@ -172,9 +166,7 @@ class SessionManager:
             logger.error(f"Error creating session for user {user_id}: {e}", exc_info=True)
             return None
 
-    async def update_session_activity(
-        self, refresh_jti: str, ip_address: str | None = None
-    ) -> bool:
+    async def update_session_activity(self, refresh_jti: str, ip_address: str | None = None) -> bool:
         """
         Update session last_seen timestamp (activity tracking).
 
@@ -187,7 +179,7 @@ class SessionManager:
         """
         try:
             update_data = {
-                "last_seen": datetime.utcnow(),
+                "last_seen": datetime.now(timezone.utc),
             }
             if ip_address:
                 update_data["ip_address"] = ip_address
@@ -286,9 +278,7 @@ class SessionManager:
         self.fingerprinting_enabled = enabled
         self.fingerprinting_strict = strict
 
-    async def get_user_sessions(
-        self, user_id: str, active_only: bool = True
-    ) -> list[dict[str, Any]]:
+    async def get_user_sessions(self, user_id: str, active_only: bool = True) -> list[dict[str, Any]]:
         """
         Get all sessions for a user.
 
@@ -338,7 +328,7 @@ class SessionManager:
 
             result = await self.collection.update_one(
                 {"_id": session_id},
-                {"$set": {"active": False, "revoked_at": datetime.utcnow()}},
+                {"$set": {"active": False, "revoked_at": datetime.now(timezone.utc)}},
             )
 
             if result.modified_count > 0:
@@ -371,7 +361,7 @@ class SessionManager:
                 query["device_id"] = {"$ne": exclude_device_id}
 
             result = await self.collection.update_many(
-                query, {"$set": {"active": False, "revoked_at": datetime.utcnow()}}
+                query, {"$set": {"active": False, "revoked_at": datetime.now(timezone.utc)}}
             )
 
             revoked_count = result.modified_count
@@ -399,7 +389,7 @@ class SessionManager:
             Number of sessions cleaned up
         """
         try:
-            cutoff_time = datetime.utcnow() - timedelta(seconds=self.inactivity_timeout)
+            cutoff_time = datetime.now(timezone.utc) - timedelta(seconds=self.inactivity_timeout)
 
             query = {"active": True, "last_seen": {"$lt": cutoff_time}}
             if user_id:
@@ -410,7 +400,7 @@ class SessionManager:
                 {
                     "$set": {
                         "active": False,
-                        "revoked_at": datetime.utcnow(),
+                        "revoked_at": datetime.now(timezone.utc),
                         "reason": "inactivity",
                     }
                 },
@@ -443,7 +433,7 @@ class SessionManager:
         try:
             result = await self.collection.update_one(
                 {"refresh_jti": refresh_jti, "active": True},
-                {"$set": {"active": False, "revoked_at": datetime.utcnow()}},
+                {"$set": {"active": False, "revoked_at": datetime.now(timezone.utc)}},
             )
             return result.modified_count > 0
         except (

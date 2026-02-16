@@ -116,15 +116,10 @@ def validate_csrf_token(
 
             # Verify signature
             message = f"{raw_token}:{timestamp_str}"
-            expected_sig = hmac.new(secret.encode(), message.encode(), hashlib.sha256).hexdigest()[
-                :16
-            ]
+            expected_sig = hmac.new(secret.encode(), message.encode(), hashlib.sha256).hexdigest()[:16]
 
             if not hmac.compare_digest(signature, expected_sig):
-                logger.warning(
-                    f"CSRF token signature mismatch. "
-                    f"Token format: signed, Has secret: {bool(secret)}"
-                )
+                logger.warning(f"CSRF token signature mismatch. " f"Token format: signed, Has secret: {bool(secret)}")
                 return False
 
             return True
@@ -192,8 +187,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         self.secure_cookies = secure_cookies
 
         logger.info(
-            f"CSRFMiddleware initialized (exempt_routes={self.exempt_routes}, "
-            f"rotate_tokens={rotate_tokens})"
+            f"CSRFMiddleware initialized (exempt_routes={self.exempt_routes}, " f"rotate_tokens={rotate_tokens})"
         )
 
     def _is_exempt(self, path: str) -> bool:
@@ -245,10 +239,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                 apps_checked.append(app_title)
                 websocket_configs = getattr(app.state, "websocket_configs", None)
                 if websocket_configs:
-                    logger.debug(
-                        f"Found websocket_configs on app '{app_title}' "
-                        f"(checked: {apps_checked})"
-                    )
+                    logger.debug(f"Found websocket_configs on app '{app_title}' " f"(checked: {apps_checked})")
                     break
                 parent_app = getattr(app, "app", None)
                 if parent_app is app:  # Prevent infinite loop
@@ -258,16 +249,14 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         if not websocket_configs:
             # No WebSocket configs found - use default (CSRF required for security by default)
             logger.debug(
-                f"No websocket_configs found anywhere for path '{path}' - "
-                f"using default csrf_required=true"
+                f"No websocket_configs found anywhere for path '{path}' - " f"using default csrf_required=true"
             )
             return True
 
         # Normalize path for matching (handle trailing slashes)
         normalized_path = path.rstrip("/")
         logger.debug(
-            f"Checking CSRF requirement for path '{normalized_path}' "
-            f"against {len(websocket_configs)} app config(s)"
+            f"Checking CSRF requirement for path '{normalized_path}' " f"against {len(websocket_configs)} app config(s)"
         )
 
         # Try to find matching app config
@@ -304,20 +293,19 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                         # Return csrf_required setting (defaults to True - security by default)
                         csrf_required = auth_config.get("csrf_required", True)
                         logger.info(
-                            f"✅ WebSocket '{normalized_path}' csrf_required={csrf_required} "
+                            f"WebSocket '{normalized_path}' csrf_required={csrf_required} "
                             f"(from app='{app_slug}', endpoint='{endpoint_name}', "
                             f"endpoint_path='{normalized_endpoint}')"
                         )
                         return csrf_required
                     else:
                         logger.debug(
-                            f"WebSocket '{normalized_path}' auth_config is not a dict: "
-                            f"{type(auth_config)}"
+                            f"WebSocket '{normalized_path}' auth_config is not a dict: " f"{type(auth_config)}"
                         )
 
         # No matching config found - use default (CSRF required for security by default)
         logger.debug(
-            f"❌ No WebSocket config match for '{normalized_path}' "
+            f"No WebSocket config match for '{normalized_path}' "
             f"(checked {len(websocket_configs)} app(s)) - using default csrf_required=true"
         )
         return True
@@ -346,11 +334,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                     for _endpoint_name, endpoint_config in config.items():
                         endpoint_path = endpoint_config.get("path", "").rstrip("/") or "/"
                         # Try various path matching patterns
-                        expected_full_path = (
-                            f"/{app_slug}{endpoint_path}"
-                            if endpoint_path != "/"
-                            else f"/{app_slug}"
-                        )
+                        expected_full_path = f"/{app_slug}{endpoint_path}" if endpoint_path != "/" else f"/{app_slug}"
                         # Match patterns:
                         # 1. Exact match with app prefix: /app-slug/endpoint-path
                         # 2. Endpoint-only match: /endpoint-path (if path ends with endpoint)
@@ -367,16 +351,14 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                     if path_matches_websocket_route:
                         break
 
-        is_websocket = has_upgrade_header and (
-            has_connection_upgrade or path_matches_websocket_route
-        )
+        is_websocket = has_upgrade_header and (has_connection_upgrade or path_matches_websocket_route)
 
         # Only log actual WebSocket upgrades at INFO level, use DEBUG for non-WebSocket requests
         if is_websocket:
-            logger.info(f"🔍 WebSocket upgrade detection for {path}: is_websocket=True")
+            logger.info(f"WebSocket upgrade detection for {path}: is_websocket=True")
         else:
             # Use DEBUG level for non-WebSocket requests to reduce log noise
-            logger.debug(f"🔍 WebSocket upgrade detection for {path}: is_websocket=False")
+            logger.debug(f"WebSocket upgrade detection for {path}: is_websocket=False")
         return is_websocket
 
     def _get_allowed_origins(self, request: Request) -> list[str]:
@@ -476,8 +458,6 @@ class CSRFMiddleware(BaseHTTPMiddleware):
 
     def _is_development_mode(self) -> bool:
         """Check if running in development mode."""
-        import os
-
         env = os.getenv("ENVIRONMENT", "").lower()
         g_nome_env = os.getenv("G_NOME_ENV", "").lower()
         return env in ["development", "dev"] or g_nome_env in ["development", "dev"]
@@ -513,16 +493,13 @@ class CSRFMiddleware(BaseHTTPMiddleware):
 
         for allowed in allowed_origins:
             if allowed == "*":
-                logger.warning(
-                    "WebSocket Origin validation using wildcard '*' - "
-                    "not recommended for production"
-                )
+                logger.warning("WebSocket Origin validation using wildcard '*' - " "not recommended for production")
                 return True
 
             normalized_allowed = self._normalize_origin(allowed)
             if normalized_origin == normalized_allowed:
                 logger.debug(
-                    f"✅ WebSocket origin validated: {origin} matches {allowed} "
+                    f"WebSocket origin validated: {origin} matches {allowed} "
                     f"(normalized: {normalized_origin} == {normalized_allowed})"
                 )
                 return True
@@ -531,7 +508,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         cors_enabled = cors_config.get("enabled", False) if cors_config else False
         normalized_allowed_list = [self._normalize_origin(a) for a in allowed_origins]
         logger.warning(
-            f"❌ WebSocket upgrade rejected - invalid Origin: {origin} "
+            f"WebSocket upgrade rejected - invalid Origin: {origin} "
             f"(normalized: {normalized_origin}, allowed: {allowed_origins}, "
             f"normalized_allowed: {normalized_allowed_list}, "
             f"app: {getattr(request.app, 'title', 'unknown')}, "
@@ -557,17 +534,8 @@ class CSRFMiddleware(BaseHTTPMiddleware):
 
         # Log ALL WebSocket-related requests IMMEDIATELY (before any processing)
         if upgrade_header or "websocket" in path.lower() or connection_header == "upgrade":
-            import sys
-
-            print(
-                f"🚨 [CSRF MIDDLEWARE ENTRY] {method} {path}, "
-                f"upgrade={upgrade_header}, connection={connection_header}, "
-                f"origin={origin_header}",
-                file=sys.stderr,
-                flush=True,
-            )
-            logger.info(
-                f"🚨 [CSRF MIDDLEWARE ENTRY] {method} {path}, "
+            logger.debug(
+                f"[CSRF MIDDLEWARE ENTRY] {method} {path}, "
                 f"upgrade={upgrade_header}, connection={connection_header}, "
                 f"origin={origin_header}"
             )
@@ -576,41 +544,32 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             # CRITICAL: Log ALL requests to verify middleware is running
             # Always log WebSocket-related requests
             if upgrade_header or "websocket" in path.lower() or connection_header == "upgrade":
-                logger.info(
-                    f"🔍 CSRF middleware INTERCEPTED: {method} {path}, "
+                logger.debug(
+                    f"CSRF middleware INTERCEPTED: {method} {path}, "
                     f"upgrade={upgrade_header}, connection={connection_header}, "
                     f"origin={origin_header}"
-                )
-                import sys
-
-                print(
-                    f"🔍 [CSRF MIDDLEWARE] {method} {path}, "
-                    f"upgrade={upgrade_header}, origin={origin_header}",
-                    file=sys.stderr,
-                    flush=True,
                 )
 
             # CRITICAL: Handle WebSocket upgrade requests BEFORE other CSRF checks
             # WebSocket upgrades use cookie-based authentication and require CSRF validation
             is_ws_upgrade = self._is_websocket_upgrade(request)
-            logger.info(f"🔍 WebSocket upgrade detection for {path}: is_websocket={is_ws_upgrade}")
+            logger.info(f"WebSocket upgrade detection for {path}: is_websocket={is_ws_upgrade}")
 
             if is_ws_upgrade:
                 logger.info(
-                    f"🔌 CSRF middleware processing WebSocket upgrade: {path}, "
-                    f"origin: {request.headers.get('origin')}"
+                    f"CSRF middleware processing WebSocket upgrade: {path}, " f"origin: {request.headers.get('origin')}"
                 )
                 # Always validate origin for WebSocket connections (CSWSH protection)
                 origin_valid = self._validate_websocket_origin(request)
                 logger.info(
-                    f"🔍 WebSocket origin validation for {path}: "
+                    f"WebSocket origin validation for {path}: "
                     f"origin={request.headers.get('origin')}, "
                     f"allowed={self._get_allowed_origins(request)}, "
                     f"valid={origin_valid}"
                 )
                 if not origin_valid:
                     logger.warning(
-                        f"❌ WebSocket origin validation failed for {path}: "
+                        f"WebSocket origin validation failed for {path}: "
                         f"origin={request.headers.get('origin')}, "
                         f"allowed={self._get_allowed_origins(request)}"
                     )
@@ -626,18 +585,14 @@ class CSRFMiddleware(BaseHTTPMiddleware):
 
                 auth_token_cookie = request.cookies.get(AUTH_COOKIE_NAME)
                 logger.info(
-                    f"🔍 WebSocket auth check for {path}: "
-                    f"auth_cookie={'present' if auth_token_cookie else 'missing'}"
+                    f"WebSocket auth check for {path}: " f"auth_cookie={'present' if auth_token_cookie else 'missing'}"
                 )
 
                 # Check if ticket/session key authentication is required
                 # (csrf_required flag controls whether WebSocket needs ticket/session key)
                 # If csrf_required=false, we skip ticket validation entirely
                 csrf_required = self._websocket_requires_csrf(request, path)
-                logger.info(
-                    f"🔍 WebSocket auth check for {path}: "
-                    f"ticket/session_key_required={csrf_required}"
-                )
+                logger.info(f"WebSocket auth check for {path}: " f"ticket/session_key_required={csrf_required}")
 
                 # Only validate ticket/session key if:
                 # 1. Auth cookie is present (user is authenticated)
@@ -671,9 +626,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                     )
 
                     # Check for ticket (preferred for single-app setups)
-                    ticket = request.query_params.get("ticket") or request.headers.get(
-                        "X-WebSocket-Ticket"
-                    )
+                    ticket = request.query_params.get("ticket") or request.headers.get("X-WebSocket-Ticket")
 
                     if session_key:
                         # Session key authentication (bypasses CSRF - encrypted and secure)
@@ -686,9 +639,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                         while app:
                             app_title = getattr(app, "title", "unknown")
                             apps_checked.append(app_title)
-                            websocket_session_manager = getattr(
-                                app.state, "websocket_session_manager", None
-                            )
+                            websocket_session_manager = getattr(app.state, "websocket_session_manager", None)
                             if websocket_session_manager:
                                 logger.debug(
                                     f"Found websocket_session_manager on app '{app_title}' "
@@ -702,15 +653,13 @@ class CSRFMiddleware(BaseHTTPMiddleware):
 
                         if not websocket_session_manager:
                             logger.error(
-                                f"❌ WebSocket session key provided for {path} but "
-                                "websocket_session_manager not found"
+                                f"WebSocket session key provided for {path} but " "websocket_session_manager not found"
                             )
                             return JSONResponse(
                                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                                 content={
                                     "detail": (
-                                        "WebSocket session manager not available. "
-                                        "Server configuration error."
+                                        "WebSocket session manager not available. " "Server configuration error."
                                     )
                                 },
                             )
@@ -719,7 +668,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                         # This ensures TestClient can catch WebSocketDisconnect exceptions
                         # The handler will validate and raise WebSocketDisconnect if invalid
                         logger.info(
-                            f"✅ WebSocket session key provided for {path} - "
+                            f"WebSocket session key provided for {path} - "
                             "CSRF validation bypassed (session key will be validated in handler)"
                         )
                     elif ticket:
@@ -738,9 +687,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                                 apps_checked.append(app_title)
 
                                 # Get ticket store
-                                websocket_ticket_store = getattr(
-                                    app.state, "websocket_ticket_store", None
-                                )
+                                websocket_ticket_store = getattr(app.state, "websocket_ticket_store", None)
                                 if websocket_ticket_store:
                                     logger.debug(
                                         f"Found websocket_ticket_store on app '{app_title}' "
@@ -756,32 +703,26 @@ class CSRFMiddleware(BaseHTTPMiddleware):
 
                         if not websocket_ticket_store:
                             logger.error(
-                                f"❌ WebSocket ticket store not available for {path}. "
+                                f"WebSocket ticket store not available for {path}. "
                                 "Ticket authentication requires websocket_ticket_store "
                                 "to be initialized."
                             )
                             return JSONResponse(
                                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                                 content={
-                                    "detail": (
-                                        "WebSocket ticket store not available. "
-                                        "Server configuration error."
-                                    )
+                                    "detail": ("WebSocket ticket store not available. " "Server configuration error.")
                                 },
                             )
 
                         # Validate and consume ticket (atomic operation - single-use)
                         try:
                             logger.info(
-                                f"🔍 Validating WebSocket ticket for {path}: "
-                                f"ticket={ticket[:16]}... (truncated)"
+                                f"Validating WebSocket ticket for {path}: " f"ticket={ticket[:16]}... (truncated)"
                             )
-                            ticket_data = await websocket_ticket_store.validate_and_consume_ticket(
-                                ticket
-                            )
+                            ticket_data = await websocket_ticket_store.validate_and_consume_ticket(ticket)
                             if not ticket_data:
                                 logger.error(
-                                    f"❌ WebSocket ticket validation failed for {path}. "
+                                    f"WebSocket ticket validation failed for {path}. "
                                     f"Ticket: {ticket[:16]}... "
                                     "Ticket may be expired, invalid, or already used."
                                 )
@@ -798,7 +739,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                             # Store ticket data in request state for WebSocket handler
                             request.state.websocket_session = ticket_data
                             logger.info(
-                                f"✅ WebSocket ticket validated for {path} "
+                                f"WebSocket ticket validated for {path} "
                                 f"(user_id: {ticket_data.get('user_id')}, "
                                 f"user_email: {ticket_data.get('user_email')})"
                             )
@@ -809,15 +750,12 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                             RuntimeError,
                         ) as e:
                             logger.error(
-                                f"❌ Error validating WebSocket ticket for {path}: {e}",
+                                f"Error validating WebSocket ticket for {path}: {e}",
                                 exc_info=True,
                             )
                             return JSONResponse(
                                 status_code=status.HTTP_403_FORBIDDEN,
-                                content={
-                                    "detail": "WebSocket ticket validation error. "
-                                    "Generate a new ticket."
-                                },
+                                content={"detail": "WebSocket ticket validation error. " "Generate a new ticket."},
                             )
                     else:
                         # Fallback to CSRF cookie validation (backward compatibility)
@@ -828,7 +766,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
 
                         if not cookie_token:
                             logger.error(
-                                f"❌ WebSocket upgrade missing CSRF cookie for {path}. "
+                                f"WebSocket upgrade missing CSRF cookie for {path}. "
                                 "CSRF protection is required. "
                                 "Generate ticket via /auth/ticket endpoint or include CSRF cookie."
                             )
@@ -847,7 +785,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                         if header_token:
                             if not hmac.compare_digest(cookie_token, header_token):
                                 logger.error(
-                                    f"❌ WebSocket CSRF token mismatch for {path}. "
+                                    f"WebSocket CSRF token mismatch for {path}. "
                                     "Header token does not match cookie token."
                                 )
                                 return JSONResponse(
@@ -857,41 +795,33 @@ class CSRFMiddleware(BaseHTTPMiddleware):
 
                         # Validate CSRF token (check signature if secret is used)
                         if not self._validate_csrf_token(cookie_token, request):
-                            logger.error(f"❌ WebSocket CSRF token validation failed for {path}")
+                            logger.error(f"WebSocket CSRF token validation failed for {path}")
                             return JSONResponse(
                                 status_code=status.HTTP_403_FORBIDDEN,
                                 content={"detail": "CSRF token validation failed."},
                             )
 
-                        logger.info(
-                            f"✅ WebSocket CSRF cookie validated for {path} "
-                            "(backward compatibility mode)"
-                        )
+                        logger.info(f"WebSocket CSRF cookie validated for {path} " "(backward compatibility mode)")
                 elif auth_token_cookie and not csrf_required:
                     logger.info(
-                        f"✅ WebSocket CSRF validation skipped for {path} "
+                        f"WebSocket CSRF validation skipped for {path} "
                         f"(csrf_required=false) - only origin validation performed"
                     )
                 elif not auth_token_cookie:
                     logger.info(
-                        f"✅ WebSocket connection allowed for {path} "
+                        f"WebSocket connection allowed for {path} "
                         f"(no auth cookie - WebSocket handler will authenticate)"
                     )
 
-                validation_status = (
-                    "CSRF/ticket validated"
-                    if auth_token_cookie and csrf_required
-                    else "CSRF skipped"
-                )
+                validation_status = "CSRF/ticket validated" if auth_token_cookie and csrf_required else "CSRF skipped"
                 logger.info(
-                    f"✅ WebSocket upgrade CSRF validation passed for {path} "
-                    f"(Origin validated, {validation_status})"
+                    f"WebSocket upgrade CSRF validation passed for {path} " f"(Origin validated, {validation_status})"
                 )
 
                 # Origin validated (and CSRF/ticket validated if authenticated
                 # and csrf_required=true)
                 # Allow WebSocket upgrade to proceed to WebSocket handler
-                logger.debug(f"✅ WebSocket upgrade request allowed to proceed: {path}")
+                logger.debug(f"WebSocket upgrade request allowed to proceed: {path}")
                 return await call_next(request)
 
         except (
@@ -903,13 +833,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             ConnectionError,
         ) as e:
             # Catch exceptions in WebSocket handling to see what's failing
-            logger.error(
-                f"❌ CRITICAL: Exception in CSRF middleware WebSocket handling: {e}", exc_info=True
-            )
-            import sys
-
-            print(f"❌ [CSRF MIDDLEWARE EXCEPTION] {e}", file=sys.stderr, flush=True)
-            # Re-raise to see the full error
+            logger.error(f"CRITICAL: Exception in CSRF middleware WebSocket handling: {e}", exc_info=True)
             raise
 
         if self._is_exempt(path):
@@ -926,9 +850,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                 self._set_csrf_cookie(request, response, token)
 
             # Make token available in request state for templates
-            request.state.csrf_token = request.cookies.get(self.cookie_name) or generate_csrf_token(
-                self.secret
-            )
+            request.state.csrf_token = request.cookies.get(self.cookie_name) or generate_csrf_token(self.secret)
 
             return response
 

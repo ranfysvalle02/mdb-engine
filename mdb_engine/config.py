@@ -80,14 +80,10 @@ class EngineConfig:
             ValueError: If required configuration is missing or invalid
         """
         if not self.mongo_uri:
-            raise ValueError(
-                "mongo_uri is required (set MONGO_URI environment variable or pass directly)"
-            )
+            raise ValueError("mongo_uri is required (set MONGO_URI environment variable or pass directly)")
 
         if not self.db_name:
-            raise ValueError(
-                "db_name is required (set DB_NAME environment variable or pass directly)"
-            )
+            raise ValueError("db_name is required (set DB_NAME environment variable or pass directly)")
 
         if self.max_pool_size < 1:
             raise ValueError(f"max_pool_size must be >= 1, got {self.max_pool_size}")
@@ -97,15 +93,11 @@ class EngineConfig:
 
         if self.min_pool_size > self.max_pool_size:
             raise ValueError(
-                f"min_pool_size ({self.min_pool_size}) cannot be greater than "
-                f"max_pool_size ({self.max_pool_size})"
+                f"min_pool_size ({self.min_pool_size}) cannot be greater than " f"max_pool_size ({self.max_pool_size})"
             )
 
         if self.server_selection_timeout_ms < 1000:
-            raise ValueError(
-                f"server_selection_timeout_ms must be >= 1000, got "
-                f"{self.server_selection_timeout_ms}"
-            )
+            raise ValueError(f"server_selection_timeout_ms must be >= 1000, got " f"{self.server_selection_timeout_ms}")
 
         if self.authz_cache_ttl < 0:
             raise ValueError(f"authz_cache_ttl must be >= 0, got {self.authz_cache_ttl}")

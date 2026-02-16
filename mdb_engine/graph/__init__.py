@@ -52,6 +52,17 @@ FastAPI Dependency Injection:
 from .base import BaseGraphService, GraphServiceError
 from .service import GraphService, get_graph_service
 
+# GraphRAG components
+try:
+    from .community import CommunityService, get_community_service
+    from .query_classifier import QueryClassifier, get_query_classifier
+except ImportError:
+    # Graceful degradation if dependencies missing
+    CommunityService = None
+    get_community_service = None
+    QueryClassifier = None
+    get_query_classifier = None
+
 __all__ = [
     # Base classes
     "BaseGraphService",
@@ -60,4 +71,9 @@ __all__ = [
     "GraphService",
     # Factory function
     "get_graph_service",
+    # GraphRAG components
+    "CommunityService",
+    "get_community_service",
+    "QueryClassifier",
+    "get_query_classifier",
 ]

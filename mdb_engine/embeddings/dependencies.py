@@ -27,9 +27,7 @@ if TYPE_CHECKING:
 from .service import EmbeddingService, get_embedding_service
 
 
-def get_embedding_service_for_app(
-    app_slug: str, engine: "MongoDBEngine"
-) -> EmbeddingService | None:
+def get_embedding_service_for_app(app_slug: str, engine: "MongoDBEngine") -> EmbeddingService | None:
     """
     Get embedding service for a specific app using the engine instance.
 
@@ -53,7 +51,7 @@ def get_embedding_service_for_app(
 
         service = get_embedding_service_for_app("my_app", engine)
         if service:
-            embeddings = await service.embed_chunks(["Hello world"])
+            embeddings = await service.embed(["Hello world"])
     """
     if engine is None:
         return None

@@ -8,10 +8,10 @@ Provides:
 
 Usage:
     from fastapi import Depends
-    from mdb_engine.dependencies import RequestContext
+    from mdb_engine.dependencies import RequestContext, get_request_context
 
     @app.get("/users/{user_id}")
-    async def get_user(user_id: str, ctx: RequestContext = Depends()):
+    async def get_user(user_id: str, ctx: RequestContext = Depends(get_request_context)):
         user = await ctx.uow.users.get(user_id)
         return user
 """
@@ -34,6 +34,7 @@ if TYPE_CHECKING:
     from .database.scoped_wrapper import ScopedMongoWrapper
     from .embeddings.service import EmbeddingService
     from .memory import BaseMemoryService
+    from .profile.service import ProfileService
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +86,7 @@ async def get_scoped_db(request: Request) -> "ScopedMongoWrapper":
     """Get a scoped database wrapper for the current app."""
     engine = await get_engine(request)
     slug = await get_app_slug(request)
-    return engine.get_scoped_db(slug)
+    return await engine.get_scoped_db(slug)
 
 
 async def get_unit_of_work(request: Request) -> UnitOfWork:
@@ -121,13 +122,50 @@ async def get_embedding_service(request: Request) -> "EmbeddingService":
         raise HTTPException(503, f"Failed to initialize embedding service: {e}") from e
 
 
-async def get_memory_service(request: Request) -> Optional["BaseMemoryService"]:
-    """Get the memory service if configured (defaults to CustomMemoryService)."""
+async def get_memory_service(request: Request) -> "BaseMemoryService":
+    """Get the memory service for the current app.
+
+    Raises:
+        HTTPException(503): If the engine, app slug, or memory service is
+            not available.
+    """
     engine = getattr(request.app.state, "engine", None)
+    if not engine:
+        raise HTTPException(503, "MDB-Engine not initialized")
     slug = getattr(request.app.state, "app_slug", None)
-    if not engine or not slug:
-        return None
-    return engine.get_memory_service(slug)
+    if not slug:
+        raise HTTPException(503, "App slug not configured")
+    service = engine.get_memory_service(slug)
+    if service is None:
+        raise HTTPException(
+            503,
+            f"Memory service not configured for app '{slug}'. "
+            "Enable it with memory_config.enabled=true in your manifest.",
+        )
+    return service
+
+
+async def get_profile_service(request: Request) -> "ProfileService":
+    """Get the profile service for the current app.
+
+    Raises:
+        HTTPException(503): If the engine, app slug, or profile service is
+            not available.
+    """
+    engine = getattr(request.app.state, "engine", None)
+    if not engine:
+        raise HTTPException(503, "MDB-Engine not initialized")
+    slug = getattr(request.app.state, "app_slug", None)
+    if not slug:
+        raise HTTPException(503, "App slug not configured")
+    service = engine.get_profile_service(slug)
+    if service is None:
+        raise HTTPException(
+            503,
+            f"Profile service not configured for app '{slug}'. "
+            "Enable it with profile_config.enabled=true in your manifest.",
+        )
+    return service
 
 
 async def get_llm_client(request: Request) -> Union["AzureOpenAI", "OpenAI"]:
@@ -170,6 +208,16 @@ async def get_authz_provider(request: Request) -> Optional["AuthorizationProvide
     return getattr(request.app.state, "authz_provider", None)
 
 
+async def get_oauth_service(request: Request) -> Any:
+    """Get the OAuthService for the current app (if OAuth is configured).
+
+    Returns the :class:`~mdb_engine.auth.oauth.OAuthService` instance stored
+    on ``app.state`` during lifespan initialization, or ``None`` when OAuth
+    is not enabled for this app.
+    """
+    return getattr(request.app.state, "oauth_service", None)
+
+
 async def get_current_user(request: Request) -> dict[str, Any] | None:
     """Get the current authenticated user."""
     return getattr(request.state, "user", None)
@@ -180,7 +228,7 @@ async def get_user_roles(request: Request) -> list[str]:
     return getattr(request.state, "user_roles", [])
 
 
-def require_user():
+def require_user() -> Callable:
     """Dependency that requires authentication."""
 
     async def _require_user(request: Request) -> dict[str, Any]:
@@ -192,7 +240,7 @@ def require_user():
     return _require_user
 
 
-def require_role(*roles: str):
+def require_role(*roles: str) -> Callable:
     """Dependency that requires specific roles."""
 
     async def _require_role(request: Request) -> dict[str, Any]:
@@ -221,7 +269,10 @@ class RequestContext:
 
     Usage:
         @app.post("/documents")
-        async def create_doc(data: DocCreate, ctx: RequestContext = Depends()):
+        async def create_doc(
+            data: DocCreate,
+            ctx: RequestContext = Depends(get_request_context),
+        ):
             doc_id = await ctx.uow.documents.add(doc)
             return {"id": doc_id}
     """
@@ -235,6 +286,7 @@ class RequestContext:
         self._config = None
         self._embedding_service = None
         self._memory = None
+        self._profile = None
         self._llm = None
         self._user = None
         self._authz = None
@@ -258,18 +310,45 @@ class RequestContext:
                 raise HTTPException(503, "App slug not configured")
         return self._slug
 
-    @property
-    def db(self):
+    async def get_db(self):
         """Get the scoped database wrapper."""
         if self._db is None:
-            self._db = self.engine.get_scoped_db(self.slug)
+            self._db = await self.engine.get_scoped_db(self.slug)
         return self._db
 
     @property
-    def uow(self) -> UnitOfWork:
+    def db(self):
+        """Get the scoped database wrapper (cached).
+
+        Note: Call get_db() first in an async context to initialize,
+        or use get_db() directly for async access.
+        """
+        if self._db is None:
+            raise RuntimeError(
+                "Database not initialized. Call 'await ctx.get_db()' first, "
+                "or use 'db = await ctx.get_db()' instead of 'ctx.db'."
+            )
+        return self._db
+
+    async def get_uow(self) -> UnitOfWork:
         """Get the Unit of Work for repository access."""
         if self._uow is None:
-            self._uow = UnitOfWork(self.db)
+            db = await self.get_db()
+            self._uow = UnitOfWork(db)
+        return self._uow
+
+    @property
+    def uow(self) -> UnitOfWork:
+        """Get the Unit of Work for repository access (cached).
+
+        Note: Call get_uow() first in an async context to initialize,
+        or use get_uow() directly for async access.
+        """
+        if self._uow is None:
+            raise RuntimeError(
+                "UnitOfWork not initialized. Call 'await ctx.get_uow()' first, "
+                "or use 'uow = await ctx.get_uow()' instead of 'ctx.uow'."
+            )
         return self._uow
 
     @property
@@ -282,7 +361,7 @@ class RequestContext:
         return self._config
 
     @property
-    def embedding_service(self):
+    def embedding_service(self) -> "EmbeddingService | None":
         """Get the embedding service (None if not configured)."""
         if self._embedding_service is None:
             embedding_config = self.config.get("embedding_config", {})
@@ -299,14 +378,21 @@ class RequestContext:
         return self._embedding_service
 
     @property
-    def memory(self):
+    def memory(self) -> "BaseMemoryService | None":
         """Get the memory service (None if not configured)."""
         if self._memory is None:
             self._memory = self.engine.get_memory_service(self.slug)
         return self._memory
 
     @property
-    def llm(self):
+    def profile(self) -> "ProfileService | None":
+        """Get the profile service (None if not configured)."""
+        if self._profile is None:
+            self._profile = self.engine.get_profile_service(self.slug)
+        return self._profile
+
+    @property
+    def llm(self) -> "OpenAI | AzureOpenAI | None":
         """Get the LLM client (None if not configured)."""
         if self._llm is None:
             azure_key = os.getenv("AZURE_OPENAI_API_KEY")
@@ -344,7 +430,7 @@ class RequestContext:
         return getattr(self.request.state, "user_roles", [])
 
     @property
-    def authz(self):
+    def authz(self) -> "AuthorizationProvider | None":
         """Get the authorization provider."""
         if self._authz is None:
             self._authz = getattr(self.request.app.state, "authz_provider", None)
@@ -365,9 +451,7 @@ class RequestContext:
             raise HTTPException(403, f"Required role: {roles_str}")
         return user
 
-    async def check_permission(
-        self, resource: str, action: str, subject: str | None = None
-    ) -> bool:
+    async def check_permission(self, resource: str, action: str, subject: str | None = None) -> bool:
         """Check if current user has permission for an action."""
         if not self.authz:
             return True
@@ -377,13 +461,9 @@ class RequestContext:
         return await self.authz.check(subject, resource, action)
 
 
-async def _get_request_context(request: Request) -> RequestContext:
+async def get_request_context(request: Request) -> RequestContext:
     """Create a RequestContext for the current request."""
     return RequestContext(request=request)
-
-
-# Make RequestContext usable with Depends()
-RequestContext.__call__ = staticmethod(_get_request_context)
 
 
 # =============================================================================
@@ -414,13 +494,16 @@ __all__ = [
     "get_unit_of_work",
     "get_embedding_service",
     "get_memory_service",
+    "get_profile_service",
     "get_llm_client",
     "get_llm_model_name",
     "get_authz_provider",
+    "get_oauth_service",
     "get_current_user",
     "get_user_roles",
     "require_user",
     "require_role",
+    "get_request_context",
     "RequestContext",
     "inject",
     "Inject",

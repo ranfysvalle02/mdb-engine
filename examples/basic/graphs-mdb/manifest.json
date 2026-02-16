@@ -6,17 +6,6 @@
   "status": "active",
   "developer_id": "developer@example.com",
 
-  "auth": {
-    "policy": {
-      "provider": "none",
-      "required": false,
-      "allow_anonymous": true
-    },
-    "users": {
-      "enabled": false
-    }
-  },
-
   "graph_config": {
     "enabled": true,
     "collection_name": "__kg",
@@ -29,9 +18,9 @@
 
   "llm_config": {
     "enabled": true,
-    "default_model": "openai/gpt-4o",
-    "temperature": 0.3,
-    "fallbacks": ["gpt-4o-mini"],
+    "providers": {
+      "chat": "openai/gpt-4o"
+    },
     "litellm_config": {
       "num_retries": 2,
       "request_timeout": 60

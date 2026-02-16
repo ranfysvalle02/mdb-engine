@@ -31,7 +31,7 @@ class TestManifestDataAccess:
             },
         }
 
-        is_valid, error, paths = manifest_validator.validate(manifest)
+        is_valid, error, paths = await manifest_validator.validate(manifest)
         assert is_valid is True
         assert error is None
 
@@ -45,7 +45,7 @@ class TestManifestDataAccess:
             },
         }
 
-        is_valid, error, paths = manifest_validator.validate(manifest)
+        is_valid, error, paths = await manifest_validator.validate(manifest)
         assert is_valid is True
 
     async def test_manifest_data_access_missing(self, manifest_validator):
@@ -55,7 +55,7 @@ class TestManifestDataAccess:
             "name": "Test App",
         }
 
-        is_valid, error, paths = manifest_validator.validate(manifest)
+        is_valid, error, paths = await manifest_validator.validate(manifest)
         assert is_valid is True  # data_access is optional
 
     async def test_manifest_read_scopes_validation(self, manifest_validator):
@@ -68,7 +68,7 @@ class TestManifestDataAccess:
             },
         }
 
-        is_valid, error, paths = manifest_validator.validate(manifest)
+        is_valid, error, paths = await manifest_validator.validate(manifest)
         assert is_valid is True
 
     async def test_manifest_read_scopes_invalid_type(self, manifest_validator):
@@ -95,7 +95,7 @@ class TestManifestDataAccess:
             },
         }
 
-        is_valid, error, paths = manifest_validator.validate(manifest)
+        is_valid, error, paths = await manifest_validator.validate(manifest)
         assert is_valid is True
 
     async def test_manifest_write_scope_invalid_type(self, manifest_validator):
@@ -123,7 +123,7 @@ class TestManifestDataAccess:
                 },
             }
 
-            is_valid, error, paths = manifest_validator.validate(manifest)
+            is_valid, error, paths = await manifest_validator.validate(manifest)
             assert is_valid is True, f"Policy '{policy}' should be valid"
 
     async def test_manifest_cross_app_policy_invalid(self, manifest_validator):
@@ -148,7 +148,7 @@ class TestManifestDataAccess:
             # No data_access - should still be valid
         }
 
-        is_valid, error, paths = manifest_validator.validate(manifest)
+        is_valid, error, paths = await manifest_validator.validate(manifest)
         assert is_valid is True
 
     async def test_manifest_read_scopes_empty(self, manifest_validator):
@@ -161,6 +161,6 @@ class TestManifestDataAccess:
             },
         }
 
-        is_valid, error, paths = manifest_validator.validate(manifest)
+        is_valid, error, paths = await manifest_validator.validate(manifest)
         # Empty array is valid per schema (validation happens at engine level)
         assert is_valid is True

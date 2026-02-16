@@ -6,9 +6,8 @@ Deletes or anonymizes user data for GDPR compliance (Right to Erasure).
 This module is part of MDB_ENGINE - MongoDB Engine.
 """
 
-import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -67,9 +66,7 @@ class DataDeletionService:
             Dictionary with deletion results
         """
         # Discover collections with user data
-        collections = await self.discovery_service.discover_user_collections(
-            user_identifier, identifier_type, app_slug
-        )
+        collections = await self.discovery_service.discover_user_collections(user_identifier, identifier_type, app_slug)
 
         deletion_results = {
             "collections_processed": [],
@@ -77,7 +74,7 @@ class DataDeletionService:
             "documents_anonymized": 0,
             "documents_soft_deleted": 0,
             "errors": [],
-            "deleted_at": datetime.utcnow().isoformat(),
+            "deleted_at": datetime.now(timezone.utc).isoformat(),
         }
 
         # Build query
@@ -107,7 +104,7 @@ class DataDeletionService:
                             "email": anonymous_email,
                             "user_email": anonymous_email,
                             "user_id": f"deleted_{anonymous_id}",
-                            "anonymized_at": datetime.utcnow(),
+                            "anonymized_at": datetime.now(timezone.utc),
                             "gdpr_anonymized": True,
                         },
                         "$unset": {
@@ -118,35 +115,26 @@ class DataDeletionService:
 
                     result = await collection.update_many(query, update)
                     deletion_results["documents_anonymized"] += result.modified_count
-                    logger.info(
-                        f"Anonymized {result.modified_count} documents in "
-                        f"collection '{collection_name}'"
-                    )
+                    logger.info(f"Anonymized {result.modified_count} documents in " f"collection '{collection_name}'")
 
                 elif soft_delete:
                     # Soft delete (mark as deleted)
                     update = {
                         "$set": {
-                            "deleted_at": datetime.utcnow(),
+                            "deleted_at": datetime.now(timezone.utc),
                             "deleted": True,
                             "gdpr_deleted": True,
                         }
                     }
                     result = await collection.update_many(query, update)
                     deletion_results["documents_soft_deleted"] += result.modified_count
-                    logger.info(
-                        f"Soft deleted {result.modified_count} documents in "
-                        f"collection '{collection_name}'"
-                    )
+                    logger.info(f"Soft deleted {result.modified_count} documents in " f"collection '{collection_name}'")
 
                 else:
                     # Hard delete (permanent removal)
                     result = await collection.delete_many(query)
                     deletion_results["documents_deleted"] += result.deleted_count
-                    logger.info(
-                        f"Hard deleted {result.deleted_count} documents in "
-                        f"collection '{collection_name}'"
-                    )
+                    logger.info(f"Hard deleted {result.deleted_count} documents in " f"collection '{collection_name}'")
 
                 deletion_results["collections_processed"].append(collection_name)
 
@@ -166,15 +154,7 @@ class DataDeletionService:
                 # Hard delete memories if not soft_delete (GDPR compliance)
                 hard_delete_memories = not soft_delete
 
-                # Use asyncio.to_thread if delete_all is synchronous
-                if asyncio.iscoroutinefunction(memory_service.delete_all):
-                    success = await memory_service.delete_all(
-                        user_id=user_id, hard_delete=hard_delete_memories
-                    )
-                else:
-                    success = await asyncio.to_thread(
-                        memory_service.delete_all, user_id=user_id, hard_delete=hard_delete_memories
-                    )
+                success = await memory_service.delete_all(user_id=user_id, hard_delete=hard_delete_memories)
 
                 if success:
                     deletion_results["collections_processed"].append("memory_service")
@@ -214,7 +194,7 @@ class DataDeletionService:
                     update = {
                         "$set": {
                             "user_id": f"deleted_{anonymous_id}",
-                            "anonymized_at": datetime.utcnow(),
+                            "anonymized_at": datetime.now(timezone.utc),
                             "gdpr_anonymized": True,
                         }
                     }
@@ -223,7 +203,7 @@ class DataDeletionService:
                 elif soft_delete:
                     update = {
                         "$set": {
-                            "deleted_at": datetime.utcnow(),
+                            "deleted_at": datetime.now(timezone.utc),
                             "deleted": True,
                             "gdpr_deleted": True,
                         }

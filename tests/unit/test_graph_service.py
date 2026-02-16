@@ -6,6 +6,7 @@ Tests the knowledge graph functionality including:
 - Edge operations (add, remove, update, deactivate)
 - Graph traversal ($graphLookup)
 - Hybrid search (vector + graph)
+- GraphRAG search methods (local_search, global_search, drift_search, classify_query)
 - LLM-based graph extraction
 - Context formatting
 """
@@ -28,19 +29,38 @@ from mdb_engine.graph import (
 # ============================================================================
 
 
+def _make_async_cursor(return_value=None):
+    """Helper to create a mock async cursor with to_list and async-for support."""
+    items = return_value or []
+    cursor = MagicMock()
+    cursor.to_list = AsyncMock(return_value=items)
+    cursor.sort = MagicMock(return_value=cursor)
+    cursor.limit = MagicMock(return_value=cursor)
+
+    # Support ``async for doc in cursor``
+    async def _aiter():
+        for item in items:
+            yield item
+
+    cursor.__aiter__ = lambda self_: _aiter()
+    return cursor
+
+
 @pytest.fixture
 def mock_collection():
     """Create a mock MongoDB collection."""
     collection = MagicMock()
     collection.name = "test_kg"
-    collection.create_index = MagicMock()
-    collection.find_one = MagicMock(return_value=None)
-    collection.update_one = MagicMock()
-    collection.delete_one = MagicMock()
-    collection.delete_many = MagicMock()
-    collection.update_many = MagicMock()
-    collection.find = MagicMock()
-    collection.aggregate = MagicMock(return_value=[])
+    collection.create_index = AsyncMock()
+    collection.find_one = AsyncMock(return_value=None)
+    collection.update_one = AsyncMock()
+    collection.delete_one = AsyncMock()
+    collection.delete_many = AsyncMock()
+    collection.update_many = AsyncMock()
+    collection.count_documents = AsyncMock(return_value=0)
+    # find() and aggregate() return cursors synchronously; cursor.to_list() is async
+    collection.find = MagicMock(return_value=_make_async_cursor())
+    collection.aggregate = MagicMock(return_value=_make_async_cursor())
     return collection
 
 
@@ -151,8 +171,9 @@ class TestBaseGraphService:
 class TestGraphServiceInit:
     """Test GraphService initialization."""
 
-    def test_init_creates_indexes(self, mock_collection, mock_llm_service, mock_embedding_service):
-        """Test that initialization creates required indexes."""
+    @pytest.mark.asyncio
+    async def test_init_creates_indexes(self, mock_collection, mock_llm_service, mock_embedding_service):
+        """Test that indexes are created lazily on first async call."""
         service = GraphService(
             app_slug="test_app",
             collection=mock_collection,
@@ -161,15 +182,18 @@ class TestGraphServiceInit:
             embedding_service=mock_embedding_service,
         )
 
-        # Verify indexes created and service configured correctly
-        assert mock_collection.create_index.called
+        # Indexes are lazy — not created in __init__
+        assert not mock_collection.create_index.called
         assert service.app_slug == "test_app"
-        # Verify enabled state via public API (get_stats)
-        assert service.get_stats()["enabled"] is True
 
-    def test_init_enabled_by_default(
-        self, mock_collection, mock_llm_service, mock_embedding_service
-    ):
+        # Trigger lazy init via get_stats()
+        stats = await service.get_stats()
+        assert stats["enabled"] is True
+        # Now indexes should have been created
+        assert mock_collection.create_index.called
+
+    @pytest.mark.asyncio
+    async def test_init_enabled_by_default(self, mock_collection, mock_llm_service, mock_embedding_service):
         """Test that graph service is enabled by default (empty config)."""
         service = GraphService(
             app_slug="test_app",
@@ -180,11 +204,11 @@ class TestGraphServiceInit:
         )
 
         # Verify enabled state via public API (enabled by default)
-        assert service.get_stats()["enabled"] is True
+        stats = await service.get_stats()
+        assert stats["enabled"] is True
 
-    def test_init_explicitly_disabled(
-        self, mock_collection, mock_llm_service, mock_embedding_service
-    ):
+    @pytest.mark.asyncio
+    async def test_init_explicitly_disabled(self, mock_collection, mock_llm_service, mock_embedding_service):
         """Test that graph service can be explicitly disabled."""
         service = GraphService(
             app_slug="test_app",
@@ -195,9 +219,11 @@ class TestGraphServiceInit:
         )
 
         # Verify disabled state via public API
-        assert service.get_stats()["enabled"] is False
+        stats = await service.get_stats()
+        assert stats["enabled"] is False
 
-    def test_init_with_config(self, mock_collection, mock_llm_service, mock_embedding_service):
+    @pytest.mark.asyncio
+    async def test_init_with_config(self, mock_collection, mock_llm_service, mock_embedding_service):
         """Test initialization with custom config."""
         config = {
             "enabled": True,
@@ -216,7 +242,8 @@ class TestGraphServiceInit:
         )
 
         # Verify config applied via public properties
-        assert service.get_stats()["enabled"] is True
+        stats = await service.get_stats()
+        assert stats["enabled"] is True
         assert service.auto_extract is False
         assert service.llm_model == "openai/gpt-4"
         assert service.default_max_depth == 3
@@ -237,6 +264,10 @@ class TestGraphServiceInit:
 
 class TestFactoryFunction:
     """Test the get_graph_service factory function."""
+
+    def test_graph_service_mro_resolves_all_abstract_methods(self):
+        """Verify GraphService MRO correctly resolves all abstract methods."""
+        assert len(GraphService.__abstractmethods__) == 0
 
     def test_get_graph_service(self, mock_collection, mock_llm_service, mock_embedding_service):
         """Test factory function creates GraphService."""
@@ -260,7 +291,8 @@ class TestFactoryFunction:
 class TestNodeOperations:
     """Test node CRUD operations."""
 
-    def test_upsert_node_creates_new(self, graph_service, mock_collection):
+    @pytest.mark.asyncio
+    async def test_upsert_node_creates_new(self, graph_service, mock_collection):
         """Test upserting a new node."""
         mock_collection.update_one.return_value = MagicMock(
             upserted_id="person:alex",
@@ -272,7 +304,7 @@ class TestNodeOperations:
             "name": "Alex",
         }
 
-        result = graph_service.upsert_node(
+        result = await graph_service.upsert_node(
             node_id="person:alex",
             node_type="person",
             name="Alex",
@@ -283,9 +315,10 @@ class TestNodeOperations:
         assert mock_collection.update_one.called
         assert result["_id"] == "person:alex"
 
-    def test_upsert_node_disabled(self, graph_service_disabled, mock_collection):
+    @pytest.mark.asyncio
+    async def test_upsert_node_disabled(self, graph_service_disabled, mock_collection):
         """Test that upsert returns empty when disabled."""
-        result = graph_service_disabled.upsert_node(
+        result = await graph_service_disabled.upsert_node(
             node_id="person:alex",
             node_type="person",
             name="Alex",
@@ -294,51 +327,54 @@ class TestNodeOperations:
         assert result == {}
         assert not mock_collection.update_one.called
 
-    def test_get_node_found(self, graph_service, mock_collection, sample_node):
+    @pytest.mark.asyncio
+    async def test_get_node_found(self, graph_service, mock_collection, sample_node):
         """Test getting an existing node."""
         mock_collection.find_one.return_value = sample_node
 
-        result = graph_service.get_node("person:alex")
+        result = await graph_service.get_node("person:alex")
 
         assert result is not None
         assert result["_id"] == "person:alex"
         assert result["type"] == "person"
 
-    def test_get_node_not_found(self, graph_service, mock_collection):
+    @pytest.mark.asyncio
+    async def test_get_node_not_found(self, graph_service, mock_collection):
         """Test getting a non-existent node."""
         mock_collection.find_one.return_value = None
 
-        result = graph_service.get_node("person:nonexistent")
+        result = await graph_service.get_node("person:nonexistent")
 
         assert result is None
 
-    def test_delete_node(self, graph_service, mock_collection):
+    @pytest.mark.asyncio
+    async def test_delete_node(self, graph_service, mock_collection):
         """Test deleting a node."""
         mock_collection.delete_one.return_value = MagicMock(deleted_count=1)
         mock_collection.update_many.return_value = MagicMock(modified_count=2)
 
-        result = graph_service.delete_node("person:alex")
+        result = await graph_service.delete_node("person:alex")
 
         assert result is True
         # Should also remove edges pointing to this node
         assert mock_collection.update_many.called
 
-    def test_delete_node_not_found(self, graph_service, mock_collection):
+    @pytest.mark.asyncio
+    async def test_delete_node_not_found(self, graph_service, mock_collection):
         """Test deleting a non-existent node."""
         mock_collection.delete_one.return_value = MagicMock(deleted_count=0)
 
-        result = graph_service.delete_node("person:nonexistent")
+        result = await graph_service.delete_node("person:nonexistent")
 
         assert result is False
 
-    def test_list_nodes(self, graph_service, mock_collection, sample_node):
+    @pytest.mark.asyncio
+    async def test_list_nodes(self, graph_service, mock_collection, sample_node):
         """Test listing nodes."""
-        mock_cursor = MagicMock()
-        mock_cursor.sort.return_value = mock_cursor
-        mock_cursor.limit.return_value = [sample_node]
+        mock_cursor = _make_async_cursor([sample_node])
         mock_collection.find.return_value = mock_cursor
 
-        result = graph_service.list_nodes(node_type="person", limit=10)
+        result = await graph_service.list_nodes(node_type="person", limit=10)
 
         assert len(result) == 1
         mock_collection.find.assert_called_once()
@@ -352,7 +388,8 @@ class TestNodeOperations:
 class TestEdgeOperations:
     """Test edge CRUD operations."""
 
-    def test_add_edge_new(self, graph_service, mock_collection):
+    @pytest.mark.asyncio
+    async def test_add_edge_new(self, graph_service, mock_collection):
         """Test adding a new edge."""
         # First update (existing edge check) returns no match
         mock_collection.update_one.side_effect = [
@@ -360,7 +397,7 @@ class TestEdgeOperations:
             MagicMock(modified_count=1),  # Edge added
         ]
 
-        result = graph_service.add_edge(
+        result = await graph_service.add_edge(
             source_id="person:alex",
             relation="likes",
             target_id="interest:golf",
@@ -371,11 +408,12 @@ class TestEdgeOperations:
         assert result is True
         assert mock_collection.update_one.call_count == 2
 
-    def test_add_edge_updates_existing(self, graph_service, mock_collection):
+    @pytest.mark.asyncio
+    async def test_add_edge_updates_existing(self, graph_service, mock_collection):
         """Test that adding an existing edge updates it."""
         mock_collection.update_one.return_value = MagicMock(modified_count=1)
 
-        result = graph_service.add_edge(
+        result = await graph_service.add_edge(
             source_id="person:alex",
             relation="likes",
             target_id="interest:golf",
@@ -384,9 +422,10 @@ class TestEdgeOperations:
 
         assert result is True
 
-    def test_add_edge_disabled(self, graph_service_disabled, mock_collection):
+    @pytest.mark.asyncio
+    async def test_add_edge_disabled(self, graph_service_disabled, mock_collection):
         """Test that add_edge returns False when disabled."""
-        result = graph_service_disabled.add_edge(
+        result = await graph_service_disabled.add_edge(
             source_id="person:alex",
             relation="likes",
             target_id="interest:golf",
@@ -394,11 +433,12 @@ class TestEdgeOperations:
 
         assert result is False
 
-    def test_remove_edge(self, graph_service, mock_collection):
+    @pytest.mark.asyncio
+    async def test_remove_edge(self, graph_service, mock_collection):
         """Test removing an edge."""
         mock_collection.update_one.return_value = MagicMock(modified_count=1)
 
-        result = graph_service.remove_edge(
+        result = await graph_service.remove_edge(
             source_id="person:alex",
             relation="likes",
             target_id="interest:golf",
@@ -406,11 +446,12 @@ class TestEdgeOperations:
 
         assert result is True
 
-    def test_remove_edge_not_found(self, graph_service, mock_collection):
+    @pytest.mark.asyncio
+    async def test_remove_edge_not_found(self, graph_service, mock_collection):
         """Test removing a non-existent edge."""
         mock_collection.update_one.return_value = MagicMock(modified_count=0)
 
-        result = graph_service.remove_edge(
+        result = await graph_service.remove_edge(
             source_id="person:alex",
             relation="likes",
             target_id="interest:nonexistent",
@@ -418,11 +459,12 @@ class TestEdgeOperations:
 
         assert result is False
 
-    def test_update_edge(self, graph_service, mock_collection):
+    @pytest.mark.asyncio
+    async def test_update_edge(self, graph_service, mock_collection):
         """Test updating an edge."""
         mock_collection.update_one.return_value = MagicMock(modified_count=1)
 
-        result = graph_service.update_edge(
+        result = await graph_service.update_edge(
             source_id="person:alex",
             relation="likes",
             target_id="interest:golf",
@@ -431,11 +473,12 @@ class TestEdgeOperations:
 
         assert result is True
 
-    def test_deactivate_edge(self, graph_service, mock_collection):
+    @pytest.mark.asyncio
+    async def test_deactivate_edge(self, graph_service, mock_collection):
         """Test deactivating an edge (soft delete)."""
         mock_collection.update_one.return_value = MagicMock(modified_count=1)
 
-        result = graph_service.deactivate_edge(
+        result = await graph_service.deactivate_edge(
             source_id="person:alex",
             relation="works_at",
             target_id="organization:oldcorp",
@@ -452,10 +495,11 @@ class TestEdgeOperations:
 class TestGraphTraversal:
     """Test graph traversal operations."""
 
-    def test_traverse_basic(self, graph_service, mock_collection, sample_node):
+    @pytest.mark.asyncio
+    async def test_traverse_basic(self, graph_service, mock_collection, sample_node):
         """Test basic graph traversal."""
-        # Mock aggregation result
-        mock_collection.aggregate.return_value = [
+        # Mock aggregation result via async cursor
+        traverse_data = [
             {"node": sample_node, "hop_distance": 0},
             {
                 "node": {
@@ -467,23 +511,26 @@ class TestGraphTraversal:
                 "hop_distance": 1,
             },
         ]
+        mock_collection.aggregate.return_value = _make_async_cursor(traverse_data)
 
-        results = graph_service.traverse("person:alex", max_depth=2)
+        results = await graph_service.traverse("person:alex", max_depth=2)
 
         assert len(results) == 2
         assert mock_collection.aggregate.called
 
-    def test_traverse_disabled(self, graph_service_disabled, mock_collection):
+    @pytest.mark.asyncio
+    async def test_traverse_disabled(self, graph_service_disabled, mock_collection):
         """Test that traverse returns empty when disabled."""
-        results = graph_service_disabled.traverse("person:alex")
+        results = await graph_service_disabled.traverse("person:alex")
 
         assert results == []
 
-    def test_traverse_with_depth_limit(self, graph_service, mock_collection):
+    @pytest.mark.asyncio
+    async def test_traverse_with_depth_limit(self, graph_service, mock_collection):
         """Test traversal respects depth limit."""
-        mock_collection.aggregate.return_value = []
+        mock_collection.aggregate.return_value = _make_async_cursor([])
 
-        graph_service.traverse("person:alex", max_depth=1)
+        await graph_service.traverse("person:alex", max_depth=1)
 
         # Check that the pipeline includes maxDepth
         call_args = mock_collection.aggregate.call_args
@@ -494,24 +541,30 @@ class TestGraphTraversal:
             if "$graphLookup" in stage:
                 assert stage["$graphLookup"]["maxDepth"] == 0  # maxDepth is 0-indexed
 
-    def test_get_neighbors(self, graph_service, mock_collection, sample_node):
+    @pytest.mark.asyncio
+    async def test_get_neighbors(self, graph_service, mock_collection, sample_node):
         """Test getting immediate neighbors."""
+        # get_node returns the sample_node (has one "likes" edge to interest:golf)
         mock_collection.find_one.return_value = sample_node
-        mock_collection.find_one.side_effect = [
-            sample_node,
-            {
-                "_id": "interest:golf",
-                "type": "interest",
-                "name": "Golf",
-            },
-        ]
+        # get_neighbors then batch-fetches target nodes via collection.find()
+        mock_collection.find.return_value = _make_async_cursor(
+            [
+                {
+                    "_id": "interest:golf",
+                    "type": "interest",
+                    "name": "Golf",
+                    "app_slug": "test_app",
+                },
+            ]
+        )
 
-        neighbors = graph_service.get_neighbors("person:alex")
+        neighbors = await graph_service.get_neighbors("person:alex")
 
         assert len(neighbors) == 1
         assert neighbors[0]["relation"] == "likes"
 
-    def test_get_neighbors_with_filter(self, graph_service, mock_collection, sample_node):
+    @pytest.mark.asyncio
+    async def test_get_neighbors_with_filter(self, graph_service, mock_collection, sample_node):
         """Test getting neighbors with relation filter."""
         sample_node["edges"].append(
             {
@@ -523,7 +576,7 @@ class TestGraphTraversal:
         mock_collection.find_one.return_value = sample_node
 
         # Filter for only "likes" relations
-        neighbors = graph_service.get_neighbors("person:alex", relation="likes")
+        neighbors = await graph_service.get_neighbors("person:alex", relation="likes")
 
         # Only the "likes" edge should be returned
         assert all(n["relation"] == "likes" for n in neighbors)
@@ -537,9 +590,10 @@ class TestGraphTraversal:
 class TestHybridSearch:
     """Test hybrid search (vector + graph)."""
 
-    def test_hybrid_search_disabled(self, graph_service_disabled, mock_collection):
+    @pytest.mark.asyncio
+    async def test_hybrid_search_disabled(self, graph_service_disabled, mock_collection):
         """Test hybrid search when disabled."""
-        result = graph_service_disabled.hybrid_search(
+        result = await graph_service_disabled.hybrid_search(
             query="What does Alex like?",
             user_id="user123",
         )
@@ -548,25 +602,28 @@ class TestHybridSearch:
         assert result["graph_context"] == []
         assert result["total_nodes"] == 0
 
-    def test_hybrid_search_with_embedding(self, graph_service, mock_collection, sample_node):
+    @pytest.mark.asyncio
+    async def test_hybrid_search_with_embedding(self, graph_service, mock_collection, sample_node):
         """Test hybrid search with embedding service."""
-        # Mock vector search results
+        # Mock vector search results via async cursors
         mock_collection.aggregate.side_effect = [
             # First call: vector search
-            [
-                {
-                    "_id": "person:alex",
-                    "type": "person",
-                    "name": "Alex",
-                    "edges": [],
-                    "similarity": 0.92,
-                }
-            ],
+            _make_async_cursor(
+                [
+                    {
+                        "_id": "person:alex",
+                        "type": "person",
+                        "name": "Alex",
+                        "edges": [],
+                        "similarity": 0.92,
+                    }
+                ]
+            ),
             # Second call: traverse
-            [],
+            _make_async_cursor([]),
         ]
 
-        result = graph_service.hybrid_search(
+        result = await graph_service.hybrid_search(
             query="What does Alex like?",
             user_id="user123",
             max_depth=2,
@@ -584,17 +641,19 @@ class TestHybridSearch:
 class TestGraphExtraction:
     """Test LLM-based graph extraction."""
 
-    def test_extract_disabled_when_auto_extract_false(self, graph_service, mock_collection):
+    @pytest.mark.asyncio
+    async def test_extract_disabled_when_auto_extract_false(self, graph_service, mock_collection):
         """Test extraction is skipped when auto_extract is False."""
-        result = graph_service.extract_graph_from_memory(
-            memory_text="Alex loves golf",
+        result = await graph_service.extract_graph_from_text(
+            text="Alex loves golf",
             user_id="user123",
         )
 
         assert result["nodes_created"] == 0
         assert result["edges_created"] == 0
 
-    def test_extract_disabled_when_graph_disabled(
+    @pytest.mark.asyncio
+    async def test_extract_disabled_when_graph_disabled(
         self, mock_collection, mock_llm_service, mock_embedding_service
     ):
         """Test extraction is skipped when graph is disabled."""
@@ -606,8 +665,8 @@ class TestGraphExtraction:
             embedding_service=mock_embedding_service,
         )
 
-        result = service.extract_graph_from_memory(
-            memory_text="Alex loves golf",
+        result = await service.extract_graph_from_text(
+            text="Alex loves golf",
             user_id="user123",
         )
 
@@ -664,18 +723,20 @@ class TestContextFormatting:
 class TestStatistics:
     """Test graph statistics."""
 
-    def test_get_stats_disabled(self, graph_service_disabled):
+    @pytest.mark.asyncio
+    async def test_get_stats_disabled(self, graph_service_disabled):
         """Test stats when disabled."""
-        stats = graph_service_disabled.get_stats()
+        stats = await graph_service_disabled.get_stats()
 
         assert stats["enabled"] is False
         assert stats["total_nodes"] == 0
 
-    def test_get_stats_enabled(self, graph_service, mock_collection):
+    @pytest.mark.asyncio
+    async def test_get_stats_enabled(self, graph_service, mock_collection):
         """Test getting stats when enabled."""
-        mock_collection.count_documents.return_value = 42
+        mock_collection.aggregate.return_value = _make_async_cursor([])
 
-        stats = graph_service.get_stats()
+        stats = await graph_service.get_stats()
 
         assert stats["enabled"] is True
         assert stats["app_slug"] == "test_app"
@@ -695,11 +756,14 @@ class TestErrorHandling:
         assert isinstance(error, Exception)
         assert str(error) == "Test error"
 
-    def test_node_operations_handle_mongo_errors(self, graph_service, mock_collection):
+    @pytest.mark.asyncio
+    async def test_node_operations_handle_mongo_errors(self, graph_service, mock_collection):
         """Test that node operations handle MongoDB errors gracefully."""
-        mock_collection.find_one.side_effect = Exception("MongoDB error")
+        from pymongo.errors import PyMongoError
 
-        result = graph_service.get_node("person:alex")
+        mock_collection.find_one.side_effect = PyMongoError("MongoDB error")
 
-        # Should return None on error
+        result = await graph_service.get_node("person:alex")
+
+        # Should return None on error (get_node catches PyMongoError)
         assert result is None

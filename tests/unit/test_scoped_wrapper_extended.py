@@ -55,9 +55,7 @@ class TestAsyncAtlasIndexManagerExtended:
         """Test benign CollectionInvalid error (already exists)."""
         mock_coll = MagicMock()
         mock_coll.name = "test_coll"
-        mock_coll.database.create_collection = AsyncMock(
-            side_effect=CollectionInvalid("Collection already exists")
-        )
+        mock_coll.database.create_collection = AsyncMock(side_effect=CollectionInvalid("Collection already exists"))
 
         with patch("mdb_engine.database.scoped_wrapper.AsyncIOMotorCollection", MagicMock):
             manager = AsyncAtlasIndexManager(mock_coll)
@@ -74,16 +72,12 @@ class TestAsyncAtlasIndexManagerExtended:
             manager = AsyncAtlasIndexManager(mock_coll)
 
             # Connection Failure
-            mock_coll.database.create_collection = AsyncMock(
-                side_effect=ConnectionFailure("Connection lost")
-            )
+            mock_coll.database.create_collection = AsyncMock(side_effect=ConnectionFailure("Connection lost"))
             with pytest.raises(MongoDBEngineError, match="connection failed"):
                 await manager._ensure_collection_exists()  # noqa: SLF001
 
             # Other Operation Failure
-            mock_coll.database.create_collection = AsyncMock(
-                side_effect=OperationFailure("Other error")
-            )
+            mock_coll.database.create_collection = AsyncMock(side_effect=OperationFailure("Other error"))
             with pytest.raises(MongoDBEngineError, match="Error creating prerequisite collection"):
                 await manager._ensure_collection_exists()  # noqa: SLF001
 
@@ -118,9 +112,7 @@ class TestAsyncAtlasIndexManagerExtended:
 
         with patch("mdb_engine.database.scoped_wrapper.AsyncIOMotorCollection", MagicMock):
             # We need to patch the class method since instance has slots
-            with patch.object(
-                AsyncAtlasIndexManager, "update_search_index", new_callable=AsyncMock
-            ) as mock_update:
+            with patch.object(AsyncAtlasIndexManager, "update_search_index", new_callable=AsyncMock) as mock_update:
                 manager = AsyncAtlasIndexManager(mock_coll)
 
                 existing = {
@@ -134,17 +126,13 @@ class TestAsyncAtlasIndexManagerExtended:
                 )
 
                 assert result is False  # Will wait (mocked update)
-                mock_update.assert_awaited_with(
-                    name="idx", definition=new_definition, wait_for_ready=False
-                )
+                mock_update.assert_awaited_with(name="idx", definition=new_definition, wait_for_ready=False)
 
     @pytest.mark.asyncio
     async def test_create_search_index_race_condition(self):
         """Test benign race condition (IndexAlreadyExists)."""
         mock_coll = MagicMock()
-        mock_coll.create_search_index = AsyncMock(
-            side_effect=OperationFailure("IndexAlreadyExists")
-        )
+        mock_coll.create_search_index = AsyncMock(side_effect=OperationFailure("IndexAlreadyExists"))
 
         with patch("mdb_engine.database.scoped_wrapper.AsyncIOMotorCollection", MagicMock):
             manager = AsyncAtlasIndexManager(mock_coll)
@@ -156,9 +144,7 @@ class TestAsyncAtlasIndexManagerExtended:
                     "_ensure_collection_exists",
                     new_callable=AsyncMock,
                 ),
-                patch.object(
-                    AsyncAtlasIndexManager, "get_search_index", new_callable=AsyncMock
-                ) as mock_get,
+                patch.object(AsyncAtlasIndexManager, "get_search_index", new_callable=AsyncMock) as mock_get,
                 patch.object(
                     AsyncAtlasIndexManager,
                     "_wait_for_search_index_ready",
@@ -169,9 +155,7 @@ class TestAsyncAtlasIndexManagerExtended:
                 mock_wait.return_value = True
 
                 with patch("mdb_engine.database.scoped_wrapper.logger") as mock_logger:
-                    result = await manager.create_search_index(
-                        "idx", {"def": 1}, wait_for_ready=True
-                    )
+                    result = await manager.create_search_index("idx", {"def": 1}, wait_for_ready=True)
 
                     assert result is True
                     mock_logger.warning.assert_called()
@@ -181,9 +165,7 @@ class TestAsyncAtlasIndexManagerExtended:
     async def test_create_search_index_errors(self):
         """Test error handling in create_search_index."""
         mock_coll = MagicMock()
-        mock_coll.database.create_collection = (
-            AsyncMock()
-        )  # Defensive: allow real ensure_exists to pass if mock fails
+        mock_coll.database.create_collection = AsyncMock()  # Defensive: allow real ensure_exists to pass if mock fails
 
         with patch("mdb_engine.database.scoped_wrapper.AsyncIOMotorCollection", MagicMock):
             manager = AsyncAtlasIndexManager(mock_coll)
@@ -194,9 +176,7 @@ class TestAsyncAtlasIndexManagerExtended:
                     "_ensure_collection_exists",
                     new_callable=AsyncMock,
                 ) as mock_ensure,
-                patch.object(
-                    AsyncAtlasIndexManager, "get_search_index", new_callable=AsyncMock
-                ) as mock_get,
+                patch.object(AsyncAtlasIndexManager, "get_search_index", new_callable=AsyncMock) as mock_get,
             ):
                 mock_get.return_value = None
 
@@ -206,8 +186,6 @@ class TestAsyncAtlasIndexManagerExtended:
                     await manager.create_search_index("idx", {})
 
                 # Operation Failure (fatal)
-                mock_coll.create_search_index = AsyncMock(
-                    side_effect=OperationFailure("Fatal error")
-                )
+                mock_coll.create_search_index = AsyncMock(side_effect=OperationFailure("Fatal error"))
                 with pytest.raises(MongoDBEngineError, match="Failed to create/check search index"):
                     await manager.create_search_index("idx", {})

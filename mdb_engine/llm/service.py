@@ -21,10 +21,16 @@ Supported Providers (via LiteLLM):
   See: https://docs.litellm.ai/docs/providers
 """
 
+import json
 import logging
 import os
+import re
 import time
 from typing import Any, TypeVar
+
+from ..exceptions import MongoDBEngineError
+from ..observability.tracing import create_span
+from .temperature import adjust_temperature_for_model
 
 # LiteLLM import
 try:
@@ -81,8 +87,6 @@ def _parse_structured_response(
 
     # Handle markdown code blocks (```json ... ``` or ``` ... ```)
     # Some LLMs wrap JSON responses in markdown code blocks
-    import re
-
     json_match = re.search(r"```(?:json)?\s*(.*?)\s*```", content, re.DOTALL)
     if json_match:
         content = json_match.group(1).strip()
@@ -90,8 +94,6 @@ def _parse_structured_response(
 
     # Parse JSON
     try:
-        import json
-
         data = json.loads(content)
     except json.JSONDecodeError as e:
         logger.warning(f"Failed to parse JSON response: {e}. Content preview: {content[:200]}...")
@@ -117,7 +119,7 @@ def _parse_structured_response(
     return data
 
 
-class LLMServiceError(Exception):
+class LLMServiceError(MongoDBEngineError):
     """Base exception for LLM service failures."""
 
     pass
@@ -134,8 +136,11 @@ def _detect_provider_from_env() -> str:
     if not LITELLM_AVAILABLE:
         return "openai/gpt-4o"  # Default fallback
 
-    # Check for Azure OpenAI
-    if os.getenv("AZURE_OPENAI_API_KEY") and os.getenv("AZURE_OPENAI_ENDPOINT"):
+    # Check for Azure OpenAI (supports both AZURE_OPENAI_ENDPOINT and AZURE_API_BASE)
+    azure_key = os.getenv("AZURE_OPENAI_API_KEY") or os.getenv("AZURE_API_KEY")
+    azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT") or os.getenv("AZURE_API_BASE")
+
+    if azure_key and azure_endpoint:
         deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4o")
         return f"azure/{deployment}"
     # Check for Gemini
@@ -223,8 +228,7 @@ def _format_response_format_for_provider(response_format: Any, model: str | None
         # This works well for OpenAI's structured outputs feature
         elif model_lower.startswith("openai/") or model_lower.startswith("azure/"):
             logger.debug(
-                f"Using OpenAI/Azure function calling format for model '{model}' "
-                f"(Pydantic model passed directly)"
+                f"Using OpenAI/Azure function calling format for model '{model}' " f"(Pydantic model passed directly)"
             )
             return response_format
 
@@ -241,19 +245,12 @@ def _format_response_format_for_provider(response_format: Any, model: str | None
     return response_format
 
 
-class LLMProvider:
-    """
-    Standalone LLM provider wrapper using LiteLLM.
+class _LLMProvider:
+    """Internal LLM provider wrapper using LiteLLM.
 
-    Auto-detects provider from environment variables or config.
-    Supports 100+ LLM providers through LiteLLM.
-
-    Example:
-        # Auto-detects from environment variables
-        provider = LLMProvider()
-
-        # Or configure via manifest
-        provider = LLMProvider(config={"default_model": "gemini/gemini-3-flash-preview"})
+    Not part of the public API.  Use ``LLMService`` instead, which
+    manages one or more ``_LLMProvider`` instances keyed by name
+    (e.g. ``"chat"``, ``"extraction"``).
     """
 
     def __init__(
@@ -283,6 +280,20 @@ class LLMProvider:
         if not LITELLM_AVAILABLE:
             raise LLMServiceError("LiteLLM not available. Install with: pip install litellm")
 
+        # Ensure compatibility: Sync AZURE_API_BASE and AZURE_OPENAI_ENDPOINT
+        # LiteLLM uses AZURE_API_BASE, but we also support AZURE_OPENAI_ENDPOINT
+        azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+        azure_api_base = os.getenv("AZURE_API_BASE")
+
+        if azure_endpoint and not azure_api_base:
+            # Set AZURE_API_BASE from AZURE_OPENAI_ENDPOINT for LiteLLM compatibility
+            os.environ["AZURE_API_BASE"] = azure_endpoint
+            logger.debug(f"Set AZURE_API_BASE={azure_endpoint} from AZURE_OPENAI_ENDPOINT")
+        elif azure_api_base and not azure_endpoint:
+            # Set AZURE_OPENAI_ENDPOINT from AZURE_API_BASE for our code compatibility
+            os.environ["AZURE_OPENAI_ENDPOINT"] = azure_api_base
+            logger.debug(f"Set AZURE_OPENAI_ENDPOINT={azure_api_base} from AZURE_API_BASE")
+
         config = config or {}
 
         # Handle legacy provider format or use LiteLLM model format
@@ -302,7 +313,7 @@ class LLMProvider:
                 deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", model_name)
                 self.default_model = f"azure/{deployment}"
                 logger.warning(
-                    f"⚠️ Using Azure deployment name '{deployment}'. "
+                    f"Using Azure deployment name '{deployment}'. "
                     f"Make sure this matches your Azure AI Studio deployment name, "
                     f"not the underlying model name."
                 )
@@ -317,20 +328,17 @@ class LLMProvider:
         # Extract fallbacks (list of model strings)
         self.fallbacks = config.get("fallbacks", [])
         if self.fallbacks:
-            logger.info(f"✅ LLM Provider configured with fallbacks: {self.fallbacks}")
+            logger.info(f"LLM Provider configured with fallbacks: {self.fallbacks}")
 
         # Extract tools (list of tool definitions)
         self.tools = config.get("tools", [])
         if self.tools:
-            logger.info(f"✅ LLM Provider configured with tools: " f"{len(self.tools)} tool(s)")
+            logger.info(f"LLM Provider configured with tools: " f"{len(self.tools)} tool(s)")
 
         # Extract LiteLLM config (passed directly to LiteLLM)
         self.litellm_config = config.get("litellm_config", {})
         if self.litellm_config:
-            logger.info(
-                f"✅ LLM Provider configured with LiteLLM options: "
-                f"{list(self.litellm_config.keys())}"
-            )
+            logger.info(f"LLM Provider configured with LiteLLM options: " f"{list(self.litellm_config.keys())}")
             # Apply LiteLLM config globally if needed
             # Some configs like request_timeout, num_retries can be set globally
             for key, value in self.litellm_config.items():
@@ -342,8 +350,44 @@ class LLMProvider:
         self.default_temperature = config.get("temperature", 0.7)
         self.default_persona = config.get("persona", "helpful assistant")
 
-        logger.info(f"✅ LLM Provider initialized (model: {self.default_model})")
+        logger.info(f"LLM Provider initialized (model: {self.default_model})")
         self.config = config
+
+        # --- Apply shared resilience (retry + backoff + circuit breaker) ---
+        try:
+            from ..core.resilience import (
+                circuit_breaker_from_config,
+                policy_from_config,
+                resilient,
+            )
+
+            resilience_cfg = config.get("resilience", {})
+            _policy = policy_from_config(
+                resilience_cfg,
+                name="llm",
+                default_retries=3,
+                default_backoff_base=1.0,
+                default_backoff_max=30.0,
+                default_timeout=60.0,
+                extra_retryable=(LLMServiceError,),
+            )
+            self._circuit_breaker = circuit_breaker_from_config(
+                resilience_cfg,
+                name=f"llm:{self.default_model}",
+            )
+            _original_chat = self.chat_completion
+
+            @resilient(_policy, circuit_breaker=self._circuit_breaker)
+            async def _resilient_chat(*args, **kwargs):
+                return await _original_chat(*args, **kwargs)
+
+            self.chat_completion = _resilient_chat  # type: ignore[assignment]
+            logger.debug(
+                f"LLM resilience enabled: retries={_policy.max_retries}, "
+                f"timeout={_policy.timeout}s, circuit_threshold={self._circuit_breaker.failure_threshold}"
+            )
+        except ImportError:
+            logger.debug("Resilience module not available; LLM calls will not be retried")
 
     async def chat_completion(
         self,
@@ -402,121 +446,109 @@ class LLMProvider:
         start_time = time.time()
         model_to_use = model or self.default_model
 
-        try:
-            # Inject persona as system message if no system message exists
-            messages_to_use = messages.copy()
-            has_system_message = any(msg.get("role") == "system" for msg in messages_to_use)
-            if not has_system_message and self.default_persona:
-                messages_to_use.insert(0, {"role": "system", "content": self.default_persona})
+        with create_span(
+            "gen_ai.chat_completion",
+            {
+                "gen_ai.system": "litellm",
+                "gen_ai.request.model": model_to_use or "",
+                "gen_ai.request.temperature": temperature,
+                "gen_ai.request.max_tokens": max_tokens or 0,
+            },
+        ) as span:
+            try:
+                # Inject persona as system message if no system message exists
+                messages_to_use = messages.copy()
+                has_system_message = any(msg.get("role") == "system" for msg in messages_to_use)
+                if not has_system_message and self.default_persona:
+                    messages_to_use.insert(0, {"role": "system", "content": self.default_persona})
 
-            # Format response_format based on provider for optimal structured output
-            # - Gemini: Pydantic models → response_schema (via LiteLLM)
-            # - OpenAI/Azure: Pydantic models → function calling format
-            #   (structured outputs via LiteLLM)
-            formatted_response_format = _format_response_format_for_provider(
-                response_format, model_to_use
-            )
-            if formatted_response_format:
-                kwargs["response_format"] = formatted_response_format
+                # Format response_format based on provider for optimal structured output
+                # - Gemini: Pydantic models → response_schema (via LiteLLM)
+                # - OpenAI/Azure: Pydantic models → function calling format
+                #   (structured outputs via LiteLLM)
+                formatted_response_format = _format_response_format_for_provider(response_format, model_to_use)
+                if formatted_response_format:
+                    kwargs["response_format"] = formatted_response_format
 
-            # Add fallbacks if configured
-            if self.fallbacks:
-                kwargs["fallbacks"] = self.fallbacks
-                logger.debug(f"Using fallback models: {self.fallbacks}")
+                # Add fallbacks if configured
+                if self.fallbacks:
+                    kwargs["fallbacks"] = self.fallbacks
+                    logger.debug(f"Using fallback models: {self.fallbacks}")
 
-            # Add tools if configured (allow override via explicit kwargs)
-            if self.tools and "tools" not in kwargs:
-                kwargs["tools"] = self.tools
-                logger.debug(f"Using configured tools: {len(self.tools)} tool(s)")
+                # Add tools if configured (allow override via explicit kwargs)
+                if self.tools and "tools" not in kwargs:
+                    kwargs["tools"] = self.tools
+                    logger.debug(f"Using configured tools: {len(self.tools)} tool(s)")
 
-            # Merge LiteLLM config into kwargs (overrides any explicit kwargs)
-            # LiteLLM config takes precedence for things like num_retries, request_timeout, etc.
-            litellm_kwargs = self.litellm_config.copy()
-            # Don't override explicit parameters passed to the method
-            for key, value in litellm_kwargs.items():
-                if key not in kwargs:
-                    kwargs[key] = value
+                # Merge LiteLLM config into kwargs (overrides any explicit kwargs)
+                # LiteLLM config takes precedence for things like num_retries, request_timeout, etc.
+                litellm_kwargs = self.litellm_config.copy()
+                # Don't override explicit parameters passed to the method
+                for key, value in litellm_kwargs.items():
+                    if key not in kwargs:
+                        kwargs[key] = value
 
-            # Use config temperature as default if using default parameter value
-            requested_temperature = temperature if temperature != 0.7 else self.default_temperature
+                # Use config temperature as default if using default parameter value
+                requested_temperature = temperature if temperature != 0.7 else self.default_temperature
 
-            # Enforce provider-specific temperature rules
-            # Gemini models: Always use temperature=1.0
-            # Azure OpenAI and OpenAI: Always use temperature=0.3
-            model_lower = (model_to_use or "").lower()
-            if model_lower.startswith("gemini/"):
-                # Gemini: Always use 1.0
-                final_temperature = 1.0
-                if requested_temperature != 1.0:
-                    logger.info(
-                        f"⚠️  Enforcing temperature=1.0 for Gemini model '{model_to_use}' "
-                        f"(config: {requested_temperature})"
-                    )
-            elif model_lower.startswith("azure/") or model_lower.startswith("openai/"):
-                # Azure OpenAI and OpenAI: Always use 0.3
-                final_temperature = 0.3
-                if requested_temperature != 0.3:
-                    logger.info(
-                        f"⚠️  Enforcing temperature=0.3 for OpenAI/Azure model '{model_to_use}' "
-                        f"(config: {requested_temperature})"
-                    )
-            else:
-                final_temperature = requested_temperature
+                final_temperature = adjust_temperature_for_model(
+                    model=model_to_use,
+                    requested_temperature=requested_temperature,
+                    log=logger,
+                )
 
-            # Use LiteLLM's async completion
-            response = await acompletion(
-                model=model_to_use,
-                messages=messages_to_use,
-                temperature=final_temperature,
-                max_tokens=max_tokens,
-                **kwargs,
-            )
+                # Use LiteLLM's async completion
+                response = await acompletion(
+                    model=model_to_use,
+                    messages=messages_to_use,
+                    temperature=final_temperature,
+                    max_tokens=max_tokens,
+                    **kwargs,
+                )
 
-            # Extract text from LiteLLM response (OpenAI-compatible format)
-            if hasattr(response, "choices") and response.choices:
-                content = response.choices[0].message.content
-                if content:
-                    duration = time.time() - start_time
-                    # Log which model was actually used
-                    # (may differ from model_to_use if fallback was used)
-                    actual_model = getattr(response, "model", model_to_use)
-                    logger.info(
-                        "LLM_COMPLETION_SUCCESS",
-                        extra={
-                            "latency_sec": round(duration, 3),
-                            "requested_model": model_to_use,
-                            "actual_model": actual_model,
-                        },
-                    )
-                    if actual_model != model_to_use:
+                # Record token usage on the span
+                usage = getattr(response, "usage", None)
+                if usage:
+                    span.set_attribute("gen_ai.usage.prompt_tokens", getattr(usage, "prompt_tokens", 0))
+                    span.set_attribute("gen_ai.usage.completion_tokens", getattr(usage, "completion_tokens", 0))
+
+                actual_model = getattr(response, "model", model_to_use)
+                span.set_attribute("gen_ai.response.model", actual_model or "")
+
+                # Extract text from LiteLLM response (OpenAI-compatible format)
+                if hasattr(response, "choices") and response.choices:
+                    content = response.choices[0].message.content
+                    if content:
+                        duration = time.time() - start_time
                         logger.info(
-                            f"✅ Used fallback model: {actual_model} (requested: {model_to_use})"
+                            "LLM_COMPLETION_SUCCESS",
+                            extra={
+                                "latency_sec": round(duration, 3),
+                                "requested_model": model_to_use,
+                                "actual_model": actual_model,
+                            },
                         )
-                    return content
+                        if actual_model != model_to_use:
+                            logger.info(f"Used fallback model: {actual_model} (requested: {model_to_use})")
+                        return content
 
-            # Fallback extraction
-            if hasattr(response, "content"):
-                return str(response.content)
+                # Fallback extraction
+                if hasattr(response, "content"):
+                    return str(response.content)
 
-            return str(response)
+                return str(response)
 
-        except (
-            ValueError,
-            TypeError,
-            AttributeError,
-            RuntimeError,
-            ConnectionError,
-            TimeoutError,
-        ) as e:
-            # Catch specific exceptions that can occur during LLM completion
-            # ValueError: Invalid parameters
-            # TypeError: Type errors
-            # AttributeError: Missing attributes
-            # RuntimeError: Runtime issues
-            # ConnectionError: Network errors
-            # TimeoutError: Timeout errors
-            logger.exception(f"LLM_COMPLETION_FAILED: {str(e)}")
-            raise LLMServiceError(f"LLM completion failed: {str(e)}") from e
+            except (
+                ValueError,
+                TypeError,
+                AttributeError,
+                RuntimeError,
+                ConnectionError,
+                TimeoutError,
+            ) as e:
+                span.set_attribute("error", True)
+                logger.exception(f"LLM_COMPLETION_FAILED: {str(e)}")
+                raise LLMServiceError(f"LLM completion failed: {str(e)}") from e
 
     async def chat_completion_stream(
         self,
@@ -579,126 +611,118 @@ class LLMProvider:
         reasoning_buffer = []  # Capture full reasoning for audit trail
         reasoning_started = False  # Track if we've sent the reasoning start marker
 
-        try:
-            # Inject persona as system message if no system message exists
-            messages_to_use = messages.copy()
-            has_system_message = any(msg.get("role") == "system" for msg in messages_to_use)
-            if not has_system_message and self.default_persona:
-                messages_to_use.insert(0, {"role": "system", "content": self.default_persona})
+        with create_span(
+            "gen_ai.chat_completion_stream",
+            {
+                "gen_ai.system": "litellm",
+                "gen_ai.request.model": model_to_use or "",
+                "gen_ai.request.temperature": temperature,
+                "gen_ai.request.max_tokens": max_tokens or 0,
+                "gen_ai.request.stream": True,
+            },
+        ) as span:
+            try:
+                # Inject persona as system message if no system message exists
+                messages_to_use = messages.copy()
+                has_system_message = any(msg.get("role") == "system" for msg in messages_to_use)
+                if not has_system_message and self.default_persona:
+                    messages_to_use.insert(0, {"role": "system", "content": self.default_persona})
 
-            # Add fallbacks if configured
-            if self.fallbacks:
-                kwargs["fallbacks"] = self.fallbacks
+                # Add fallbacks if configured
+                if self.fallbacks:
+                    kwargs["fallbacks"] = self.fallbacks
 
-            # Add tools if configured (allow override via explicit kwargs)
-            if self.tools and "tools" not in kwargs:
-                kwargs["tools"] = self.tools
-                logger.debug(f"Using configured tools: {len(self.tools)} tool(s)")
+                # Add tools if configured (allow override via explicit kwargs)
+                if self.tools and "tools" not in kwargs:
+                    kwargs["tools"] = self.tools
+                    logger.debug(f"Using configured tools: {len(self.tools)} tool(s)")
 
-            # Merge LiteLLM config into kwargs
-            litellm_kwargs = self.litellm_config.copy()
-            for key, value in litellm_kwargs.items():
-                if key not in kwargs:
-                    kwargs[key] = value
+                # Merge LiteLLM config into kwargs
+                litellm_kwargs = self.litellm_config.copy()
+                for key, value in litellm_kwargs.items():
+                    if key not in kwargs:
+                        kwargs[key] = value
 
-            # Use config temperature as default if using default parameter value
-            requested_temperature = temperature if temperature != 0.7 else self.default_temperature
+                # Use config temperature as default if using default parameter value
+                requested_temperature = temperature if temperature != 0.7 else self.default_temperature
 
-            # Enforce provider-specific temperature rules
-            # Gemini models: Always use temperature=1.0
-            # Azure OpenAI and OpenAI: Always use temperature=0.3
-            model_lower = (model_to_use or "").lower()
-            if model_lower.startswith("gemini/"):
-                # Gemini: Always use 1.0
-                final_temperature = 1.0
-                if requested_temperature != 1.0:
-                    logger.info(
-                        f"⚠️  Enforcing temperature=1.0 for Gemini model '{model_to_use}' "
-                        f"(config: {requested_temperature})"
-                    )
-            elif model_lower.startswith("azure/") or model_lower.startswith("openai/"):
-                # Azure OpenAI and OpenAI: Always use 0.3
-                final_temperature = 0.3
-                if requested_temperature != 0.3:
-                    logger.info(
-                        f"⚠️  Enforcing temperature=0.3 for OpenAI/Azure model '{model_to_use}' "
-                        f"(config: {requested_temperature})"
-                    )
-            else:
-                final_temperature = requested_temperature
-
-            # Add reasoning_effort for Gemini 3+ models (maps to thinking_level)
-            if reasoning_effort and model_to_use:
-                # LiteLLM handles mapping reasoning_effort to thinking_level for Gemini 3
-                kwargs["reasoning_effort"] = reasoning_effort
-                logger.debug(
-                    f"Using reasoning_effort='{reasoning_effort}' for model '{model_to_use}'"
+                final_temperature = adjust_temperature_for_model(
+                    model=model_to_use,
+                    requested_temperature=requested_temperature,
+                    log=logger,
                 )
 
-            # Use LiteLLM's async streaming completion
-            response = await acompletion(
-                model=model_to_use,
-                messages=messages_to_use,
-                temperature=final_temperature,
-                max_tokens=max_tokens,
-                stream=True,  # Enable streaming
-                **kwargs,
-            )
+                # Add reasoning_effort for Gemini 3+ models (maps to thinking_level)
+                if reasoning_effort and model_to_use:
+                    # LiteLLM handles mapping reasoning_effort to thinking_level for Gemini 3
+                    kwargs["reasoning_effort"] = reasoning_effort
+                    logger.debug(f"Using reasoning_effort='{reasoning_effort}' for model '{model_to_use}'")
 
-            # Yield chunks as they arrive
-            async for chunk in response:
-                if hasattr(chunk, "choices") and chunk.choices:
-                    delta = chunk.choices[0].delta
-
-                    # Handle reasoning_content FIRST (comes before main content)
-                    # Stream as separate event for frontend to render as thinking bubble
-                    if hasattr(delta, "reasoning_content") and delta.reasoning_content:
-                        reasoning_buffer.append(delta.reasoning_content)
-                        if stream_reasoning:
-                            # Send start marker on first reasoning chunk
-                            if not reasoning_started:
-                                yield "__REASONING_START__"
-                                reasoning_started = True
-                            # Stream reasoning content (frontend renders as thinking bubble)
-                            yield f"__REASONING__:{delta.reasoning_content}"
-
-                    # Yield main content to user (separate from reasoning)
-                    if hasattr(delta, "content") and delta.content:
-                        # If we were streaming reasoning, signal end before content starts
-                        if reasoning_started and stream_reasoning:
-                            yield "__REASONING_END__"
-                            reasoning_started = False
-                        yield delta.content
-
-            # Send final reasoning end marker if needed
-            if reasoning_started and stream_reasoning:
-                yield "__REASONING_END__"
-
-            # Log reasoning for audit trail (if any was captured)
-            if reasoning_buffer:
-                full_reasoning = "".join(reasoning_buffer)
-                logger.info(
-                    "LLM_REASONING_CAPTURED",
-                    extra={
-                        "model": model_to_use,
-                        "reasoning_effort": reasoning_effort,
-                        "reasoning_length": len(full_reasoning),
-                        "reasoning_preview": full_reasoning[:200] + "..."
-                        if len(full_reasoning) > 200
-                        else full_reasoning,
-                    },
+                # Use LiteLLM's async streaming completion
+                response = await acompletion(
+                    model=model_to_use,
+                    messages=messages_to_use,
+                    temperature=final_temperature,
+                    max_tokens=max_tokens,
+                    stream=True,  # Enable streaming
+                    **kwargs,
                 )
 
-        except (
-            ValueError,
-            TypeError,
-            AttributeError,
-            RuntimeError,
-            ConnectionError,
-            TimeoutError,
-        ) as e:
-            logger.exception(f"LLM_STREAM_FAILED: {str(e)}")
-            raise LLMServiceError(f"LLM streaming failed: {str(e)}") from e
+                # Yield chunks as they arrive
+                async for chunk in response:
+                    if hasattr(chunk, "choices") and chunk.choices:
+                        delta = chunk.choices[0].delta
+
+                        # Handle reasoning_content FIRST (comes before main content)
+                        # Stream as separate event for frontend to render as thinking bubble
+                        if hasattr(delta, "reasoning_content") and delta.reasoning_content:
+                            reasoning_buffer.append(delta.reasoning_content)
+                            if stream_reasoning:
+                                # Send start marker on first reasoning chunk
+                                if not reasoning_started:
+                                    yield "__REASONING_START__"
+                                    reasoning_started = True
+                                # Stream reasoning content (frontend renders as thinking bubble)
+                                yield f"__REASONING__:{delta.reasoning_content}"
+
+                        # Yield main content to user (separate from reasoning)
+                        if hasattr(delta, "content") and delta.content:
+                            # If we were streaming reasoning, signal end before content starts
+                            if reasoning_started and stream_reasoning:
+                                yield "__REASONING_END__"
+                                reasoning_started = False
+                            yield delta.content
+
+                # Send final reasoning end marker if needed
+                if reasoning_started and stream_reasoning:
+                    yield "__REASONING_END__"
+
+                # Log reasoning for audit trail (if any was captured)
+                if reasoning_buffer:
+                    full_reasoning = "".join(reasoning_buffer)
+                    logger.info(
+                        "LLM_REASONING_CAPTURED",
+                        extra={
+                            "model": model_to_use,
+                            "reasoning_effort": reasoning_effort,
+                            "reasoning_length": len(full_reasoning),
+                            "reasoning_preview": full_reasoning[:200] + "..."
+                            if len(full_reasoning) > 200
+                            else full_reasoning,
+                        },
+                    )
+
+            except (
+                ValueError,
+                TypeError,
+                AttributeError,
+                RuntimeError,
+                ConnectionError,
+                TimeoutError,
+            ) as e:
+                span.set_attribute("error", True)
+                logger.exception(f"LLM_STREAM_FAILED: {str(e)}")
+                raise LLMServiceError(f"LLM streaming failed: {str(e)}") from e
 
 
 class LLMService:
@@ -735,38 +759,82 @@ class LLMService:
 
     def __init__(
         self,
-        llm_provider: LLMProvider | None = None,
         config: dict[str, Any] | None = None,
     ):
         """
         Initialize LLM Service.
 
         Args:
-            llm_provider: LLMProvider instance (optional, will create default if None)
-            config: Optional configuration dict (from manifest.json llm_config)
+            config: Configuration dict (from manifest.json llm_config)
+                   Requires:
+                   - providers: Dict mapping provider names to LiteLLM model strings
+                     (e.g., {"chat": "openai/gpt-4o", "analysis": "gemini/gemini-3-flash-preview"})
                    Supports:
-                   - default_model: LiteLLM model string
-                     (e.g., "openai/gpt-4o", "gemini/gemini-3-flash-preview")
-                   - tools: List of tool definitions for function calling/grounding
-                     (e.g., [{"google_search": {}}] for Gemini Google Search)
-                   - provider: Legacy format (e.g., "openai", "azure", "gemini")
+                   - litellm_config: Dict of LiteLLM configuration options
+                     (e.g., {"request_timeout": 60, "num_retries": 2})
 
         Raises:
-            LLMServiceError: If LiteLLM is not available
+            LLMServiceError: If LiteLLM is not available or providers not configured
         """
         if not LITELLM_AVAILABLE:
             raise LLMServiceError("LiteLLM not available. Install with: pip install litellm")
 
-        # Create LLM provider if not provided
-        if llm_provider is None:
-            llm_provider = LLMProvider(config=config)
+        # Ensure compatibility: Sync AZURE_API_BASE and AZURE_OPENAI_ENDPOINT
+        # LiteLLM uses AZURE_API_BASE, but we also support AZURE_OPENAI_ENDPOINT
+        azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+        azure_api_base = os.getenv("AZURE_API_BASE")
 
-        self.llm_provider = llm_provider
-        self.config = config or {}
+        if azure_endpoint and not azure_api_base:
+            # Set AZURE_API_BASE from AZURE_OPENAI_ENDPOINT for LiteLLM compatibility
+            os.environ["AZURE_API_BASE"] = azure_endpoint
+            logger.debug(f"Set AZURE_API_BASE={azure_endpoint} from AZURE_OPENAI_ENDPOINT")
+        elif azure_api_base and not azure_endpoint:
+            # Set AZURE_OPENAI_ENDPOINT from AZURE_API_BASE for our code compatibility
+            os.environ["AZURE_OPENAI_ENDPOINT"] = azure_api_base
+            logger.debug(f"Set AZURE_OPENAI_ENDPOINT={azure_api_base} from AZURE_API_BASE")
+
+        if not config:
+            raise LLMServiceError("LLMService requires 'config' dict with 'providers' mapping")
+
+        providers_config = config.get("providers", {})
+        if not providers_config:
+            raise LLMServiceError(
+                "LLMService requires 'providers' dict in config. " "Example: {'providers': {'chat': 'openai/gpt-4o'}}"
+            )
+
+        self.config = config
+        self.providers: dict[str, _LLMProvider] = {}
+
+        shared_config = {}
+        if "litellm_config" in config:
+            shared_config["litellm_config"] = config["litellm_config"]
+
+        for provider_name, model_string in providers_config.items():
+            if not isinstance(model_string, str):
+                raise LLMServiceError(
+                    f"Provider '{provider_name}' must map to a LiteLLM model string, "
+                    f"got {type(model_string).__name__}"
+                )
+            provider_config = {"default_model": model_string, **shared_config}
+            self.providers[provider_name] = _LLMProvider(config=provider_config)
+            logger.info(f"Initialized named provider '{provider_name}' with model '{model_string}'")
+
+        # Default provider: prefer "chat" if it exists, otherwise first key
+        if "chat" in self.providers:
+            self.default_provider_name: str = "chat"
+        else:
+            self.default_provider_name = next(iter(self.providers))
+
+    def get_provider(self, provider_name: str) -> _LLMProvider:
+        if provider_name not in self.providers:
+            available = ", ".join(self.providers.keys())
+            raise LLMServiceError(f"Provider '{provider_name}' not found. Available providers: {available}")
+        return self.providers[provider_name]
 
     async def chat_completion(
         self,
         messages: list[dict[str, str]],
+        provider_name: str | None = None,
         model: str | None = None,
         temperature: float = 0.7,
         max_tokens: int | None = None,
@@ -780,6 +848,8 @@ class LLMService:
             messages: List of message dicts with 'role' and 'content' keys.
                      Format: [{"role": "system", "content": "..."},
                               {"role": "user", "content": "..."}, ...]
+            provider_name: Named provider to use (e.g. ``"chat"``, ``"extraction"``).
+                          Defaults to ``self.default_provider_name`` (usually ``"chat"``).
             model: Optional LiteLLM model string
                    (e.g., "openai/gpt-4o", "gemini/gemini-3-flash-preview")
                    Overrides default_model if provided
@@ -798,6 +868,8 @@ class LLMService:
                            - dict with "type": "json_object", "response_schema": {...}
                              (for Gemini strict schema)
                            - None (for free-form text)
+            provider_name: Optional provider name from providers config.
+                          If None, uses default provider.
             **kwargs: Additional provider-specific parameters
                      (e.g., tools, tool_choice for function calling/grounding)
 
@@ -812,6 +884,12 @@ class LLMService:
                     {"role": "user", "content": "What is the capital of France?"}
                 ],
                 model="openai/gpt-4o"
+            )
+
+            # Named provider (required)
+            response = await service.chat_completion(
+                messages=[{"role": "user", "content": "Analyze this data"}],
+                provider_name="analysis"
             )
 
             # Structured output with Pydantic (provider-aware)
@@ -833,11 +911,12 @@ class LLMService:
             movie = Movie.model_validate_json(response)
         """
         try:
-            # Use provider's default temperature if not explicitly provided
-            if temperature == 0.7:  # Default parameter value
-                temperature = self.llm_provider.default_temperature
+            provider_name = provider_name or self.default_provider_name
+            provider = self.get_provider(provider_name)
+            if temperature == 0.7:
+                temperature = provider.default_temperature
 
-            response = await self.llm_provider.chat_completion(
+            return await provider.chat_completion(
                 messages=messages,
                 model=model,
                 temperature=temperature,
@@ -845,8 +924,6 @@ class LLMService:
                 response_format=response_format,
                 **kwargs,
             )
-            logger.info("Generated LLM completion successfully")
-            return response
         except (
             LLMServiceError,
             ValueError,
@@ -855,19 +932,13 @@ class LLMService:
             ConnectionError,
             TimeoutError,
         ) as e:
-            # Catch specific exceptions that can occur during LLM completion
-            # LLMServiceError: From the provider
-            # ValueError: Invalid parameters
-            # TypeError: Type errors
-            # RuntimeError: Runtime issues
-            # ConnectionError: Network errors
-            # TimeoutError: Timeout errors
             logger.error(f"Error generating LLM completion: {e}", exc_info=True)
             raise LLMServiceError(f"LLM completion generation failed: {str(e)}") from e
 
     async def chat_completion_stream(
         self,
         messages: list[dict[str, str]],
+        provider_name: str | None = None,
         model: str | None = None,
         temperature: float = 0.7,
         max_tokens: int | None = None,
@@ -895,6 +966,8 @@ class LLMService:
                              Use "none" for cheapest/fastest responses.
             stream_reasoning: If True (default), streams reasoning as separate
                              chunks for frontend to render as thinking bubbles.
+            provider_name: Optional provider name from providers config.
+                          If None, uses default provider.
             **kwargs: Additional provider-specific parameters
 
         Yields:
@@ -914,6 +987,7 @@ class LLMService:
                     messages=[{"role": "user", "content": "Tell me a story"}],
                     reasoning_effort="low",
                     stream_reasoning=True,
+                    provider_name="chat",
                 ):
                     if chunk.startswith("__REASONING"):
                         # Send as reasoning event for thinking bubble
@@ -923,31 +997,21 @@ class LLMService:
 
             return StreamingResponse(stream_generator(), media_type="text/event-stream")
         """
-        try:
-            # Use provider's default temperature if not explicitly provided
-            if temperature == 0.7:  # Default parameter value
-                temperature = self.llm_provider.default_temperature
+        provider_name = provider_name or self.default_provider_name
+        provider = self.get_provider(provider_name)
+        if temperature == 0.7:
+            temperature = provider.default_temperature
 
-            async for chunk in self.llm_provider.chat_completion_stream(
-                messages=messages,
-                model=model,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                reasoning_effort=reasoning_effort,
-                stream_reasoning=stream_reasoning,
-                **kwargs,
-            ):
-                yield chunk
-        except (
-            LLMServiceError,
-            ValueError,
-            TypeError,
-            RuntimeError,
-            ConnectionError,
-            TimeoutError,
-        ) as e:
-            logger.error(f"Error in streaming LLM completion: {e}", exc_info=True)
-            raise LLMServiceError(f"LLM streaming failed: {str(e)}") from e
+        async for chunk in provider.chat_completion_stream(
+            messages=messages,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            reasoning_effort=reasoning_effort,
+            stream_reasoning=stream_reasoning,
+            **kwargs,
+        ):
+            yield chunk
 
 
 # Dependency injection helper
@@ -963,14 +1027,13 @@ def get_llm_service(
     (e.g., "openai/gpt-4o", "gemini/gemini-3-flash-preview")
 
     Args:
-        config: Optional configuration dict (from manifest.json llm_config)
+        config: Configuration dict (from manifest.json llm_config)
+               Requires:
+               - providers: Dict mapping provider names to LiteLLM model strings
+                 (e.g., {"chat": "openai/gpt-4o", "analysis": "gemini/gemini-3-flash-preview"})
                Supports:
-               - default_model: LiteLLM model string
-                 (e.g., "openai/gpt-4o", "gemini/gemini-3-flash-preview")
-               - tools: List of tool definitions for function calling/grounding
-                 (e.g., [{"google_search": {}}] for Gemini Google Search)
-               - provider: Legacy format (e.g., "openai", "azure", "gemini")
-                 - will be converted
+               - litellm_config: Dict of LiteLLM configuration options
+                 (e.g., {"request_timeout": 60, "num_retries": 2})
 
     Returns:
         LLMService instance
@@ -978,12 +1041,14 @@ def get_llm_service(
     Example:
         from mdb_engine.llm import get_llm_service
 
-        # Auto-detects from environment variables
-        llm_service = get_llm_service()
-
-        # Or configure explicitly
+        # Named providers (required)
         llm_service = get_llm_service(
-            config={"default_model": "gemini/gemini-3-flash-preview"}
+            config={
+                "providers": {
+                    "chat": "openai/gpt-4o",
+                    "analysis": "gemini/gemini-3-flash-preview"
+                }
+            }
         )
     """
     return LLMService(config=config)

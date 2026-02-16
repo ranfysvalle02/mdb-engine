@@ -403,7 +403,7 @@ async def app2_root():
         engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name="test_db")
 
         # Create multi-app
-        app = engine.create_multi_app(
+        app = await engine.create_multi_app(
             apps=[
                 {"slug": "app1", "manifest": manifest1_path, "path_prefix": "/app1"},
                 {"slug": "app2", "manifest": manifest2_path, "path_prefix": "/app2"},
@@ -412,9 +412,7 @@ async def app2_root():
 
         # Test routes are accessible via path prefix
         async with app.router.lifespan_context(app):
-            async with AsyncClient(
-                transport=ASGITransport(app=app), base_url="http://test"
-            ) as client:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
                 # Test app1 route
                 response = await client.get("/app1/")
                 assert response.status_code == 200

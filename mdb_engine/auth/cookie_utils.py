@@ -15,9 +15,7 @@ from fastapi import Request
 logger = logging.getLogger(__name__)
 
 
-def get_secure_cookie_settings(
-    request: Request, config: dict[str, Any] | None = None
-) -> dict[str, Any]:
+def get_secure_cookie_settings(request: Request, config: dict[str, Any] | None = None) -> dict[str, Any]:
     """
     Get secure cookie settings based on manifest config and request environment.
 
@@ -50,9 +48,7 @@ def get_secure_cookie_settings(
         if cookie_secure == "auto":
             # Auto-detect: secure if HTTPS or production environment
             is_https = request.url.scheme == "https"
-            is_production = (
-                os.getenv("G_NOME_ENV") == "production" or os.getenv("ENVIRONMENT") == "production"
-            )
+            is_production = os.getenv("G_NOME_ENV") == "production" or os.getenv("ENVIRONMENT") == "production"
             secure = is_https or is_production
         elif cookie_secure == "true":
             secure = True
@@ -61,9 +57,7 @@ def get_secure_cookie_settings(
     else:
         # No config - use environment-based defaults
         is_https = request.url.scheme == "https"
-        is_production = (
-            os.getenv("G_NOME_ENV") == "production" or os.getenv("ENVIRONMENT") == "production"
-        )
+        is_production = os.getenv("G_NOME_ENV") == "production" or os.getenv("ENVIRONMENT") == "production"
         secure = is_https or is_production
 
     return {
@@ -159,6 +153,4 @@ def clear_auth_cookies(response, request: Request | None = None):
     response.delete_cookie(key="token", httponly=True, secure=secure, samesite=samesite, path="/")
 
     # Delete refresh token cookie
-    response.delete_cookie(
-        key="refresh_token", httponly=True, secure=secure, samesite=samesite, path="/"
-    )
+    response.delete_cookie(key="refresh_token", httponly=True, secure=secure, samesite=samesite, path="/")

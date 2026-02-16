@@ -79,9 +79,7 @@ class TestCookieExtraction:
         # Simulate ASGI-style headers in scope
         mock_websocket.cookies = None  # No cookies attribute
         mock_websocket.scope = {
-            "headers": [
-                (b"cookie", f"{AUTH_COOKIE_NAME}=test-token; csrf_token=csrf-value".encode())
-            ]
+            "headers": [(b"cookie", f"{AUTH_COOKIE_NAME}=test-token; csrf_token=csrf-value".encode())]
         }
 
         cookies = _get_cookies_from_websocket(mock_websocket)
@@ -103,9 +101,7 @@ class TestCookieExtraction:
     async def test_get_cookies_from_websocket_malformed_cookie(self, mock_websocket):
         """Test handling malformed cookie strings."""
         mock_websocket.cookies = None
-        mock_websocket.scope = {
-            "headers": [(b"cookie", b"malformed=cookie=value; valid=mdb_auth_token")]
-        }
+        mock_websocket.scope = {"headers": [(b"cookie", b"malformed=cookie=value; valid=mdb_auth_token")]}
 
         cookies = _get_cookies_from_websocket(mock_websocket)
 
@@ -123,9 +119,7 @@ class TestWebSocketCookieAuthentication:
     """
 
     @pytest.mark.asyncio
-    async def test_authenticate_via_cookie_success(
-        self, mock_websocket, valid_jwt_token, mock_user_pool
-    ):
+    async def test_authenticate_via_cookie_success(self, mock_websocket, valid_jwt_token, mock_user_pool):
         """
         Test successful authentication via WebSocket ticket.
 
@@ -139,9 +133,7 @@ class TestWebSocketCookieAuthentication:
 
         # Create ticket store and generate a ticket
         ticket_store = WebSocketTicketStore()
-        ticket = ticket_store.create_ticket(
-            user_id="user123", user_email="test@example.com", app_slug="test_app"
-        )
+        ticket = ticket_store.create_ticket(user_id="user123", user_email="test@example.com", app_slug="test_app")
 
         # Set up WebSocket with ticket in query params and ticket store in app state
         mock_websocket.query_params = MagicMock()
@@ -150,9 +142,7 @@ class TestWebSocketCookieAuthentication:
         mock_websocket.app.state = MagicMock()
         mock_websocket.app.state.websocket_ticket_store = ticket_store
 
-        user_id, user_email = await authenticate_websocket(
-            mock_websocket, "test_app", require_auth=True
-        )
+        user_id, user_email = await authenticate_websocket(mock_websocket, "test_app", require_auth=True)
 
         assert user_id == "user123"
         assert user_email == "test@example.com"
@@ -179,9 +169,7 @@ class TestWebSocketCookieAuthentication:
         mock_websocket.app.state.websocket_ticket_store = ticket_store
 
         # Invalid tickets should return None, None
-        user_id, user_email = await authenticate_websocket(
-            mock_websocket, "test_app", require_auth=True
-        )
+        user_id, user_email = await authenticate_websocket(mock_websocket, "test_app", require_auth=True)
         assert user_id is None
         assert user_email is None
 
@@ -200,9 +188,7 @@ class TestWebSocketCookieAuthentication:
 
         # Create ticket store with very short TTL
         ticket_store = WebSocketTicketStore(ticket_ttl_seconds=0.1)  # Expires in 0.1 seconds
-        ticket = ticket_store.create_ticket(
-            user_id="user123", user_email="test@example.com", app_slug="test_app"
-        )
+        ticket = ticket_store.create_ticket(user_id="user123", user_email="test@example.com", app_slug="test_app")
 
         # Wait for ticket to expire
         time.sleep(0.2)
@@ -215,16 +201,12 @@ class TestWebSocketCookieAuthentication:
         mock_websocket.app.state.websocket_ticket_store = ticket_store
 
         # Expired tickets should return None, None
-        user_id, user_email = await authenticate_websocket(
-            mock_websocket, "test_app", require_auth=True
-        )
+        user_id, user_email = await authenticate_websocket(mock_websocket, "test_app", require_auth=True)
         assert user_id is None
         assert user_email is None
 
     @pytest.mark.asyncio
-    async def test_authenticate_via_cookie_scope_header(
-        self, mock_websocket, valid_jwt_token, mock_user_pool
-    ):
+    async def test_authenticate_via_cookie_scope_header(self, mock_websocket, valid_jwt_token, mock_user_pool):
         """
         Test authentication via ticket in header.
 
@@ -240,9 +222,7 @@ class TestWebSocketCookieAuthentication:
 
         # Create ticket store and generate a ticket
         ticket_store = WebSocketTicketStore()
-        ticket = ticket_store.create_ticket(
-            user_id="user123", user_email="test@example.com", app_slug="test_app"
-        )
+        ticket = ticket_store.create_ticket(user_id="user123", user_email="test@example.com", app_slug="test_app")
 
         # Set up WebSocket with ticket in header (not query params)
         mock_websocket.query_params = MagicMock()
@@ -253,9 +233,7 @@ class TestWebSocketCookieAuthentication:
         mock_websocket.app.state = MagicMock()
         mock_websocket.app.state.websocket_ticket_store = ticket_store
 
-        user_id, user_email = await authenticate_websocket(
-            mock_websocket, "test_app", require_auth=True
-        )
+        user_id, user_email = await authenticate_websocket(mock_websocket, "test_app", require_auth=True)
 
         assert user_id == "user123"
         assert user_email == "test@example.com"
@@ -281,9 +259,7 @@ class TestWebSocketAuthenticationNoAuth:
         security checks.
         """
         # No token provided
-        user_id, user_email = await authenticate_websocket(
-            mock_websocket, "test_app", require_auth=False
-        )
+        user_id, user_email = await authenticate_websocket(mock_websocket, "test_app", require_auth=False)
 
         assert user_id is None
         assert user_email is None
@@ -299,9 +275,7 @@ class TestWebSocketAuthenticationNoAuth:
         """
         mock_websocket.cookies = {AUTH_COOKIE_NAME: valid_jwt_token}
 
-        user_id, user_email = await authenticate_websocket(
-            mock_websocket, "test_app", require_auth=False
-        )
+        user_id, user_email = await authenticate_websocket(mock_websocket, "test_app", require_auth=False)
 
         # Should return None even though token is present
         assert user_id is None
@@ -327,9 +301,7 @@ class TestWebSocketAuthenticationErrors:
         This ensures that unauthenticated connections are not allowed when
         auth is required, preventing unauthorized access.
         """
-        user_id, user_email = await authenticate_websocket(
-            mock_websocket, "test_app", require_auth=True
-        )
+        user_id, user_email = await authenticate_websocket(mock_websocket, "test_app", require_auth=True)
 
         assert user_id is None
         assert user_email is None
@@ -349,18 +321,14 @@ class TestWebSocketAuthenticationErrors:
         mock_websocket.cookies = MagicMock(side_effect=AttributeError("No cookies"))
         mock_websocket.scope = {"headers": []}
 
-        user_id, user_email = await authenticate_websocket(
-            mock_websocket, "test_app", require_auth=True
-        )
+        user_id, user_email = await authenticate_websocket(mock_websocket, "test_app", require_auth=True)
 
         # Should fail - no way to access cookies
         assert user_id is None
         assert user_email is None
 
     @pytest.mark.asyncio
-    async def test_websocket_auth_uses_correct_cookie_name(
-        self, mock_websocket, valid_jwt_token, mock_user_pool
-    ):
+    async def test_websocket_auth_uses_correct_cookie_name(self, mock_websocket, valid_jwt_token, mock_user_pool):
         """
         Regression test: Ensure WebSocket authentication uses ticket-based auth.
 
@@ -375,9 +343,7 @@ class TestWebSocketAuthenticationErrors:
 
         # Create ticket store and generate a ticket
         ticket_store = WebSocketTicketStore()
-        ticket = ticket_store.create_ticket(
-            user_id="user123", user_email="test@example.com", app_slug="test_app"
-        )
+        ticket = ticket_store.create_ticket(user_id="user123", user_email="test@example.com", app_slug="test_app")
 
         mock_websocket.app = MagicMock()
         mock_websocket.app.state = MagicMock()
@@ -388,17 +354,13 @@ class TestWebSocketAuthenticationErrors:
         mock_websocket.query_params.get = MagicMock(return_value=ticket)
         mock_websocket.headers = MagicMock()
         mock_websocket.headers.get = MagicMock(return_value=None)
-        user_id, user_email = await authenticate_websocket(
-            mock_websocket, "test_app", require_auth=True
-        )
+        user_id, user_email = await authenticate_websocket(mock_websocket, "test_app", require_auth=True)
         assert user_id == "user123"
         assert user_email == "test@example.com"
 
         # Test with old/wrong cookie name (should fail)
         mock_websocket.cookies = {"token": valid_jwt_token}  # Wrong name
-        user_id, user_email = await authenticate_websocket(
-            mock_websocket, "test_app", require_auth=True
-        )
+        user_id, user_email = await authenticate_websocket(mock_websocket, "test_app", require_auth=True)
         # Should fail because wrong cookie name
         assert user_id is None
         assert user_email is None
@@ -418,9 +380,7 @@ class TestWebSocketSessionKeyAuthentication:
 
         # Create ticket store and generate a ticket
         ticket_store = WebSocketTicketStore()
-        ticket = ticket_store.create_ticket(
-            user_id="user123", user_email="test@example.com", app_slug="test_app"
-        )
+        ticket = ticket_store.create_ticket(user_id="user123", user_email="test@example.com", app_slug="test_app")
 
         # Set up mock websocket with ticket
         mock_websocket.app = MagicMock()
@@ -432,9 +392,7 @@ class TestWebSocketSessionKeyAuthentication:
         mock_websocket.headers.get = MagicMock(return_value=None)
 
         # Authenticate
-        user_id, user_email = await authenticate_websocket(
-            mock_websocket, "test_app", require_auth=True
-        )
+        user_id, user_email = await authenticate_websocket(mock_websocket, "test_app", require_auth=True)
 
         assert user_id == "user123"
         assert user_email == "test@example.com"
@@ -450,9 +408,7 @@ class TestWebSocketSessionKeyAuthentication:
 
         # Create ticket store and generate a ticket
         ticket_store = WebSocketTicketStore()
-        ticket = ticket_store.create_ticket(
-            user_id="user123", user_email="test@example.com", app_slug="test_app"
-        )
+        ticket = ticket_store.create_ticket(user_id="user123", user_email="test@example.com", app_slug="test_app")
 
         # Set up mock websocket with ticket in header
         mock_websocket.app = MagicMock()
@@ -461,14 +417,10 @@ class TestWebSocketSessionKeyAuthentication:
         mock_websocket.query_params = MagicMock()
         mock_websocket.query_params.get = MagicMock(return_value=None)
         mock_websocket.headers = MagicMock()
-        mock_websocket.headers.get = MagicMock(
-            side_effect=lambda key: ticket if key == "X-WebSocket-Ticket" else None
-        )
+        mock_websocket.headers.get = MagicMock(side_effect=lambda key: ticket if key == "X-WebSocket-Ticket" else None)
 
         # Authenticate
-        user_id, user_email = await authenticate_websocket(
-            mock_websocket, "test_app", require_auth=True
-        )
+        user_id, user_email = await authenticate_websocket(mock_websocket, "test_app", require_auth=True)
 
         assert user_id == "user123"
         assert user_email == "test@example.com"
@@ -492,18 +444,14 @@ class TestWebSocketSessionKeyAuthentication:
         mock_websocket.headers.get = MagicMock(return_value=None)
 
         # Authenticate (should fail)
-        user_id, user_email = await authenticate_websocket(
-            mock_websocket, "test_app", require_auth=True
-        )
+        user_id, user_email = await authenticate_websocket(mock_websocket, "test_app", require_auth=True)
 
         # Should fail (no valid ticket)
         assert user_id is None
         assert user_email is None
 
     @pytest.mark.asyncio
-    async def test_authenticate_falls_back_to_cookie(
-        self, mock_websocket, valid_jwt_token, mock_user_pool
-    ):
+    async def test_authenticate_falls_back_to_cookie(self, mock_websocket, valid_jwt_token, mock_user_pool):
         """Test that authentication fails when no ticket is provided."""
         from mdb_engine.auth.websocket_tickets import WebSocketTicketStore
 
@@ -520,9 +468,7 @@ class TestWebSocketSessionKeyAuthentication:
         mock_websocket.headers.get = MagicMock(return_value=None)
 
         # Authenticate (should fail - no ticket provided)
-        user_id, user_email = await authenticate_websocket(
-            mock_websocket, "test_app", require_auth=True
-        )
+        user_id, user_email = await authenticate_websocket(mock_websocket, "test_app", require_auth=True)
 
         # Should fail (no ticket provided)
         assert user_id is None

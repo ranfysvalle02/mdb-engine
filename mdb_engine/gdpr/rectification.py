@@ -7,7 +7,7 @@ This module is part of MDB_ENGINE - MongoDB Engine.
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -60,15 +60,13 @@ class DataRectificationService:
             raise ValueError("Updates must be a non-empty dictionary")
 
         # Discover collections with user data
-        collections = await self.discovery_service.discover_user_collections(
-            user_identifier, identifier_type, app_slug
-        )
+        collections = await self.discovery_service.discover_user_collections(user_identifier, identifier_type, app_slug)
 
         update_results = {
             "collections_processed": [],
             "documents_updated": 0,
             "errors": [],
-            "updated_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
         }
 
         # Build query
@@ -79,7 +77,7 @@ class DataRectificationService:
         update_doc = {
             "$set": {
                 **updates,
-                "updated_at": datetime.utcnow(),
+                "updated_at": datetime.now(timezone.utc),
                 "gdpr_updated": True,
             }
         }
@@ -96,10 +94,7 @@ class DataRectificationService:
                 if result.modified_count > 0:
                     update_results["documents_updated"] += result.modified_count
                     update_results["collections_processed"].append(collection_name)
-                    logger.info(
-                        f"Updated {result.modified_count} documents in "
-                        f"collection '{collection_name}'"
-                    )
+                    logger.info(f"Updated {result.modified_count} documents in " f"collection '{collection_name}'")
             except PyMongoError as e:
                 error_info = {
                     "collection": collection_name,

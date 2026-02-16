@@ -104,8 +104,7 @@ class ScopeManager:
         scope_dict = _request_scope.get()
         if scope_dict is None:
             raise RuntimeError(
-                "No active request scope. Ensure ScopeManager.begin_request() "
-                "was called (usually via middleware)."
+                "No active request scope. Ensure ScopeManager.begin_request() " "was called (usually via middleware)."
             )
 
         if key not in scope_dict:

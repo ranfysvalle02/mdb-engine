@@ -49,9 +49,7 @@ class TestManifestGraphConfig:
         enabled_schema = graph_schema["enabled"]
 
         # Enabled should default to True
-        assert (
-            enabled_schema.get("default") is True
-        ), "graph_config.enabled should default to True (enabled by default)"
+        assert enabled_schema.get("default") is True, "graph_config.enabled should default to True (enabled by default)"
 
     def test_graph_config_validates_correctly(self):
         """Verify manifest validation accepts valid graph_config."""
@@ -72,6 +70,26 @@ class TestManifestGraphConfig:
 
         # Should not raise
         ManifestConfig.validate(valid_manifest)
+
+    def test_graphrag_config_schema_exists(self):
+        """Verify graphrag_config is properly defined in manifest schema."""
+        from mdb_engine.core.manifest import ManifestConfig
+
+        schema = ManifestConfig.get_schema()
+        properties = schema.get("properties", {})
+
+        assert "graphrag_config" in properties, "graphrag_config missing from manifest schema"
+        graphrag_schema = properties["graphrag_config"]["properties"]
+
+        # Core GraphRAG config options must exist
+        required_options = [
+            "enabled",
+            "community_detection",
+            "query_classification",
+            "search_methods",
+        ]
+        for opt in required_options:
+            assert opt in graphrag_schema, f"graphrag_config.{opt} missing from schema"
 
 
 class TestPublicAPIContracts:
@@ -128,6 +146,11 @@ class TestGraphServicePublicInterface:
             "extract_graph_from_text",
             "format_graph_context",
             "get_stats",
+            # GraphRAG methods
+            "local_search",
+            "global_search",
+            "drift_search",
+            "classify_query",
         ]
 
         for method in required_methods:

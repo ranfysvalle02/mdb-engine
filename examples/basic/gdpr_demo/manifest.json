@@ -26,12 +26,18 @@
       "allow_registration": true
     }
   },
+  "llm_config": {
+    "enabled": true,
+    "providers": {
+      "chat": "openai/gpt-4o"
+    }
+  },
   "memory_config": {
     "enabled": true,
     "provider": "cognitive",
     "collection_name": "user_memories",
     "embedding_model": "text-embedding-3-small",
-    "memory_llm_model": "gpt-4o",
+    "memory_llm_model": "openai/gpt-4o",
     "embedding_model_dims": 1536,
     "infer": true,
     "async_mode": true,
@@ -39,10 +45,6 @@
     "max_depth": 100,
     "cognitive": {
       "enabled": true,
-      "decay": {
-        "enabled": true,
-        "default_stability_hours": 24
-      },
       "emotion": {
         "enabled": true,
         "flashbulb_threshold": 0.7
@@ -62,15 +64,6 @@
     "categories": {
       "enabled": true,
       "custom_categories": ["personal", "work", "health"]
-    },
-    "redaction": {
-      "enabled": true,
-      "patterns": {
-        "ssn": true,
-        "credit_card": true,
-        "password": true,
-        "api_key": true
-      }
     }
   }
 }

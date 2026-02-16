@@ -97,9 +97,7 @@ class TestBreachCheck:
         """Test that breached passwords are detected."""
         # Mock httpx response
         mock_response = AsyncMock()
-        mock_response.text = (
-            "0018A45C4D1DEF81644B54AB7F969B88D65:5\n00D4F6E8FA6EECAD2A3AA415EEC418D38EC:2"
-        )
+        mock_response.text = "0018A45C4D1DEF81644B54AB7F969B88D65:5\n00D4F6E8FA6EECAD2A3AA415EEC418D38EC:2"
         mock_response.raise_for_status = lambda: None
 
         mock_client = AsyncMock()
@@ -253,9 +251,7 @@ class TestValidatePasswordStrengthAsync:
     @pytest.mark.asyncio
     async def test_with_breach_check_disabled(self):
         """Test with breach check disabled."""
-        is_valid, errors = await validate_password_strength_async(
-            "SecureP@ss123!", check_breaches=False
-        )
+        is_valid, errors = await validate_password_strength_async("SecureP@ss123!", check_breaches=False)
         assert is_valid is True
 
     @pytest.mark.asyncio

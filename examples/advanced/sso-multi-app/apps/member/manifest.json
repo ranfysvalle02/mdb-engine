@@ -1,0 +1,179 @@
+{
+  "schema_version": "2.0",
+  "slug": "member",
+  "name": "Member - Cognitive Memory Showcase",
+  "description": "Member Berries-inspired showcase of MDB-Engine's cognitive memory system: Ebbinghaus decay, flashbulb memory, GraphRAG, bucket isolation, conflict detection, cold storage, and memory analytics.",
+  "status": "active",
+  "auth": {
+    "mode": "shared",
+    "auth_hub_url": "http://localhost:8000",
+    "roles": ["base_user", "viewer", "editor", "admin"],
+    "require_role": "base_user",
+    "public_routes": ["/health", "/auth/callback"],
+    "csrf_protection": {
+      "enabled": true,
+      "exempt_routes": ["/health", "/auth/callback"],
+      "token_ttl": 3600
+    }
+  },
+  "memory_config": {
+    "enabled": true,
+    "provider": "cognitive",
+    "collection_name": "member_memories",
+    "embedding_model": "text-embedding-3-small",
+    "embedding_model_dims": 1536,
+    "chat_model": "gemini/gemini-2.5-flash-lite",
+    "memory_llm_model": "gemini/gemini-2.5-flash-lite",
+    "extraction_provider": "extraction",
+    "infer": true,
+    "enable_cognitive": true,
+    "max_depth": 500,
+    "emotion_weight": 0.5,
+    "recency_weight": 0.3,
+    "recency_half_life_hours": 168,
+    "spreading_activation": true,
+    "activation_discount": 0.7,
+    "salience_gate": true,
+    "salience_threshold": 0.3,
+    "persona": {
+      "enabled": true,
+      "default_role": "Member Berry - Cognitive Memory Companion",
+      "default_description": "A nostalgic AI companion with perfect recall. Member speaks warmly, often starting responses with 'Oh, I member!' when recalling stored memories. Member uses the cognitive memory system to remember facts, relationships, and emotions across conversations. Member is enthusiastic about demonstrating memory features like decay curves, graph relationships, and bucket isolation.",
+      "default_traits": {
+        "technical_focus": 0.4,
+        "humor": 0.8,
+        "formality": 0.3,
+        "empathy": 0.8,
+        "creativity": 0.7
+      }
+    },
+    "cognitive": {
+      "enabled": true,
+      "emotion": {
+        "enabled": true,
+        "flashbulb_threshold": 0.7,
+        "max_stability_multiplier": 100
+      },
+      "conflict_resolution": {
+        "enabled": true,
+        "similarity_threshold": 0.85
+      },
+      "pruning": {
+        "enabled": true,
+        "max_capacity": 1000,
+        "prune_percentage": 0.05,
+        "strategy": "soft_delete"
+      },
+      "cold_storage": {
+        "enabled": true,
+        "retention_days": 365
+      }
+    },
+    "categories": {
+      "enabled": true,
+      "custom_categories": [
+        "biographical",
+        "preferences",
+        "work",
+        "health",
+        "relationships",
+        "hobbies",
+        "goals",
+        "nostalgia"
+      ]
+    },
+    "reflection": {
+      "enabled": true,
+      "interval_hours": 24,
+      "message_threshold": 50,
+      "min_salience_to_keep": 0.3,
+      "store_reflections": true
+    },
+    "memory_types": {
+      "enabled": true,
+      "auto_detect": true,
+      "default_type": "semantic",
+      "episodic_retention_days": 365,
+      "working_ttl_hours": 24
+    },
+    "consolidation": {
+      "extract_entities": true,
+      "route_by_type": true,
+      "link_to_graph": true
+    },
+    "graph": {
+      "enabled": true,
+      "auto_extract": true
+    }
+  },
+  "graph_config": {
+    "enabled": true,
+    "collection_name": "__kg",
+    "auto_extract": true,
+    "default_max_depth": 2,
+    "node_types": [
+      "person",
+      "interest",
+      "movie",
+      "actor",
+      "genre",
+      "location",
+      "organization",
+      "event",
+      "concept",
+      "food",
+      "pet"
+    ]
+  },
+  "llm_config": {
+    "enabled": true,
+    "providers": {
+      "chat": "gemini/gemini-2.5-flash-lite",
+      "extraction": "gemini/gemini-2.5-flash-lite"
+    },
+    "litellm_config": {
+      "num_retries": 2,
+      "request_timeout": 60
+    }
+  },
+  "embedding_config": {
+    "enabled": true,
+    "default_embedding_model": "text-embedding-3-small",
+    "max_tokens_per_chunk": 1000
+  },
+  "managed_indexes": {
+    "conversations": [
+      {
+        "type": "regular",
+        "keys": { "user_id": 1, "created_at": -1 },
+        "name": "user_conversations_idx",
+        "options": { "background": true }
+      }
+    ],
+    "messages": [
+      {
+        "type": "regular",
+        "keys": { "conversation_id": 1, "created_at": 1 },
+        "name": "conversation_messages_idx",
+        "options": { "background": true }
+      }
+    ]
+  },
+  "cors": {
+    "enabled": true,
+    "allow_origins": [
+      "http://localhost:8000",
+      "http://localhost:8001",
+      "http://localhost:8002",
+      "http://localhost:8003",
+      "http://localhost:8004"
+    ],
+    "allow_credentials": true,
+    "allow_methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    "allow_headers": ["Content-Type", "Authorization", "X-CSRF-Token"]
+  },
+  "data_access": {
+    "read_scopes": ["member"],
+    "write_scope": "member"
+  }
+}

@@ -130,7 +130,14 @@ def serialize_document(doc: dict[str, Any]) -> dict[str, Any]:
             serialized[key] = serialize_document(value)
         elif isinstance(value, list):
             serialized[key] = [
-                serialize_document(item) if isinstance(item, dict) else item for item in value
+                serialize_document(item)
+                if isinstance(item, dict)
+                else str(item)
+                if isinstance(item, ObjectId)
+                else item.isoformat()
+                if isinstance(item, datetime)
+                else item
+                for item in value
             ]
         else:
             serialized[key] = value

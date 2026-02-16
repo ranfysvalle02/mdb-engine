@@ -153,8 +153,7 @@ def _get_local_key() -> bytes | None:
         key_bytes = base64.b64decode(key_str)
         if len(key_bytes) != 96:
             logger.warning(
-                f"Local master key is {len(key_bytes)} bytes, expected 96. "
-                f"This may cause encryption failures."
+                f"Local master key is {len(key_bytes)} bytes, expected 96. " f"This may cause encryption failures."
             )
         return key_bytes
     except (ValueError, base64.binascii.Error) as e:
@@ -318,14 +317,10 @@ class CSFLEConfig:
             return cls(enabled=False)
 
         kms_provider = encryption_config.get("kms_provider", "local")
-        key_vault_namespace = encryption_config.get(
-            "key_vault_namespace", DEFAULT_KEY_VAULT_NAMESPACE
-        )
+        key_vault_namespace = encryption_config.get("key_vault_namespace", DEFAULT_KEY_VAULT_NAMESPACE)
 
         # Prefix collection names with app slug
-        prefixed_collections = {
-            f"{app_slug}_{name}": fields for name, fields in encrypted_fields.items()
-        }
+        prefixed_collections = {f"{app_slug}_{name}": fields for name, fields in encrypted_fields.items()}
 
         return cls(
             enabled=True,
@@ -410,8 +405,7 @@ def _get_kms_providers(kms_provider: str) -> dict[str, Any]:
 
         if not access_key or not secret_key:
             raise ValueError(
-                f"AWS KMS requires {ENV_AWS_ACCESS_KEY} and "
-                f"{ENV_AWS_SECRET_KEY} environment variables"
+                f"AWS KMS requires {ENV_AWS_ACCESS_KEY} and " f"{ENV_AWS_SECRET_KEY} environment variables"
             )
 
         return {
@@ -447,8 +441,7 @@ def _get_kms_providers(kms_provider: str) -> dict[str, Any]:
 
         if not email or not private_key:
             raise ValueError(
-                f"GCP Cloud KMS requires {ENV_GCP_EMAIL} and "
-                f"{ENV_GCP_PRIVATE_KEY} environment variables"
+                f"GCP Cloud KMS requires {ENV_GCP_EMAIL} and " f"{ENV_GCP_PRIVATE_KEY} environment variables"
             )
 
         return {
@@ -490,7 +483,11 @@ def _ensure_data_keys(
 
     key_ids: dict[str, bytes] = {}
 
-    # Connect to MongoDB to manage keys
+    # NOTE: CSFLE key management requires sync PyMongo operations (ClientEncryption API).
+    # This is a legitimate exception to the "no direct MongoDB connections" rule.
+    # If called from within engine context, consider using engine._connection_manager.mongo_client.delegate
+    # to get the underlying PyMongo client instead of creating a new connection.
+    # However, this function is designed to work standalone for CSFLE setup/initialization.
     client = MongoClient(mongo_uri)
 
     try:
@@ -527,9 +524,7 @@ def _ensure_data_keys(
                     logger.debug(f"Using existing data key for {collection}")
                 else:
                     # Create new data key
-                    key_id = client_encryption.create_data_key(
-                        config.kms_provider, key_alt_names=[key_alt_name]
-                    )
+                    key_id = client_encryption.create_data_key(config.kms_provider, key_alt_names=[key_alt_name])
                     key_ids[collection] = key_id
                     logger.info(f"Created new data key for {collection}")
         finally:
@@ -616,6 +611,11 @@ def build_auto_encryption_opts(
         opts = build_auto_encryption_opts(config, uri, db_name)
         if opts:
             client = MongoClient(uri, auto_encryption_opts=opts)
+
+    Note:
+        CSFLE key management operations (_ensure_data_keys) require sync PyMongo operations.
+        This is a legitimate exception to the "no direct MongoDB connections" rule when engine is available.
+        When called from engine context, prefer using engine's connection manager if possible.
     """
     if not config.enabled:
         return None
@@ -627,9 +627,7 @@ def build_auto_encryption_opts(
         return None
 
     if not status["crypt_shared_exists"]:
-        logger.warning(
-            f"crypt_shared library not found at {status['crypt_shared_path']}. " "CSFLE disabled."
-        )
+        logger.warning(f"crypt_shared library not found at {status['crypt_shared_path']}. " "CSFLE disabled.")
         return None
 
     try:

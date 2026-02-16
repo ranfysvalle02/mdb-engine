@@ -1,97 +1,181 @@
 """
 Memory Service Module
 ---------------------
-This module provides intelligent memory management using native MongoDB Atlas Vector Search.
+Persistent AI memory backed by MongoDB Atlas Vector Search.
+
+Quick Start:
+    # In your manifest.json, enable memory:
+    # {"memory_config": {"enabled": true, "provider": "cognitive"}}
+
+    from mdb_engine.dependencies import get_memory_service
+
+    @app.post("/remember")
+    async def remember(text: str, memory=Depends(get_memory_service)):
+        return await memory.add(messages=text, user_id="user1")
+
+    @app.get("/recall")
+    async def recall(q: str, memory=Depends(get_memory_service)):
+        return await memory.search(query=q, user_id="user1")
 
 Key Features:
-- **MongoDB Atlas Vector Search**: Native integration with MongoDB for semantic search
-- **Intelligent Fact Extraction**: Uses LLM to extract atomic facts from conversations
-- **Memory Categories**: Classifies memories as biographical, preferences, temporal, relational
-- **Embedding Service Integration**: Uses mdb_engine.embeddings for vector generation
-- **Metadata Support**: Full support for bucket_id, bucket_type, and custom metadata
-- **Cognitive Memory**: Advanced memory system with importance scoring,
-  reinforcement, decay, merging, and pruning
-- **Redaction Layer**: Configurable privacy protection for sensitive data (SSN, credit cards, etc.)
-- **Reflection Service**: Periodic memory consolidation to prevent bloat
-- **Extensible Architecture**: Base class allows for future memory provider implementations
+- Semantic search via MongoDB Atlas Vector Search
+- LLM-powered fact extraction from conversations
+- Memory categories (biographical, preferences, temporal, relational)
+- Optional cognitive features (importance scoring, reinforcement, decay, merging)
+- Chat orchestration with short-term + long-term memory (ChatEngine)
 
-For GraphRAG functionality (knowledge graph with $graphLookup traversal), use the standalone
-mdb_engine.graph module:
+For GraphRAG (knowledge graph with $graphLookup traversal), see:
     from mdb_engine.graph import GraphService, get_graph_service
 
 Dependencies:
     pip install pymongo openai litellm
 """
 
-# Import base classes
+# ---------------------------------------------------------------------------
+# Tier 1 — Primary exports (what most developers need)
+# ---------------------------------------------------------------------------
+
+# The memory service — use MemoryService as the primary name
 from .base import BaseMemoryService, MemoryServiceError
 
-# Import cognitive memory service (THE memory service - customizable)
+# ---------------------------------------------------------------------------
+# Tier 2 — Advanced exports (commonly needed for richer apps)
+# ---------------------------------------------------------------------------
+from .chat_history import ChatHistoryService
 from .cognitive import (
-    MEMORY_CATEGORIES,
     CognitiveMemoryService,
     CognitiveMemoryServiceError,
+    MemoryService,  # <-- preferred alias
 )
 
-# Import memory fusion service
-from .fusion import MemoryFusionError, MemoryFusionService
-
-# Import cognitive orchestrator
+# ---------------------------------------------------------------------------
+# Tier 3 — Specialist features
+#
+# These are importable (for backwards compatibility) but are NOT in __all__
+# so they won't clutter IDE autocomplete. Import from their submodules:
+#
+#   from mdb_engine.memory.reflective import ReflectiveMemory
+#   from mdb_engine.memory.predictive import PredictiveMemory
+#   from mdb_engine.memory.prospective import ProspectiveMemory
+#   from mdb_engine.memory.shared import SharedMemory
+#   from mdb_engine.memory.veto import MemoryVeto
+#   from mdb_engine.memory.recall import QueryAwareRecall
+#   from mdb_engine.memory.versioning import MemoryVersioning
+#   from mdb_engine.memory.timeline import TimelineService
+#   from mdb_engine.memory.consolidator import MemoryConsolidator
+#   from mdb_engine.memory.prompt import SystemPromptGenerator
+# ---------------------------------------------------------------------------
+from .consolidator import MemoryConsolidator, MemoryConsolidatorError
+from .extraction import MEMORY_CATEGORIES
+from .hygiene import run_daily_hygiene
 from .orchestrator import (
-    ChatHistoryService,
+    ChatEngine,  # <-- preferred alias
     CognitiveEngine,
-    GeminiProvider,
-    LLMProvider,
-    OpenAIProvider,
 )
-
-# Import perception engine
-from .perceptions import PerceptionEngine
-
-# Import procedural memory service
-from .procedural import ProceduralMemoryService
-
-# Import privacy and enhancement services
-# Note: Redaction service moved to mdb_engine.redaction (standalone module)
+from .persona import PersonaEngine
+from .predictive import PredictiveMemory, PredictiveMemoryError
+from .procedural import (
+    ProceduralMemory,
+    ProceduralMemoryError,
+    retrieve_procedural_memory,
+)
+from .prompt import SystemPromptGenerator
+from .prospective import ProspectiveMemory, ProspectiveMemoryError
+from .recall import QueryAwareRecall, QueryAwareRecallError
 from .reflection import ReflectionService, ReflectionServiceError, create_reflection_service
-
-# Import factory function
+from .reflective import ReflectiveMemory, ReflectiveMemoryError
 from .service import get_memory_service
-
-# Backwards compatibility: CustomMemoryService is an alias for CognitiveMemoryService
-CustomMemoryService = CognitiveMemoryService
-CustomMemoryServiceError = CognitiveMemoryServiceError
+from .shared import SharedMemory, SharedMemoryError
+from .strategies import (
+    # Context dataclasses
+    ConsolidationResult,
+    # Built-in alternatives
+    CustomWeightPersonaBlend,
+    # Protocols (for type hints)
+    DecayStrategy,
+    ExponentialDecay,
+    ExtractedFact,
+    ExtractionContext,
+    ExtractionStrategy,
+    ImportanceContext,
+    ImportanceStrategy,
+    LinearDecay,
+    # Default implementations
+    LLMImportance,
+    MemoryDocument,
+    NoDecay,
+    PerfectRecallScoring,
+    PersonaStrategy,
+    QueryContext,
+    RecencyDecayScoring,
+    ReflectionContext,
+    ReflectionStats,
+    ReflectionStrategy,
+    RuleBasedImportance,
+    ScoringStrategy,
+    TimeCountReflection,
+    WeightedPersonaBlend,
+)
+from .system import (
+    CognitiveMemory,
+    CognitiveMemoryError,
+    MultiTierMemory,  # <-- preferred alias
+)
+from .timeline import TimelineService
+from .versioning import MemoryVersioning, MemoryVersioningError
+from .veto import MemoryVeto, MemoryVetoError
 
 __all__ = [
-    # Base classes (for extensibility)
+    # ---- Tier 1: Primary (start here) ----
+    "MemoryService",
+    "ChatEngine",
     "BaseMemoryService",
     "MemoryServiceError",
-    # Cognitive memory service (THE memory service - customizable)
+    "get_memory_service",
+    # Backwards-compatible names
     "CognitiveMemoryService",
     "CognitiveMemoryServiceError",
-    "MEMORY_CATEGORIES",
-    # Backwards compatibility aliases
-    "CustomMemoryService",
-    "CustomMemoryServiceError",
-    # Cognitive architecture
-    "ChatHistoryService",
     "CognitiveEngine",
-    # LLM Provider abstraction
-    "LLMProvider",
-    "OpenAIProvider",
-    "GeminiProvider",
-    # Privacy and enhancement services
-    # Note: Redaction service available via mdb_engine.redaction
+    # ---- Tier 2: Advanced ----
+    "ChatHistoryService",
+    "PersonaEngine",
     "ReflectionService",
     "ReflectionServiceError",
     "create_reflection_service",
-    # Memory Fusion Service
-    "MemoryFusionService",
-    "MemoryFusionError",
-    # Perception Engine
-    "PerceptionEngine",
-    # Procedural Memory Service
-    "ProceduralMemoryService",
-    # Factory function
-    "get_memory_service",
+    "ProceduralMemory",
+    "ProceduralMemoryError",
+    "retrieve_procedural_memory",
+    "MultiTierMemory",
+    "CognitiveMemory",
+    "CognitiveMemoryError",
+    "MEMORY_CATEGORIES",
+    # ---- Tier 3: Pluggable Strategy API ----
+    # Protocols
+    "ScoringStrategy",
+    "DecayStrategy",
+    "ExtractionStrategy",
+    "ImportanceStrategy",
+    "PersonaStrategy",
+    "ReflectionStrategy",
+    # Default implementations
+    "PerfectRecallScoring",
+    "NoDecay",
+    "LLMImportance",
+    "WeightedPersonaBlend",
+    "TimeCountReflection",
+    # Built-in alternatives
+    "RecencyDecayScoring",
+    "ExponentialDecay",
+    "LinearDecay",
+    "RuleBasedImportance",
+    "CustomWeightPersonaBlend",
+    # Context dataclasses
+    "MemoryDocument",
+    "QueryContext",
+    "ExtractionContext",
+    "ExtractedFact",
+    "ImportanceContext",
+    "ReflectionStats",
+    "ReflectionContext",
+    "ConsolidationResult",
 ]

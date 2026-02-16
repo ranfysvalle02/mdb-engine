@@ -10,11 +10,13 @@ with the platform's auth system.
 This module is part of MDB_ENGINE - MongoDB Engine.
 """
 
+import asyncio
+import json
 import logging
 import os
 import uuid
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import bcrypt
@@ -114,9 +116,7 @@ async def _validate_and_decode_session_token(
 
         # Verify it's for this app
         if payload.get("app_slug") != slug_id:
-            logger.warning(
-                f"Session token for wrong app: expected {slug_id}, got {payload.get('app_slug')}"
-            )
+            logger.warning(f"Session token for wrong app: expected {slug_id}, got {payload.get('app_slug')}")
             return None, None
 
         # Get user ID from token
@@ -232,9 +232,7 @@ async def get_app_user(
     return await _fetch_app_user_from_db(db, collection_name, user_id)
 
 
-async def _try_demo_mode(
-    request: Request, slug_id: str, db, config: dict[str, Any]
-) -> dict[str, Any] | None:
+async def _try_demo_mode(request: Request, slug_id: str, db, config: dict[str, Any]) -> dict[str, Any] | None:
     """
     Internal helper: Try to authenticate as demo user if demo mode is enabled.
 
@@ -358,8 +356,8 @@ async def create_app_session(
     payload = {
         "app_slug": slug_id,
         "app_user_id": str(user_id),
-        "exp": datetime.utcnow() + timedelta(seconds=session_ttl),
-        "iat": datetime.utcnow(),
+        "exp": datetime.now(timezone.utc) + timedelta(seconds=session_ttl),
+        "iat": datetime.now(timezone.utc),
     }
 
     # Sign token
@@ -460,9 +458,7 @@ async def authenticate_app_user(
                 return user
         else:
             # Password is not bcrypt hashed - reject for security
-            logger.warning(
-                f"User {email} has non-bcrypt password hash - password verification rejected"
-            )
+            logger.warning(f"User {email} has non-bcrypt password hash - password verification rejected")
             return None
 
         return None
@@ -542,7 +538,7 @@ async def create_app_user(
             "email": email,
             "password_hash": password_hash,
             "role": role,
-            "date_created": datetime.datetime.utcnow(),
+            "date_created": datetime.now(timezone.utc),
         }
 
         if store_id:
@@ -627,7 +623,7 @@ async def get_or_create_anonymous_user(
             "email": anonymous_id,
             "role": "anonymous",
             "is_anonymous": True,
-            "date_created": datetime.datetime.utcnow(),
+            "date_created": datetime.now(timezone.utc),
         }
         # Use getattr to access collection (works with ScopedMongoWrapper and AppDB)
         collection = getattr(db, collection_name)
@@ -665,22 +661,22 @@ async def get_platform_demo_user(
         if users_collection is not None:
             # Use provided collection (from MDB-Engine)
             collection = users_collection
-            logger.debug("✅ Using MDB-Engine collection for platform demo user lookup")
+            logger.debug("Using MDB-Engine collection for platform demo user lookup")
         elif connection_manager and connection_manager.initialized:
             # Get collection from MDB-Engine connection manager
             try:
                 motor_db = connection_manager.mongo_db
                 collection = motor_db.users
-                logger.debug("✅ Using MDB-Engine connection pool for platform demo user lookup")
+                logger.debug("Using MDB-Engine connection pool for platform demo user lookup")
             except (AttributeError, RuntimeError, KeyError) as e:
                 logger.exception(
-                    f"❌ Could not get collection from MDB-Engine connection manager: {e}. "
+                    f"Could not get collection from MDB-Engine connection manager: {e}. "
                     f"get_platform_demo_user requires MDB-Engine connection."
                 )
                 return None
         else:
             logger.error(
-                "❌ Either 'users_collection' or 'connection_manager' must be provided. "
+                "Either 'users_collection' or 'connection_manager' must be provided. "
                 "get_platform_demo_user requires MDB-Engine connection pool."
             )
             return None
@@ -749,15 +745,14 @@ async def _link_platform_demo_user(
                 "role": "user",
                 "platform_user_id": platform_demo["platform_user_id"],
                 "is_demo": True,
-                "date_created": datetime.datetime.utcnow(),
+                "date_created": datetime.now(timezone.utc),
             }
             collection = getattr(db, collection_name)
             result = await collection.insert_one(user_doc)
             user_doc["_id"] = result.inserted_id
             user_doc["app_user_id"] = str(result.inserted_id)
             logger.info(
-                f"ensure_demo_users_exist: Created app demo user "
-                f"'{platform_demo['email']}' for '{slug_id}'"
+                f"ensure_demo_users_exist: Created app demo user " f"'{platform_demo['email']}' for '{slug_id}'"
             )
             return user_doc
 
@@ -771,16 +766,13 @@ async def _link_platform_demo_user(
         KeyError,
     ) as e:
         logger.error(
-            f"ensure_demo_users_exist: Error auto-linking platform demo "
-            f"user for '{slug_id}': {e}",
+            f"ensure_demo_users_exist: Error auto-linking platform demo " f"user for '{slug_id}': {e}",
             exc_info=True,
         )
         return None
 
 
-def _validate_demo_user_config(
-    demo_user_config: Any, slug_id: str
-) -> tuple[dict[str, Any] | None, str | None]:
+def _validate_demo_user_config(demo_user_config: Any, slug_id: str) -> tuple[dict[str, Any] | None, str | None]:
     """Validate demo user configuration."""
     if not isinstance(demo_user_config, dict):
         return None, f"Invalid demo_user_config entry (not a dict): {demo_user_config}"
@@ -872,7 +864,7 @@ async def _create_demo_user_from_config(
         "password_hash": password_hash,
         "role": role,
         "is_demo": True,
-        "date_created": datetime.datetime.utcnow(),
+        "date_created": datetime.now(timezone.utc),
     }
 
     # Link to platform demo if requested
@@ -913,15 +905,10 @@ async def _create_demo_user_from_config(
                 TypeError,
             ) as e:
                 # If user already exists with this _id, just fetch it
-                if isinstance(e, OperationFailure) and (
-                    "duplicate" in str(e).lower() or "E11000" in str(e)
-                ):
+                if isinstance(e, OperationFailure) and ("duplicate" in str(e).lower() or "E11000" in str(e)):
                     existing = await collection.find_one({"_id": custom_id})
                     if existing:
-                        logger.info(
-                            f"Demo user {email} already exists with "
-                            f"_id={custom_id} for {slug_id}"
-                        )
+                        logger.info(f"Demo user {email} already exists with " f"_id={custom_id} for {slug_id}")
                         return existing
                 raise
         else:
@@ -1207,16 +1194,10 @@ async def get_or_create_demo_user(
             demo_user = demo_users[0]
             if isinstance(demo_user, dict):
                 demo_user["app_user_id"] = str(demo_user.get("_id"))
-            logger.info(
-                f"get_or_create_demo_user: Found/created {len(demo_users)} "
-                f"demo user(s) for '{slug_id}'"
-            )
+            logger.info(f"get_or_create_demo_user: Found/created {len(demo_users)} " f"demo user(s) for '{slug_id}'")
             return demo_user
         else:
-            logger.warning(
-                f"get_or_create_demo_user: ensure_demo_users_exist returned "
-                f"empty list for '{slug_id}'"
-            )
+            logger.warning(f"get_or_create_demo_user: ensure_demo_users_exist returned " f"empty list for '{slug_id}'")
     except (
         ValueError,
         TypeError,
@@ -1263,9 +1244,7 @@ async def get_or_create_demo_user(
     return None
 
 
-async def ensure_demo_users_for_actor(
-    db, slug_id: str, connection_manager=None
-) -> list[dict[str, Any]]:
+async def ensure_demo_users_for_actor(db, slug_id: str, connection_manager=None) -> list[dict[str, Any]]:
     """
     Convenience function for actors to ensure demo users exist.
 
@@ -1299,7 +1278,6 @@ async def ensure_demo_users_for_actor(
         List of demo user dicts that were created or already exist
     """
     try:
-        import json
         from pathlib import Path
 
         # Try to load manifest.json from multiple possible locations
@@ -1330,21 +1308,22 @@ async def ensure_demo_users_for_actor(
             return []
 
         try:
-            with open(manifest_path) as f:
-                config = json.load(f)
+
+            def _read_manifest(path):
+                with open(path) as f:
+                    return json.load(f)
+
+            config = await asyncio.to_thread(_read_manifest, manifest_path)
         except json.JSONDecodeError as e:
             logger.error(f"Invalid JSON in manifest.json for {slug_id}: {e}", exc_info=True)
             return []
 
         # Ensure demo users exist
-        return await ensure_demo_users_exist(
-            db, slug_id, config, connection_manager=connection_manager
-        )
+        return await ensure_demo_users_exist(db, slug_id, config, connection_manager=connection_manager)
 
     except FileNotFoundError:
         logger.debug(
-            f"Manifest file not accessible for {slug_id}. "
-            f"Demo users will be auto-created on first access."
+            f"Manifest file not accessible for {slug_id}. " f"Demo users will be auto-created on first access."
         )
         return []
     except PermissionError as e:
@@ -1361,6 +1340,104 @@ async def ensure_demo_users_for_actor(
     ) as e:
         logger.error(f"Error ensuring demo users for actor {slug_id}: {e}", exc_info=True)
         return []
+
+
+async def get_or_create_oauth_user(
+    db,
+    provider_name: str,
+    oauth_id: str,
+    email: str,
+    display_name: str | None = None,
+    avatar_url: str | None = None,
+    role: str = "user",
+    strategy: str = "link_or_create",
+    collection_name: str = "users",
+) -> dict[str, Any] | None:
+    """
+    Find or create a local user record for an OAuth identity.
+
+    This is a standalone helper that apps can use outside the automatic
+    ``OAuthService`` callback flow.
+
+    Strategy ``link_or_create`` (default):
+        1. Match by ``oauth_linked_providers`` (provider + id).
+        2. Fall back to email match and link the new provider.
+        3. Create a new user if no match is found.
+
+    Strategy ``create_only``:
+        Always create a new user record.
+
+    Args:
+        db: Database wrapper (ScopedMongoWrapper or AppDB).
+        provider_name: OAuth provider name (e.g. ``"google"``).
+        oauth_id: Unique user ID from the provider (``sub`` / ``id``).
+        email: User email address.
+        display_name: Optional human-readable name.
+        avatar_url: Optional avatar image URL.
+        role: Role to assign to newly created users (default: ``"user"``).
+        strategy: ``"link_or_create"`` or ``"create_only"``.
+        collection_name: MongoDB collection for user documents.
+
+    Returns:
+        User dict (with ``app_user_id`` set) or None on failure.
+    """
+    try:
+        collection = getattr(db, collection_name)
+
+        if strategy == "link_or_create":
+            # 1. Exact provider match
+            user = await collection.find_one(
+                {"oauth_linked_providers": {"$elemMatch": {"provider": provider_name, "id": oauth_id}}}
+            )
+            if user:
+                await collection.update_one(
+                    {"_id": user["_id"]},
+                    {"$set": {"last_login": datetime.now(timezone.utc)}},
+                )
+                user["app_user_id"] = str(user["_id"])
+                return user
+
+            # 2. Email match – link provider
+            user = await collection.find_one({"email": email})
+            if user:
+                linked = user.get("oauth_linked_providers", [])
+                linked.append({"provider": provider_name, "id": oauth_id})
+                await collection.update_one(
+                    {"_id": user["_id"]},
+                    {
+                        "$set": {
+                            "oauth_linked_providers": linked,
+                            "oauth_provider": provider_name,
+                            "oauth_id": oauth_id,
+                            "last_login": datetime.now(timezone.utc),
+                        }
+                    },
+                )
+                user["app_user_id"] = str(user["_id"])
+                return user
+
+        # 3. Create new user
+        user_doc: dict[str, Any] = {
+            "email": email,
+            "display_name": display_name or email,
+            "role": role,
+            "oauth_provider": provider_name,
+            "oauth_id": oauth_id,
+            "oauth_linked_providers": [{"provider": provider_name, "id": oauth_id}],
+            "avatar_url": avatar_url or "",
+            "created_at": datetime.now(timezone.utc),
+            "last_login": datetime.now(timezone.utc),
+        }
+        result = await collection.insert_one(user_doc)
+        user_doc["_id"] = result.inserted_id
+        user_doc["app_user_id"] = str(result.inserted_id)
+
+        logger.info("Created OAuth user '%s' via '%s'", email, provider_name)
+        return user_doc
+
+    except (ValueError, TypeError, AttributeError, RuntimeError, KeyError) as e:
+        logger.error("Error in get_or_create_oauth_user: %s", e, exc_info=True)
+        return None
 
 
 async def sync_app_user_to_casbin(
@@ -1424,9 +1501,7 @@ async def sync_app_user_to_casbin(
             )
             return True
         else:
-            logger.warning(
-                f"sync_app_user_to_casbin: Failed to assign role '{role}' to user '{subject}'"
-            )
+            logger.warning(f"sync_app_user_to_casbin: Failed to assign role '{role}' to user '{subject}'")
             return False
 
     except (

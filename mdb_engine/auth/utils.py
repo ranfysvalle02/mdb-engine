@@ -8,9 +8,10 @@ This module is part of MDB_ENGINE - MongoDB Engine.
 
 import hashlib
 import logging
+import os
 import re
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 import bcrypt
@@ -159,8 +160,6 @@ def is_common_password(password: str) -> bool:
         True if password is common, False otherwise
     """
     try:
-        import os
-
         # Get the path to the common passwords file
         resources_dir = os.path.join(os.path.dirname(__file__), "resources")
         common_passwords_path = os.path.join(resources_dir, "common_passwords.txt")
@@ -270,24 +269,14 @@ def validate_password_strength(
     if config:
         min_length = min_length if min_length is not None else config.get("min_length", 8)
         require_uppercase = (
-            require_uppercase
-            if require_uppercase is not None
-            else config.get("require_uppercase", True)
+            require_uppercase if require_uppercase is not None else config.get("require_uppercase", True)
         )
         require_lowercase = (
-            require_lowercase
-            if require_lowercase is not None
-            else config.get("require_lowercase", True)
+            require_lowercase if require_lowercase is not None else config.get("require_lowercase", True)
         )
-        require_numbers = (
-            require_numbers if require_numbers is not None else config.get("require_numbers", True)
-        )
-        require_special = (
-            require_special if require_special is not None else config.get("require_special", False)
-        )
-        min_entropy_bits = (
-            min_entropy_bits if min_entropy_bits is not None else config.get("min_entropy_bits", 0)
-        )
+        require_numbers = require_numbers if require_numbers is not None else config.get("require_numbers", True)
+        require_special = require_special if require_special is not None else config.get("require_special", False)
+        min_entropy_bits = min_entropy_bits if min_entropy_bits is not None else config.get("min_entropy_bits", 0)
         check_common_passwords = (
             check_common_passwords
             if check_common_passwords is not None
@@ -300,9 +289,7 @@ def validate_password_strength(
         require_numbers = require_numbers if require_numbers is not None else True
         require_special = require_special if require_special is not None else False
         min_entropy_bits = min_entropy_bits if min_entropy_bits is not None else 0
-        check_common_passwords = (
-            check_common_passwords if check_common_passwords is not None else False
-        )
+        check_common_passwords = check_common_passwords if check_common_passwords is not None else False
 
     if len(password) < min_length:
         errors.append(f"Password must be at least {min_length} characters long")
@@ -323,10 +310,7 @@ def validate_password_strength(
     if min_entropy_bits and min_entropy_bits > 0:
         entropy = calculate_password_entropy(password)
         if entropy < min_entropy_bits:
-            errors.append(
-                f"Password is too weak (entropy: {entropy:.0f} bits, "
-                f"required: {min_entropy_bits} bits)"
-            )
+            errors.append(f"Password is too weak (entropy: {entropy:.0f} bits, " f"required: {min_entropy_bits} bits)")
 
     # Common password check
     if check_common_passwords:
@@ -367,9 +351,7 @@ async def validate_password_strength_async(
     # Async breach check
     if check_breaches:
         if await check_password_breach(password):
-            errors.append(
-                "Password has been exposed in a data breach - " "please choose a different password"
-            )
+            errors.append("Password has been exposed in a data breach - " "please choose a different password")
             is_valid = False
 
     return is_valid, errors
@@ -445,9 +427,7 @@ async def login_user(
 
         # Check password (bcrypt only - plain text support removed for security)
         password_valid = False
-        if isinstance(password_hash, bytes) or (
-            isinstance(password_hash, str) and password_hash.startswith("$2b$")
-        ):
+        if isinstance(password_hash, bytes) or (isinstance(password_hash, str) and password_hash.startswith("$2b$")):
             # Bcrypt hash
             if isinstance(password_hash, str):
                 password_hash = password_hash.encode("utf-8")
@@ -463,9 +443,7 @@ async def login_user(
                 password_valid = False
         else:
             # Password is not bcrypt hashed - reject for security
-            logger.warning(
-                f"User {email} has non-bcrypt password hash - password verification rejected"
-            )
+            logger.warning(f"User {email} has non-bcrypt password hash - password verification rejected")
             password_valid = False
 
         if not password_valid:
@@ -529,10 +507,7 @@ async def login_user(
                         user_email=user["email"],
                         app_slug=app_slug,
                     )
-                    logger.debug(
-                        f"Generated WebSocket session key for user '{user['email']}' "
-                        f"(app: {app_slug})"
-                    )
+                    logger.debug(f"Generated WebSocket session key for user '{user['email']}' " f"(app: {app_slug})")
         except (ValueError, TypeError, AttributeError, RuntimeError) as e:
             # Log but don't fail login if WebSocket session generation fails
             logger.warning(f"Failed to generate WebSocket session key during login: {e}")
@@ -595,9 +570,7 @@ def _validate_email_format(email: str) -> bool:
     return bool(email and "@" in email and "." in email)
 
 
-def _get_password_policy_from_config(
-    request: Request, config: dict[str, Any] | None
-) -> dict[str, Any] | None:
+def _get_password_policy_from_config(request: Request, config: dict[str, Any] | None) -> dict[str, Any] | None:
     """Get password policy from config or request."""
     if config:
         security = config.get("security", {})
@@ -609,16 +582,14 @@ def _get_password_policy_from_config(
     return None
 
 
-async def _create_user_document(
-    email: str, password: str, extra_data: dict[str, Any] | None
-) -> dict[str, Any]:
+async def _create_user_document(email: str, password: str, extra_data: dict[str, Any] | None) -> dict[str, Any]:
     """Create user document with hashed password."""
     password_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt())
     user_doc = {
         "email": email,
         "password_hash": password_hash,
         "role": "user",
-        "date_created": datetime.utcnow(),
+        "date_created": datetime.now(timezone.utc),
     }
     if extra_data:
         user_doc.update(extra_data)

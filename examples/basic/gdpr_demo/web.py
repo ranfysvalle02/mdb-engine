@@ -62,8 +62,7 @@ engine = MongoDBEngine(
 
 async def on_startup(app, engine, manifest):
     """Initialize the application."""
-    logger.info("✅ GDPR Demo application started")
-    await engine.initialize()
+    logger.info("GDPR Demo application started")
 
 
 # -------------------------------------------------------------------------
@@ -71,7 +70,8 @@ async def on_startup(app, engine, manifest):
 # -------------------------------------------------------------------------
 
 app = engine.create_app(
-    manifest_path=Path(__file__).parent / "manifest.json",
+    slug=APP_SLUG,
+    manifest=Path(__file__).parent / "manifest.json",
     on_startup=on_startup,
 )
 

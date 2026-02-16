@@ -10,13 +10,14 @@ This directory contains example applications demonstrating how to use MDB_ENGINE
 
 | If you need... | Use this | Example |
 |----------------|----------|---------|
-| **Simple single app** | `engine.create_app()` | [simple_app](./simple_app/) |
-| **Custom FastAPI setup** | Manual `initialize()`/`shutdown()` | [hello_world](./hello_world/) |
+| **Quickest possible start** | `quickstart()` | [hello_world](./basic/hello_world/) |
+| **AI memory / semantic search** | `MemoryService` | [memory_quickstart](./basic/memory_quickstart/) |
+| **Full AI chat with history** | `ChatEngine` | [chit_chat](./basic/chit_chat/) |
+| **Production single app** | `engine.create_app()` | [simple_app](./advanced/simple_app/) |
 | **Multiple apps with SSO** | Shared auth mode | [multi_app_shared](./multi_app_shared/) |
 | **Multiple apps (isolated auth)** | Multi-app with `read_scopes` | [multi_app](./multi_app/) |
 | **Authorization/permissions** | OSO or Casbin from manifest | [oso_hello_world](./oso_hello_world/) |
 | **Vector search/RAG** | EmbeddingService + Atlas Search | [interactive_rag](./interactive_rag/) |
-| **Distributed processing** | `enable_ray=True` | [simple_app](./simple_app/) |
 
 ### Feature Decision Tree
 
@@ -65,7 +66,6 @@ See [Best Practices](../docs/BEST_PRACTICES.md) for full guidance.
 
 | Feature | Enable When... | How |
 |---------|---------------|-----|
-| **Ray** | Heavy computation, distributed processing, isolated actors | `enable_ray=True` |
 | **Multi-site** | Multiple apps need to share data securely | `read_scopes` in manifest |
 | **Shared Auth (SSO)** | Multi-app with single sign-on | `"auth": {"mode": "shared"}` in manifest |
 | **Per-App Auth** | Isolated auth per app (default) | `"auth": {"mode": "app"}` in manifest |
@@ -79,49 +79,79 @@ See [Best Practices](../docs/BEST_PRACTICES.md) for full guidance.
 
 ## Available Examples
 
-### [Simple App](./simple_app/) ⭐ Start Here
+### [Hello World](./basic/hello_world/) ⭐ Start Here
 
-A minimal task management app demonstrating the **unified MongoDBEngine pattern** with `create_app()`:
+The absolute simplest mdb-engine app — zero config, no manifest file:
+
+```python
+from mdb_engine import quickstart
+from mdb_engine.dependencies import get_scoped_db
+from fastapi import Depends
+
+app = quickstart("hello")
+
+@app.get("/items")
+async def list_items(db=Depends(get_scoped_db)):
+    return await db.items.find({}).to_list(10)
+```
+
+- No manifest file needed
+- 3 lines to a working app
+- Automatic data scoping and collection prefixing
+
+**Perfect for:** Your very first mdb-engine app
+
+**Run it:**
+```bash
+cd basic/hello_world
+pip install mdb-engine fastapi uvicorn
+uvicorn web:app --reload
+```
+
+### [Memory Quickstart](./basic/memory_quickstart/)
+
+Minimal AI memory app — store facts and recall them by meaning:
+
+```python
+from mdb_engine import MongoDBEngine
+from mdb_engine.dependencies import get_memory_service
+
+engine = MongoDBEngine()
+app = engine.create_app(slug="my_bot", manifest=Path("manifest.json"))
+
+@app.post("/remember")
+async def remember(text: str, memory=Depends(get_memory_service)):
+    return await memory.add(messages=text, user_id="user1")
+```
+
+- MemoryService with semantic search
+- LLM-powered fact extraction
+- Minimal manifest (just LLM + embedding + memory config)
+
+**Perfect for:** Adding AI memory to your app
+
+### [Simple App](./advanced/simple_app/)
+
+A task management app demonstrating the **manifest-based pattern** with `create_app()`:
 
 ```python
 from mdb_engine import MongoDBEngine
 from pathlib import Path
 
-engine = MongoDBEngine(mongo_uri="...", db_name="...")
+engine = MongoDBEngine()
 app = engine.create_app(slug="my_app", manifest=Path("manifest.json"))
 ```
 
 - Automatic lifecycle management (no startup/shutdown boilerplate)
 - Scoped database access with `get_scoped_db()`
 - Manifest-driven indexes
-- Optional Ray support
 
-**Perfect for:** Getting started with the recommended pattern
+**Perfect for:** Production-style apps with manifest configuration
 
 **Run it:**
 ```bash
-cd simple_app
+cd advanced/simple_app
 docker-compose up --build
-```
-
-### [Hello World](./hello_world/)
-
-A simple, beginner-friendly example that demonstrates:
-- Initializing the MongoDB Engine
-- Creating and registering an app manifest
-- Basic CRUD operations with automatic app scoping
-- Using `engine.get_scoped_db()` for all database access (raw database access removed for security)
-- Using `engine.get_scoped_db()` for app-scoped operations
-- Authentication with JWT
-- WebSocket support with real-time updates
-- Health checks and metrics
-
-**Perfect for:** Getting started with MDB_ENGINE
-
-**Run it:**
-```bash
-cd hello_world
-./run_with_docker.sh
 ```
 
 ### [OSO Hello World](./oso_hello_world/)
@@ -156,7 +186,7 @@ An advanced example demonstrating:
 ### [Chit Chat](./basic/chit_chat/) 💬
 
 An AI chat application demonstrating:
-- Memory service (`CustomMemoryService` or `CognitiveMemoryService`) with persistent memory
+- Memory service (`MemoryService`) with persistent memory
 - Memory injection (`inject()`) for manual memory insertion without LLM inference
 - Memory deletion (`delete()`, `delete_all()`) for memory management
 - Semantic search across conversation history
@@ -377,8 +407,8 @@ services:
 ```python
 from mdb_engine import MongoDBEngine
 
-# Initialize engine
-engine = MongoDBEngine(mongo_uri=mongo_uri, db_name=db_name)
+# Initialize engine (reads MONGODB_URI from env, or defaults to localhost)
+engine = MongoDBEngine()
 await engine.initialize()
 
 # For app-scoped data (all operations should use scoped databases)
@@ -420,12 +450,18 @@ await db.collection.find_one({})
 
 ### Common Patterns
 
-#### Pattern 0: Unified create_app() (Recommended)
+#### Pattern 0: quickstart() (Fastest)
+```python
+from mdb_engine import quickstart
+app = quickstart("my_app")
+```
+
+#### Pattern 0b: Unified create_app() (Recommended for Production)
 ```python
 from mdb_engine import MongoDBEngine
 from pathlib import Path
 
-engine = MongoDBEngine(mongo_uri="...", db_name="...")
+engine = MongoDBEngine()  # reads MONGODB_URI from env, defaults to localhost
 
 # Optional: Custom startup/shutdown callbacks
 async def my_startup(app, engine, manifest):

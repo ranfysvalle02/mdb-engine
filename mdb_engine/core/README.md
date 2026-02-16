@@ -17,7 +17,6 @@ The central orchestration engine for MDB_ENGINE that manages database connection
 
 | Feature | When to Enable | Configuration |
 |---------|---------------|---------------|
-| **Ray** | Distributed processing, isolated actors | `enable_ray=True` |
 | **Multi-site** | Cross-app data sharing | `read_scopes` in manifest |
 | **Auto-indexing** | Let engine optimize queries | Default ON (`auto_index=True`) |
 | **App Tokens** | Production security | Set `MDB_ENGINE_MASTER_KEY` |
@@ -75,8 +74,6 @@ engine = MongoDBEngine(
     authz_provider=authz_provider,      # Optional
     max_pool_size=10,                   # Optional
     min_pool_size=1,                    # Optional
-    enable_ray=False,                   # Optional: Enable Ray support
-    ray_namespace="modular_labs"        # Optional: Ray namespace
 )
 
 await engine.initialize()
@@ -155,33 +152,6 @@ manifest = await engine.load_manifest("manifest.json")
 # Register app (creates indexes, sets up auth, etc.)
 await engine.register_app(manifest)
 ```
-
-### Optional Ray Integration
-
-Enable Ray for distributed processing (Ray must be installed):
-
-```python
-from mdb_engine import MongoDBEngine
-
-# Enable Ray support
-engine = MongoDBEngine(
-    mongo_uri="mongodb://localhost:27017",
-    db_name="my_database",
-    enable_ray=True,
-    ray_namespace="my_namespace"
-)
-
-await engine.initialize()
-
-# Check if Ray is available
-if engine.has_ray:
-    print(f"Ray initialized in namespace: {engine.ray_namespace}")
-```
-
-Ray integration features:
-- Isolated app environments via Ray actors
-- Automatic graceful degradation if Ray not installed
-- App-specific namespaces for isolation
 
 ### Health Checks
 
@@ -408,9 +378,6 @@ is_valid, error, paths = await validate_manifest_with_db(
 
 - `mongo_client` - MongoDB client instance (for observability only)
 - `initialized` - Whether engine is initialized
-- `has_ray` - Whether Ray is enabled and initialized
-- `enable_ray` - Whether Ray support is enabled
-- `ray_namespace` - Ray namespace for actor isolation
 
 ### ManifestValidator
 
@@ -461,8 +428,6 @@ export MONGO_SERVER_SELECTION_TIMEOUT_MS=5000
 - `authz_provider` (optional): Authorization provider instance
 - `max_pool_size` (optional): Maximum connection pool size (default: 10)
 - `min_pool_size` (optional): Minimum connection pool size (default: 1)
-- `enable_ray` (optional): Enable Ray support for distributed processing (default: False)
-- `ray_namespace` (optional): Ray namespace for actor isolation (default: "modular_labs")
 
 ## Manifest Schema Features
 

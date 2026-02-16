@@ -172,9 +172,7 @@ def is_origin_allowed(
                 if 1 <= port_num <= 65535:
                     for allowed in allowed_origins:
                         normalized_allowed = normalize_origin(allowed, is_dev)
-                        if normalized_allowed.startswith(
-                            ("http://localhost:", "https://localhost:")
-                        ):
+                        if normalized_allowed.startswith(("http://localhost:", "https://localhost:")):
                             return True
             except ValueError:
                 pass

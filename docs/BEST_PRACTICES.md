@@ -12,7 +12,7 @@ This guide covers best practices for building applications with `mdb-engine`, fo
 | `Depends(get_embedding_service)` | Text chunking & embeddings | `from mdb_engine.dependencies import get_embedding_service` |
 | `Depends(get_llm_client)` | Chat completions | `from mdb_engine.dependencies import get_llm_client` |
 | `Depends(get_memory_service)` | Semantic memory (MongoDB Atlas Vector Search) | `from mdb_engine.dependencies import get_memory_service` |
-| `AppContext = Depends()` | Multiple services at once | `from mdb_engine.dependencies import AppContext` |
+| `RequestContext = Depends()` | Multiple services at once | `from mdb_engine.dependencies import RequestContext` |
 
 ---
 
@@ -59,18 +59,18 @@ async def embed_text(
     return {"chunks_created": result["chunks_created"]}
 ```
 
-### AppContext All-in-One
+### RequestContext All-in-One
 
-Use `AppContext` when you need multiple services or want cleaner code:
+Use `RequestContext` when you need multiple services or want cleaner code:
 
 ```python
 from fastapi import Depends
-from mdb_engine.dependencies import AppContext
+from mdb_engine.dependencies import RequestContext
 
 @app.post("/ai-chat")
-async def chat(query: str, ctx: AppContext = Depends()):
+async def chat(query: str, ctx: RequestContext = Depends()):
     """
-    AppContext provides:
+    RequestContext provides:
     - ctx.db          - Scoped database
     - ctx.slug        - App identifier
     - ctx.config      - Manifest configuration
@@ -150,7 +150,7 @@ async def startup():
 
 ```
 Are you inside a route handler?
-├─ YES → Use Depends(get_scoped_db) or AppContext
+├─ YES → Use Depends(get_scoped_db) or RequestContext
 └─ NO  → Use engine.get_scoped_db(APP_SLUG)
 ```
 
@@ -171,9 +171,9 @@ The scoped database automatically:
 async def get_items(db=Depends(get_scoped_db)):
     return await db.items.find({}).to_list(100)
 
-# ✅ GOOD: AppContext for multiple services
+# ✅ GOOD: RequestContext for multiple services
 @app.get("/dashboard")
-async def dashboard(ctx: AppContext = Depends()):
+async def dashboard(ctx: RequestContext = Depends()):
     items = await ctx.db.items.find({}).to_list(100)
     users = await ctx.db.users.count_documents({})
     return {"items": len(items), "users": users}
@@ -292,7 +292,7 @@ async def chat(
 async def chat_with_history(
     message: str,
     history: list,
-    ctx: AppContext = Depends(),
+    ctx: RequestContext = Depends(),
 ):
     """Chat with conversation history."""
     if not ctx.llm:
@@ -338,6 +338,44 @@ For persistent semantic memory with intelligent fact extraction and cognitive fe
 5. **Monitor memory growth in production:**
    - Set `max_depth` to prevent unbounded growth
    - Use cognitive features (enabled by default) for automatic pruning
+
+6. **Use Perfect Brain features for advanced capabilities:**
+   - **Memory Consolidator**: Run periodically (every 6 hours) to transform episodes into reusable knowledge
+   - **Reflective Memory**: Store insights about system behavior for self-improvement
+   - **Predictive Memory**: Track and validate predictions for learning
+   - **Shared Memory**: Enable privacy-safe group knowledge sharing
+   - **Query-Aware Recall**: Use policy-driven retrieval for different task types
+   - **Timeline Service**: Enable counterfactual reasoning for "what if" scenarios
+
+**Perfect Brain Example:**
+```python
+from mdb_engine.memory.consolidator import MemoryConsolidator
+from mdb_engine.memory.reflective import ReflectiveMemory
+import asyncio
+
+# Run consolidation as background task
+async def consolidate_memories():
+    consolidator = MemoryConsolidator(
+        db_client=mongo_client,
+        db_name="cognitive_agent",
+        model="gpt-4o"
+    )
+    while True:
+        users = await get_active_users()
+        for user_id in users:
+            consolidator.consolidate_episodes(agent_id=user_id)
+        await asyncio.sleep(6 * 3600)  # Every 6 hours
+
+# Store reflective insights
+reflective = ReflectiveMemory(collection=reflective_collection)
+reflective.store_reflection(
+    reflection="I tend to over-weight recent conversations",
+    trigger="performance_review",
+    confidence=0.8,
+    scope="user",
+    user_id="user123"
+)
+```
 
 **Example: Complete AI Chat with Memory:**
 
@@ -508,33 +546,33 @@ async def get_my_roles(
     return {"user": user.get("email"), "roles": roles}
 ```
 
-### Using AppContext for Auth
+### Using RequestContext for Auth
 
-AppContext provides convenient auth helpers:
+RequestContext provides convenient auth helpers:
 
 ```python
-from mdb_engine.dependencies import AppContext
+from mdb_engine.dependencies import RequestContext
 
 @app.get("/profile")
-async def profile(ctx: AppContext = Depends()):
+async def profile(ctx: RequestContext = Depends()):
     """Require authentication."""
     user = ctx.require_user()  # Raises 401 if not logged in
     return {"email": user["email"]}
 
 @app.get("/admin")
-async def admin_only(ctx: AppContext = Depends()):
+async def admin_only(ctx: RequestContext = Depends()):
     """Require admin role."""
     user = ctx.require_role("admin")  # Raises 403 if not admin
     return {"admin": user["email"]}
 
 @app.get("/editor-or-admin")
-async def editor_or_admin(ctx: AppContext = Depends()):
+async def editor_or_admin(ctx: RequestContext = Depends()):
     """Require editor OR admin role."""
     user = ctx.require_role("editor", "admin")  # Any of these roles
     return {"user": user["email"], "roles": ctx.user_roles}
 
 @app.delete("/documents/{doc_id}")
-async def delete_document(doc_id: str, ctx: AppContext = Depends()):
+async def delete_document(doc_id: str, ctx: RequestContext = Depends()):
     """Check fine-grained permission."""
     ctx.require_user()
     
@@ -706,7 +744,7 @@ async def logout(request: Request):
 
 ```python
 @app.post("/rag")
-async def rag_query(query: str, ctx: AppContext = Depends()):
+async def rag_query(query: str, ctx: RequestContext = Depends()):
     """Complete RAG pipeline."""
     user = ctx.require_user()
     
@@ -753,7 +791,7 @@ async def rag_query(query: str, ctx: AppContext = Depends()):
 async def chat_with_memory(
     message: str,
     user_id: str,
-    ctx: AppContext = Depends(),
+    ctx: RequestContext = Depends(),
 ):
     """Chat that remembers past conversations."""
     if not ctx.llm:
@@ -799,7 +837,7 @@ async def chat_with_memory(
 
 ```python
 @app.get("/health")
-async def health(ctx: AppContext = Depends()):
+async def health(ctx: RequestContext = Depends()):
     """Comprehensive health check."""
     health = {
         "status": "healthy",
@@ -950,12 +988,12 @@ except (ConnectionError, TimeoutError, OSError):
 ```python
 # ❌ BAD: Crashes if service not configured
 @app.post("/embed")
-async def embed(text: str, ctx: AppContext = Depends()):
+async def embed(text: str, ctx: RequestContext = Depends()):
     return await ctx.embedding_service.embed_chunks([text])  # None if not configured!
 
 # ✅ GOOD: Graceful handling of optional services
 @app.post("/embed")
-async def embed(text: str, ctx: AppContext = Depends()):
+async def embed(text: str, ctx: RequestContext = Depends()):
     if not ctx.embedding_service:
         raise HTTPException(503, "Embedding service not configured")
     return await ctx.embedding_service.embed_chunks([text])
@@ -1015,7 +1053,7 @@ async def get_items(db=Depends(get_scoped_db)):
     return await db.items.find({}).to_list(100)
 ```
 
-### From Manual Auth Checks to AppContext
+### From Manual Auth Checks to RequestContext
 
 **Before:**
 ```python
@@ -1031,10 +1069,10 @@ async def admin(request: Request):
 
 **After:**
 ```python
-from mdb_engine.dependencies import AppContext
+from mdb_engine.dependencies import RequestContext
 
 @app.get("/admin")
-async def admin(ctx: AppContext = Depends()):
+async def admin(ctx: RequestContext = Depends()):
     user = ctx.require_role("admin")  # One line!
     return {"admin": user["email"]}
 ```
@@ -1044,7 +1082,7 @@ async def admin(ctx: AppContext = Depends()):
 ## Summary
 
 1. **Use `Depends(get_scoped_db)`** for simple database access in routes
-2. **Use `AppContext`** when you need multiple services or auth helpers
+2. **Use `RequestContext`** when you need multiple services or auth helpers
 3. **Use `engine.get_scoped_db()`** for startup, decorators, and background tasks
 4. **Never create direct MongoDB connections** - always use scoped database
 5. **Let `create_app()` handle initialization** - no manual startup code needed

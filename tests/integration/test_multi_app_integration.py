@@ -6,6 +6,7 @@ Tests the full multi-app mounting flow with real MongoDB connection.
 
 import base64
 import json
+import logging
 import os
 
 import pytest
@@ -72,7 +73,7 @@ class TestMultiAppIntegration:
         engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name=db_name)
 
         # Create multi-app
-        app = engine.create_multi_app(
+        app = await engine.create_multi_app(
             apps=[
                 {
                     "slug": "app1",
@@ -94,9 +95,7 @@ class TestMultiAppIntegration:
 
         # Start lifespan and test endpoints
         async with app.router.lifespan_context(app):
-            async with AsyncClient(
-                transport=ASGITransport(app=app), base_url="http://test"
-            ) as client:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
                 # Test health check endpoint
                 response = await client.get("/health")
                 assert response.status_code == 200
@@ -163,7 +162,7 @@ class TestMultiAppIntegration:
         engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name=db_name)
 
         # Create multi-app with shared auth
-        app = engine.create_multi_app(
+        app = await engine.create_multi_app(
             apps=[
                 {
                     "slug": "auth-hub",
@@ -184,9 +183,7 @@ class TestMultiAppIntegration:
             assert hasattr(app.state, "user_pool")
             assert app.state.user_pool is not None
 
-            async with AsyncClient(
-                transport=ASGITransport(app=app), base_url="http://test"
-            ) as client:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
                 # Test health check
                 response = await client.get("/health")
                 assert response.status_code == 200
@@ -195,9 +192,7 @@ class TestMultiAppIntegration:
         await engine.shutdown()
 
     @pytest.mark.asyncio
-    async def test_multi_app_manifest_based_integration(
-        self, mongodb_connection_string, temp_manifests
-    ):
+    async def test_multi_app_manifest_based_integration(self, mongodb_connection_string, temp_manifests):
         """Test multi-app from manifest file integration."""
         import os
 
@@ -232,15 +227,13 @@ class TestMultiAppIntegration:
         engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name=db_name)
 
         # Create multi-app from manifest
-        app = engine.create_multi_app(multi_app_manifest=multi_app_manifest_path)
+        app = await engine.create_multi_app(multi_app_manifest=multi_app_manifest_path)
 
         assert app is not None
 
         # Start lifespan and test
         async with app.router.lifespan_context(app):
-            async with AsyncClient(
-                transport=ASGITransport(app=app), base_url="http://test"
-            ) as client:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
                 # Test health check
                 response = await client.get("/health")
                 assert response.status_code == 200
@@ -285,7 +278,7 @@ class TestMultiAppIntegration:
         engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name=db_name)
 
         # Create multi-app with test app mounted at path prefix
-        app = engine.create_multi_app(
+        app = await engine.create_multi_app(
             apps=[
                 {
                     "slug": "test-app",
@@ -329,38 +322,26 @@ class TestMultiAppIntegration:
             async def protected():
                 return {"message": "protected"}
 
-            async with AsyncClient(
-                transport=ASGITransport(app=app), base_url="http://test"
-            ) as client:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
                 # Test public routes with path prefix - should return 200 (not 401)
                 response = await client.get("/test-app/")
-                assert (
-                    response.status_code == 200
-                ), f"Root route failed: {response.status_code} - {response.text}"
+                assert response.status_code == 200, f"Root route failed: {response.status_code} - {response.text}"
 
                 response = await client.get("/test-app/login")
-                assert (
-                    response.status_code == 200
-                ), f"Login route failed: {response.status_code} - {response.text}"
+                assert response.status_code == 200, f"Login route failed: {response.status_code} - {response.text}"
                 assert response.json() == {"message": "login"}
 
                 response = await client.get("/test-app/register")
-                assert (
-                    response.status_code == 200
-                ), f"Register route failed: {response.status_code} - {response.text}"
+                assert response.status_code == 200, f"Register route failed: {response.status_code} - {response.text}"
                 assert response.json() == {"message": "register"}
 
                 response = await client.get("/test-app/health")
-                assert (
-                    response.status_code == 200
-                ), f"Health route failed: {response.status_code} - {response.text}"
+                assert response.status_code == 200, f"Health route failed: {response.status_code} - {response.text}"
                 assert response.json() == {"status": "ok"}
 
                 # Test protected route - should return 401 (no auth token)
                 response = await client.get("/test-app/protected")
-                assert (
-                    response.status_code == 401
-                ), f"Protected route should require auth: {response.status_code}"
+                assert response.status_code == 401, f"Protected route should require auth: {response.status_code}"
 
         # Cleanup
         await engine.shutdown()
@@ -414,7 +395,7 @@ class TestMultiAppIntegration:
         engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name=db_name)
 
         # Create multi-app with both apps
-        app = engine.create_multi_app(
+        app = await engine.create_multi_app(
             apps=[
                 {
                     "slug": "app1",
@@ -474,9 +455,7 @@ class TestMultiAppIntegration:
             async def app2_protected():
                 return {"app": "app2", "route": "protected"}
 
-            async with AsyncClient(
-                transport=ASGITransport(app=app), base_url="http://test"
-            ) as client:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
                 # Test app1 public routes
                 response = await client.get("/app1/login")
                 assert response.status_code == 200, f"App1 login failed: {response.status_code}"
@@ -488,9 +467,7 @@ class TestMultiAppIntegration:
 
                 # Test app1 protected route
                 response = await client.get("/app1/protected")
-                assert (
-                    response.status_code == 401
-                ), f"App1 protected should require auth: {response.status_code}"
+                assert response.status_code == 401, f"App1 protected should require auth: {response.status_code}"
 
                 # Test app2 public routes
                 response = await client.get("/app2/")
@@ -502,24 +479,18 @@ class TestMultiAppIntegration:
                 assert response.json()["app"] == "app2"
 
                 response = await client.get("/app2/api/public/test")
-                assert (
-                    response.status_code == 200
-                ), f"App2 public API failed: {response.status_code}"
+                assert response.status_code == 200, f"App2 public API failed: {response.status_code}"
                 assert response.json()["app"] == "app2"
 
                 # Test app2 protected route
                 response = await client.get("/app2/protected")
-                assert (
-                    response.status_code == 401
-                ), f"App2 protected should require auth: {response.status_code}"
+                assert response.status_code == 401, f"App2 protected should require auth: {response.status_code}"
 
         # Cleanup
         await engine.shutdown()
 
     @pytest.mark.asyncio
-    async def test_public_routes_wildcard_with_path_prefix(
-        self, mongodb_connection_string, tmp_path
-    ):  # noqa: E501
+    async def test_public_routes_wildcard_with_path_prefix(self, mongodb_connection_string, tmp_path):  # noqa: E501
         """Test wildcard public routes work correctly with path prefixes."""
         import os
 
@@ -551,7 +522,7 @@ class TestMultiAppIntegration:
         engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name=db_name)
 
         # Create multi-app
-        app = engine.create_multi_app(
+        app = await engine.create_multi_app(
             apps=[
                 {
                     "slug": "wildcard-app",
@@ -589,30 +560,20 @@ class TestMultiAppIntegration:
             async def private():
                 return {"route": "private"}
 
-            async with AsyncClient(
-                transport=ASGITransport(app=app), base_url="http://test"
-            ) as client:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
                 # Test wildcard public routes
                 response = await client.get("/wildcard-app/api/public/endpoint1")
-                assert (
-                    response.status_code == 200
-                ), f"Wildcard public route failed: {response.status_code}"
+                assert response.status_code == 200, f"Wildcard public route failed: {response.status_code}"
 
                 response = await client.get("/wildcard-app/api/public/nested/deep/endpoint")
-                assert (
-                    response.status_code == 200
-                ), f"Nested wildcard route failed: {response.status_code}"
+                assert response.status_code == 200, f"Nested wildcard route failed: {response.status_code}"
 
                 response = await client.get("/wildcard-app/static/css/style.css")
-                assert (
-                    response.status_code == 200
-                ), f"Static wildcard route failed: {response.status_code}"
+                assert response.status_code == 200, f"Static wildcard route failed: {response.status_code}"
 
                 # Test non-public route (should require auth)
                 response = await client.get("/wildcard-app/api/private/endpoint")
-                assert (
-                    response.status_code == 401
-                ), f"Private route should require auth: {response.status_code}"
+                assert response.status_code == 401, f"Private route should require auth: {response.status_code}"
 
         # Cleanup
         await engine.shutdown()
@@ -650,7 +611,7 @@ class TestMultiAppIntegration:
         engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name=db_name)
 
         # Create multi-app
-        app = engine.create_multi_app(
+        app = await engine.create_multi_app(
             apps=[
                 {
                     "slug": "edge-app",
@@ -690,9 +651,7 @@ class TestMultiAppIntegration:
 
                 # Test root path with trailing slash
                 response = await client.get("/edge-app/")
-                assert (
-                    response.status_code == 200
-                ), f"Root with slash failed: {response.status_code}"
+                assert response.status_code == 200, f"Root with slash failed: {response.status_code}"
 
                 # Test health route
                 response = await client.get("/edge-app/health")
@@ -702,9 +661,7 @@ class TestMultiAppIntegration:
         await engine.shutdown()
 
     @pytest.mark.asyncio
-    async def test_regression_public_routes_path_prefix_bug(
-        self, mongodb_connection_string, tmp_path
-    ):  # noqa: E501
+    async def test_regression_public_routes_path_prefix_bug(self, mongodb_connection_string, tmp_path):  # noqa: E501
         """
         REGRESSION TEST: Ensure public routes work with path prefixes.
 
@@ -719,9 +676,11 @@ class TestMultiAppIntegration:
         - Request to /auth-hub/register should match /register in public_routes
         - Previously returned 401, should now return 200
         """
+        import asyncio
         import os
 
         from httpx import ASGITransport, AsyncClient
+        from motor.motor_asyncio import AsyncIOMotorClient
 
         from mdb_engine.core.engine import MongoDBEngine
 
@@ -748,8 +707,26 @@ class TestMultiAppIntegration:
         db_name = f"test_regression_bug_{os.getpid()}"
         engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name=db_name)
 
+        # Ensure the MongoDB testcontainer is reachable before entering lifespan.
+        # This avoids rare flakes where the connection briefly drops and the lifespan init fails.
+        client = AsyncIOMotorClient(mongodb_connection_string)
+        try:
+            last_exc: Exception | None = None
+            for _ in range(5):
+                try:
+                    await client.admin.command("ping")
+                    last_exc = None
+                    break
+                except Exception as e:  # noqa: BLE001
+                    last_exc = e
+                    await asyncio.sleep(0.25)
+            if last_exc is not None:
+                raise last_exc
+        finally:
+            client.close()
+
         # Create multi-app exactly as in bug report
-        app = engine.create_multi_app(
+        app = await engine.create_multi_app(
             apps=[
                 {
                     "slug": "auth-hub",
@@ -861,7 +838,7 @@ class TestMultiAppIntegration:
         engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name=db_name)
 
         # Create multi-app with test app mounted at path prefix
-        app = engine.create_multi_app(
+        app = await engine.create_multi_app(
             apps=[
                 {
                     "slug": "test-db-app",
@@ -885,22 +862,14 @@ class TestMultiAppIntegration:
 
             # Verify that child app has engine in state (this is what we're testing)
             assert hasattr(mounted_app.state, "engine"), (
-                "REGRESSION: Child app missing engine in state. "
-                "get_scoped_db dependency will fail with 503."
+                "REGRESSION: Child app missing engine in state. " "get_scoped_db dependency will fail with 503."
             )
             assert mounted_app.state.engine is not None, (
-                "REGRESSION: Child app engine is None. "
-                "get_scoped_db dependency will fail with 503."
+                "REGRESSION: Child app engine is None. " "get_scoped_db dependency will fail with 503."
             )
-            assert (
-                mounted_app.state.engine == engine
-            ), "Child app engine should be same instance as parent engine"
-            assert hasattr(
-                mounted_app.state, "app_slug"
-            ), "REGRESSION: Child app missing app_slug in state."
-            assert (
-                mounted_app.state.app_slug == "test-db-app"
-            ), "Child app slug should be set correctly."
+            assert mounted_app.state.engine == engine, "Child app engine should be same instance as parent engine"
+            assert hasattr(mounted_app.state, "app_slug"), "REGRESSION: Child app missing app_slug in state."
+            assert mounted_app.state.app_slug == "test-db-app", "Child app slug should be set correctly."
 
             # Add test route that uses get_scoped_db dependency
             from fastapi import Depends
@@ -929,9 +898,7 @@ class TestMultiAppIntegration:
                     "has_engine": hasattr(mounted_app.state, "engine"),
                 }
 
-            async with AsyncClient(
-                transport=ASGITransport(app=app), base_url="http://test"
-            ) as client:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
                 # Test the route with get_scoped_db dependency
                 # This should return 200, not 503
                 response = await client.get("/test-db-app/api/test-db")
@@ -993,7 +960,7 @@ class TestWebSocketWithCORSCConfig:
         engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name=db_name)
 
         # Create multi-app
-        app = engine.create_multi_app(
+        app = await engine.create_multi_app(
             apps=[
                 {
                     "slug": "ws-test-app",
@@ -1016,18 +983,11 @@ class TestWebSocketWithCORSCConfig:
             assert cors_config["allow_origins"] == [
                 "http://localhost:3000",
                 "http://localhost:8000",
-            ], (
-                f"Parent app should have merged origins from child app, "
-                f"got: {cors_config['allow_origins']}"
-            )
+            ], f"Parent app should have merged origins from child app, " f"got: {cors_config['allow_origins']}"
             assert cors_config["allow_credentials"] is True, "Parent app should allow credentials"
 
             # Verify WebSocket route exists on parent app
-            ws_routes = [
-                route
-                for route in app.routes
-                if hasattr(route, "path") and "/ws-app/ws" in route.path
-            ]
+            ws_routes = [route for route in app.routes if hasattr(route, "path") and "/ws-app/ws" in route.path]
             assert len(ws_routes) > 0, "WebSocket route should be registered on parent app"
 
             # Note: Actual WebSocket connection testing would require a WebSocket client
@@ -1037,9 +997,7 @@ class TestWebSocketWithCORSCConfig:
         await engine.shutdown()
 
     @pytest.mark.asyncio
-    async def test_allow_credentials_preserved_in_merged_cors(
-        self, mongodb_connection_string, tmp_path
-    ):
+    async def test_allow_credentials_preserved_in_merged_cors(self, mongodb_connection_string, tmp_path):
         """Test that allow_credentials: True from child apps is preserved in parent CORS config."""
         import os
 
@@ -1067,7 +1025,7 @@ class TestWebSocketWithCORSCConfig:
         db_name = f"test_credentials_{os.getpid()}"
         engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name=db_name)
 
-        app = engine.create_multi_app(
+        app = await engine.create_multi_app(
             apps=[
                 {
                     "slug": "credentials-app",
@@ -1089,9 +1047,7 @@ class TestWebSocketWithCORSCConfig:
 
             # Verify CORS middleware reads from app.state dynamically
             # Make a request and check CORS headers
-            async with AsyncClient(
-                transport=ASGITransport(app=app), base_url="http://test"
-            ) as client:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
                 response = await client.options(
                     "/credentials-app/api/test",
                     headers={"Origin": "http://localhost:3000"},
@@ -1108,9 +1064,7 @@ class TestWebSocketWithCORSCConfig:
         await engine.shutdown()
 
     @pytest.mark.asyncio
-    async def test_multiple_apps_credentials_merge_correctly(
-        self, mongodb_connection_string, tmp_path
-    ):
+    async def test_multiple_apps_credentials_merge_correctly(self, mongodb_connection_string, tmp_path):
         """Test that if ANY child app has allow_credentials: True, parent gets True."""
         import os
 
@@ -1148,7 +1102,7 @@ class TestWebSocketWithCORSCConfig:
         db_name = f"test_multi_creds_{os.getpid()}"
         engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name=db_name)
 
-        app = engine.create_multi_app(
+        app = await engine.create_multi_app(
             apps=[
                 {"slug": "app-with-creds", "manifest": manifest1_path, "path_prefix": "/app1"},
                 {"slug": "app-without-creds", "manifest": manifest2_path, "path_prefix": "/app2"},
@@ -1211,7 +1165,7 @@ class TestWebSocketWithCORSCConfig:
         db_name = f"test_wildcard_merge_{os.getpid()}"
         engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name=db_name)
 
-        app = engine.create_multi_app(
+        app = await engine.create_multi_app(
             apps=[
                 {"slug": "wildcard-app", "manifest": manifest1_path, "path_prefix": "/wildcard"},
                 {"slug": "specific-app", "manifest": manifest2_path, "path_prefix": "/specific"},
@@ -1227,8 +1181,7 @@ class TestWebSocketWithCORSCConfig:
                 "*" in cors_config["allow_origins"]
             ), f"Wildcard should be in merged origins, got {cors_config['allow_origins']}"
             assert cors_config["allow_origins"] == ["*"], (
-                "Merged origins should be ['*'] when any child has wildcard "
-                "and no credentials conflict"
+                "Merged origins should be ['*'] when any child has wildcard " "and no credentials conflict"
             )
             # Credentials should be False (OR logic, but both are False)
             assert cors_config["allow_credentials"] is False
@@ -1258,7 +1211,8 @@ class TestWebSocketWithCORSCConfig:
             "cors": {
                 "enabled": True,
                 "allow_origins": ["*"],
-                "allow_credentials": True,
+                # Wildcard + credentials=True is invalid per CORS spec
+                "allow_credentials": False,
             },
         }
         manifest_path = tmp_path / "manifest.json"
@@ -1272,11 +1226,12 @@ class TestWebSocketWithCORSCConfig:
         handler = logging.Handler()
         handler.emit = lambda record: log_capture.append(record.getMessage())
 
-        logger = logging.getLogger("mdb_engine.core.engine")
+        # WebSocket route registration + verification logs are emitted by multi-app mounting
+        logger = logging.getLogger("mdb_engine.core.multi_app")
         logger.addHandler(handler)
         logger.setLevel(logging.DEBUG)  # Need DEBUG level to capture verification logs
 
-        app = engine.create_multi_app(
+        app = await engine.create_multi_app(
             apps=[
                 {
                     "slug": "ws-verify-app",
@@ -1300,13 +1255,14 @@ class TestWebSocketWithCORSCConfig:
             verification_logs = [
                 log
                 for log in log_capture
-                if "Verified WebSocket route" in log
+                if "[ROUTE VERIFICATION]" in log
+                or "Registered WebSocket route" in log
+                or "Verified WebSocket route" in log
                 or "WebSocket route" in log
                 and "not found after registration" in log
             ]
             assert len(verification_logs) > 0, (
-                f"Route verification should be logged. "
-                f"Captured logs (first 20): {log_capture[:20]}"
+                f"Route verification should be logged. " f"Captured logs (first 20): {log_capture[:20]}"
             )
 
         logger.removeHandler(handler)
@@ -1343,11 +1299,11 @@ class TestWebSocketWithCORSCConfig:
         handler = logging.Handler()
         handler.emit = lambda record: log_capture.append(record.getMessage())
 
-        logger = logging.getLogger("mdb_engine.core.engine")
+        logger = logging.getLogger("mdb_engine.core.multi_app")
         logger.addHandler(handler)
         logger.setLevel(logging.INFO)
 
-        app = engine.create_multi_app(
+        app = await engine.create_multi_app(
             apps=[
                 {
                     "slug": "startup-verify-app",
@@ -1360,11 +1316,7 @@ class TestWebSocketWithCORSCConfig:
 
         async with app.router.lifespan_context(app):
             # Check that startup verification logging occurred
-            verification_logs = [
-                log
-                for log in log_capture
-                if "MDB-Engine Multi-App Configuration Verification" in log
-            ]
+            verification_logs = [log for log in log_capture if "MDB-Engine Multi-App Configuration Verification" in log]
             assert len(verification_logs) > 0, "Startup verification should be logged"
 
             # Check that CORS config is logged
@@ -1379,9 +1331,7 @@ class TestWebSocketWithCORSCConfig:
         await engine.shutdown()
 
     @pytest.mark.asyncio
-    async def test_websocket_connection_without_csrf_rejection(
-        self, mongodb_connection_string, tmp_path
-    ):
+    async def test_websocket_connection_without_csrf_rejection(self, mongodb_connection_string, tmp_path):
         """Test that WebSocket connections work without being rejected by child app CSRF."""
         import os
 
@@ -1411,7 +1361,7 @@ class TestWebSocketWithCORSCConfig:
         db_name = f"test_ws_no_csrf_reject_{os.getpid()}"
         engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name=db_name)
 
-        app = engine.create_multi_app(
+        app = await engine.create_multi_app(
             apps=[
                 {
                     "slug": "ws-app",
@@ -1447,9 +1397,7 @@ class TestWebSocketWithCORSCConfig:
         await engine.shutdown()
 
     @pytest.mark.asyncio
-    async def test_child_app_public_routes_exempt_from_csrf(
-        self, mongodb_connection_string, tmp_path
-    ):
+    async def test_child_app_public_routes_exempt_from_csrf(self, mongodb_connection_string, tmp_path):
         """Test that child app public routes are exempt from CSRF validation."""
         import os
 
@@ -1476,7 +1424,7 @@ class TestWebSocketWithCORSCConfig:
         db_name = f"test_public_routes_csrf_{os.getpid()}"
         engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name=db_name)
 
-        app = engine.create_multi_app(
+        app = await engine.create_multi_app(
             apps=[
                 {
                     "slug": "public-app",
@@ -1507,9 +1455,7 @@ class TestWebSocketWithCORSCConfig:
         await engine.shutdown()
 
     @pytest.mark.asyncio
-    async def test_multi_app_websocket_routing_with_session_keys(
-        self, mongodb_connection_string, tmp_path
-    ):
+    async def test_multi_app_websocket_routing_with_session_keys(self, mongodb_connection_string, tmp_path):
         """Test WebSocket routing in multi-app setup with session keys."""
         import asyncio
         import json
@@ -1551,7 +1497,7 @@ class TestWebSocketWithCORSCConfig:
         await engine.initialize()
 
         # Create multi-app
-        app = engine.create_multi_app(
+        app = await engine.create_multi_app(
             apps=[
                 {
                     "slug": "app1",
@@ -1575,8 +1521,8 @@ class TestWebSocketWithCORSCConfig:
                         password="testpass123",
                         app_roles={"app1": ["viewer"]},
                     )
-                except Exception:
-                    pass  # User might already exist
+                except (ValueError, Exception) as exc:  # ValueError if user already exists
+                    logging.getLogger(__name__).debug("create_user skipped: %s", exc)
 
                 # Authenticate
                 auth_result = await user_pool.authenticate(

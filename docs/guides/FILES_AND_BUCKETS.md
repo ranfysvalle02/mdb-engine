@@ -275,7 +275,7 @@ async def get_bucket_files(
     user_id = str(user["_id"])
     
     # Find all memories with this bucket as associated_bucket_id
-    all_mems = await asyncio.to_thread(svc.get_all, user_id=user_id, limit=2000)
+    all_mems = await svc.get_all(user_id=user_id, limit=2000)
     
     files_list = []
     seen = set()
@@ -351,7 +351,7 @@ async def get_memory_stats(request: Request, svc=Depends(get_memory_service)):
     user = get_current_user(request)
     user_id = str(user["_id"])
     
-    all_mems = await asyncio.to_thread(svc.get_all, user_id=user_id, limit=2000)
+    all_mems = await svc.get_all(user_id=user_id, limit=2000)
     stats = {
         "file_contexts": {},
         "general_buckets": {},
@@ -774,6 +774,158 @@ def extract_category_from_bucket(bucket_id: str) -> str:
 
 ---
 
+## Shared/Group Memory with Buckets
+
+Shared memory (formerly "family memory") enables privacy-safe promotion of facts within groups (families, teams, organizations, communities). Shared memories can be filtered by bucket, enabling contextual isolation at the group level.
+
+### How Shared Memory Works with Buckets
+
+1. **Promotion**: User-scoped memories are promoted to shared memory based on promotion rules
+2. **Bucket Preservation**: Bucket information is preserved during promotion
+3. **Group-Level Buckets**: Shared memories can have group-level bucket IDs (e.g., `category:CODE:team-001`)
+4. **Unified Search**: Query shared memories filtered by bucket
+
+### Example: Team Memory in CODE Bucket
+
+```python
+from mdb_engine.memory import SharedMemory
+
+shared_memory = SharedMemory(
+    semantic_collection=entity_collection,
+    shared_collection=shared_collection
+)
+
+# Promote a fact to shared level (team example)
+if shared_memory.check_promotion_rules(fact, source_user_ids, "low"):
+    shared_memory.promote_to_shared(
+        fact="We prefer async/await patterns for I/O operations",
+        source_user_ids=["user1", "user2", "user3"],
+        confidence=0.85,
+        group_id="team-001",  # Generic group identifier
+        bucket_id="category:CODE:team-001",  # Bucket filter
+        bucket_type="category"
+    )
+
+# Query shared memories in CODE bucket
+shared_facts = shared_memory.get_shared_memory(
+    group_id="team-001",
+    bucket_id="category:CODE:team-001",
+    query="What coding patterns do we use?",
+    min_confidence=0.7
+)
+```
+
+### Example: Family Memory in WORK Bucket
+
+```python
+# Family memories filtered by WORK bucket
+shared_facts = shared_memory.get_shared_memory(
+    group_id="family-001",
+    bucket_id="category:WORK:family-001",
+    query="What work-related patterns do we share?"
+)
+```
+
+### Bucket Filtering in Shared Memory
+
+Shared memories support the same bucket filtering as user memories:
+
+- **`metadata.bucket_id`**: Direct bucket assignment
+- **`metadata.bucket_type`**: Bucket type classification
+- **`metadata.associated_bucket_id`**: Links related memories (for unified search)
+
+### Vector Search with Shared Memory Buckets
+
+MongoDB Atlas Vector Search filter includes bucket conditions for shared memory:
+
+```python
+filter = {
+    "group_id": group_id,  # or user_id for user scope
+    "scope": "shared",  # "user", "shared", "system"
+    "metadata.associated_bucket_id": bucket_id,  # Bucket filter
+    "is_active": True,
+    "confidence": {"$gte": min_confidence}
+}
+```
+
+### Integration with Other Memory Types
+
+All memory types support bucket filtering:
+
+```python
+from mdb_engine.memory import CognitiveMemory
+
+memory = CognitiveMemory(...)
+
+# Search entities in CODE bucket (shared scope)
+entities = memory.search_entities(
+    query="coding patterns",
+    scope="shared",
+    group_id="team-001",
+    bucket_id="category:CODE:team-001"
+)
+
+# Get reflections in WORK bucket (user scope)
+reflections = memory.get_reflections(
+    scope="user",
+    user_id="user123",
+    bucket_id="category:WORK:user123"
+)
+
+# Get predictions in CODE bucket (shared scope)
+predictions = memory.get_predictions(
+    scope="shared",
+    group_id="team-001",
+    bucket_id="category:CODE:team-001"
+)
+```
+
+### Query-Aware Recall with Buckets
+
+Query-aware recall supports bucket filtering:
+
+```python
+from mdb_engine.memory import QueryAwareRecall
+
+recall = QueryAwareRecall()
+
+# Recall with bucket filtering
+result = recall.recall(
+    query="User preferences",
+    user_id="user123",
+    collection=semantic_collection,
+    bucket_id="category:CODE:user123",
+    task_type="fast_answer"
+)
+
+# Multi-scope recall with bucket filtering
+result = recall.recall_multi_scope(
+    query="How is our team doing?",
+    user_id="user123",
+    collections={
+        "user": user_collection,
+        "shared": shared_collection,
+        "system": system_collection
+    },
+    allowed_scopes=["user", "shared", "system"],
+    bucket_id="category:CODE:team-001"
+)
+```
+
+### Generic Grouping
+
+The "shared" scope is a **generic grouping mechanism** - `group_id` can represent:
+
+- **Families**: `group_id="family-001"`
+- **Teams**: `group_id="team-001"`
+- **Organizations**: `group_id="org-acme"`
+- **Communities**: `group_id="community-dev"`
+- **Any collection of users**: Custom group identifiers
+
+This makes the system flexible enough to support any multi-user scenario while maintaining privacy and bucket isolation.
+
+---
+
 ## Summary
 
 MDB-Engine's bucket system provides:
@@ -783,10 +935,27 @@ MDB-Engine's bucket system provides:
 3. **Unified Search**: `associated_bucket_id` links files to categories
 4. **Full Isolation**: Memories in one bucket don't leak to others
 5. **Flexible Patterns**: Create custom bucket types as needed
+6. **Shared Memory Support**: Group memories can be filtered by bucket
+7. **Generic Grouping**: Supports families, teams, organizations, communities, etc.
 
 The key to file memory is the **dual-bucket pattern**:
 - Files get their own unique `bucket_id`: `file:{filename}:{user_id}`
 - Files link to categories via `associated_bucket_id`: `bucket:{category}:{user_id}`
 - Searching by `associated_bucket_id` finds both conversation AND file memories
 
-For a complete implementation example, see the [sso-app-3 example](../../examples/advanced/sso-multi-app/apps/sso-app-3/).
+**Shared Memory with Buckets**:
+- Shared memories preserve bucket information during promotion
+- Group-level buckets enable contextual isolation (e.g., `category:CODE:team-001`)
+- All memory types (entities, reflections, predictions) support bucket filtering
+- Vector search intelligently combines scope, group_id, and bucket filters
+
+For a complete implementation example, see the [sso-app-3 example](../../examples/advanced/sso-multi-app/apps/sso-app-3/). The example demonstrates:
+
+- **File Memory**: Document processing with bucket association
+- **Shared Memory**: Team/family memory promotion with bucket filtering (`POST /api/memories/shared/promote`, `GET /api/memories/shared`)
+- **Bucket Filtering**: All Perfect Brain features support bucket filtering
+- **Query-Aware Recall**: Policy-driven memory search with bucket filters (`GET /api/memories/search`)
+
+See the [sso-app-3 README](../../examples/advanced/sso-multi-app/apps/sso-app-3/README.md) for complete API documentation.
+
+For comprehensive documentation on shared memory and perfect brain features, see [MEMORY_SERVICE.md](../MEMORY_SERVICE.md).

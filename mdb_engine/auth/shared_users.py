@@ -44,7 +44,7 @@ Usage:
 import logging
 import os
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
 import bcrypt
@@ -156,8 +156,7 @@ class SharedUserPool:
         # Validate algorithm
         if jwt_algorithm not in SUPPORTED_ALGORITHMS:
             raise JWTKeyError(
-                f"Unsupported JWT algorithm: {jwt_algorithm}. "
-                f"Supported: {', '.join(sorted(SUPPORTED_ALGORITHMS))}"
+                f"Unsupported JWT algorithm: {jwt_algorithm}. " f"Supported: {', '.join(sorted(SUPPORTED_ALGORITHMS))}"
             )
 
         self._jwt_algorithm = jwt_algorithm
@@ -186,7 +185,7 @@ class SharedUserPool:
                 # Generate ephemeral secret for development
                 self._jwt_secret = secrets.token_urlsafe(32)
                 logger.warning(
-                    "⚠️  INSECURE: Using auto-generated JWT secret. "
+                    "INSECURE: Using auto-generated JWT secret. "
                     "Tokens will be invalid after restart. "
                     "Set MDB_ENGINE_JWT_SECRET for production!"
                 )
@@ -208,7 +207,7 @@ class SharedUserPool:
         if not self._jwt_secret:
             if allow_insecure_dev:
                 logger.warning(
-                    f"⚠️  INSECURE: {self._jwt_algorithm} requires a private key. "
+                    f"INSECURE: {self._jwt_algorithm} requires a private key. "
                     f"Set MDB_ENGINE_JWT_SECRET with your private key in production!"
                 )
                 # We can't auto-generate RSA/ECDSA keys easily, so error out
@@ -229,7 +228,7 @@ class SharedUserPool:
             # For verification, we can derive public key from private in some cases,
             # or require it explicitly for better security
             logger.warning(
-                f"⚠️  No public key provided for {self._jwt_algorithm}. "
+                f"No public key provided for {self._jwt_algorithm}. "
                 f"Token verification will use the private key (less secure). "
                 f"Set MDB_ENGINE_JWT_PUBLIC_KEY for better key separation."
             )
@@ -261,9 +260,7 @@ class SharedUserPool:
             # Unique index on email
             await self._collection.create_index("email", unique=True, name="email_unique_idx")
             # Index for active users
-            await self._collection.create_index(
-                [("is_active", 1), ("email", 1)], name="active_email_idx"
-            )
+            await self._collection.create_index([("is_active", 1), ("email", 1)], name="active_email_idx")
             logger.info("SharedUserPool user indexes ensured")
         except OperationFailure as e:
             logger.warning(f"Failed to create user indexes: {e}")
@@ -280,9 +277,7 @@ class SharedUserPool:
             # Unique index on JTI for fast lookups
             await self._blacklist_collection.create_index("jti", unique=True, name="jti_unique_idx")
             # TTL index for automatic cleanup of expired entries
-            await self._blacklist_collection.create_index(
-                "expires_at", expireAfterSeconds=0, name="expires_at_ttl_idx"
-            )
+            await self._blacklist_collection.create_index("expires_at", expireAfterSeconds=0, name="expires_at_ttl_idx")
             self._blacklist_indexes_created = True
             logger.info("SharedUserPool blacklist indexes ensured")
         except OperationFailure as e:
@@ -318,7 +313,7 @@ class SharedUserPool:
         # Hash password
         password_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         user_doc = {
             "email": email,
             "password_hash": password_hash,
@@ -382,9 +377,7 @@ class SharedUserPool:
             return None
 
         # Update last login
-        await self._collection.update_one(
-            {"_id": user["_id"]}, {"$set": {"last_login": datetime.utcnow()}}
-        )
+        await self._collection.update_one({"_id": user["_id"]}, {"$set": {"last_login": datetime.now(timezone.utc)}})
 
         # Prepare extra claims for session binding
         extra_claims = {}
@@ -411,9 +404,7 @@ class SharedUserPool:
                     user_email=email,
                     app_slug=app_slug,
                 )
-                logger.debug(
-                    f"Generated WebSocket session key for user '{email}' " f"(app: {app_slug})"
-                )
+                logger.debug(f"Generated WebSocket session key for user '{email}' " f"(app: {app_slug})")
             except (ValueError, TypeError, AttributeError, RuntimeError) as e:
                 # Log but don't fail authentication if WebSocket session generation fails
                 logger.warning(f"Failed to generate WebSocket session key: {e}")
@@ -483,7 +474,7 @@ class SharedUserPool:
                 # Double-check expiration (TTL index should handle this)
                 expires_at = entry.get("expires_at")
                 if expires_at and isinstance(expires_at, datetime):
-                    return datetime.utcnow() < expires_at
+                    return datetime.now(timezone.utc) < expires_at
                 return True  # No expiration = permanently blacklisted
             return False
         except PyMongoError as e:
@@ -491,8 +482,7 @@ class SharedUserPool:
             # Fail closed for security by default (reject token if we can't verify)
             if self._blacklist_fail_closed:
                 logger.warning(
-                    "Token blacklist check failed - rejecting token for security "
-                    "(blacklist_fail_closed=True)"
+                    "Token blacklist check failed - rejecting token for security " "(blacklist_fail_closed=True)"
                 )
                 return True  # Token IS revoked (reject access)
             # Fail open only if explicitly configured (availability over security)
@@ -536,7 +526,7 @@ class SharedUserPool:
             if exp_timestamp:
                 expires_at = datetime.utcfromtimestamp(exp_timestamp)
             else:
-                expires_at = datetime.utcnow() + timedelta(days=7)
+                expires_at = datetime.now(timezone.utc) + timedelta(days=7)
 
             # Ensure blacklist indexes exist
             await self._ensure_blacklist_indexes()
@@ -549,7 +539,7 @@ class SharedUserPool:
                         "jti": jti,
                         "user_id": payload.get("sub"),
                         "email": payload.get("email"),
-                        "revoked_at": datetime.utcnow(),
+                        "revoked_at": datetime.now(timezone.utc),
                         "expires_at": expires_at,
                         "reason": reason,
                     }
@@ -586,7 +576,7 @@ class SharedUserPool:
             {"_id": user_id},
             {
                 "$set": {
-                    "tokens_revoked_at": datetime.utcnow(),
+                    "tokens_revoked_at": datetime.now(timezone.utc),
                     "tokens_revoked_reason": reason,
                 }
             },
@@ -622,7 +612,7 @@ class SharedUserPool:
             {
                 "$set": {
                     f"app_roles.{app_slug}": roles,
-                    "updated_at": datetime.utcnow(),
+                    "updated_at": datetime.now(timezone.utc),
                 }
             },
         )
@@ -647,7 +637,7 @@ class SharedUserPool:
             {"email": email},
             {
                 "$unset": {f"app_roles.{app_slug}": ""},
-                "$set": {"updated_at": datetime.utcnow()},
+                "$set": {"updated_at": datetime.now(timezone.utc)},
             },
         )
 
@@ -663,7 +653,7 @@ class SharedUserPool:
             {
                 "$set": {
                     "is_active": False,
-                    "updated_at": datetime.utcnow(),
+                    "updated_at": datetime.now(timezone.utc),
                 }
             },
         )
@@ -676,7 +666,7 @@ class SharedUserPool:
             {
                 "$set": {
                     "is_active": True,
-                    "updated_at": datetime.utcnow(),
+                    "updated_at": datetime.now(timezone.utc),
                 }
             },
         )
@@ -708,7 +698,7 @@ class SharedUserPool:
             )
         """
         # Build update document, ensuring updated_at is always set
-        update_doc = {"$set": {**metadata, "updated_at": datetime.utcnow()}}
+        update_doc = {"$set": {**metadata, "updated_at": datetime.now(timezone.utc)}}
 
         result = await self._collection.update_one(
             {"email": email},
@@ -789,7 +779,7 @@ class SharedUserPool:
         Returns:
             Signed JWT token string
         """
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         payload = {
             "sub": str(user["_id"]),
             "email": user["email"],

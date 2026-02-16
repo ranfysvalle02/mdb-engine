@@ -61,9 +61,7 @@ class AppRegistrationManager:
         self.manifest_parser = manifest_parser
         self._apps: dict[str, dict[str, Any]] = {}
 
-    async def validate_manifest(
-        self, manifest: "ManifestDict"
-    ) -> tuple[bool, str | None, list[str] | None]:
+    async def validate_manifest(self, manifest: "ManifestDict") -> tuple[bool, str | None, list[str] | None]:
         """
         Validate a manifest against the schema.
 
@@ -77,7 +75,7 @@ class AppRegistrationManager:
         slug = manifest.get("slug", "unknown")
 
         try:
-            result = self.manifest_validator.validate(manifest)
+            result = await self.manifest_validator.validate(manifest)
             duration_ms = (time.time() - start_time) * 1000
             is_valid = result[0]
             record_operation(
@@ -118,11 +116,12 @@ class AppRegistrationManager:
         manifest: "ManifestDict",
         create_indexes_callback: Callable[[str, "ManifestDict"], Any] | None = None,
         seed_data_callback: Callable[[str, dict[str, list[dict[str, Any]]]], Any] | None = None,
+        initialize_osi_callback: Callable[[str, dict[str, Any]], Any] | None = None,
         initialize_graph_callback: Callable[[str, dict[str, Any]], Any] | None = None,
         initialize_memory_callback: Callable[[str, dict[str, Any]], Any] | None = None,
+        initialize_profile_callback: Callable[[str, dict[str, Any]], Any] | None = None,
         register_websockets_callback: Callable[[str, dict[str, Any]], Any] | None = None,
-        setup_observability_callback: Callable[[str, "ManifestDict", dict[str, Any]], Any]
-        | None = None,
+        setup_observability_callback: Callable[[str, "ManifestDict", dict[str, Any]], Any] | None = None,
     ) -> bool:
         """
         Register an app from its manifest.
@@ -134,8 +133,12 @@ class AppRegistrationManager:
             manifest: Validated manifest dictionary containing app configuration
             create_indexes_callback: Optional callback to create indexes
             seed_data_callback: Optional callback to seed initial data
+            initialize_osi_callback: Optional callback to initialize OSI registry
+                (MUST run before graph callback)
             initialize_graph_callback: Optional callback to initialize graph service
             initialize_memory_callback: Optional callback to initialize memory service
+            initialize_profile_callback: Optional callback to initialize profile service
+                (MUST run after memory and graph)
             register_websockets_callback: Optional callback to register WebSockets
             setup_observability_callback: Optional callback to setup observability
 
@@ -166,7 +169,7 @@ class AppRegistrationManager:
             if not is_valid:
                 duration_ms = (time.time() - start_time) * 1000
                 logger.error(
-                    f"[{slug}] ❌ Manifest validation FAILED: {error}. "
+                    f"[{slug}] Manifest validation FAILED: {error}. "
                     f"Error paths: {paths}. "
                     f"This blocks app registration and index creation!"
                 )
@@ -234,6 +237,12 @@ class AppRegistrationManager:
             if seed_data_callback and "initial_data" in manifest:
                 callback_tasks.append(seed_data_callback(slug, manifest["initial_data"]))
 
+            # Initialize OSI registry if configured (MUST complete before graph)
+            # OSI provides entity types and synonyms that graph extraction uses
+            osi_config = manifest.get("osi_config")
+            if initialize_osi_callback and osi_config and osi_config.get("enabled", False):
+                await initialize_osi_callback(slug, osi_config)
+
             # Initialize Graph service if configured (MUST complete before memory)
             # Graph is enabled by default - users can disable via manifest
             graph_config = manifest.get("graph_config", {})
@@ -246,6 +255,11 @@ class AppRegistrationManager:
             if initialize_memory_callback and memory_config and memory_config.get("enabled", False):
                 callback_tasks.append(initialize_memory_callback(slug, memory_config))
 
+            # Initialize Profile service if configured (after memory + graph)
+            profile_config = manifest.get("profile_config")
+            if initialize_profile_callback and profile_config and profile_config.get("enabled", False):
+                callback_tasks.append(initialize_profile_callback(slug, profile_config))
+
             # Register WebSocket endpoints if configured
             websockets_config = manifest.get("websockets")
             if register_websockets_callback and websockets_config:
@@ -254,9 +268,7 @@ class AppRegistrationManager:
             # Set up observability (health checks, metrics, logging)
             observability_config = manifest.get("observability", {})
             if setup_observability_callback and observability_config:
-                callback_tasks.append(
-                    setup_observability_callback(slug, manifest, observability_config)
-                )
+                callback_tasks.append(setup_observability_callback(slug, manifest, observability_config))
 
             # Run all callbacks in parallel
             if callback_tasks:
@@ -273,8 +285,7 @@ class AppRegistrationManager:
                         ]
                         callback_name = callback_names[i] if i < len(callback_names) else "unknown"
                         logger.warning(
-                            f"[{slug}] Callback '{callback_name}' failed during "
-                            f"app registration: {result}",
+                            f"[{slug}] Callback '{callback_name}' failed during " f"app registration: {result}",
                             exc_info=result,
                         )
 
@@ -310,15 +321,13 @@ class AppRegistrationManager:
             register_app_callback: Callback to register each app
 
         Returns:
-            Number of apps successfully registered
+            Number of apps successfully registered, or -1 if reload failed
         """
         logger.info("Reloading active apps from database...")
 
         try:
             # Fetch active apps
-            active_cfgs = (
-                await self._mongo_db.apps_config.find({"status": "active"}).limit(500).to_list(None)
-            )
+            active_cfgs = await self._mongo_db.apps_config.find({"status": "active"}).limit(500).to_list(None)
 
             logger.info(f"Found {len(active_cfgs)} active app(s).")
 
@@ -332,7 +341,7 @@ class AppRegistrationManager:
                 if success:
                     registered_count += 1
 
-            logger.info(f"✔️ App reload complete. {registered_count} app(s) registered.")
+            logger.info(f"App reload complete. {registered_count} app(s) registered.")
             return registered_count
         except (
             OperationFailure,
@@ -342,8 +351,8 @@ class AppRegistrationManager:
             TypeError,
             KeyError,
         ) as e:
-            logger.error(f"❌ Error reloading apps: {e}", exc_info=True)
-            return 0
+            logger.error(f"Error reloading apps: {e}", exc_info=True)
+            return -1
 
     def get_app(self, slug: str) -> Optional["ManifestDict"]:
         """

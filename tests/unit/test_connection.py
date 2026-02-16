@@ -107,9 +107,7 @@ class TestConnectionManagerMetricsRegistration:
             "mdb_engine.core.connection.AsyncIOMotorClient",
             return_value=mock_mongo_client,
         ):
-            with patch(
-                "mdb_engine.database.connection.register_client_for_metrics"
-            ) as mock_register:
+            with patch("mdb_engine.database.connection.register_client_for_metrics") as mock_register:
                 manager = ConnectionManager(**connection_config)
                 await manager.initialize()
 
@@ -1208,9 +1206,7 @@ class TestRegisterClientForMetrics:
                 )
 
                 # Make ping fail
-                mock_client.admin.command = AsyncMock(
-                    side_effect=ConnectionFailure("Connection failed")
-                )
+                mock_client.admin.command = AsyncMock(side_effect=ConnectionFailure("Connection failed"))
 
                 result = await verify_shared_client()
                 assert result is False
@@ -1248,9 +1244,7 @@ class TestRegisterClientForMetrics:
                 )
 
                 # Make ping fail with timeout
-                mock_client.admin.command = AsyncMock(
-                    side_effect=ServerSelectionTimeoutError("Timeout")
-                )
+                mock_client.admin.command = AsyncMock(side_effect=ServerSelectionTimeoutError("Timeout"))
 
                 result = await verify_shared_client()
                 assert result is False

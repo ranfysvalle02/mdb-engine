@@ -6,11 +6,14 @@ Tests that auth.mode field is properly validated and parsed.
 
 from unittest.mock import MagicMock
 
+import pytest
+
 
 class TestAuthModeManifestSchema:
     """Tests for auth.mode in manifest schema."""
 
-    def test_auth_mode_app_valid(self):
+    @pytest.mark.asyncio
+    async def test_auth_mode_app_valid(self):
         """Test that mode='app' is valid."""
         from mdb_engine.core.manifest import validate_manifest
 
@@ -27,10 +30,11 @@ class TestAuthModeManifestSchema:
             },
         }
 
-        is_valid, error, warnings = validate_manifest(manifest)
+        is_valid, error, warnings = await validate_manifest(manifest)
         assert is_valid, f"Expected valid, got error: {error}"
 
-    def test_auth_mode_shared_valid(self):
+    @pytest.mark.asyncio
+    async def test_auth_mode_shared_valid(self):
         """Test that mode='shared' is valid."""
         from mdb_engine.core.manifest import validate_manifest
 
@@ -50,10 +54,11 @@ class TestAuthModeManifestSchema:
             },
         }
 
-        is_valid, error, warnings = validate_manifest(manifest)
+        is_valid, error, warnings = await validate_manifest(manifest)
         assert is_valid, f"Expected valid, got error: {error}"
 
-    def test_auth_mode_invalid_value(self):
+    @pytest.mark.asyncio
+    async def test_auth_mode_invalid_value(self):
         """Test that invalid mode value fails validation."""
         from mdb_engine.core.manifest import validate_manifest
 
@@ -70,11 +75,12 @@ class TestAuthModeManifestSchema:
             },
         }
 
-        is_valid, error, warnings = validate_manifest(manifest)
+        is_valid, error, warnings = await validate_manifest(manifest)
         assert not is_valid
         assert "mode" in error.lower() or "invalid" in error.lower()
 
-    def test_auth_public_routes_valid(self):
+    @pytest.mark.asyncio
+    async def test_auth_public_routes_valid(self):
         """Test that public_routes array is valid."""
         from mdb_engine.core.manifest import validate_manifest
 
@@ -92,10 +98,11 @@ class TestAuthModeManifestSchema:
             },
         }
 
-        is_valid, error, warnings = validate_manifest(manifest)
+        is_valid, error, warnings = await validate_manifest(manifest)
         assert is_valid, f"Expected valid, got error: {error}"
 
-    def test_auth_roles_valid(self):
+    @pytest.mark.asyncio
+    async def test_auth_roles_valid(self):
         """Test that roles array is valid."""
         from mdb_engine.core.manifest import validate_manifest
 
@@ -113,10 +120,11 @@ class TestAuthModeManifestSchema:
             },
         }
 
-        is_valid, error, warnings = validate_manifest(manifest)
+        is_valid, error, warnings = await validate_manifest(manifest)
         assert is_valid, f"Expected valid, got error: {error}"
 
-    def test_auth_default_mode_is_app(self):
+    @pytest.mark.asyncio
+    async def test_auth_default_mode_is_app(self):
         """Test that default mode is 'app' when not specified."""
         from mdb_engine.core.manifest import validate_manifest
 
@@ -131,7 +139,7 @@ class TestAuthModeManifestSchema:
             },
         }
 
-        is_valid, error, warnings = validate_manifest(manifest)
+        is_valid, error, warnings = await validate_manifest(manifest)
         assert is_valid, f"Expected valid, got error: {error}"
 
 

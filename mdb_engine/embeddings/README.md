@@ -71,7 +71,7 @@ async def search(
     embedding_service=Depends(get_embedding_service),
 ):
     # Generate query embedding
-    vectors = await embedding_service.embed_chunks([query])
+    vectors = await embedding_service.embed([query])
     # Use vectors for vector search...
     return {"query_vector_dims": len(vectors[0])}
 ```
@@ -91,7 +91,7 @@ chunks = await embedding_service.chunk_text(
 )
 
 # Generate embeddings
-vectors = await embedding_service.embed_chunks(chunks, model="text-embedding-3-small")
+vectors = await embedding_service.embed(chunks, model="text-embedding-3-small")
 ```
 
 ### 3. Process and Store in MongoDB
@@ -123,7 +123,7 @@ from mdb_engine.embeddings.dependencies import get_embedding_service_for_app
 # In a background task or CLI tool
 service = get_embedding_service_for_app("my_app", engine)
 if service:
-    embeddings = await service.embed_chunks(["Hello world"])
+    embeddings = await service.embed(["Hello world"])
 ```
 
 ### 5. Explicit Provider
@@ -161,12 +161,12 @@ Split text into semantic chunks.
 chunks = await service.chunk_text("Long document...", max_tokens=1000)
 ```
 
-### `embed_chunks(chunks, model=None)`
+### `embed(chunks, model=None)`
 
 Generate embeddings for text chunks.
 
 ```python
-vectors = await service.embed_chunks(chunks, model="text-embedding-3-small")
+vectors = await service.embed(chunks, model="text-embedding-3-small")
 ```
 
 ### `process_and_store(text_content, source_id, collection, ...)`
@@ -202,7 +202,7 @@ All embedding operations raise `EmbeddingServiceError` on failure:
 from mdb_engine.embeddings import EmbeddingServiceError
 
 try:
-    vectors = await service.embed_chunks(["Hello"])
+    vectors = await service.embed(["Hello"])
 except EmbeddingServiceError as e:
     print(f"Embedding failed: {e}")
 ```

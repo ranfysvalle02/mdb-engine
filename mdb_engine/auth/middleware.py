@@ -94,9 +94,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
 
         return "; ".join(parts)
 
-    async def dispatch(
-        self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
-    ) -> Response:
+    async def dispatch(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
         """
         Process request through security middleware.
         """
@@ -114,13 +112,6 @@ class SecurityMiddleware(BaseHTTPMiddleware):
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="HTTPS required in production",
                 )
-
-        # Generate CSRF token if not present (for GET requests) - legacy support
-        if self.csrf_protection and request.method == "GET":
-            csrf_token = request.cookies.get("csrf_token")
-            if not csrf_token:
-                csrf_token = secrets.token_urlsafe(32)
-                # Will be set in response
 
         # Process request
         response = await call_next(request)
@@ -147,11 +138,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
             response.headers["Strict-Transport-Security"] = self._build_hsts_header()
 
         # Set CSRF token cookie if generated (legacy support)
-        if (
-            self.csrf_protection
-            and request.method == "GET"
-            and not request.cookies.get("csrf_token")
-        ):
+        if self.csrf_protection and request.method == "GET" and not request.cookies.get("csrf_token"):
             csrf_token = secrets.token_urlsafe(32)
             response.set_cookie(
                 key="csrf_token",
@@ -187,9 +174,7 @@ class StaleSessionMiddleware(BaseHTTPMiddleware):
         self.slug_id = slug_id
         self.engine = engine
 
-    async def dispatch(
-        self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
-    ) -> Response:
+    async def dispatch(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
         """
         Process request and clean up stale session cookies if needed.
 
@@ -216,9 +201,7 @@ class StaleSessionMiddleware(BaseHTTPMiddleware):
                         auth = auth_config.get("auth", {})
                         users_config = auth.get("users", {})
                         if users_config.get("enabled", False):
-                            session_cookie_name = users_config.get(
-                                "session_cookie_name", "app_session"
-                            )
+                            session_cookie_name = users_config.get("session_cookie_name", "app_session")
                             cookie_name = f"{session_cookie_name}_{self.slug_id}"
                     except (AttributeError, KeyError, TypeError):
                         pass
@@ -231,9 +214,7 @@ class StaleSessionMiddleware(BaseHTTPMiddleware):
                             auth = app_config.get("auth", {})
                             users_config = auth.get("users", {})
                             if users_config.get("enabled", False):
-                                session_cookie_name = users_config.get(
-                                    "session_cookie_name", "app_session"
-                                )
+                                session_cookie_name = users_config.get("session_cookie_name", "app_session")
                                 cookie_name = f"{session_cookie_name}_{self.slug_id}"
                     except (AttributeError, KeyError, TypeError):
                         pass
@@ -243,9 +224,7 @@ class StaleSessionMiddleware(BaseHTTPMiddleware):
                     cookie_name = f"app_session_{self.slug_id}"
 
                 # Get cookie settings to match how it was set
-                should_use_secure = (
-                    request.url.scheme == "https" or os.getenv("G_NOME_ENV") == "production"
-                )
+                should_use_secure = request.url.scheme == "https" or os.getenv("G_NOME_ENV") == "production"
 
                 # Delete the stale cookie
                 response.delete_cookie(
@@ -263,23 +242,3 @@ class StaleSessionMiddleware(BaseHTTPMiddleware):
                 )
 
         return response
-
-
-def create_security_middleware(config: dict) -> Callable:
-    """
-    Create security middleware from manifest config.
-
-    Args:
-        config: token_management.security config from manifest
-
-    Returns:
-        SecurityMiddleware instance
-    """
-    security = config.get("security", {})
-
-    return SecurityMiddleware(
-        app=None,  # Will be set by FastAPI
-        require_https=security.get("require_https", False),
-        csrf_protection=security.get("csrf_protection", True),
-        security_headers=True,
-    )

@@ -28,7 +28,7 @@ async def initialize_token_management(app, db):
         @app.on_event("startup")
         async def startup():
             # Get scoped database from engine
-            db = engine.get_scoped_db("my_app")
+            db = await engine.get_scoped_db("my_app")
 
             # Initialize token management
             await initialize_token_management(app, db)
@@ -59,6 +59,4 @@ async def initialize_token_management(app, db):
     ) as e:
         logger.error(f"Error initializing token management: {e}", exc_info=True)
         # Don't raise - allow app to start without token management (backward compatibility)
-        logger.warning(
-            "Token management not available - continuing without enhanced token features"
-        )
+        logger.warning("Token management not available - continuing without enhanced token features")

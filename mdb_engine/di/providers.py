@@ -7,6 +7,7 @@ according to their configured scope.
 
 import inspect
 import logging
+import threading
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
@@ -107,16 +108,21 @@ class SingletonProvider(Provider[T]):
     ):
         super().__init__(service_type, Scope.SINGLETON, factory)
         self._instance: T | None = None
+        self._lock = threading.Lock()
 
     def get(self, container: "Container") -> T:
-        if self._instance is None:
-            self._instance = self._create_instance(container)
-            logger.debug(f"Created singleton: {self.service_type.__name__}")
-        return self._instance
+        if self._instance is not None:  # Fast path (no lock)
+            return self._instance
+        with self._lock:  # Slow path (double-check)
+            if self._instance is None:
+                self._instance = self._create_instance(container)
+                logger.debug(f"Created singleton: {self.service_type.__name__}")
+            return self._instance
 
     def reset(self) -> None:
         """Reset the singleton (useful for testing)."""
-        self._instance = None
+        with self._lock:
+            self._instance = None
 
 
 class RequestProvider(Provider[T]):
@@ -134,9 +140,7 @@ class RequestProvider(Provider[T]):
         super().__init__(service_type, Scope.REQUEST, factory)
 
     def get(self, container: "Container") -> T:
-        return ScopeManager.get_or_create(
-            self.service_type, lambda: self._create_instance(container)
-        )
+        return ScopeManager.get_or_create(self.service_type, lambda: self._create_instance(container))
 
 
 class TransientProvider(Provider[T]):
@@ -181,17 +185,19 @@ class FactoryProvider(Provider[T]):
         super().__init__(service_type, scope, None)
         self._custom_factory = factory
         self._singleton_instance: T | None = None
+        self._lock = threading.Lock()
 
     def get(self, container: "Container") -> T:
         if self.scope == Scope.SINGLETON:
-            if self._singleton_instance is None:
-                self._singleton_instance = self._custom_factory(container)
-            return self._singleton_instance
+            if self._singleton_instance is not None:  # Fast path
+                return self._singleton_instance
+            with self._lock:  # Double-check
+                if self._singleton_instance is None:
+                    self._singleton_instance = self._custom_factory(container)
+                return self._singleton_instance
 
         elif self.scope == Scope.REQUEST:
-            return ScopeManager.get_or_create(
-                self.service_type, lambda: self._custom_factory(container)
-            )
+            return ScopeManager.get_or_create(self.service_type, lambda: self._custom_factory(container))
 
         else:  # TRANSIENT
             return self._custom_factory(container)

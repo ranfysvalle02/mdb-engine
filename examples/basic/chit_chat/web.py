@@ -113,37 +113,6 @@ async def on_startup(app, engine, manifest):
             # We'll sync messages to the messages collection for UI compatibility
             chat_history_collection = pymongo_db["chat_history"]
             
-            # Create adapter to use async LLMService with sync CognitiveEngine interface
-            from mdb_engine.memory.orchestrator import LLMProvider as OrchestratorLLMProvider
-            
-            class LLMServiceProvider(OrchestratorLLMProvider):
-                """Adapter to use async LLMService with sync CognitiveEngine LLMProvider interface."""
-                def __init__(self, llm_service):
-                    self.llm_service = llm_service
-                
-                def generate_chat_completion(self, messages, model=None, **kwargs):
-                    """Generate chat completion using LLMService (sync wrapper for async)."""
-                    import asyncio
-                    try:
-                        # Try to get the current event loop
-                        loop = asyncio.get_running_loop()
-                        # If we're in an async context, we need to run in a thread
-                        import concurrent.futures
-                        with concurrent.futures.ThreadPoolExecutor() as executor:
-                            future = executor.submit(
-                                lambda: asyncio.run(
-                                    self.llm_service.chat_completion(messages, model=model, **kwargs)
-                                )
-                            )
-                            return future.result(timeout=300)  # 5 minute timeout
-                    except RuntimeError:
-                        # No running loop, we can use asyncio.run
-                        return asyncio.run(
-                            self.llm_service.chat_completion(messages, model=model, **kwargs)
-                        )
-            
-            llm_provider = LLMServiceProvider(llm_service)
-            
             cognitive_engine = CognitiveEngine(
                 app_slug=APP_SLUG,
                 memory_service=memory_service,
@@ -151,7 +120,7 @@ async def on_startup(app, engine, manifest):
                 stm_context_limit=10,  # Last 10 messages for context
                 ltm_search_limit=5,    # Top 5 relevant memories
                 auto_summarize_threshold=20,  # Summarize when session > 20 messages
-                llm_provider=llm_provider,  # Use LLMService via adapter
+                llm_service=llm_service,
             )
             logger.info("✅ Cognitive Engine Online: Complete RAG Pipeline Ready")
         except Exception as e:
@@ -844,11 +813,10 @@ async def _generate_llm_response(messages):
         return "I am currently unable to access my language model. Please check configuration."
     
     try:
-        # LLMService uses default_model from llm_provider automatically
-        # No need to specify model - it will use the configured default_model
-        # Fallbacks are automatically handled by LiteLLM if configured in manifest
+        # Use named provider from llm_config.providers
         response = await llm_service.chat_completion(
             messages=messages,
+            provider_name="chat",
             temperature=1.0
         )
         return response
@@ -1034,8 +1002,7 @@ async def _extract_memories_background(
         
         try:
             # Extract and store memories (this uses LLM for fact extraction)
-            stored = await asyncio.to_thread(
-                memory_service.add,
+            stored = await memory_service.add(
                 messages=extraction_text,
                 user_id=user_id,
                 metadata=storage_metadata,
@@ -1212,10 +1179,8 @@ async def _broadcast_memory_stored(
         await asyncio.sleep(VECTOR_INDEX_UPDATE_DELAY_SECONDS)
         
         # Fetch fresh memories to broadcast (ensures we have the latest state)
-        # Use asyncio.to_thread to run synchronous memory service methods safely
         try:
-            fresh_memories = await asyncio.to_thread(
-                memory_service.get_all,
+            fresh_memories = await memory_service.get_all(
                 user_id=str(user_id),
                 limit=MAX_MEMORIES_TO_FETCH
             )
@@ -1360,12 +1325,14 @@ async def get_graph_stats(request: Request):
         raise HTTPException(status_code=401, detail="Authentication required")
 
     memory_service = engine.get_memory_service(APP_SLUG)
-    if not memory_service or not getattr(memory_service, "graph_store", None):
+    graph_service = getattr(memory_service, "_graph_service", None) if memory_service else None
+    
+    if not graph_service:
         return JSONResponse(
             {"success": True, "enabled": False, "total_nodes": 0, "total_edges": 0}
         )
 
-    stats = await asyncio.to_thread(memory_service.graph_store.get_stats)
+    stats = await graph_service.get_stats()
     return JSONResponse({"success": True, **stats})
 
 
@@ -1383,22 +1350,31 @@ async def graph_hybrid_search(
         raise HTTPException(status_code=401, detail="Authentication required")
 
     memory_service = engine.get_memory_service(APP_SLUG)
-    graph_store = getattr(memory_service, "graph_store", None)
+    graph_service = getattr(memory_service, "_graph_service", None) if memory_service else None
     
-    if not graph_store:
+    if not graph_service:
         return JSONResponse(
-            {"success": True, "entry_nodes": [], "graph_context": [], "total_nodes": 0}
+            {"success": True, "query_type": "none", "entry_nodes": [], "graph_context": [], "total_nodes": 0}
         )
 
     user_id = str(app_user["_id"])
     
-    results = await asyncio.to_thread(
-        graph_store.hybrid_search,
-        query=query,
-        user_id=user_id,
-        max_depth=max_depth,
-        vector_limit=limit
-    )
+    # Use GraphRAG query classification
+    query_type = graph_service.classify_query(query)
+    
+    # Route to appropriate search method
+    if query_type == "local":
+        results = await graph_service.local_search(query=query, user_id=user_id, max_depth=max_depth)
+    elif query_type == "global":
+        results = await graph_service.global_search(query=query, user_id=user_id, max_communities=limit)
+    elif query_type == "drift":
+        results = await graph_service.drift_search(query=query, user_id=user_id, max_depth=max_depth)
+    else:
+        results = await graph_service.hybrid_search(query=query, user_id=user_id, max_depth=max_depth, vector_limit=limit)
+    
+    # Ensure query_type is included
+    if results and "query_type" not in results:
+        results["query_type"] = query_type
     
     return JSONResponse({"success": True, **results})
 
@@ -1416,13 +1392,12 @@ async def graph_traverse(
         raise HTTPException(status_code=401, detail="Authentication required")
 
     memory_service = engine.get_memory_service(APP_SLUG)
-    graph_store = getattr(memory_service, "graph_store", None)
+    graph_service = getattr(memory_service, "_graph_service", None) if memory_service else None
     
-    if not graph_store:
+    if not graph_service:
         return JSONResponse({"success": True, "nodes": []})
 
-    results = await asyncio.to_thread(
-        graph_store.traverse,
+    results = await graph_service.traverse(
         start_id=node_id,
         max_depth=max_depth
     )
@@ -1443,15 +1418,14 @@ async def list_graph_nodes(
         raise HTTPException(status_code=401, detail="Authentication required")
 
     memory_service = engine.get_memory_service(APP_SLUG)
-    graph_store = getattr(memory_service, "graph_store", None)
+    graph_service = getattr(memory_service, "_graph_service", None) if memory_service else None
     
-    if not graph_store:
+    if not graph_service:
         return JSONResponse({"success": True, "nodes": []})
 
     user_id = str(app_user["_id"])
     
-    nodes = await asyncio.to_thread(
-        graph_store.list_nodes,
+    nodes = await graph_service.list_nodes(
         node_type=node_type,
         user_id=user_id,
         limit=limit
@@ -1494,7 +1468,7 @@ async def get_all_memories(request: Request, limit: int = 20):
         f"collection={memory_collection}, db={memory_db}, service_id={memory_service_id}",
         extra={"user_id": user_id, "limit": limit},
     )
-    memories = await asyncio.to_thread(memory_service.get_all, user_id=str(user_id), limit=limit)
+    memories = await memory_service.get_all(user_id=str(user_id), limit=limit)
     logger.info(
         f"🔍 RETRIEVED MEMORIES - user_id={user_id}, count={len(memories) if isinstance(memories, list) else 0}"
     )
@@ -1556,8 +1530,7 @@ async def search_memories(
                 status_code=400, detail="Invalid filters format. Expected JSON string."
             )
 
-    results = await asyncio.to_thread(
-        memory_service.search,
+    results = await memory_service.search(
         query=query,
         user_id=user_id,
         limit=limit,
@@ -1611,7 +1584,7 @@ async def get_memory(request: Request, memory_id: str):
         )
 
     user_id = str(app_user["_id"])
-    memory = await asyncio.to_thread(memory_service.get, memory_id=memory_id, user_id=user_id)
+    memory = await memory_service.get(memory_id=memory_id, user_id=user_id)
 
     if not memory:
         return JSONResponse(
@@ -1727,8 +1700,7 @@ async def inject_memory(request: Request):
         )
 
         # Inject memory without inference
-        injected_memory = await asyncio.to_thread(
-            memory_service.inject,
+        injected_memory = await memory_service.inject(
             memory=memory_content,
             user_id=user_id,
             metadata=metadata,
@@ -1849,9 +1821,7 @@ async def update_memory(request: Request, memory_id: str):
     try:
         # Update memory content - automatically regenerates embeddings if text changes
         # Metadata is preserved and merged with existing metadata
-        updated_memory = await asyncio.to_thread(
-            memory_service.update, memory_id=memory_id, memory=data, user_id=user_id
-        )
+        updated_memory = await memory_service.update(memory_id=memory_id, memory=data, user_id=user_id)
 
         logger.debug(
             f"Memory update result for {memory_id}: {type(updated_memory)}, "
@@ -1911,7 +1881,7 @@ async def delete_memory(request: Request, memory_id: str):
         )
 
     user_id = str(app_user["_id"])
-    success = await asyncio.to_thread(memory_service.delete, memory_id=memory_id, user_id=user_id)
+    success = await memory_service.delete(memory_id=memory_id, user_id=user_id)
 
     return JSONResponse(
         {
@@ -1940,12 +1910,11 @@ async def delete_all_memories(request: Request):
 
     user_id = str(app_user["_id"])
 
-    all_memories = await asyncio.to_thread(memory_service.get_all, user_id=user_id, limit=1000)
+    all_memories = await memory_service.get_all(user_id=user_id, limit=1000)
     memory_count = len(all_memories) if isinstance(all_memories, list) else 0
 
     # Hard delete for user-initiated deletion (GDPR compliant)
-    success = await asyncio.to_thread(
-        memory_service.delete_all, 
+    success = await memory_service.delete_all(
         user_id=user_id,
         hard_delete=True
     )
@@ -2011,7 +1980,7 @@ async def get_memory_stats(request: Request):
 
         try:
             all_memories = await asyncio.wait_for(
-                asyncio.to_thread(memory_service.get_all, user_id=str(user_id), limit=1000),
+                memory_service.get_all(user_id=str(user_id), limit=1000),
                 timeout=5.0,
             )
         except asyncio.TimeoutError:
@@ -2109,8 +2078,7 @@ async def get_memory_analytics(request: Request):
                 "error": "Analytics not available for this memory provider",
             }, status_code=501)
         
-        analytics = await asyncio.to_thread(
-            memory_service.get_memory_analytics,
+        analytics = await memory_service.get_memory_analytics(
             user_id=user_id,
         )
         
@@ -2162,8 +2130,7 @@ async def get_cold_storage(request: Request, limit: int = 50):
                 "error": "Cold storage not available for this memory provider",
             }, status_code=501)
         
-        cold_memories = await asyncio.to_thread(
-            memory_service.get_cold_storage,
+        cold_memories = await memory_service.get_cold_storage(
             user_id=user_id,
             limit=limit,
             include_reason=True,
@@ -2216,8 +2183,7 @@ async def restore_from_cold_storage(request: Request, memory_id: str):
                 "error": "Restore not available for this memory provider",
             }, status_code=501)
         
-        restored_memory = await asyncio.to_thread(
-            memory_service.restore_from_cold_storage,
+        restored_memory = await memory_service.restore_from_cold_storage(
             memory_id=memory_id,
             user_id=user_id,
         )
@@ -2294,23 +2260,10 @@ async def check_knowledge_conflict(request: Request):
         if not new_fact:
             raise HTTPException(status_code=400, detail="Missing 'fact' field in request body")
         
-        # Check for sync version of conflict detection
-        if hasattr(memory_service, 'detect_knowledge_conflict_sync'):
-            conflict = await asyncio.to_thread(
-                memory_service.detect_knowledge_conflict_sync,
-                user_id=user_id,
-                new_fact=new_fact,
-            )
-        elif hasattr(memory_service, 'detect_knowledge_conflict'):
-            conflict = await memory_service.detect_knowledge_conflict(
-                user_id=user_id,
-                new_fact=new_fact,
-            )
-        else:
-            return JSONResponse({
-                "success": False,
-                "error": "Conflict detection not available for this memory provider",
-            }, status_code=501)
+        conflict = await memory_service.detect_knowledge_conflict(
+            user_id=user_id,
+            new_fact=new_fact,
+        )
         
         return JSONResponse({
             "success": True,
@@ -2364,8 +2317,8 @@ async def trigger_pruning(request: Request):
         body = {}
         try:
             body = await request.json()
-        except Exception:
-            pass  # No body is fine
+        except (ValueError, TypeError) as exc:
+            logger.debug("No JSON body provided (ok for this endpoint): %s", exc)
         
         max_capacity = body.get("max_capacity")
         reason = body.get("reason", "manual_trigger")
@@ -2376,8 +2329,7 @@ async def trigger_pruning(request: Request):
                 "error": "Pruning not available for this memory provider",
             }, status_code=501)
         
-        pruned_count = await asyncio.to_thread(
-            memory_service.prune_memories,
+        pruned_count = await memory_service.prune_memories(
             user_id=user_id,
             max_capacity=max_capacity,
             reason=reason,

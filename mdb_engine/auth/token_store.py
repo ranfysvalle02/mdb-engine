@@ -7,7 +7,7 @@ This module is part of MDB_ENGINE - MongoDB Engine.
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 try:
     from pymongo.errors import (
@@ -59,9 +59,7 @@ class TokenBlacklist:
             await self.collection.create_index("jti", unique=True, name="jti_unique_idx")
 
             # Create TTL index on expires_at (auto-delete expired entries)
-            await self.collection.create_index(
-                "expires_at", expireAfterSeconds=0, name="expires_at_ttl_idx"
-            )
+            await self.collection.create_index("expires_at", expireAfterSeconds=0, name="expires_at_ttl_idx")
 
             self._indexes_created = True
             logger.info("Token blacklist indexes created successfully")
@@ -99,12 +97,12 @@ class TokenBlacklist:
 
             # If expires_at not provided, use a default (e.g., 7 days from now)
             if expires_at is None:
-                expires_at = datetime.utcnow() + timedelta(days=7)
+                expires_at = datetime.now(timezone.utc) + timedelta(days=7)
 
             blacklist_entry = {
                 "jti": jti,
                 "user_id": user_id,
-                "revoked_at": datetime.utcnow(),
+                "revoked_at": datetime.now(timezone.utc),
                 "expires_at": expires_at,
                 "reason": reason or "manual_revocation",
             }
@@ -142,7 +140,7 @@ class TokenBlacklist:
                 # Check if entry hasn't expired (TTL index should handle this, but double-check)
                 expires_at = entry.get("expires_at")
                 if expires_at and isinstance(expires_at, datetime):
-                    if datetime.utcnow() < expires_at:
+                    if datetime.now(timezone.utc) < expires_at:
                         return True
                 elif expires_at is None:
                     # No expiration means it's permanently blacklisted
@@ -181,9 +179,9 @@ class TokenBlacklist:
             # Store a user-level revocation marker
             revocation_marker = {
                 "user_id": user_id,
-                "revoked_at": datetime.utcnow(),
+                "revoked_at": datetime.now(timezone.utc),
                 "reason": reason or "logout_all",
-                "expires_at": datetime.utcnow() + timedelta(days=30),  # Keep for 30 days
+                "expires_at": datetime.now(timezone.utc) + timedelta(days=30),  # Keep for 30 days
             }
 
             # Use upsert to update or create marker
@@ -228,7 +226,7 @@ class TokenBlacklist:
                 # Check if marker hasn't expired
                 expires_at = marker.get("expires_at")
                 if expires_at and isinstance(expires_at, datetime):
-                    if datetime.utcnow() < expires_at:
+                    if datetime.now(timezone.utc) < expires_at:
                         return True
                 elif expires_at is None:
                     return True
@@ -258,7 +256,8 @@ class TokenBlacklist:
             Number of entries deleted
         """
         try:
-            result = await self.collection.delete_many({"expires_at": {"$lt": datetime.utcnow()}})
+            now = datetime.now(timezone.utc)
+            result = await self.collection.delete_many({"expires_at": {"$lt": now}})
             deleted_count = result.deleted_count
             if deleted_count > 0:
                 logger.info(f"Cleared {deleted_count} expired blacklist entries")

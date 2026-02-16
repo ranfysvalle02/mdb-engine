@@ -17,7 +17,7 @@ async def test_export_user_data_with_email(real_mongodb_engine):
     """Test user data export with email identifier."""
     engine = real_mongodb_engine
     # Create test user
-    db = engine.get_scoped_db("test_app")
+    db = await engine.get_scoped_db("test_app")
     test_email = "test_export@example.com"
 
     # Insert test data
@@ -70,7 +70,7 @@ async def test_export_user_data_with_user_id(real_mongodb_engine):
     """Test user data export with user_id identifier."""
     engine = real_mongodb_engine
     # Create test user
-    db = engine.get_scoped_db("test_app")
+    db = await engine.get_scoped_db("test_app")
     test_user_id = str(ObjectId())
 
     # Insert test data
@@ -116,7 +116,7 @@ async def test_export_user_data_csv_format(real_mongodb_engine):
     """Test user data export in CSV format."""
     engine = real_mongodb_engine
     # Create test user
-    db = engine.get_scoped_db("test_app")
+    db = await engine.get_scoped_db("test_app")
     test_email = "test_csv@example.com"
 
     await db.users.insert_one(
@@ -158,7 +158,7 @@ async def test_delete_user_data_soft_delete(real_mongodb_engine):
     """Test soft delete of user data."""
     engine = real_mongodb_engine
     # Create test user
-    db = engine.get_scoped_db("test_app")
+    db = await engine.get_scoped_db("test_app")
     test_email = "test_delete@example.com"
 
     # Insert test data
@@ -209,7 +209,7 @@ async def test_delete_user_data_hard_delete(real_mongodb_engine):
     """Test hard delete of user data."""
     engine = real_mongodb_engine
     # Create test user
-    db = engine.get_scoped_db("test_app")
+    db = await engine.get_scoped_db("test_app")
     test_email = "test_hard_delete@example.com"
 
     # Insert test data
@@ -244,7 +244,7 @@ async def test_delete_user_data_anonymize(real_mongodb_engine):
     """Test anonymization of user data."""
     engine = real_mongodb_engine
     # Create test user
-    db = engine.get_scoped_db("test_app")
+    db = await engine.get_scoped_db("test_app")
     test_email = "test_anonymize@example.com"
 
     # Insert test data
@@ -292,7 +292,7 @@ async def test_delete_user_data_with_memory_service(real_mongodb_engine):
     # For now, we'll test that the deletion doesn't fail
     # even if memory service is not available
 
-    db = engine.get_scoped_db("test_app")
+    db = await engine.get_scoped_db("test_app")
     test_email = "test_memory@example.com"
 
     await db.users.insert_one(
@@ -324,7 +324,7 @@ async def test_update_user_data(real_mongodb_engine):
     """Test updating user data."""
     engine = real_mongodb_engine
     # Create test user
-    db = engine.get_scoped_db("test_app")
+    db = await engine.get_scoped_db("test_app")
     test_email = "test_update@example.com"
     new_email = "updated@example.com"
 
@@ -434,8 +434,8 @@ async def test_export_user_data_all_apps(real_mongodb_engine):
     """Test export across all apps (no app_slug specified)."""
     engine = real_mongodb_engine
     # Create test user in multiple apps
-    db1 = engine.get_scoped_db("test_app_1")
-    db2 = engine.get_scoped_db("test_app_2")
+    db1 = await engine.get_scoped_db("test_app_1")
+    db2 = await engine.get_scoped_db("test_app_2")
     test_email = "test_multi_app@example.com"
 
     await db1.users.insert_one(
@@ -474,8 +474,8 @@ async def test_delete_user_data_app_scoped(real_mongodb_engine):
     """Test deletion scoped to specific app."""
     engine = real_mongodb_engine
     # Create test user in multiple apps
-    db1 = engine.get_scoped_db("test_app_1")
-    db2 = engine.get_scoped_db("test_app_2")
+    db1 = await engine.get_scoped_db("test_app_1")
+    db2 = await engine.get_scoped_db("test_app_2")
     test_email = "test_scoped@example.com"
 
     await db1.users.insert_one(
@@ -525,7 +525,7 @@ async def test_export_user_data_report_format(real_mongodb_engine):
     """Test export in human-readable report format."""
     engine = real_mongodb_engine
     # Create test user
-    db = engine.get_scoped_db("test_app")
+    db = await engine.get_scoped_db("test_app")
     test_email = "test_report@example.com"
 
     await db.users.insert_one(
@@ -560,7 +560,7 @@ async def test_delete_user_data_error_handling(real_mongodb_engine):
     """Test that deletion handles errors gracefully."""
     engine = real_mongodb_engine
     # Create test user
-    db = engine.get_scoped_db("test_app")
+    db = await engine.get_scoped_db("test_app")
     test_email = "test_error@example.com"
 
     await db.users.insert_one(

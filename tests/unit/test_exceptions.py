@@ -69,9 +69,7 @@ class TestExceptionMessages:
     def test_initialization_error_with_context(self):
         """Test InitializationError with MongoDB context."""
         message = "Connection failed"
-        error = InitializationError(
-            message, mongo_uri="mongodb://localhost:27017", db_name="test_db"
-        )
+        error = InitializationError(message, mongo_uri="mongodb://localhost:27017", db_name="test_db")
         assert error.mongo_uri == "mongodb://localhost:27017"
         assert error.db_name == "test_db"
         assert "mongo_uri" in error.context

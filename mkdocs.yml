@@ -1,0 +1,108 @@
+site_name: MDB Engine
+site_description: "MongoDB Engine - Zero-config MongoDB runtime with scoping, auth, memory, and GraphRAG"
+site_url: https://ranfysvalle02.github.io/mdb-engine/
+repo_url: https://github.com/ranfysvalle02/mdb-engine
+repo_name: ranfysvalle02/mdb-engine
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: green
+      accent: teal
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: green
+      accent: teal
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - content.code.copy
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.highlight
+    - toc.follow
+
+plugins:
+  - search
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          options:
+            show_source: true
+            show_root_heading: true
+            show_root_full_path: true
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            members_order: source
+            docstring_style: google
+            merge_init_into_class: true
+            show_if_no_docstring: false
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Quick Start: QUICK_START.md
+    - MDB Engine 101: MDB_ENGINE_101.md
+    - Beginner's Guide: BEGINNERS_GUIDE.md
+  - Architecture:
+    - Overview: ARCHITECTURE.md
+    - Deep Analysis: DEEP_ANALYSIS.md
+    - Best Practices: BEST_PRACTICES.md
+    - Context Engineering: CONTEXT_ENGINEERING.md
+  - Features:
+    - Manifest Reference: MANIFEST_REFERENCE.md
+    - Manifest Deep Dive: MANIFEST_DEEP_DIVE.md
+    - Memory Service: MEMORY_SERVICE.md
+    - Memory System: MEMORY_SYSTEM_COMPLETE.md
+    - Graph Service: GRAPH_SERVICE.md
+    - GraphRAG: GRAPHRAG.md
+    - Authorization: AUTHZ.md
+    - App Authentication: APP_AUTHENTICATION.md
+    - GDPR Compliance: GDPR_COMPLIANCE.md
+  - Guides:
+    - Files & Buckets: guides/FILES_AND_BUCKETS.md
+    - CSFLE Setup: guides/CSFLE_SETUP.md
+    - CSRF Protection: guides/CSRF_PROTECTION.md
+    - CORS Troubleshooting: guides/CORS_TROUBLESHOOTING.md
+    - Multi-App Guide: guides/MULTI_APP_GUIDE.md
+    - SSO Multi-App Setup: guides/SSO_MULTI_APP_SETUP.md
+    - WebSocket Security: guides/WEBSOCKET_SECURITY_ELEGANT_SOLUTION.md
+    - WebSocket Troubleshooting: guides/WEBSOCKET_TROUBLESHOOTING.md
+    - Testing: guides/testing.md
+    - Error Handling: guides/error_handling.md
+  - API Reference:
+    - Core Engine: api/core.md
+    - Database: api/database.md
+    - Memory Service: api/memory.md
+    - Graph Service: api/graph.md
+    - Auth: api/auth.md
+    - Repositories: api/repositories.md
+    - Embeddings: api/embeddings.md
+    - LLM Service: api/llm.md
+    - DI Container: api/di.md
+    - Types & Protocols: api/types.md
+  - Security:
+    - Overview: SECURITY.md
+    - Deep Dive: SECURITY_DEEPDIVE.md
+  - FAQ: FAQ.md
+
+docs_dir: docs

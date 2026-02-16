@@ -285,13 +285,9 @@ async def _get_client_pool_metrics(client: AsyncIOMotorClient) -> dict[str, Any]
 
             # Method 2: From client attributes directly
             if max_pool_size is None:
-                max_pool_size = getattr(client, "maxPoolSize", None) or getattr(
-                    client, "max_pool_size", None
-                )
+                max_pool_size = getattr(client, "maxPoolSize", None) or getattr(client, "max_pool_size", None)
             if min_pool_size is None:
-                min_pool_size = getattr(client, "minPoolSize", None) or getattr(
-                    client, "min_pool_size", None
-                )
+                min_pool_size = getattr(client, "minPoolSize", None) or getattr(client, "min_pool_size", None)
         except (AttributeError, TypeError, KeyError) as e:
             logger.debug(f"Could not get pool size from client options: {e}")
 
@@ -321,12 +317,8 @@ async def _get_client_pool_metrics(client: AsyncIOMotorClient) -> dict[str, Any]
                     total_raw = connections.get("totalCreated", 0)
 
                     # Only use if actually numeric
-                    current_connections = (
-                        int(current_raw) if isinstance(current_raw, int | float) else None
-                    )
-                    available_connections = (
-                        int(available_raw) if isinstance(available_raw, int | float) else None
-                    )
+                    current_connections = int(current_raw) if isinstance(current_raw, int | float) else None
+                    available_connections = int(available_raw) if isinstance(available_raw, int | float) else None
                     total_created = int(total_raw) if isinstance(total_raw, int | float) else None
         except (
             OperationFailure,

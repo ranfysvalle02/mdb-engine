@@ -6,6 +6,7 @@ Migrates a manifest to a target schema version.
 This module is part of MDB_ENGINE - MongoDB Engine.
 """
 
+import json
 import sys
 from pathlib import Path
 
@@ -65,8 +66,6 @@ def migrate(
             output_path = output
         else:
             # Output to stdout
-            import json
-
             click.echo(json.dumps(migrated_manifest, indent=2, ensure_ascii=False))
             sys.exit(0)
 
@@ -74,7 +73,7 @@ def migrate(
         save_manifest_file(output_path, migrated_manifest)
         click.echo(
             click.style(
-                f"✅ Migrated manifest to version {target_version}: {output_path}",
+                f"Migrated manifest to version {target_version}: {output_path}",
                 fg="green",
             )
         )

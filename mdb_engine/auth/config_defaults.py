@@ -68,4 +68,11 @@ OBSERVABILITY_DEFAULTS: dict[str, Any] = {
         "include_request_id": True,
         "log_sensitive_data": False,
     },
+    "tracing": {
+        "enabled": False,
+        "exporter": "otlp",
+        "endpoint": "http://localhost:4317",
+        "service_name": None,
+        "sample_rate": 1.0,
+    },
 }

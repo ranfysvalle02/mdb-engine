@@ -6,7 +6,7 @@ Tests envelope encryption integration, session lifecycle, and validation.
 
 import base64
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -100,9 +100,7 @@ class TestWebSocketSessionManager:
         assert "expires_at" in call_args
         assert call_args["algorithm"] == "AES-256-GCM"
 
-    async def test_validate_session_success(
-        self, session_manager, mock_mongo_db, encryption_service
-    ):
+    async def test_validate_session_success(self, session_manager, mock_mongo_db, encryption_service):
         """Test successful session validation."""
         db, collection = mock_mongo_db
 
@@ -110,7 +108,7 @@ class TestWebSocketSessionManager:
         session_key = WebSocketSessionManager.generate_session_key()
         encrypted_key, encrypted_dek = encryption_service.encrypt_secret(session_key)
 
-        expires_at = datetime.utcnow() + timedelta(hours=SESSION_TTL_HOURS)
+        expires_at = datetime.now(timezone.utc) + timedelta(hours=SESSION_TTL_HOURS)
 
         # Mock find_one to return session document
         collection.find_one = AsyncMock(
@@ -122,7 +120,7 @@ class TestWebSocketSessionManager:
                 "encrypted_key": base64.b64encode(encrypted_key).decode(),
                 "encrypted_dek": base64.b64encode(encrypted_dek).decode(),
                 "algorithm": "AES-256-GCM",
-                "created_at": datetime.utcnow(),
+                "created_at": datetime.now(timezone.utc),
                 "expires_at": expires_at,
             }
         )
@@ -149,9 +147,7 @@ class TestWebSocketSessionManager:
         # Verify validation failed
         assert session_data is None
 
-    async def test_validate_session_expired(
-        self, session_manager, mock_mongo_db, encryption_service
-    ):
+    async def test_validate_session_expired(self, session_manager, mock_mongo_db, encryption_service):
         """Test session validation when session expired."""
         db, collection = mock_mongo_db
 
@@ -160,7 +156,7 @@ class TestWebSocketSessionManager:
         encrypted_key, encrypted_dek = encryption_service.encrypt_secret(session_key)
 
         # Mock expired session
-        expires_at = datetime.utcnow() - timedelta(hours=1)  # Expired
+        expires_at = datetime.now(timezone.utc) - timedelta(hours=1)  # Expired
 
         collection.find_one = AsyncMock(
             return_value={
@@ -182,9 +178,7 @@ class TestWebSocketSessionManager:
         # Verify expired session was deleted
         assert collection.delete_one.called
 
-    async def test_validate_session_user_mismatch(
-        self, session_manager, mock_mongo_db, encryption_service
-    ):
+    async def test_validate_session_user_mismatch(self, session_manager, mock_mongo_db, encryption_service):
         """Test session validation when user_id doesn't match."""
         db, collection = mock_mongo_db
 
@@ -192,7 +186,7 @@ class TestWebSocketSessionManager:
         session_key = WebSocketSessionManager.generate_session_key()
         encrypted_key, encrypted_dek = encryption_service.encrypt_secret(session_key)
 
-        expires_at = datetime.utcnow() + timedelta(hours=SESSION_TTL_HOURS)
+        expires_at = datetime.now(timezone.utc) + timedelta(hours=SESSION_TTL_HOURS)
 
         collection.find_one = AsyncMock(
             return_value={

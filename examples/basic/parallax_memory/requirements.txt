@@ -1,8 +1,6 @@
 # Requirements for Parallax Example
-# Install MDB_ENGINE first: pip install mdb-engine
-# Or install from source: pip install -e ../../..
-
-mdb-engine>=0.1.0
+# Install mdb-engine from source (NOT published to PyPI):
+#   pip install -e "../../..[ai]"
 
 # Core dependencies
 python-dotenv>=1.0.0

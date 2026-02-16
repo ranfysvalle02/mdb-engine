@@ -60,7 +60,6 @@ APP_SLUG = "simple_app"
 engine = MongoDBEngine(
     mongo_uri=os.getenv("MONGODB_URI", "mongodb://localhost:27017"),
     db_name=os.getenv("MONGODB_DB", "mdb_runtime"),
-    enable_ray=os.getenv("ENABLE_RAY", "false").lower() == "true",
 )
 
 # ============================================================================
@@ -210,7 +209,6 @@ async def index(request: Request, db=Depends(get_scoped_db)):
     return templates.TemplateResponse("index.html", {
         "request": request,
         "tasks": tasks,
-        "ray_enabled": engine.has_ray,
         "manifest": manifest,
     })
 
@@ -358,7 +356,6 @@ async def health():
     return {
         "status": health_status.get("status", "unknown"),
         "app": APP_SLUG,
-        "ray_enabled": engine.has_ray,
     }
 
 
@@ -374,9 +371,6 @@ async def status():
     return {
         "app": APP_SLUG,
         "engine_initialized": engine.initialized,
-        "ray_enabled": engine.enable_ray,
-        "ray_available": engine.has_ray,
-        "ray_namespace": engine.ray_namespace if engine.has_ray else None,
     }
 
 

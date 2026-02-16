@@ -1,8 +1,7 @@
 # Requirements for Interactive RAG Example
-# Install MDB_ENGINE first: pip install mdb-engine
-# Or install from source: pip install -e ../../../
+# Install mdb-engine from source (NOT published to PyPI):
+#   pip install -e "../../..[ai]"
 
-mdb-engine>=0.1.0
 python-dotenv>=1.0.0
 
 # Web framework

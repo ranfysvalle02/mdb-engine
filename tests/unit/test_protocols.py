@@ -24,9 +24,7 @@ class TestProtocolDefinitions:
 
     def test_llm_service_protocol_is_runtime_checkable(self):
         """Test LLMServiceProtocol is runtime checkable."""
-        assert hasattr(LLMServiceProtocol, "__protocol_attrs__") or hasattr(
-            LLMServiceProtocol, "_is_runtime_protocol"
-        )
+        assert hasattr(LLMServiceProtocol, "__protocol_attrs__") or hasattr(LLMServiceProtocol, "_is_runtime_protocol")
 
     def test_embedding_service_protocol_is_runtime_checkable(self):
         """Test EmbeddingServiceProtocol is runtime checkable."""
@@ -83,15 +81,6 @@ class TestMockServiceConformance:
                 **kwargs: Any,
             ) -> str:
                 return "Mock response"
-
-            def chat_completion_sync(
-                self,
-                messages: list[dict[str, Any]],
-                model: str | None = None,
-                temperature: float | None = None,
-                **kwargs: Any,
-            ) -> str:
-                return "Mock sync response"
 
         mock_service = MockLLMService()
         assert isinstance(mock_service, LLMServiceProtocol)
@@ -211,9 +200,6 @@ class TestDependencyInjection:
             async def chat_completion(self, messages, model=None, temperature=None, **kwargs):
                 return "Mock response"
 
-            def chat_completion_sync(self, messages, model=None, temperature=None, **kwargs):
-                return "Mock response"
-
         mock_llm = MockLLMService()
 
         # Create a mock collection
@@ -232,12 +218,8 @@ class TestDependencyInjection:
         sig = inspect.signature(get_memory_service)
         param_names = list(sig.parameters.keys())
 
-        assert (
-            "llm_service" in param_names
-        ), "get_memory_service should accept llm_service parameter"
-        assert (
-            "embedding_service" in param_names
-        ), "get_memory_service should accept embedding_service parameter"
+        assert "llm_service" in param_names, "get_memory_service should accept llm_service parameter"
+        assert "embedding_service" in param_names, "get_memory_service should accept embedding_service parameter"
 
     def test_cognitive_memory_service_constructor_accepts_di_params(self):
         """Test that CognitiveMemoryService constructor accepts DI parameters."""

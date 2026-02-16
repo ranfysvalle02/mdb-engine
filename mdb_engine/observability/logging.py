@@ -7,18 +7,14 @@ Provides structured logging with correlation IDs and context.
 import contextvars
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 # Context variable for correlation ID
-_correlation_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
-    "correlation_id", default=None
-)
+_correlation_id: contextvars.ContextVar[str | None] = contextvars.ContextVar("correlation_id", default=None)
 
 # Context variable for app context
-_app_context: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
-    "app_context", default=None
-)
+_app_context: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar("app_context", default=None)
 
 
 def get_correlation_id() -> str | None:
@@ -66,13 +62,16 @@ def clear_app_context() -> None:
 
 def get_logging_context() -> dict[str, Any]:
     """
-    Get current logging context (correlation ID and app context).
+    Get current logging context (correlation ID, app context, and trace IDs).
+
+    When OpenTelemetry is active, ``trace_id`` and ``span_id`` are included
+    automatically so that log lines can be correlated with distributed traces.
 
     Returns:
         Dictionary with context information
     """
     context: dict[str, Any] = {
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
     correlation_id = get_correlation_id()
@@ -82,6 +81,13 @@ def get_logging_context() -> dict[str, Any]:
     app_context = _app_context.get()
     if app_context:
         context.update(app_context)
+
+    # Inject OTel trace/span IDs when available
+    from .tracing import get_current_trace_context
+
+    trace_ctx = get_current_trace_context()
+    if trace_ctx:
+        context.update(trace_ctx)
 
     return context
 

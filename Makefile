@@ -7,9 +7,10 @@ COV_FAIL_UNDER := 70
 TEST_DIR := tests
 UNIT_TEST_DIR := tests/unit
 INTEGRATION_TEST_DIR := tests/integration
+EXAMPLES_TEST_FILE := tests/integration/test_examples_validation.py
 COV_ARGS := --cov=mdb_engine/core --cov=mdb_engine/database --cov-fail-under=$(COV_FAIL_UNDER)
 
-.PHONY: help install install-dev test test-unit test-integration test-coverage test-coverage-html lint-local lint-ci fix format clean clean-pyc clean-cache check _check-tools _lint-exceptions build build-check publish
+.PHONY: help install install-dev test test-unit test-integration test-examples test-examples-fast test-coverage test-coverage-html lint-local lint-ci fix format clean clean-pyc clean-cache check _check-tools _lint-exceptions build build-check publish typecheck typecheck-strict docs-serve docs-build
 
 # Default target
 help:
@@ -20,6 +21,8 @@ help:
 	@echo "  make test             - Run all tests (unit + integration)"
 	@echo "  make test-unit        - Run unit tests only (fast, no MongoDB)"
 	@echo "  make test-integration - Run integration tests only (requires Docker)"
+	@echo "  make test-examples    - Validate all example apps (requires Docker)"
+	@echo "  make test-examples-fast - Validate example manifests only (no Docker)"
 	@echo "  make test-coverage    - Run tests with coverage report (terminal)"
 	@echo "  make test-coverage-html - Run tests with HTML coverage report"
 	@echo "  make fix              - Auto-fix all linting issues (format + lint fixes)"
@@ -30,6 +33,10 @@ help:
 	@echo "  make clean            - Remove build artifacts and caches"
 	@echo "  make clean-pyc        - Remove Python cache files"
 	@echo "  make clean-cache      - Remove pytest cache"
+	@echo "  make typecheck        - Run mypy type checking"
+	@echo "  make typecheck-strict - Run mypy with --strict mode"
+	@echo "  make docs-serve       - Serve documentation locally (http://127.0.0.1:8000)"
+	@echo "  make docs-build       - Build documentation (strict mode)"
 	@echo "  make build            - Build distribution packages (wheel + sdist)"
 	@echo "  make build-check      - Check built packages"
 	@echo "  make publish          - Publish to PyPI (requires PYPI_API_TOKEN)"
@@ -59,6 +66,19 @@ test-integration:
 		exit 1; \
 	fi
 	$(PYTEST) $(INTEGRATION_TEST_DIR) -v -m integration
+
+test-examples:
+	@echo "Validating example apps (all tiers)..."
+	@if [ -z "$$SKIP_DOCKER_CHECK" ] && ! command -v docker &> /dev/null; then \
+		echo "Error: Docker is required for example validation. Please install Docker."; \
+		echo "   Or set SKIP_DOCKER_CHECK=1 to skip this check (e.g., in CI)"; \
+		exit 1; \
+	fi
+	$(PYTEST) $(EXAMPLES_TEST_FILE) -v
+
+test-examples-fast:
+	@echo "Validating example manifests (no Docker required)..."
+	$(PYTEST) $(EXAMPLES_TEST_FILE) -v -k "TestExampleManifests or TestExampleImports" -m "not integration"
 
 test-coverage:
 	@echo "Running tests with coverage..."
@@ -130,9 +150,30 @@ lint-ci: _check-tools
 	@$(MAKE) _lint-semgrep
 	@echo "✅ Code quality checks passed!"
 
+# Type checking
+typecheck:
+	@echo "Running mypy type checking..."
+	@mypy mdb_engine
+	@echo "✅ Type checking passed!"
+
+typecheck-strict:
+	@echo "Running mypy type checking (strict mode)..."
+	@mypy mdb_engine --strict
+	@echo "✅ Strict type checking passed!"
+
+# Documentation
+docs-serve:
+	@echo "Serving documentation at http://127.0.0.1:8000 ..."
+	@mkdocs serve
+
+docs-build:
+	@echo "Building documentation (strict mode)..."
+	@mkdocs build --strict
+	@echo "✅ Documentation built in site/"
+
 # Cleanup
 clean: clean-pyc clean-cache
-	rm -rf build/ dist/ *.egg-info htmlcov/ .coverage
+	rm -rf build/ dist/ *.egg-info htmlcov/ .coverage site/
 
 clean-pyc:
 	find . -type d -name __pycache__ -exec rm -r {} + 2>/dev/null || true

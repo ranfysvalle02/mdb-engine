@@ -6,7 +6,6 @@ orchestration logic for managing apps.
 
 The MongoDBEngine now includes:
 - FastAPI integration with create_app() method
-- Optional Ray support with enable_ray parameter
 - Automatic app token retrieval
 - Multi-site mode auto-detection from manifest
 - Optional CSFLE (Client-Side Field Level Encryption) support
@@ -51,25 +50,13 @@ from .protocols import (
     GraphServiceProtocol,
     LLMServiceProtocol,
     MemoryServiceProtocol,
+    ProceduralMemoryProtocol,
     TextChunkerProtocol,
 )
 
-# Optional Ray integration (gracefully handles missing Ray)
-from .ray_integration import (
-    RAY_AVAILABLE,
-    AppRayActor,
-    get_ray_actor_handle,
-    ray_actor_decorator,
-)
-
 __all__ = [
-    # MongoDB Engine (includes FastAPI integration and optional Ray)
+    # MongoDB Engine (includes FastAPI integration)
     "MongoDBEngine",
-    # Ray Integration (optional - only active if Ray installed)
-    "RAY_AVAILABLE",
-    "AppRayActor",
-    "get_ray_actor_handle",
-    "ray_actor_decorator",
     # CSFLE Support (optional - only active if pymongo[encryption] installed)
     "CSFLEConfig",
     "build_csfle_config_from_manifest",
@@ -83,6 +70,7 @@ __all__ = [
     "TextChunkerProtocol",
     "GraphServiceProtocol",
     "MemoryServiceProtocol",
+    "ProceduralMemoryProtocol",
     # Classes
     "ManifestValidator",
     "ManifestParser",

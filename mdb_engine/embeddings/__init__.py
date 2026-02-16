@@ -14,7 +14,7 @@ FastAPI Dependency Injection:
 
     @app.post("/embed")
     async def embed_text(embedding_service=Depends(get_embedding_service)):
-        embeddings = await embedding_service.embed_chunks(["Hello world"])
+        embeddings = await embedding_service.embed(["Hello world"])
         return {"embeddings": embeddings}
 
 Standalone Usage:
@@ -22,7 +22,7 @@ Standalone Usage:
 
     # Auto-detects OpenAI or Azure from environment variables
     service = get_embedding_service(config={"default_embedding_model": "text-embedding-3-small"})
-    embeddings = await service.embed_chunks(["Hello world"])
+    embeddings = await service.embed(["Hello world"])
 
 Example LLM implementation:
     from openai import AzureOpenAI
@@ -50,6 +50,7 @@ from .service import (
     EmbeddingProvider,
     EmbeddingService,
     EmbeddingServiceError,
+    LiteLLMEmbeddingProvider,
     OpenAIEmbeddingProvider,
     get_embedding_service,
 )
@@ -63,6 +64,7 @@ __all__ = [
     "BaseEmbeddingProvider",
     "OpenAIEmbeddingProvider",
     "AzureOpenAIEmbeddingProvider",
+    "LiteLLMEmbeddingProvider",
     # Factory function
     "get_embedding_service",
     # Utility for standalone usage

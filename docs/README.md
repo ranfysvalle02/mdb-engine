@@ -2,15 +2,15 @@
 
 Welcome to the MDB Engine documentation. This directory contains comprehensive documentation for developers, contributors, and users.
 
-## 🎯 Start Here: manifest.json
+## Start Here: manifest.json
 
 **`manifest.json` is the key to everything.** It's a single configuration file that defines your app's identity, data structure, authentication, indexes, and services. Everything in mdb-engine flows from your manifest.json.
 
 ### Essential Reading
 
-1. **[Quick Start Guide](QUICK_START.md)** ⭐ **START HERE** - Learn how manifest.json works and get your first app running
-2. **[Manifest Reference](MANIFEST_REFERENCE.md)** 📖 - Complete reference for all manifest.json fields and configurations
-3. **[Manifest Deep Dive](MANIFEST_DEEP_DIVE.md)** - Comprehensive analysis of manifest.json, its convenience, and incremental adoption
+1. **[Beginner's Guide](BEGINNERS_GUIDE.md)** - Start here if you're new to the memory system
+2. **[Manifest Reference](MANIFEST_REFERENCE.md)** - Complete reference for all manifest.json fields and configurations
+3. **[MDB Engine 101](MDB_ENGINE_101.md)** - Complete LLM-assisted development guide
 
 ### Understanding manifest.json
 
@@ -22,31 +22,35 @@ Welcome to the MDB Engine documentation. This directory contains comprehensive d
 ## Documentation Structure
 
 ### Getting Started
-- **[Quick Start Guide](QUICK_START.md)** ⭐ - Get up and running with manifest.json
-- **[Manifest Reference](MANIFEST_REFERENCE.md)** 📖 - Complete reference for all manifest.json fields
-- **[Manifest Deep Dive](MANIFEST_DEEP_DIVE.md)** - Deep analysis of manifest.json, its convenience, and incremental adoption
+- **[Beginner's Guide](BEGINNERS_GUIDE.md)** - Get started with the memory system
+- **[MDB Engine 101](MDB_ENGINE_101.md)** - Complete development guide
+- **[Manifest Reference](MANIFEST_REFERENCE.md)** - Complete reference for all manifest.json fields
 - **[Best Practices](BEST_PRACTICES.md)** - Dependency injection, patterns, and clean code
-- **[Setup Guide](../SETUP.md)** - Development environment setup
 
 ### Guides
-- **[Authorization Guide](AUTHZ.md)** - Authentication and authorization
-- **[Memory Service Guide](MEMORY_SERVICE.md)** ⭐ - Complete guide to the memory service with automatic index management
-- **[Cognitive Memory](COGNITIVE_MEMORY.md)** - Advanced cognitive memory features
-- **[Cognitive Architecture](COGNITIVE_ARCHITECTURE.md)** - STM + LTM memory architecture
-- **[Testing Guide](guides/testing.md)** - Comprehensive testing documentation
-- **[Contributing Guide](../CONTRIBUTING.md)** - How to contribute to the project
+- **[Memory Service Guide](MEMORY_SERVICE.md)** - Complete guide to the memory service (developer guide, API, Perfect Brain features)
+- **[Customize the Cognitive Engine](CUSTOMIZE_COGNITIVE_ENGINE.md)** - Build your own scoring, decay, extraction, importance, persona, and reflection strategies
+- **[Memory System Complete Reference](MEMORY_SYSTEM_COMPLETE.md)** - Technical architecture, data flows, and implementation details
+- **[Context Engineering](CONTEXT_ENGINEERING.md)** - Context-engineered prompt construction
+- **[Graph Service](GRAPH_SERVICE.md)** - Knowledge graph API reference
+- **[GraphRAG](GRAPHRAG.md)** - GraphRAG implementation guide
+- **[Deep Analysis](DEEP_ANALYSIS.md)** - Architecture deep dive
+- **[Files and Buckets](guides/FILES_AND_BUCKETS.md)** - Memory bucket organization
 
-### API Documentation
-- API reference documentation (coming soon)
+### OSI (Open Semantic Interchange)
+- **[OSI Overview](../OSI.md)** - Strategic analysis of OSI and MDB-Engine alignment
+- **[OSI Integration Blueprint](../OSI_PROPOSED_INTEGRATION.md)** - Engineering blueprint (5 phases, all implemented)
+- **[OSI Manifest Guide](../OSI_MANIFEST.md)** - Manifest configuration (3 tiers: one-liner, config section, inline models)
 
-### Other Documentation
-- **[FAQ](FAQ.md)** - Frequently asked questions
+### Reference
+- **[MDB Engine Bible](../MDB_ENGINE_BIBLE.md)** - The complete, authoritative guide to every feature
+- **[LLM Reference](../llms.txt)** - LLM-optimized quick reference
+- **[API Documentation](../docs.md)** - Primary API documentation
 
 ## Quick Links
 
 - [Main README](../README.md)
-- [Contributing Guidelines](../CONTRIBUTING.md)
-- [Development Setup](../SETUP.md)
+- [Examples](../examples/README.md)
 - [Test Suite](../tests/README.md) - Test structure and examples
 
 ## Documentation Standards

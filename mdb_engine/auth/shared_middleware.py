@@ -339,8 +339,7 @@ class SharedAuthMiddleware(BaseHTTPMiddleware):
                                     )
                                 else:
                                     logger.warning(
-                                        f"Failed to refresh user after auto-assigning role: "
-                                        f"{user_email}"
+                                        f"Failed to refresh user after auto-assigning role: " f"{user_email}"
                                     )
                             else:
                                 logger.warning(
@@ -360,9 +359,7 @@ class SharedAuthMiddleware(BaseHTTPMiddleware):
                     self._require_role,
                     self._role_hierarchy,
                 ):
-                    return self._forbidden_response(
-                        f"Role '{self._require_role}' required for this app"
-                    )
+                    return self._forbidden_response(f"Role '{self._require_role}' required for this app")
 
         return await call_next(request)
 
@@ -395,9 +392,7 @@ class SharedAuthMiddleware(BaseHTTPMiddleware):
 
             # Check fingerprint binding (strict by default for security)
             bind_fingerprint = self._session_binding.get("bind_fingerprint", True)
-            strict_fingerprint = self._session_binding.get(
-                "strict_fingerprint", True
-            )  # Default: strict
+            strict_fingerprint = self._session_binding.get("strict_fingerprint", True)  # Default: strict
             if bind_fingerprint:
                 token_fp = payload.get("fp")
                 if token_fp:
@@ -576,9 +571,7 @@ def _is_public_route_helper(path: str, public_routes: list[str]) -> bool:
     return False
 
 
-def _extract_token_helper(
-    request: Request, cookie_name: str, header_name: str, header_prefix: str
-) -> str | None:
+def _extract_token_helper(request: Request, cookie_name: str, header_name: str, header_prefix: str) -> str | None:
     """Extract JWT token from cookie or header."""
     # Try cookie first
     token = request.cookies.get(cookie_name)
@@ -644,24 +637,18 @@ def _create_lazy_middleware_class(  # noqa: C901
 
             if user_pool is None:
                 # User pool not initialized yet, skip auth
-                logger.warning(
-                    f"LazySharedAuthMiddleware: user_pool not found on app.state for '{app_slug}'"
-                )
+                logger.warning(f"LazySharedAuthMiddleware: user_pool not found on app.state for '{app_slug}'")
                 return await call_next(request)
 
             is_public = _is_public_route_helper(_get_request_path(request), self._public_routes)
-            token = _extract_token_helper(
-                request, self._cookie_name, self._header_name, self._header_prefix
-            )
+            token = _extract_token_helper(request, self._cookie_name, self._header_name, self._header_prefix)
 
             # Handle unauthenticated requests
             if not token:
                 return await self._handle_no_token(is_public, request, call_next)
 
             # Authenticate and authorize user
-            auth_result = await self._authenticate_and_authorize(
-                request, user_pool, token, is_public, call_next
-            )
+            auth_result = await self._authenticate_and_authorize(request, user_pool, token, is_public, call_next)
             if auth_result is not None:
                 return auth_result
 
@@ -684,9 +671,7 @@ def _create_lazy_middleware_class(  # noqa: C901
             # Validate session binding if configured
             binding_error = await self._validate_session_binding(request, token)
             if binding_error:
-                return await self._handle_binding_error(
-                    binding_error, is_public, request, call_next
-                )
+                return await self._handle_binding_error(binding_error, is_public, request, call_next)
 
             # Set user on request state
             request.state.user = user
@@ -785,9 +770,7 @@ def _create_lazy_middleware_class(  # noqa: C901
                 self._require_role,
                 self._role_hierarchy,
             ):
-                return self._forbidden_response(
-                    f"Role '{self._require_role}' required for this app"
-                )
+                return self._forbidden_response(f"Role '{self._require_role}' required for this app")
 
             return None
 
@@ -809,9 +792,7 @@ def _create_lazy_middleware_class(  # noqa: C901
 
             try:
                 # Auto-assign the required role
-                success = await user_pool.update_user_roles(
-                    user_email, self._app_slug, [self._require_role]
-                )
+                success = await user_pool.update_user_roles(user_email, self._app_slug, [self._require_role])
                 if success:
                     # Refresh user data to include new role
                     updated_user = await user_pool.get_user_by_email(user_email)
@@ -824,9 +805,7 @@ def _create_lazy_middleware_class(  # noqa: C901
                             f"(auto_assign_default_role enabled)"
                         )
                     else:
-                        logger.warning(
-                            f"Failed to refresh user after auto-assigning role: " f"{user_email}"
-                        )
+                        logger.warning(f"Failed to refresh user after auto-assigning role: " f"{user_email}")
                 else:
                     logger.warning(
                         f"Failed to auto-assign role '{self._require_role}' to "
@@ -901,9 +880,7 @@ def _create_lazy_middleware_class(  # noqa: C901
             if not token_fp:
                 return None
 
-            strict_fingerprint = self._session_binding.get(
-                "strict_fingerprint", True
-            )  # Default: strict
+            strict_fingerprint = self._session_binding.get("strict_fingerprint", True)  # Default: strict
             client_fp = _compute_fingerprint(request)
             if client_fp != token_fp:
                 if strict_fingerprint:

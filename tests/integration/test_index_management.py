@@ -35,8 +35,12 @@ class TestIndexManagement:
 
         await engine.register_app(manifest, create_indexes=True)
 
+        secret = None
+        if engine._app_secrets_manager:
+            secret = await engine._app_secrets_manager.get_app_secret("index_test")
+
         # Verify index was created
-        scoped_db = engine.get_scoped_db("index_test")
+        scoped_db = await engine.get_scoped_db("index_test", app_token=secret)
         collection = scoped_db.test_collection
 
         # Get the real collection to check indexes
@@ -90,7 +94,11 @@ class TestIndexManagement:
         # First registration
         await engine.register_app(manifest, create_indexes=True)
 
-        scoped_db = engine.get_scoped_db("idempotent_index_test")
+        secret = None
+        if engine._app_secrets_manager:
+            secret = await engine._app_secrets_manager.get_app_secret("idempotent_index_test")
+
+        scoped_db = await engine.get_scoped_db("idempotent_index_test", app_token=secret)
         collection = scoped_db.test_collection
         real_collection = collection._collection  # noqa: SLF001
 
@@ -133,7 +141,11 @@ class TestIndexManagement:
 
         await engine.register_app(manifest, create_indexes=True)
 
-        scoped_db = engine.get_scoped_db("multi_index_test")
+        secret = None
+        if engine._app_secrets_manager:
+            secret = await engine._app_secrets_manager.get_app_secret("multi_index_test")
+
+        scoped_db = await engine.get_scoped_db("multi_index_test", app_token=secret)
         collection = scoped_db.test_collection
         real_collection = collection._collection  # noqa: SLF001
 
@@ -155,18 +167,18 @@ class TestIndexManagement:
             "status": "active",
             "developer_id": "dev@example.com",
             "managed_indexes": {
-                "collection1": [
-                    {"name": "coll1_index", "type": "regular", "keys": [("field1", 1)]}
-                ],
-                "collection2": [
-                    {"name": "coll2_index", "type": "regular", "keys": [("field2", 1)]}
-                ],
+                "collection1": [{"name": "coll1_index", "type": "regular", "keys": [("field1", 1)]}],
+                "collection2": [{"name": "coll2_index", "type": "regular", "keys": [("field2", 1)]}],
             },
         }
 
         await engine.register_app(manifest, create_indexes=True)
 
-        scoped_db = engine.get_scoped_db("multi_collection_index_test")
+        secret = None
+        if engine._app_secrets_manager:
+            secret = await engine._app_secrets_manager.get_app_secret("multi_collection_index_test")
+
+        scoped_db = await engine.get_scoped_db("multi_collection_index_test", app_token=secret)
 
         # Check collection1 indexes
         coll1 = scoped_db.collection1
@@ -197,7 +209,11 @@ class TestIndexManagement:
 
         await engine.register_app(manifest_no_index, create_indexes=False)
 
-        scoped_db = engine.get_scoped_db("existing_data_test")
+        secret = None
+        if engine._app_secrets_manager:
+            secret = await engine._app_secrets_manager.get_app_secret("existing_data_test")
+
+        scoped_db = await engine.get_scoped_db("existing_data_test", app_token=secret)
         collection = scoped_db.test_collection
 
         # Insert some data

@@ -64,7 +64,10 @@ from .jwt import (
 )
 
 # Middleware
-from .middleware import SecurityMiddleware, create_security_middleware
+from .middleware import SecurityMiddleware
+
+# OAuth
+from .oauth import OAuthService, register_oauth_routes
 from .provider import AUTHZ_CACHE_TTL, AuthorizationProvider, CasbinAdapter, OsoAdapter
 
 # Rate limiting
@@ -109,6 +112,7 @@ from .users import (
     get_or_create_anonymous_user,
     get_or_create_demo_user,
     get_or_create_demo_user_for_request,
+    get_or_create_oauth_user,
     sync_app_user_to_casbin,
 )
 
@@ -177,6 +181,10 @@ __all__ = [
     "ensure_demo_users_for_actor",
     "sync_app_user_to_casbin",
     "get_app_user_role",
+    "get_or_create_oauth_user",
+    # OAuth
+    "OAuthService",
+    "register_oauth_routes",
     # Restrictions
     "is_demo_user",
     "require_non_demo_user",
@@ -213,7 +221,6 @@ __all__ = [
     "clear_auth_cookies",
     # Middleware
     "SecurityMiddleware",
-    "create_security_middleware",
     # Integration
     "get_auth_config",
     "setup_auth_from_manifest",

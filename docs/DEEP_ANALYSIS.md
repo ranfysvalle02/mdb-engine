@@ -150,12 +150,32 @@ Application Startup
 
 ### MongoDBEngine
 
-The central orchestration class that manages all engine components.
+The central orchestration class that manages all engine components. It is composed from **six specialized mixins**:
+
+| Mixin | Module | Responsibility |
+|---|---|---|
+| `ScopedAccessMixin` | `mdb_engine.core.scoped_access` | `get_scoped_db()`, service accessors, scope authorization |
+| `AppLifecycleMixin` | `mdb_engine.core.app_lifecycle` | Manifest loading, app registration, `reload_apps()` |
+| `FastAPIAppMixin` | `mdb_engine.core.fastapi_app` | `create_app()`, lifespan, middleware stack |
+| `MultiAppMixin` | `mdb_engine.core.multi_app` | `create_multi_app()`, auto-discovery, route import |
+| `GDPRMixin` | `mdb_engine.core.gdpr_ops` | GDPR Articles 15-17 operations |
+| `WebSocketMixin` | `mdb_engine.core.websocket_ops` | WebSocket route registration, ticket/session auth |
+
+Additionally, three cross-cutting infrastructure modules provide shared functionality:
+
+| Module | Purpose |
+|---|---|
+| `mdb_engine.core.prompt_safety` | Prompt injection defense, `TokenBudget` |
+| `mdb_engine.core.resilience` | `@resilient` decorator, `CircuitBreaker`, retry/backoff |
+| `mdb_engine.core.validation` | Input validation (`validate_identifier`, `validate_user_id`, etc.) |
 
 #### Initialization Process
 
 ```python
-class MongoDBEngine:
+class MongoDBEngine(
+    ScopedAccessMixin, AppLifecycleMixin, FastAPIAppMixin,
+    MultiAppMixin, GDPRMixin, WebSocketMixin,
+):
     def __init__(
         self,
         mongo_uri: str,
@@ -164,7 +184,6 @@ class MongoDBEngine:
         authz_provider: Optional["AuthorizationProvider"] = None,
         max_pool_size: int = DEFAULT_MAX_POOL_SIZE,
         min_pool_size: int = DEFAULT_MIN_POOL_SIZE,
-        enable_ray: bool = False,
         csfle_config: Optional["CSFLEConfig"] = None,
     ):
         # Initialize component managers
@@ -862,60 +881,26 @@ class AutoIndexManager:
 
 ### Overview
 
-The Memory Service provides semantic memory management using MongoDB Atlas Vector Search. It supports two implementations:
+The Memory Service provides semantic memory management using MongoDB Atlas Vector Search. The primary implementation is `MemoryService` (class name: `CognitiveMemoryService`).
 
-1. **CustomMemoryService**: Basic memory with fact extraction
-2. **CognitiveMemoryService**: Advanced memory with importance scoring, decay, and reinforcement
+> **Note:** The legacy `CustomMemoryService` name was removed in v0.7.7. There is now a single implementation -- `MemoryService` (a.k.a. `CognitiveMemoryService`) -- which provides all cognitive features by default.
 
-### CustomMemoryService
+### Mixin-Based Architecture
 
-**Architecture:**
+`CognitiveMemoryService` is composed from six specialized mixins:
 
-```python
-class CustomMemoryService(BaseMemoryService):
-    """
-    Basic memory service with LLM fact extraction.
-    
-    Features:
-    - Semantic search using vector embeddings
-    - Automatic fact extraction from conversations
-    - Metadata support (bucket_id, bucket_type)
-    - Automatic re-embedding on updates
-    """
-    
-    def add(
-        self,
-        messages: list[dict[str, str]],
-        user_id: str,
-        metadata: dict[str, Any] | None = None,
-    ) -> list[dict[str, Any]]:
-        """
-        Adds memories from conversation.
-        
-        Process:
-        1. Extract facts using LLM
-        2. Generate embeddings for facts
-        3. Store in MongoDB with vector index
-        4. Return created memories
-        """
-```
+| Mixin | Module | Responsibility |
+|---|---|---|
+| `StorageMixin` | `mdb_engine.memory.storage` | CRUD, graph links, timeline ops |
+| `ExtractionMixin` | `mdb_engine.memory.extraction` | LLM fact extraction, categories |
+| `ScoringMixin` | `mdb_engine.memory.scoring` | Importance scoring (0.1-1.0) |
+| `ReinforcementMixin` | `mdb_engine.memory.reinforcement` | Memory reinforcement and boost |
+| `MergingMixin` | `mdb_engine.memory.merging` | LLM-powered memory merging |
+| `EmbeddingMixin` | `mdb_engine.memory.embedding` | Embedding generation |
 
-**Fact Extraction:**
+The `get_memory_service()` factory uses `CognitiveMemoryServiceBuilder` internally to wire dependencies.
 
-```python
-async def _extract_facts(self, messages: list[dict]) -> list[str]:
-    """
-    Uses LLM to extract atomic facts from conversation.
-    
-    Example:
-        Input: [
-            {"role": "user", "content": "I'm allergic to peanuts"},
-            {"role": "assistant", "content": "I'll remember that."}
-        ]
-        
-        Output: ["User is allergic to peanuts"]
-    """
-```
+> **All methods are fully async.** Use `await` for every memory service call.
 
 ### CognitiveMemoryService
 
@@ -1158,7 +1143,10 @@ class RequestContext:
     
     Usage:
         @app.post("/documents")
-        async def create_doc(data: DocCreate, ctx: RequestContext = Depends()):
+        async def create_doc(
+            data: DocCreate,
+            ctx: RequestContext = Depends(get_request_context),
+        ):
             doc_id = await ctx.uow.documents.add(doc)
             return {"id": doc_id}
     """
@@ -1531,31 +1519,29 @@ async def list_todos(db=Depends(get_scoped_db)):
 ### Example 2: AI Chat with Memory
 
 ```python
-from mdb_engine.dependencies import RequestContext
+from mdb_engine.dependencies import RequestContext, get_request_context
 
 @app.post("/chat")
-async def chat(message: str, ctx: RequestContext = Depends()):
+async def chat(message: str, ctx: RequestContext = Depends(get_request_context)):
     user = ctx.require_user()
     
-    # Search memories
-    memories = await asyncio.to_thread(
-        ctx.memory.search,
+    # Search memories (all memory methods are async)
+    memories = await ctx.memory.search(
         query=message,
         user_id=user["id"],
-        limit=5
+        limit=5,
     )
     
     # Generate response with context
     response = await generate_response(message, memories)
     
     # Store conversation
-    await asyncio.to_thread(
-        ctx.memory.add,
+    await ctx.memory.add(
         messages=[
             {"role": "user", "content": message},
-            {"role": "assistant", "content": response}
+            {"role": "assistant", "content": response},
         ],
-        user_id=user["id"]
+        user_id=user["id"],
     )
     
     return {"response": response}
@@ -2001,5 +1987,5 @@ The engine's modular design, protocol-based architecture, and extensive feature 
 ---
 
 **Document Version**: 1.0  
-**Last Updated**: 2026-02-05  
-**MDB-Engine Version**: 0.7.5
+**Last Updated**: 2026-02-13  
+**MDB-Engine Version**: 0.7.7

@@ -33,7 +33,7 @@ Usage:
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any
 
@@ -128,29 +128,19 @@ class AuthAuditLog:
 
         try:
             # Index for querying by user
-            await self._collection.create_index(
-                [("user_email", 1), ("timestamp", -1)], name="user_email_timestamp_idx"
-            )
+            await self._collection.create_index([("user_email", 1), ("timestamp", -1)], name="user_email_timestamp_idx")
 
             # Index for querying by action type
-            await self._collection.create_index(
-                [("action", 1), ("timestamp", -1)], name="action_timestamp_idx"
-            )
+            await self._collection.create_index([("action", 1), ("timestamp", -1)], name="action_timestamp_idx")
 
             # Index for querying by IP address
-            await self._collection.create_index(
-                [("ip_address", 1), ("timestamp", -1)], name="ip_timestamp_idx"
-            )
+            await self._collection.create_index([("ip_address", 1), ("timestamp", -1)], name="ip_timestamp_idx")
 
             # Index for querying by app
-            await self._collection.create_index(
-                [("app_slug", 1), ("timestamp", -1)], name="app_timestamp_idx"
-            )
+            await self._collection.create_index([("app_slug", 1), ("timestamp", -1)], name="app_timestamp_idx")
 
             # TTL index for automatic cleanup
-            await self._collection.create_index(
-                "expires_at", expireAfterSeconds=0, name="expires_at_ttl_idx"
-            )
+            await self._collection.create_index("expires_at", expireAfterSeconds=0, name="expires_at_ttl_idx")
 
             self._indexes_created = True
             logger.info("AuthAuditLog indexes ensured")
@@ -186,7 +176,7 @@ class AuthAuditLog:
         """
         await self.ensure_indexes()
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         expires_at = now + timedelta(days=self._retention_days)
 
         doc = {
@@ -292,9 +282,7 @@ class AuthAuditLog:
         ip_address: str | None = None,
     ) -> str:
         """Log a role change event."""
-        action = (
-            AuthAction.ROLE_GRANTED if len(new_roles) > len(old_roles) else AuthAction.ROLE_REVOKED
-        )
+        action = AuthAction.ROLE_GRANTED if len(new_roles) > len(old_roles) else AuthAction.ROLE_REVOKED
         return await self.log_event(
             action=action,
             success=True,
@@ -365,7 +353,7 @@ class AuthAuditLog:
         Returns:
             List of audit event documents
         """
-        since = datetime.utcnow() - timedelta(hours=hours)
+        since = datetime.now(timezone.utc) - timedelta(hours=hours)
 
         query: dict[str, Any] = {"timestamp": {"$gte": since}}
         if action:
@@ -401,7 +389,7 @@ class AuthAuditLog:
         Returns:
             List of failed login events
         """
-        since = datetime.utcnow() - timedelta(hours=hours)
+        since = datetime.now(timezone.utc) - timedelta(hours=hours)
 
         query: dict[str, Any] = {
             "action": AuthAction.LOGIN_FAILED.value,
@@ -437,7 +425,7 @@ class AuthAuditLog:
         Returns:
             List of user's audit events
         """
-        since = datetime.utcnow() - timedelta(hours=hours)
+        since = datetime.now(timezone.utc) - timedelta(hours=hours)
 
         cursor = (
             self._collection.find(
@@ -476,7 +464,7 @@ class AuthAuditLog:
         Returns:
             List of audit events from that IP
         """
-        since = datetime.utcnow() - timedelta(hours=hours)
+        since = datetime.now(timezone.utc) - timedelta(hours=hours)
 
         cursor = (
             self._collection.find(
@@ -515,7 +503,7 @@ class AuthAuditLog:
         Returns:
             Number of failed login attempts
         """
-        since = datetime.utcnow() - timedelta(hours=hours)
+        since = datetime.now(timezone.utc) - timedelta(hours=hours)
 
         query: dict[str, Any] = {
             "action": AuthAction.LOGIN_FAILED.value,
@@ -541,7 +529,7 @@ class AuthAuditLog:
         Returns:
             Dict with security metrics
         """
-        since = datetime.utcnow() - timedelta(hours=hours)
+        since = datetime.now(timezone.utc) - timedelta(hours=hours)
 
         # Use aggregation for efficient counting
         pipeline = [

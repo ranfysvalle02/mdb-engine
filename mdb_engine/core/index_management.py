@@ -59,9 +59,7 @@ class IndexManager:
             f"{list(managed_indexes.keys()) if managed_indexes else 'None'}"
         )
         if not managed_indexes:
-            logger.warning(
-                f"[{slug}] No 'managed_indexes' found in manifest. " f"Skipping index creation."
-            )
+            logger.warning(f"[{slug}] No 'managed_indexes' found in manifest. " f"Skipping index creation.")
             return
 
         # Check for conflicts with memory service managed indexes
@@ -79,7 +77,7 @@ class IndexManager:
                 for idx_def in indexes:
                     if idx_def.get("type") in ("vectorSearch", "search"):
                         raise ValueError(
-                            f"❌ Cannot manually define vector search indexes for memory "
+                            f"Cannot manually define vector search indexes for memory "
                             f"collection '{memory_collection_base}'. "
                             f"The memory service automatically manages its own vector search "
                             f"index. Please remove the '{memory_collection_base}' entry from "
@@ -95,7 +93,7 @@ class IndexManager:
                     for idx_def in indexes:
                         if idx_def.get("type") in ("vectorSearch", "search"):
                             raise ValueError(
-                                f"❌ Cannot manually define vector search indexes for memory "
+                                f"Cannot manually define vector search indexes for memory "
                                 f"collection '{prefixed_memory_collection}'. "
                                 f"The memory service automatically manages its own vector search "
                                 f"index. Please remove the '{prefixed_memory_collection}' entry "
@@ -105,26 +103,18 @@ class IndexManager:
                             )
 
         # Validate indexes
-        logger.info(
-            f"[{slug}] Validating {len(managed_indexes)} collection(s) " f"with managed indexes..."
-        )
+        logger.info(f"[{slug}] Validating {len(managed_indexes)} collection(s) " f"with managed indexes...")
         is_valid, error = validate_managed_indexes(managed_indexes)
         logger.info(f"[{slug}] Index validation result: is_valid={is_valid}, " f"error={error}")
         if not is_valid:
-            logger.error(
-                f"[{slug}] ❌ Invalid 'managed_indexes' configuration: {error}. "
-                f"Skipping index creation."
-            )
+            logger.error(f"[{slug}] Invalid 'managed_indexes' configuration: {error}. " f"Skipping index creation.")
             return
 
         # Create indexes for each collection
-        logger.info(
-            f"[{slug}] Processing {len(managed_indexes)} collection(s) " f"with managed indexes"
-        )
+        logger.info(f"[{slug}] Processing {len(managed_indexes)} collection(s) " f"with managed indexes")
         for collection_base_name, indexes in managed_indexes.items():
             logger.info(
-                f"[{slug}] Processing collection '{collection_base_name}' "
-                f"with {len(indexes)} index definition(s)"
+                f"[{slug}] Processing collection '{collection_base_name}' " f"with {len(indexes)} index definition(s)"
             )
             if not collection_base_name or not isinstance(indexes, list):
                 logger.warning(
@@ -142,10 +132,7 @@ class IndexManager:
             for idx_def in indexes:
                 idx_n = idx_def.get("name")
                 idx_type = idx_def.get("type")
-                logger.debug(
-                    f"[{slug}] Processing index def: name={idx_n}, "
-                    f"type={idx_type}, def={idx_def}"
-                )
+                logger.debug(f"[{slug}] Processing index def: name={idx_n}, " f"type={idx_type}, def={idx_def}")
                 if not idx_n or not idx_type:
                     logger.warning(
                         f"[{slug}] Skipping malformed index def in "
@@ -160,16 +147,10 @@ class IndexManager:
                 logger.debug(f"[{slug}] Added prefixed index: '{idx_copy['name']}'")
 
             if not prefixed_defs:
-                logger.warning(
-                    f"[{slug}] No valid index definitions for "
-                    f"'{collection_base_name}'. Skipping."
-                )
+                logger.warning(f"[{slug}] No valid index definitions for " f"'{collection_base_name}'. Skipping.")
                 continue
 
-            logger.info(
-                f"[{slug}] Creating {len(prefixed_defs)} index(es) for "
-                f"'{prefixed_collection_name}'..."
-            )
+            logger.info(f"[{slug}] Creating {len(prefixed_defs)} index(es) for " f"'{prefixed_collection_name}'...")
             try:
                 await run_index_creation_for_collection(
                     db=self._mongo_db,
@@ -179,9 +160,7 @@ class IndexManager:
                 )
                 # Wait a bit after all indexes are created to ensure they're all ready
                 await asyncio.sleep(1.0)  # Extra wait after all indexes are created
-                logger.info(
-                    f"[{slug}] ✅ Completed index creation for " f"'{prefixed_collection_name}'"
-                )
+                logger.info(f"[{slug}] Completed index creation for " f"'{prefixed_collection_name}'")
             except (
                 OperationFailure,
                 ConnectionFailure,

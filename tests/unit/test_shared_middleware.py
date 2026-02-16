@@ -651,9 +651,7 @@ class TestPublicRoutesWithPathPrefix:
         assert response is not None
 
     @pytest.mark.asyncio
-    async def test_shared_middleware_wildcard_public_route_with_path_prefix(
-        self, mock_app, mock_user_pool
-    ):  # noqa: E501
+    async def test_shared_middleware_wildcard_public_route_with_path_prefix(self, mock_app, mock_user_pool):  # noqa: E501
         """Test SharedAuthMiddleware correctly handles wildcard public routes with path prefix."""
         from mdb_engine.auth.shared_middleware import SharedAuthMiddleware
 
@@ -721,9 +719,7 @@ class TestPublicRoutesWithPathPrefix:
         call_next.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_shared_middleware_protected_route_with_path_prefix(
-        self, mock_app, mock_user_pool
-    ):  # noqa: E501
+    async def test_shared_middleware_protected_route_with_path_prefix(self, mock_app, mock_user_pool):  # noqa: E501
         """Test SharedAuthMiddleware correctly protects non-public routes with path prefix."""
         from mdb_engine.auth.shared_middleware import SharedAuthMiddleware
 
@@ -753,9 +749,7 @@ class TestPublicRoutesWithPathPrefix:
         call_next.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_shared_middleware_root_public_route_with_path_prefix(
-        self, mock_app, mock_user_pool
-    ):  # noqa: E501
+    async def test_shared_middleware_root_public_route_with_path_prefix(self, mock_app, mock_user_pool):  # noqa: E501
         """Test SharedAuthMiddleware correctly handles root public route with path prefix."""
         from mdb_engine.auth.shared_middleware import SharedAuthMiddleware
 
@@ -784,9 +778,7 @@ class TestPublicRoutesWithPathPrefix:
         call_next.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_shared_middleware_multiple_public_routes_with_path_prefix(
-        self, mock_app, mock_user_pool
-    ):  # noqa: E501
+    async def test_shared_middleware_multiple_public_routes_with_path_prefix(self, mock_app, mock_user_pool):  # noqa: E501
         """Test SharedAuthMiddleware handles multiple public routes with path prefix."""
         from mdb_engine.auth.shared_middleware import SharedAuthMiddleware
 
@@ -808,9 +800,7 @@ class TestPublicRoutesWithPathPrefix:
 
         for path in public_paths:
             request = MagicMock()
-            request.url.path = (
-                path.rstrip("/") if path.endswith("/") and path != "/auth-hub/" else path
-            )
+            request.url.path = path.rstrip("/") if path.endswith("/") and path != "/auth-hub/" else path
             request.scope = {}
             request.state = MagicMock()
             request.state.app_base_path = "/auth-hub"

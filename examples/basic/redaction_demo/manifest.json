@@ -1,9 +1,0 @@
-{
-  "app_name": "redaction_demo",
-  "app_slug": "redaction_demo",
-  "version": "1.0.0",
-  "description": "Redaction Service Demo - Demonstrates standalone redaction with REGEXP and Presidio providers",
-  "database": {
-    "db_name": "redaction_demo_db"
-  }
-}

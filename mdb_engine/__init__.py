@@ -1,30 +1,44 @@
 """
 MDB_ENGINE - MongoDB Engine
 
-Enterprise-grade engine for building applications with:
-- Automatic database scoping and data isolation
-- Proper dependency injection with service lifetimes
-- Repository pattern for clean data access
-- Authentication and authorization
+Build MongoDB-backed Python apps with automatic data isolation,
+manifest-driven configuration, and optional AI services.
 
-Usage:
-    # Simple usage
+Quick Start (zero-config):
+
+    from mdb_engine import quickstart
+    from mdb_engine.dependencies import get_scoped_db
+    from fastapi import Depends
+
+    app = quickstart("my_app")
+
+    @app.get("/items")
+    async def list_items(db=Depends(get_scoped_db)):
+        return await db.items.find({}).to_list(10)
+
+Configurable Setup (manifest-based):
+
     from mdb_engine import MongoDBEngine
-    engine = MongoDBEngine(mongo_uri=..., db_name=...)
-    await engine.initialize()
-    db = engine.get_scoped_db("my_app")
-
-    # With FastAPI integration
     app = engine.create_app(slug="my_app", manifest=Path("manifest.json"))
 
-    # In routes - use RequestContext for clean DI
-    from mdb_engine import RequestContext
+In routes — use RequestContext for clean DI:
+
+    from mdb_engine import RequestContext, get_request_context
 
     @app.get("/users/{user_id}")
-    async def get_user(user_id: str, ctx: RequestContext = Depends()):
+    async def get_user(user_id: str, ctx: RequestContext = Depends(get_request_context)):
         user = await ctx.uow.users.get(user_id)
         return user
 """
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from fastapi import FastAPI
 
 # Authentication
 from .auth import AuthorizationProvider, require_admin
@@ -32,13 +46,9 @@ from .auth import get_current_user as auth_get_current_user  # noqa: F401
 
 # Core MongoDB Engine
 from .core import (
-    RAY_AVAILABLE,
-    AppRayActor,
     ManifestParser,
     ManifestValidator,
     MongoDBEngine,
-    get_ray_actor_handle,
-    ray_actor_decorator,
 )
 
 # Database layer
@@ -57,6 +67,7 @@ from .dependencies import (
     get_llm_client,
     get_llm_model_name,
     get_memory_service,
+    get_request_context,
     get_scoped_db,
     get_unit_of_work,
     get_user_roles,
@@ -75,15 +86,8 @@ from .indexes import (
     run_index_creation_for_collection,
 )
 
-# Redaction service
-from .redaction import (
-    BaseRedactionService,
-    PresidioRedactionService,
-    RedactionServiceError,
-    RegexpRedactionService,
-    create_redaction_service,
-    get_redaction_service,
-)
+# Memory — simplified public names
+from .memory import ChatEngine, MemoryService
 
 # Repository pattern
 from .repositories import Entity, MongoRepository, Repository, UnitOfWork
@@ -91,18 +95,73 @@ from .repositories import Entity, MongoRepository, Repository, UnitOfWork
 # Utilities
 from .utils import clean_mongo_doc, clean_mongo_docs
 
-__version__ = "0.7.6"
+__version__ = "0.7.7"
+
+
+# ---------------------------------------------------------------------------
+# quickstart — zero-config entry point
+# ---------------------------------------------------------------------------
+
+
+def quickstart(
+    slug: str,
+    name: str | None = None,
+    mongo_uri: str | None = None,
+    db_name: str | None = None,
+    manifest: dict[str, Any] | Path | None = None,
+    **fastapi_kwargs: Any,
+) -> FastAPI:
+    """Create a FastAPI app with MDB Engine in one line.
+
+    This is the fastest way to get started. It combines engine creation
+    and app creation into a single call with sensible defaults.
+
+    Args:
+        slug: Unique application identifier (e.g. ``"my_app"``).
+        name: Human-readable app name. Defaults to a title-cased *slug*.
+        mongo_uri: MongoDB connection URI. Falls back to the ``MONGODB_URI``
+            or ``MDB_MONGO_URI`` env var, then ``mongodb://localhost:27017``.
+        db_name: Database name. Falls back to ``MDB_DB_NAME`` env var,
+            then ``mdb_engine``.
+        manifest: Optional manifest — a ``dict``, a ``Path`` to a JSON file,
+            or ``None`` to auto-generate a minimal manifest.
+        **fastapi_kwargs: Extra keyword arguments forwarded to ``FastAPI()``.
+
+    Returns:
+        A fully configured ``FastAPI`` application with engine lifecycle
+        management, data scoping, and dependency injection ready to use.
+
+    Example::
+
+        from mdb_engine import quickstart
+        from mdb_engine.dependencies import get_scoped_db
+        from fastapi import Depends
+
+        app = quickstart("my_app")
+
+        @app.get("/items")
+        async def list_items(db=Depends(get_scoped_db)):
+            return await db.items.find({}).to_list(10)
+    """
+    engine = MongoDBEngine(mongo_uri=mongo_uri, db_name=db_name)
+    return engine.create_app(
+        slug=slug,
+        manifest=manifest,
+        name=name,
+        **fastapi_kwargs,
+    )
+
 
 __all__ = [
+    # Zero-config entry point
+    "quickstart",
     # Core Engine
     "MongoDBEngine",
     "ManifestValidator",
     "ManifestParser",
-    # Ray Integration (optional)
-    "RAY_AVAILABLE",
-    "AppRayActor",
-    "get_ray_actor_handle",
-    "ray_actor_decorator",
+    # Simplified memory names
+    "MemoryService",
+    "ChatEngine",
     # Database
     "ScopedMongoWrapper",
     "AppDB",
@@ -120,6 +179,7 @@ __all__ = [
     "require_admin",
     # FastAPI Dependencies
     "RequestContext",
+    "get_request_context",
     "get_engine",
     "get_app_slug",
     "get_app_config",
@@ -140,13 +200,6 @@ __all__ = [
     "AsyncAtlasIndexManager",
     "AutoIndexManager",
     "run_index_creation_for_collection",
-    # Redaction Service
-    "BaseRedactionService",
-    "RegexpRedactionService",
-    "PresidioRedactionService",
-    "RedactionServiceError",
-    "get_redaction_service",
-    "create_redaction_service",
     # Utilities
     "clean_mongo_doc",
     "clean_mongo_docs",

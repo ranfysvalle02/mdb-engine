@@ -44,28 +44,18 @@ class TestMultiAppMemoryServiceInitialization:
 
         mock_embedding_service.embed = mock_embed
 
-        # Patch the initialization methods to set up mocks instead of making API calls
-        def mock_init_llm_client(self):
-            """Mock LLM client initialization that doesn't make API calls."""
-            self.llm_available = True
-            # Don't create real LLM service to avoid API calls
-
-        def mock_init_embedding_service(self):
-            """Mock embedding service initialization that doesn't make API calls."""
-            self.embedding_provider = mock_embedding_service
-
-        # Return ExitStack context manager that enters both patches
+        # Patch the builder methods to avoid real API calls
         stack = ExitStack()
         stack.enter_context(
             patch(
-                "mdb_engine.memory.cognitive.CognitiveMemoryService._init_llm_client",
-                mock_init_llm_client,
+                "mdb_engine.memory.builder.CognitiveMemoryServiceBuilder._setup_llm",
+                return_value=(None, True),
             )
         )
         stack.enter_context(
             patch(
-                "mdb_engine.memory.cognitive.CognitiveMemoryService._init_embedding_service",
-                mock_init_embedding_service,
+                "mdb_engine.memory.builder.CognitiveMemoryServiceBuilder._setup_embedding",
+                return_value=mock_embedding_service,
             )
         )
         return stack
@@ -84,7 +74,7 @@ class TestMultiAppMemoryServiceInitialization:
             "auth": {"mode": "app"},
             "memory_config": {
                 "enabled": True,
-                "provider": "custom",
+                "provider": "cognitive",
                 "collection_name": "user_memories",
                 "embedding_model_dims": 1536,
                 "embedding_model": "text-embedding-3-small",
@@ -130,9 +120,7 @@ class TestMultiAppMemoryServiceInitialization:
         }
 
     @pytest.mark.asyncio
-    async def test_memory_service_initialized_in_multi_app(
-        self, mongodb_connection_string, temp_manifests_with_memory
-    ):
+    async def test_memory_service_initialized_in_multi_app(self, mongodb_connection_string, temp_manifests_with_memory):
         """
         REGRESSION TEST: Memory service should be initialized when memory_config.enabled: true.
 
@@ -155,7 +143,7 @@ class TestMultiAppMemoryServiceInitialization:
             # Mock LLM and embedding services to avoid API calls during initialization
             with self._setup_memory_service_mocks():
                 # Create multi-app with app1 (memory enabled)
-                app = engine.create_multi_app(
+                app = await engine.create_multi_app(
                     apps=[
                         {
                             "slug": "app1",
@@ -178,15 +166,9 @@ class TestMultiAppMemoryServiceInitialization:
                     )
 
                 # Verify service has required attributes
-                assert hasattr(
-                    memory_service, "collection"
-                ), "Memory service should have 'collection' attribute"
-                assert hasattr(
-                    memory_service, "app_slug"
-                ), "Memory service should have 'app_slug' attribute"
-                assert (
-                    memory_service.app_slug == "app1"
-                ), "Memory service app_slug should match app slug"
+                assert hasattr(memory_service, "collection"), "Memory service should have 'collection' attribute"
+                assert hasattr(memory_service, "app_slug"), "Memory service should have 'app_slug' attribute"
+                assert memory_service.app_slug == "app1", "Memory service app_slug should match app slug"
 
             # Cleanup
             await engine.shutdown()
@@ -213,7 +195,7 @@ class TestMultiAppMemoryServiceInitialization:
             db_name = f"test_memory_disabled_{os.getpid()}"
             engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name=db_name)
 
-            app = engine.create_multi_app(
+            app = await engine.create_multi_app(
                 apps=[
                     {
                         "slug": "app2",
@@ -227,9 +209,7 @@ class TestMultiAppMemoryServiceInitialization:
             async with app.router.lifespan_context(app):
                 # Memory service should be None when disabled
                 memory_service = engine.get_memory_service("app2")
-                assert (
-                    memory_service is None
-                ), "Memory service should be None when memory_config.enabled: false"
+                assert memory_service is None, "Memory service should be None when memory_config.enabled: false"
 
             await engine.shutdown()
         finally:
@@ -254,7 +234,7 @@ class TestMultiAppMemoryServiceInitialization:
             db_name = f"test_memory_no_config_{os.getpid()}"
             engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name=db_name)
 
-            app = engine.create_multi_app(
+            app = await engine.create_multi_app(
                 apps=[
                     {
                         "slug": "app3",
@@ -268,9 +248,7 @@ class TestMultiAppMemoryServiceInitialization:
             async with app.router.lifespan_context(app):
                 # Memory service should be None when config is missing
                 memory_service = engine.get_memory_service("app3")
-                assert (
-                    memory_service is None
-                ), "Memory service should be None when memory_config is missing"
+                assert memory_service is None, "Memory service should be None when memory_config is missing"
 
             await engine.shutdown()
         finally:
@@ -302,7 +280,7 @@ class TestMultiAppMemoryServiceInitialization:
 
             # Mock LLM and embedding services to avoid API calls during initialization
             with self._setup_memory_service_mocks():
-                app = engine.create_multi_app(
+                app = await engine.create_multi_app(
                     apps=[
                         {
                             "slug": "app1",
@@ -327,21 +305,16 @@ class TestMultiAppMemoryServiceInitialization:
                     # App1 should have memory service (enabled)
                     memory_service_app1 = engine.get_memory_service("app1")
                     assert memory_service_app1 is not None, (
-                        "REGRESSION: Memory service should be initialized for app1 "
-                        "when memory_config.enabled: true"
+                        "REGRESSION: Memory service should be initialized for app1 " "when memory_config.enabled: true"
                     )
 
                     # App2 should NOT have memory service (disabled)
                     memory_service_app2 = engine.get_memory_service("app2")
-                    assert (
-                        memory_service_app2 is None
-                    ), "Memory service should be None for app2 when disabled"
+                    assert memory_service_app2 is None, "Memory service should be None for app2 when disabled"
 
                     # App3 should NOT have memory service (no config)
                     memory_service_app3 = engine.get_memory_service("app3")
-                    assert (
-                        memory_service_app3 is None
-                    ), "Memory service should be None for app3 when config is missing"
+                    assert memory_service_app3 is None, "Memory service should be None for app3 when config is missing"
 
                 await engine.shutdown()
         finally:
@@ -375,9 +348,7 @@ class TestMultiAppMemoryServiceInitialization:
             # We need to patch it before the module is imported
             import mdb_engine.memory.cognitive
 
-            original_cognitive = getattr(
-                mdb_engine.memory.cognitive, "CognitiveMemoryService", None
-            )
+            original_cognitive = getattr(mdb_engine.memory.cognitive, "CognitiveMemoryService", None)
 
             # Create a mock that raises CognitiveMemoryServiceError when instantiated
             def mock_cognitive_init(*args, **kwargs):
@@ -392,7 +363,7 @@ class TestMultiAppMemoryServiceInitialization:
                 if "mdb_engine.core.service_initialization" in sys.modules:
                     del sys.modules["mdb_engine.core.service_initialization"]
 
-                app = engine.create_multi_app(
+                app = await engine.create_multi_app(
                     apps=[
                         {
                             "slug": "app1",
@@ -407,9 +378,7 @@ class TestMultiAppMemoryServiceInitialization:
                 async with app.router.lifespan_context(app):
                     # Memory service should be None due to initialization error
                     memory_service = engine.get_memory_service("app1")
-                    assert (
-                        memory_service is None
-                    ), "Memory service should be None when initialization fails"
+                    assert memory_service is None, "Memory service should be None when initialization fails"
 
                     # App should still be mounted and functional
                     assert app is not None, "App should be mounted even if memory init fails"
@@ -452,7 +421,7 @@ class TestMultiAppMemoryServiceInitialization:
 
             # Mock LLM and embedding services to avoid API calls during initialization
             with self._setup_memory_service_mocks():
-                app = engine.create_multi_app(
+                app = await engine.create_multi_app(
                     apps=[
                         {
                             "slug": "app1",
@@ -465,9 +434,7 @@ class TestMultiAppMemoryServiceInitialization:
 
                 # Test BEFORE lifespan starts - should be None (not initialized yet)
                 memory_service_before = engine.get_memory_service("app1")
-                assert (
-                    memory_service_before is None
-                ), "Memory service should be None before lifespan starts"
+                assert memory_service_before is None, "Memory service should be None before lifespan starts"
 
                 # Start lifespan to trigger initialization
                 async with app.router.lifespan_context(app):
@@ -509,7 +476,7 @@ class TestMultiAppMemoryServiceInitialization:
 
             # Mock LLM and embedding services to avoid API calls during initialization
             with self._setup_memory_service_mocks():
-                app = engine.create_multi_app(
+                app = await engine.create_multi_app(
                     apps=[
                         {
                             "slug": "app1",
@@ -542,9 +509,7 @@ class TestMultiAppMemoryServiceInitialization:
                 del os.environ["OPENAI_API_KEY"]
 
     @pytest.mark.asyncio
-    async def test_memory_service_with_missing_openai_key(
-        self, mongodb_connection_string, temp_manifests_with_memory
-    ):
+    async def test_memory_service_with_missing_openai_key(self, mongodb_connection_string, temp_manifests_with_memory):
         """
         Test that memory service initialization handles missing OPENAI_API_KEY gracefully.
 
@@ -567,7 +532,7 @@ class TestMultiAppMemoryServiceInitialization:
             # App mounting should succeed even without OPENAI_API_KEY
             # The initialization will fail but should be caught and logged
             try:
-                app = engine.create_multi_app(
+                app = await engine.create_multi_app(
                     apps=[
                         {
                             "slug": "app1",
@@ -581,9 +546,7 @@ class TestMultiAppMemoryServiceInitialization:
                 async with app.router.lifespan_context(app):
                     # Memory service should be None when initialization fails due to missing key
                     memory_service = engine.get_memory_service("app1")
-                    assert (
-                        memory_service is None
-                    ), "Memory service should be None when OPENAI_API_KEY is missing"
+                    assert memory_service is None, "Memory service should be None when OPENAI_API_KEY is missing"
 
                     # App should still be mounted and functional
                     assert app is not None, "App should be mounted even without OPENAI_API_KEY"
@@ -627,9 +590,7 @@ class TestMultiAppMemoryServiceInitialization:
             # This simulates missing dependencies
             import mdb_engine.memory.service
 
-            original_get_memory_service = getattr(
-                mdb_engine.memory.service, "get_memory_service", None
-            )
+            original_get_memory_service = getattr(mdb_engine.memory.service, "get_memory_service", None)
 
             # Create a mock that raises ImportError when called
             def mock_get_memory_service_import_error(*args, **kwargs):
@@ -646,7 +607,7 @@ class TestMultiAppMemoryServiceInitialization:
                 db_name = f"test_memory_no_deps_{os.getpid()}"
                 engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name=db_name)
 
-                app = engine.create_multi_app(
+                app = await engine.create_multi_app(
                     apps=[
                         {
                             "slug": "app1",
@@ -661,9 +622,7 @@ class TestMultiAppMemoryServiceInitialization:
                 async with app.router.lifespan_context(app):
                     # Memory service should be None when import fails
                     memory_service = engine.get_memory_service("app1")
-                    assert (
-                        memory_service is None
-                    ), "Memory service should be None when dependencies import fails"
+                    assert memory_service is None, "Memory service should be None when dependencies import fails"
 
                     # App should still be mounted and functional
                     assert app is not None, "App should be mounted even if memory init fails"

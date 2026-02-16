@@ -6,7 +6,7 @@ including security features like JWT secret validation, JTI,
 token revocation, and secure cookies.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -168,7 +168,7 @@ class TestTokenRevocation:
                 "sub": user_id,
                 "email": "test@example.com",
                 "jti": "test-jti-123",
-                "exp": datetime.utcnow() + timedelta(hours=24),
+                "exp": datetime.now(timezone.utc) + timedelta(hours=24),
             },
             user_pool._jwt_secret,  # noqa: SLF001
             algorithm="HS256",
@@ -178,7 +178,7 @@ class TestTokenRevocation:
         user_pool._blacklist_collection.find_one = AsyncMock(  # noqa: SLF001
             return_value={
                 "jti": "test-jti-123",
-                "expires_at": datetime.utcnow() + timedelta(hours=24),
+                "expires_at": datetime.now(timezone.utc) + timedelta(hours=24),
             }
         )
 
@@ -198,7 +198,7 @@ class TestTokenRevocation:
                 "sub": user_id,
                 "email": "test@example.com",
                 "jti": "test-jti-456",
-                "exp": datetime.utcnow() + timedelta(hours=24),
+                "exp": datetime.now(timezone.utc) + timedelta(hours=24),
             },
             user_pool._jwt_secret,  # noqa: SLF001
             algorithm="HS256",
@@ -428,7 +428,7 @@ class TestSharedUserPool:
             {
                 "sub": user_id,
                 "email": "test@example.com",
-                "exp": datetime.utcnow() + timedelta(hours=24),
+                "exp": datetime.now(timezone.utc) + timedelta(hours=24),
             },
             user_pool._jwt_secret,  # noqa: SLF001
             algorithm="HS256",
@@ -459,7 +459,7 @@ class TestSharedUserPool:
             {
                 "sub": "user123",
                 "email": "test@example.com",
-                "exp": datetime.utcnow() - timedelta(hours=1),
+                "exp": datetime.now(timezone.utc) - timedelta(hours=1),
             },
             user_pool._jwt_secret,  # noqa: SLF001
             algorithm="HS256",

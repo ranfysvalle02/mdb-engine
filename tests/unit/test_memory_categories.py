@@ -7,11 +7,12 @@ Tests verify that:
 - Backward compatibility handles existing "general" categories
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from mdb_engine.memory.cognitive import MEMORY_CATEGORIES, CognitiveMemoryService
+from mdb_engine.memory.cognitive import CognitiveMemoryService
+from mdb_engine.memory.extraction import MEMORY_CATEGORIES
 
 
 class TestMemoryCategories:
@@ -35,21 +36,19 @@ class TestMemoryCategories:
         """Create a CognitiveMemoryService instance."""
         # Mock embedding provider to avoid API key requirement
         mock_embedding_provider = MagicMock()
-        mock_embedding_provider.embed = MagicMock(return_value=[[0.1] * 1536])
+        mock_embedding_provider.embed = AsyncMock(return_value=[[0.1] * 1536])
 
-        # Patch the embedding service initialization method
-        with patch.object(CognitiveMemoryService, "_init_embedding_service", return_value=None):
-            service = CognitiveMemoryService(
-                app_slug="test_app",
-                collection=mock_collection,
-                config={"enable_cognitive": True, "categories": {"enabled": True}},
-            )
+        service = CognitiveMemoryService(
+            app_slug="test_app",
+            collection=mock_collection,
+            config={"enable_cognitive": True, "categories": {"enabled": True}},
+            embedding_service=mock_embedding_provider,
+        )
 
-        # Set the mock embedding provider after initialization
-        service.embedding_provider = mock_embedding_provider
-        service._get_embedding = MagicMock(return_value=[0.1] * 1536)
-        service._get_embeddings_batch_sync = MagicMock(return_value={"test": [0.1] * 1536})
-        service._find_similar_memories = MagicMock(return_value=[])
+        # Set mock helpers for test isolation
+        service._get_embedding = AsyncMock(return_value=[0.1] * 1536)
+        service._get_embeddings_batch = AsyncMock(return_value={"test": [0.1] * 1536})
+        service._find_similar_memories = AsyncMock(return_value=[])
         return service
 
     def test_memory_categories_dict_does_not_include_general(self):
@@ -63,6 +62,7 @@ class TestMemoryCategories:
             "preferences",
             "temporal",
             "relational",
+            "procedural",
         }
 
     def test_detect_category_from_text_never_returns_general(self, memory_service):
@@ -82,8 +82,7 @@ class TestMemoryCategories:
         for text, _expected_category in test_cases:
             detected = memory_service._detect_category_from_text(text)
             assert detected != "general", (
-                f"Category detection should never return 'general'. "
-                f"Text: '{text}', Detected: '{detected}'"
+                f"Category detection should never return 'general'. " f"Text: '{text}', Detected: '{detected}'"
             )
             assert (
                 detected in MEMORY_CATEGORIES
@@ -103,12 +102,9 @@ class TestMemoryCategories:
             category = memory_service._detect_category_from_text(text)
             # Most important: never "general"
             assert category != "general", (
-                f"Category detection should never return 'general'. "
-                f"Text: '{text}', Detected: '{category}'"
+                f"Category detection should never return 'general'. " f"Text: '{text}', Detected: '{category}'"
             )
-            assert (
-                category in MEMORY_CATEGORIES
-            ), f"Category '{category}' must be valid. Text: '{text}'"
+            assert category in MEMORY_CATEGORIES, f"Category '{category}' must be valid. Text: '{text}'"
             # Note: Heuristic detection may not always be perfect, but should be reasonable
             # The key requirement is that it never returns "general"
 
@@ -126,12 +122,9 @@ class TestMemoryCategories:
             category = memory_service._detect_category_from_text(text)
             # Most important: never "general"
             assert category != "general", (
-                f"Category detection should never return 'general'. "
-                f"Text: '{text}', Detected: '{category}'"
+                f"Category detection should never return 'general'. " f"Text: '{text}', Detected: '{category}'"
             )
-            assert (
-                category in MEMORY_CATEGORIES
-            ), f"Category '{category}' must be valid. Text: '{text}'"
+            assert category in MEMORY_CATEGORIES, f"Category '{category}' must be valid. Text: '{text}'"
             # Note: Heuristic detection may not always be perfect, but should be reasonable
             # The key requirement is that it never returns "general"
 
@@ -149,12 +142,9 @@ class TestMemoryCategories:
             category = memory_service._detect_category_from_text(text)
             # Most important: never "general"
             assert category != "general", (
-                f"Category detection should never return 'general'. "
-                f"Text: '{text}', Detected: '{category}'"
+                f"Category detection should never return 'general'. " f"Text: '{text}', Detected: '{category}'"
             )
-            assert (
-                category in MEMORY_CATEGORIES
-            ), f"Category '{category}' must be valid. Text: '{text}'"
+            assert category in MEMORY_CATEGORIES, f"Category '{category}' must be valid. Text: '{text}'"
             # Note: Heuristic detection may not always be perfect, but should be reasonable
             # The key requirement is that it never returns "general"
 
@@ -171,12 +161,9 @@ class TestMemoryCategories:
             category = memory_service._detect_category_from_text(text)
             # Most important: never "general"
             assert category != "general", (
-                f"Category detection should never return 'general'. "
-                f"Text: '{text}', Detected: '{category}'"
+                f"Category detection should never return 'general'. " f"Text: '{text}', Detected: '{category}'"
             )
-            assert (
-                category in MEMORY_CATEGORIES
-            ), f"Category '{category}' must be valid. Text: '{text}'"
+            assert category in MEMORY_CATEGORIES, f"Category '{category}' must be valid. Text: '{text}'"
             # Note: Heuristic detection may not always be perfect, but should be reasonable
             # The key requirement is that it never returns "general"
 
@@ -191,10 +178,11 @@ class TestMemoryCategories:
         # Test that "general" returns 0 (not in priority system)
         assert memory_service._get_category_priority("general") == 0
 
-    def test_get_best_category_handles_missing_categories(self, memory_service):
+    @pytest.mark.asyncio
+    async def test_get_best_category_handles_missing_categories(self, memory_service):
         """Test that _get_best_category handles missing categories by detecting from text."""
         # When existing category is None, should detect from text
-        best = memory_service._get_best_category(
+        best = await memory_service._get_best_category(
             existing_category=None,
             new_text="User's sister Emily is a doctor",
             new_category=None,
@@ -204,7 +192,7 @@ class TestMemoryCategories:
         assert best != "general", "Should never return 'general'"
 
         # When new category is provided and is better
-        best = memory_service._get_best_category(
+        best = await memory_service._get_best_category(
             existing_category="relational",
             new_text="User's sister Emily is a doctor",
             new_category="biographical",  # Higher priority
@@ -213,10 +201,10 @@ class TestMemoryCategories:
         assert best in MEMORY_CATEGORIES, f"Category '{best}' must be valid"
         assert best != "general", "Should never return 'general'"
 
-    @patch("mdb_engine.memory.cognitive.completion")
-    def test_extract_facts_never_assigns_general(self, mock_completion, memory_service):
+    @pytest.mark.asyncio
+    async def test_extract_facts_never_assigns_general(self, memory_service):
         """Test that fact extraction never assigns 'general' category."""
-        # Mock LLM response with proper categories
+        # Mock _llm_completion to return a LiteLLM-like response
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message = MagicMock()
@@ -226,21 +214,17 @@ class TestMemoryCategories:
             '{"text": "User loves chocolate", "category": "preferences"}'
             "]}"
         )
-        mock_completion.return_value = mock_response
+        memory_service._llm_completion = AsyncMock(return_value=mock_response)
 
         # Enable LLM for extraction
         memory_service.llm_available = True
 
-        facts = memory_service._extract_facts_with_categories(
-            "My sister Emily is a doctor and I love chocolate"
-        )
+        facts = await memory_service._extract_facts_with_categories("My sister Emily is a doctor and I love chocolate")
 
         assert len(facts) > 0
         for fact in facts:
             category = fact.get("category")
-            assert (
-                category != "general"
-            ), f"Extracted fact should not have 'general' category: {fact}"
+            assert category != "general", f"Extracted fact should not have 'general' category: {fact}"
             assert (
                 category in MEMORY_CATEGORIES
             ), f"Category '{category}' must be one of: {list(MEMORY_CATEGORIES.keys())}"

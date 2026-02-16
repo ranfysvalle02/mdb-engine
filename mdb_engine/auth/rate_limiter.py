@@ -30,12 +30,13 @@ Usage:
         ...
 """
 
+import json
 import logging
 import time
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 from typing import Any
 
@@ -179,13 +180,9 @@ class MongoDBRateLimitStore:
 
         try:
             # Compound index for lookups
-            await self._collection.create_index(
-                [("identifier", 1), ("timestamp", -1)], name="identifier_timestamp_idx"
-            )
+            await self._collection.create_index([("identifier", 1), ("timestamp", -1)], name="identifier_timestamp_idx")
             # TTL index for cleanup
-            await self._collection.create_index(
-                "expires_at", expireAfterSeconds=0, name="expires_at_ttl_idx"
-            )
+            await self._collection.create_index("expires_at", expireAfterSeconds=0, name="expires_at_ttl_idx")
             self._indexes_created = True
             logger.info("Rate limit indexes ensured")
         except OperationFailure as e:
@@ -199,7 +196,7 @@ class MongoDBRateLimitStore:
         """Record an attempt and return current count in window."""
         await self.ensure_indexes()
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         expires_at = now + timedelta(seconds=window_seconds)
         cutoff = now - timedelta(seconds=window_seconds)
 
@@ -230,7 +227,7 @@ class MongoDBRateLimitStore:
         """Get current attempt count without recording."""
         await self.ensure_indexes()
 
-        cutoff = datetime.utcnow() - timedelta(seconds=window_seconds)
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=window_seconds)
 
         count = await self._collection.count_documents(
             {
@@ -246,8 +243,51 @@ class MongoDBRateLimitStore:
         await self._collection.delete_many({"identifier": identifier})
 
 
-# Global in-memory store (shared across middleware instances in same process)
+# Global in-memory store (shared across middleware instances in same process).
+# WARNING: This does NOT work across multiple processes or containers.
+# For production multi-instance deployments, use create_rate_limit_store(db=...)
+# to get a MongoDBRateLimitStore instead.
 _default_store = InMemoryRateLimitStore()
+
+
+def create_rate_limit_store(
+    db: Any | None = None,
+) -> "InMemoryRateLimitStore | MongoDBRateLimitStore":
+    """
+    Factory function to create the appropriate rate limit store.
+
+    For single-process development, returns the shared in-memory store.
+    For production multi-instance deployments, pass a MongoDB database
+    to get a distributed store backed by MongoDB with TTL indexes.
+
+    Args:
+        db: MongoDB database instance (Motor ``AsyncIOMotorDatabase``).
+            If provided, returns a ``MongoDBRateLimitStore``.
+            If ``None``, returns the global ``InMemoryRateLimitStore``.
+
+    Returns:
+        A rate limit store instance (``InMemoryRateLimitStore`` or
+        ``MongoDBRateLimitStore``).
+
+    Example:
+        .. code-block:: python
+
+            from mdb_engine.auth.rate_limiter import (
+                AuthRateLimitMiddleware,
+                create_rate_limit_store,
+            )
+
+            # Production: MongoDB-backed (works across multiple workers/containers)
+            store = create_rate_limit_store(db=engine.get_raw_db())
+
+            # Development: in-memory (single process)
+            store = create_rate_limit_store()
+
+            app.add_middleware(AuthRateLimitMiddleware, store=store)
+    """
+    if db is not None:
+        return MongoDBRateLimitStore(db)
+    return _default_store
 
 
 class AuthRateLimitMiddleware(BaseHTTPMiddleware):
@@ -301,9 +341,7 @@ class AuthRateLimitMiddleware(BaseHTTPMiddleware):
         self._store = store or _default_store
         self._include_email_in_key = include_email_in_key
 
-        logger.info(
-            f"AuthRateLimitMiddleware initialized with limits for: {list(self._limits.keys())}"
-        )
+        logger.info(f"AuthRateLimitMiddleware initialized with limits for: {list(self._limits.keys())}")
 
     async def dispatch(
         self,
@@ -388,8 +426,6 @@ class AuthRateLimitMiddleware(BaseHTTPMiddleware):
                 # In practice, this is called before the body is read by the route
                 body = await request.body()
                 if body:
-                    import json
-
                     data = json.loads(body)
                     return data.get("email")
         except (ValueError, UnicodeDecodeError, KeyError):

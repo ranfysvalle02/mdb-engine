@@ -27,19 +27,14 @@ Standalone Usage:
 
 from .dependencies import get_llm_service_for_app
 from .service import (
-    LLMProvider,
     LLMService,
     LLMServiceError,
     get_llm_service,
 )
 
 __all__ = [
-    # Core service classes
     "LLMService",
     "LLMServiceError",
-    "LLMProvider",
-    # Factory function
     "get_llm_service",
-    # Utility for standalone usage
     "get_llm_service_for_app",
 ]

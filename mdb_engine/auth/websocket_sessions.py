@@ -18,7 +18,7 @@ import base64
 import logging
 import secrets
 from collections.abc import Callable
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -107,7 +107,7 @@ class WebSocketSessionManager:
             encrypted_dek_b64 = base64.b64encode(encrypted_dek).decode()
 
             # Calculate expiration
-            expires_at = datetime.utcnow() + timedelta(hours=SESSION_TTL_HOURS)
+            expires_at = datetime.now(timezone.utc) + timedelta(hours=SESSION_TTL_HOURS)
 
             # Prepare document
             document = {
@@ -118,17 +118,14 @@ class WebSocketSessionManager:
                 "encrypted_key": encrypted_key_b64,
                 "encrypted_dek": encrypted_dek_b64,
                 "algorithm": "AES-256-GCM",
-                "created_at": datetime.utcnow(),
+                "created_at": datetime.now(timezone.utc),
                 "expires_at": expires_at,
             }
 
             # Store in private collection
             await self._sessions_collection.insert_one(document)
 
-            logger.info(
-                f"Created WebSocket session for user '{user_id}' "
-                f"(app: {app_slug}, expires: {expires_at})"
-            )
+            logger.info(f"Created WebSocket session for user '{user_id}' " f"(app: {app_slug}, expires: {expires_at})")
 
             return session_key
 
@@ -164,10 +161,8 @@ class WebSocketSessionManager:
 
             # Check expiration
             expires_at = session_doc.get("expires_at")
-            if expires_at and expires_at < datetime.utcnow():
-                logger.warning(
-                    f"WebSocket session expired: {session_key[:16]}... " f"(expired: {expires_at})"
-                )
+            if expires_at and expires_at < datetime.now(timezone.utc):
+                logger.warning(f"WebSocket session expired: {session_key[:16]}... " f"(expired: {expires_at})")
                 # Clean up expired session
                 await self._sessions_collection.delete_one({"_id": session_key})
                 return None
@@ -185,16 +180,11 @@ class WebSocketSessionManager:
             try:
                 encrypted_key = base64.b64decode(session_doc["encrypted_key"])
                 encrypted_dek = base64.b64decode(session_doc["encrypted_dek"])
-                decrypted_key = self._encryption_service.decrypt_secret(
-                    encrypted_key, encrypted_dek
-                )
+                decrypted_key = self._encryption_service.decrypt_secret(encrypted_key, encrypted_dek)
 
                 # Verify decrypted key matches session_key
                 if decrypted_key != session_key:
-                    logger.error(
-                        f"WebSocket session key decryption mismatch: "
-                        f"session_key={session_key[:16]}..."
-                    )
+                    logger.error(f"WebSocket session key decryption mismatch: " f"session_key={session_key[:16]}...")
                     return None
 
             except (ValueError, TypeError, AttributeError, KeyError):
@@ -255,10 +245,7 @@ class WebSocketSessionManager:
                 query["app_slug"] = app_slug
 
             result = await self._sessions_collection.delete_many(query)
-            logger.info(
-                f"Revoked {result.deleted_count} WebSocket sessions "
-                f"for user '{user_id}' (app: {app_slug})"
-            )
+            logger.info(f"Revoked {result.deleted_count} WebSocket sessions " f"for user '{user_id}' (app: {app_slug})")
             return result.deleted_count
         except (OperationFailure, PyMongoError):
             logger.exception("Failed to revoke user WebSocket sessions")
@@ -272,9 +259,7 @@ class WebSocketSessionManager:
             Number of sessions cleaned up
         """
         try:
-            result = await self._sessions_collection.delete_many(
-                {"expires_at": {"$lt": datetime.utcnow()}}
-            )
+            result = await self._sessions_collection.delete_many({"expires_at": {"$lt": datetime.now(timezone.utc)}})
             if result.deleted_count > 0:
                 logger.info(f"Cleaned up {result.deleted_count} expired WebSocket sessions")
             return result.deleted_count
@@ -400,13 +385,9 @@ def create_websocket_session_endpoint(
             )
 
             # Get expiration time (24 hours from now)
-            from datetime import datetime, timedelta
+            expires_at = datetime.now(timezone.utc) + timedelta(hours=SESSION_TTL_HOURS)
 
-            expires_at = datetime.utcnow() + timedelta(hours=SESSION_TTL_HOURS)
-
-            logger.info(
-                f"Generated WebSocket session key for user '{user_id}' " f"(app: {app_slug})"
-            )
+            logger.info(f"Generated WebSocket session key for user '{user_id}' " f"(app: {app_slug})")
 
             return JSONResponse(
                 {

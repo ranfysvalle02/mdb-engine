@@ -196,7 +196,7 @@ class VectorHackingService:
 
         # Generate target embedding
         try:
-            vectors = await self.embedding_service.embed_chunks(
+            vectors = await self.embedding_service.embed(
                 [self.current_target],
                 model=self.config.embedding_model,
             )
@@ -402,7 +402,7 @@ Output ONLY your next guess (the complete phrase)."""
                 return
 
             # Get embedding and calculate distance
-            vectors = await self.embedding_service.embed_chunks(
+            vectors = await self.embedding_service.embed(
                 [text],
                 model=self.config.embedding_model,
             )

@@ -6,444 +6,51 @@ This module provides a complete cognitive architecture:
 - Short-Term Memory (STM): Raw chat history for immediate context
 - Long-Term Memory (LTM): Vector store for semantic retrieval of facts
 - Cognitive Engine: Orchestrates both to provide context-aware responses
-- LLM Provider Abstraction: Flexible support for multiple LLM providers (OpenAI, Gemini, etc.)
 """
+
+from __future__ import annotations
 
 import asyncio
 import logging
-from abc import ABC, abstractmethod
-from datetime import datetime, timezone
-from typing import Any
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
 
+if TYPE_CHECKING:
+    from mdb_engine.core.protocols import GraphServiceProtocol, ProceduralMemoryProtocol
+    from mdb_engine.database.scoped_wrapper import ScopedCollectionWrapper
+
+from ..observability.tracing import create_span
 from .base import BaseMemoryService
+from .chat_history import ChatHistoryService
 from .cognitive import CognitiveMemoryService, CognitiveMemoryServiceError
+from .context_engineering import ContextEngineer
 
 try:
-    from pymongo import ASCENDING, DESCENDING
+    from pymongo import ASCENDING
     from pymongo.errors import PyMongoError
 except ImportError:
     raise ImportError("pip install pymongo") from None
 
+from ..core.validation import (
+    validate_identifier,
+    validate_session_id,
+    validate_text_content,
+    validate_user_id,
+)
+
 logger = logging.getLogger(__name__)
 
 
-# ============================================================================
-# LLM Provider Abstraction
-# ============================================================================
-
-
-class LLMProvider(ABC):
-    """
-    Abstract base class for LLM providers.
-
-    This abstraction allows CognitiveEngine to work with any LLM provider
-    (OpenAI, Azure OpenAI, Google Gemini, Anthropic Claude, etc.) by implementing
-    a simple, consistent interface.
-    """
-
-    @abstractmethod
-    def generate_chat_completion(
-        self, messages: list[dict[str, str]], model: str | None = None, **kwargs
-    ) -> str:
-        """
-        Generate a chat completion response.
-
-        Args:
-            messages: List of message dicts with 'role' and 'content' keys.
-                     Format: [{"role": "system", "content": "..."},
-                              {"role": "user", "content": "..."}, ...]
-            model: Optional model name/identifier (provider-specific)
-            **kwargs: Additional provider-specific parameters
-
-        Returns:
-            str: The generated response text
-
-        Raises:
-            Exception: If the LLM call fails
-        """
-        pass
-
-
-class OpenAIProvider(LLMProvider):
-    """
-    Provider for OpenAI and Azure OpenAI.
-
-    Supports both standard OpenAI and Azure OpenAI clients.
-    """
-
-    def __init__(self, client):
-        """
-        Initialize OpenAI provider.
-
-        Args:
-            client: OpenAI or AzureOpenAI client instance
-        """
-        self.client = client
-        self.is_azure = "Azure" in str(type(client))
-
-    def generate_chat_completion(
-        self, messages: list[dict[str, str]], model: str | None = None, **kwargs
-    ) -> str:
-        """Generate chat completion using OpenAI/Azure OpenAI."""
-        if self.is_azure:
-            # Azure OpenAI uses deployment name
-            deployment_name = kwargs.get("deployment_name", model or "gpt-4o")
-            response = self.client.chat.completions.create(
-                model=deployment_name,
-                messages=messages,
-                **{k: v for k, v in kwargs.items() if k not in ["model", "deployment_name"]},
-            )
-        else:
-            # Standard OpenAI uses model name
-            model_name = model or kwargs.get("model", "gpt-4o")
-            response = self.client.chat.completions.create(
-                model=model_name,
-                messages=messages,
-                **{k: v for k, v in kwargs.items() if k != "model"},
-            )
-
-        return response.choices[0].message.content
-
-
-class GeminiProvider(LLMProvider):
-    """
-    Provider for Google Gemini.
-
-    Converts OpenAI message format to Gemini format and handles the Gemini API.
-    Supports both single-turn and multi-turn conversations.
-    """
-
-    def __init__(self, gemini_client, default_model: str = "gemini-3-flash-preview"):
-        """
-        Initialize Gemini provider.
-
-        Args:
-            gemini_client: genai.Client instance from google.genai
-            default_model: Default model name (e.g., "gemini-3-flash-preview")
-        """
-        self.client = gemini_client
-        self.default_model = default_model
-
-    def generate_chat_completion(
-        self, messages: list[dict[str, str]], model: str | None = None, **kwargs
-    ) -> str:
-        """
-        Generate chat completion using Google Gemini.
-
-        Converts OpenAI-style messages to Gemini format:
-        - System messages are prepended to the prompt
-        - User and assistant messages are formatted as a conversation
-        - Supports temperature and other kwargs via Gemini API
-
-        Args:
-            messages: List of message dicts with 'role' and 'content' keys
-            model: Optional model name (defaults to default_model)
-            **kwargs: Additional parameters (temperature, max_tokens, etc.)
-
-        Returns:
-            str: Generated response text
-
-        Raises:
-            Exception: If Gemini API call fails
-        """
-        # Convert OpenAI messages format to Gemini format
-        system_parts = []
-        conversation_parts = []
-
-        for msg in messages:
-            role = msg.get("role", "")
-            content = msg.get("content", "")
-
-            if role == "system":
-                system_parts.append(content)
-            elif role == "user":
-                conversation_parts.append(content)
-            elif role == "assistant":
-                # For assistant messages, we include them in the conversation
-                # Gemini will use this as context for the response
-                conversation_parts.append(f"Assistant: {content}")
-
-        # Build the full prompt
-        full_prompt = ""
-        if system_parts:
-            # Combine all system messages
-            system_instruction = "\n".join(system_parts)
-            full_prompt = f"System: {system_instruction}\n\n"
-
-        # Add conversation history
-        if conversation_parts:
-            full_prompt += "\n".join(conversation_parts)
-
-        # Call Gemini API
-        model_name = model or self.default_model
-
-        # Extract Gemini-specific parameters
-        config = {}
-        if "temperature" in kwargs:
-            temperature = kwargs["temperature"]
-            # Gemini models always require temperature=1.0
-            if model_name and model_name.lower().startswith("gemini/"):
-                if temperature != 1.0:
-                    logger.info(
-                        f"⚠️  Enforcing temperature=1.0 for Gemini model '{model_name}'. "
-                        f"Gemini models require temperature=1.0. "
-                        f"Requested temperature ({temperature}) was adjusted."
-                    )
-                    temperature = 1.0
-            config["temperature"] = temperature
-        if "max_tokens" in kwargs or "max_output_tokens" in kwargs:
-            config["max_output_tokens"] = kwargs.get("max_output_tokens") or kwargs.get(
-                "max_tokens"
-            )
-
-        try:
-            response = self.client.models.generate_content(
-                model=model_name, contents=full_prompt, config=config if config else None
-            )
-
-            # Extract text from response
-            if hasattr(response, "text"):
-                return response.text
-            elif hasattr(response, "candidates") and response.candidates:
-                # Fallback: try to get text from candidates
-                candidate = response.candidates[0]
-                if hasattr(candidate, "content") and hasattr(candidate.content, "parts"):
-                    return candidate.content.parts[0].text if candidate.content.parts else ""
-
-            # Last resort: string representation
-            return str(response)
-
-        except (
-            AttributeError,
-            TypeError,
-            ValueError,
-            RuntimeError,
-            ConnectionError,
-            OSError,
-            KeyError,
-        ) as e:
-            logger.error(f"Gemini API call failed: {e}", exc_info=True)
-            raise
-
-
-# ============================================================================
-# Chat History Service
-# ============================================================================
-
-
-class ChatHistoryService:
-    """
-    Manages Short-Term Memory (The active context window).
-
-    Stores raw messages in MongoDB: {session_id, role, content, created_at}
-    This is for immediate context - "what did I just say 5 seconds ago?"
-    """
-
-    def __init__(self, collection: Any, collection_name: str = "chat_history"):
-        """
-        Initialize Chat History Service.
-
-        Args:
-            collection: PyMongo Collection instance (REQUIRED - must be from
-                       MDB-Engine connection pool)
-            collection_name: Name of the collection for chat history (for logging)
-        """
-        if collection is None:
-            raise ValueError(
-                "Collection is REQUIRED. ChatHistoryService must use MDB-Engine's connection pool. "
-                "Pass a PyMongo Collection instance obtained from MDB-Engine's connection manager."
-            )
-
-        self.collection = collection
-        logger.info(f"✅ Chat History Service using MDB-Engine collection: {collection_name}")
-
-        # Index for fast retrieval of sessions
-        try:
-            self.collection.create_index([("session_id", ASCENDING), ("created_at", DESCENDING)])
-            self.collection.create_index([("user_id", ASCENDING), ("created_at", DESCENDING)])
-
-            # TTL index for working memory (Cognitive Blueprint v2.0)
-            # Default: 24 hours (86400 seconds)
-            try:
-                ttl_seconds = 24 * 3600  # 24 hours default
-                self.collection.create_index(
-                    [("created_at", ASCENDING)],
-                    name="working_memory_ttl_idx",
-                    expireAfterSeconds=ttl_seconds,
-                    background=True,
-                )
-                logger.info("✅ Working memory TTL index created (24h expiration)")
-            except (PyMongoError, AttributeError, TypeError) as e:
-                logger.debug(f"TTL index creation: {e}")
-
-            logger.info(f"✅ Chat history indexes created for {collection_name}")
-        except PyMongoError as e:
-            logger.warning(f"Failed to create chat history indexes: {e}")
-
-    def get_message_count(self, session_id: str, user_id: str | None = None) -> int:
-        """
-        Get the count of messages for a session.
-
-        Args:
-            session_id: Session identifier
-            user_id: Optional user ID for filtering
-
-        Returns:
-            Number of messages in the session
-        """
-        query = {"session_id": session_id}
-        if user_id:
-            query["user_id"] = str(user_id)
-        return self.collection.count_documents(query)
-
-    def add_message(
-        self,
-        session_id: str,
-        role: str,
-        content: str,
-        user_id: str | None = None,
-        metadata: dict[str, Any] | None = None,
-    ):
-        """
-        Adds a message to the chat history.
-
-        Args:
-            session_id: Unique session identifier
-            role: Message role ("user", "assistant", "system")
-            content: Message content
-            user_id: Optional user ID for filtering
-            metadata: Optional metadata dictionary
-            metadata: Optional metadata to store with the message
-        """
-        doc = {
-            "session_id": session_id,
-            "role": role,
-            "content": content,
-            "created_at": datetime.now(timezone.utc),
-            "memory_type": "working",  # Cognitive Blueprint v2.0
-        }
-
-        if user_id:
-            doc["user_id"] = str(user_id)
-
-        if metadata:
-            doc["metadata"] = metadata
-
-        self.collection.insert_one(doc)
-        logger.debug(f"Added {role} message to session {session_id}")
-
-    def get_context(
-        self,
-        session_id: str,
-        limit: int = 10,
-        user_id: str | None = None,
-    ) -> list[dict[str, str]]:
-        """
-        Retrieves the most recent messages (Short-Term Memory).
-
-        Returns them in chronological order (Oldest -> Newest) for the LLM.
-
-        Args:
-            session_id: Session identifier
-            limit: Maximum number of messages to retrieve
-            user_id: Optional user ID for filtering
-
-        Returns:
-            List of message dicts with 'role' and 'content' keys
-        """
-        query = {"session_id": session_id}
-        if user_id:
-            query["user_id"] = str(user_id)
-
-        cursor = self.collection.find(query).sort("created_at", ASCENDING).limit(limit)
-
-        # Return in chronological order [Msg 1, Msg 2, Msg 3...]
-        history = list(cursor)
-
-        return [{"role": h["role"], "content": h["content"]} for h in history]
-
-    def get_recent_messages(
-        self,
-        session_id: str,
-        limit: int = 10,
-        user_id: str | None = None,
-    ) -> list[dict[str, Any]]:
-        """
-        Retrieves the most recent messages in reverse chronological order.
-
-        Useful for displaying recent messages in UI.
-
-        Args:
-            session_id: Session identifier
-            limit: Maximum number of messages to retrieve
-            user_id: Optional user ID for filtering
-
-        Returns:
-            List of full message documents
-        """
-        query = {"session_id": session_id}
-        if user_id:
-            query["user_id"] = str(user_id)
-
-        cursor = self.collection.find(query).sort("created_at", DESCENDING).limit(limit)
-        return list(cursor)
-
-    def get_session_count(self, session_id: str, user_id: str | None = None) -> int:
-        """Get the number of messages in a session."""
-        query = {"session_id": session_id}
-        if user_id:
-            query["user_id"] = str(user_id)
-        return self.collection.count_documents(query)
-
-    def clear_session(self, session_id: str, user_id: str | None = None):
-        """
-        Wipes Short-Term memory for a session.
-
-        Args:
-            session_id: Session identifier
-            user_id: Optional user ID for security filtering
-        """
-        query = {"session_id": session_id}
-        if user_id:
-            query["user_id"] = str(user_id)
-        result = self.collection.delete_many(query)
-        logger.info(f"Cleared {result.deleted_count} messages from session {session_id}")
-
-    def delete_old_messages(
-        self,
-        session_id: str,
-        keep_count: int = 10,
-        user_id: str | None = None,
-    ) -> int:
-        """
-        Deletes old messages from a session, keeping only the most recent ones.
-
-        Useful for managing context window size.
-
-        Args:
-            session_id: Session identifier
-            keep_count: Number of recent messages to keep
-            user_id: Optional user ID for security filtering
-
-        Returns:
-            Number of messages deleted
-        """
-        query = {"session_id": session_id}
-        if user_id:
-            query["user_id"] = str(user_id)
-
-        # Get IDs of messages to keep
-        keep_messages = self.collection.find(query).sort("created_at", DESCENDING).limit(keep_count)
-        keep_ids = [msg["_id"] for msg in keep_messages]
-
-        # Delete all others
-        delete_query = {"session_id": session_id, "_id": {"$nin": keep_ids}}
-        if user_id:
-            delete_query["user_id"] = str(user_id)
-
-        result = self.collection.delete_many(delete_query)
-        logger.info(f"Deleted {result.deleted_count} old messages from session {session_id}")
-        return result.deleted_count
+@dataclass
+class _FormattedContext:
+    """Intermediate container passed between ``chat()`` phases."""
+
+    ltm_text: str = ""
+    graph_text: str = ""
+    skills_text: str = ""
+    triggers_text: str = ""
+    stm_messages: list[dict[str, str]] = field(default_factory=list)
+    stm_summary: str | None = None
 
 
 class CognitiveEngine:
@@ -463,19 +70,25 @@ class CognitiveEngine:
         self,
         app_slug: str,
         memory_service: BaseMemoryService | None = None,
-        chat_history_collection: Any = None,
-        memory_collection: Any = None,
+        chat_history_collection: ScopedCollectionWrapper | None = None,
+        memory_collection: ScopedCollectionWrapper | None = None,
         stm_context_limit: int = 10,
         ltm_search_limit: int = 5,
         auto_summarize_threshold: int = 20,
-        llm_client=None,
-        llm_provider: LLMProvider | None = None,
+        llm_service: Any = None,
         *,
         graph_service: Any = None,
+        procedural_memory: Any = None,
         enable_context_engineering: bool = True,
         stm_raw_window: int = 5,
         enable_entity_extraction: bool = True,
         enable_dynamic_persona: bool = True,
+        graph_min_hop_distance: int = 2,
+        graph_min_edges: int = 1,
+        graph_deduplication_threshold: float = 0.70,
+        graph_min_nodes: int = 2,
+        summary_staleness_threshold: int = 10,
+        max_prompt_tokens: int | None = None,
     ):
         """
         Initialize the Cognitive Engine.
@@ -484,38 +97,60 @@ class CognitiveEngine:
             app_slug: Application slug (required)
             memory_service: Optional BaseMemoryService instance (CognitiveMemoryService).
                            Will create CognitiveMemoryService if None.
-            chat_history_collection: PyMongo Collection instance (REQUIRED - must be from
-                                    MDB-Engine connection pool)
-            memory_collection: PyMongo Collection instance (REQUIRED if memory_service not provided
-                              - must be from MDB-Engine connection pool)
+            chat_history_collection: Motor AsyncIOMotorCollection instance (REQUIRED - must be from
+                                    MDB-Engine connection manager)
+            memory_collection: Motor AsyncIOMotorCollection instance (REQUIRED if memory_service not provided
+                              - must be from MDB-Engine connection manager)
             stm_context_limit: Number of recent messages to include in context
             ltm_search_limit: Number of relevant memories to retrieve from LTM
             auto_summarize_threshold: Number of messages before auto-summarization kicks in
-            llm_client: Optional LLM client (OpenAI, AzureOpenAI, or Gemini client)
-                       Will auto-detect provider type and create appropriate LLMProvider
-            llm_provider: Optional LLMProvider instance (takes precedence over llm_client)
-                         Use this for custom providers or explicit control
+            llm_service: LLM service with async ``chat_completion`` method
+                        (e.g. ``mdb_engine.llm.LLMService``)
             graph_service: Optional GraphService instance for GraphRAG functionality.
-                          If provided, enables knowledge graph traversal via $graphLookup.
-                          Use mdb_engine.graph.GraphService for standalone graph operations.
+            procedural_memory: Optional ProceduralMemory instance for skill retrieval
+                during chat.  Falls back to ``ltm._procedural_memory`` if not provided.
             enable_context_engineering: Enable Context Engineering features (default: True).
-                                       When enabled, integrates PersonaEngine, entity extraction,
-                                       and dynamic persona adaptation.
-            stm_raw_window: Number of recent STM messages to keep raw before summarizing
-                           (default: 5). Older messages are summarized to optimize tokens.
+            stm_raw_window: Number of recent STM messages to keep raw before summarizing (default: 5).
             enable_entity_extraction: Enable entity fact extraction from memories (default: True).
-                                     Extracts key-value facts like Name, OS, Language, Expertise.
-            enable_dynamic_persona: Enable dynamic persona adaptation based on user context
-                                   (default: True). Adjusts persona tone based on expertise,
-                                   emotion, and retrieved memories.
+            enable_dynamic_persona: Enable dynamic persona adaptation (default: True).
+            graph_min_hop_distance: Minimum hop distance for graph_context nodes (default: 2).
+            graph_min_edges: Minimum edges required for graph_context nodes (default: 1).
+            graph_deduplication_threshold: Similarity threshold for deduplication (default: 0.70).
+            graph_min_nodes: Minimum graph nodes required to include graph context (default: 2).
+            summary_staleness_threshold: New messages before re-summarizing STM (default: 10).
+            max_prompt_tokens: Optional token budget for system prompts. When set,
+                ``TokenBudget`` from ``core.prompt_safety`` truncates the lowest-priority
+                sections to stay within this limit. When ``None`` (default) prompts are
+                assembled without truncation.
         """
         if chat_history_collection is None:
             raise ValueError(
                 "chat_history_collection is REQUIRED. CognitiveEngine must use "
                 "MDB-Engine's connection pool. "
-                "Pass a PyMongo Collection instance obtained from "
+                "Pass a Motor AsyncIOMotorCollection obtained from "
                 "MDB-Engine's connection manager."
             )
+
+        # Fail fast if a synchronous collection or string was passed.
+        # A sync pymongo.Collection.create_index() returns a string, and
+        # ``await "string"`` raises TypeError at runtime -- catch it here.
+        if isinstance(chat_history_collection, str):
+            raise TypeError(
+                f"chat_history_collection must be an async Motor collection or "
+                f"ScopedCollectionWrapper, not a string ('{chat_history_collection}'). "
+                f"Use engine.get_scoped_db(slug) to get async collections."
+            )
+        try:
+            from pymongo.collection import Collection as SyncCollection
+
+            if isinstance(chat_history_collection, SyncCollection):
+                raise TypeError(
+                    "chat_history_collection must be an ASYNC Motor collection "
+                    "(AsyncIOMotorCollection) or ScopedCollectionWrapper, not a synchronous "
+                    "pymongo.Collection. Use engine.get_scoped_db(slug) to get async collections."
+                )
+        except ImportError:
+            pass
 
         self.app_slug = app_slug
         self.stm_context_limit = stm_context_limit
@@ -525,8 +160,18 @@ class CognitiveEngine:
         # Context Engineering configuration
         self.enable_context_engineering = enable_context_engineering
         self.stm_raw_window = stm_raw_window
+        self.summary_staleness_threshold = summary_staleness_threshold
         self.enable_entity_extraction = enable_entity_extraction
         self.enable_dynamic_persona = enable_dynamic_persona
+
+        # Token budget
+        self._max_prompt_tokens = max_prompt_tokens
+
+        # Graph filtering configuration (Phase 5)
+        self.graph_min_hop_distance = graph_min_hop_distance
+        self.graph_min_edges = graph_min_edges
+        self.graph_deduplication_threshold = graph_deduplication_threshold
+        self.graph_min_nodes = graph_min_nodes
 
         # Initialize Short-Term Memory
         self.stm = ChatHistoryService(collection=chat_history_collection)
@@ -546,7 +191,7 @@ class CognitiveEngine:
                 raise ValueError(
                     "memory_collection is REQUIRED when memory_service is not provided. "
                     "CognitiveEngine must use MDB-Engine's connection pool. "
-                    "Pass a PyMongo Collection instance obtained from "
+                    "Pass a Motor AsyncIOMotorCollection obtained from "
                     "MDB-Engine's connection manager."
                 )
             logger.info("Creating new CognitiveMemoryService using MDB-Engine connection")
@@ -560,433 +205,88 @@ class CognitiveEngine:
                 f"collection={getattr(self.ltm, 'collection_name', 'unknown')}"
             )
 
-        # Initialize LLM Provider
-        if llm_provider:
-            # Use provided provider
-            self.llm_provider = llm_provider
-            logger.info("✅ Using provided LLMProvider")
-        elif llm_client:
-            # Auto-detect provider type from client
-            self.llm_provider = self._create_provider_from_client(llm_client)
-            logger.info(f"✅ Auto-detected LLM provider: {type(self.llm_provider).__name__}")
+        # Initialize LLM Service (must expose async chat_completion)
+        if llm_service:
+            self.llm_service = llm_service
+            logger.info("Using provided LLMService")
         else:
-            # Try to get from memory service
-            memory_service_client = getattr(self.ltm, "llm_client", None)
-            if memory_service_client:
-                self.llm_provider = self._create_provider_from_client(memory_service_client)
-                logger.info(
-                    f"✅ Using LLM provider from memory service: {type(self.llm_provider).__name__}"
-                )
-            else:
-                self.llm_provider = None
-                logger.warning("⚠️ No LLM provider available. Fact extraction will be disabled.")
+            self.llm_service = None
+            logger.warning("No LLM service available. Fact extraction will be disabled.")
+
+        # Initialize Prospective Memory (if available on memory service)
+        self._prospective_memory = getattr(self.ltm, "_prospective_memory", None)
 
         # Store GraphService for GraphRAG functionality
         # Priority: explicit graph_service > memory service's _graph_service
         if graph_service:
             self._graph_service = graph_service
-            logger.info("✅ Using provided GraphService for GraphRAG")
+            logger.info("Using provided GraphService for GraphRAG")
         else:
             # Fall back to memory service's graph service
             self._graph_service = getattr(self.ltm, "_graph_service", None)
             if self._graph_service:
-                logger.info("✅ Using GraphService from memory service")
+                logger.info("Using GraphService from memory service")
             else:
                 logger.debug("GraphService not available - GraphRAG disabled")
 
-    def _create_provider_from_client(self, client) -> LLMProvider:
-        """
-        Auto-detect and create appropriate LLMProvider from client instance.
-
-        Args:
-            client: LLM client instance (OpenAI, AzureOpenAI, or Gemini)
-
-        Returns:
-            LLMProvider instance
-        """
-        client_type_str = str(type(client))
-
-        # Check for Gemini
-        if "genai" in client_type_str.lower() or "google" in client_type_str.lower():
-            return GeminiProvider(client)
-
-        # Check for OpenAI/AzureOpenAI
-        try:
-            from openai import AzureOpenAI, OpenAI
-
-            if isinstance(client, OpenAI | AzureOpenAI):
-                return OpenAIProvider(client)
-        except ImportError:
-            pass
-
-        # Default: assume OpenAI-compatible interface
-        logger.warning(f"⚠️ Unknown client type {client_type_str}, assuming OpenAI-compatible")
-        return OpenAIProvider(client)
-
-    def _extract_entity_facts(
-        self, user_id: str, relevant_memories: list[dict[str, Any]]
-    ) -> dict[str, str]:
-        """
-        Extract entity facts from retrieved memories.
-
-        Filters memories by category="biographical" and extracts key-value pairs
-        like Name, OS, Language, Expertise level, etc.
-
-        Args:
-            user_id: User identifier
-            relevant_memories: List of memory dicts from LTM search
-
-        Returns:
-            Dict of entity facts (e.g., {"Name": "Alice", "OS": "Ubuntu 22.04"})
-        """
-        if not self.enable_entity_extraction:
-            return {}
-
-        entity_facts = {}
-
-        # Extract from biographical category memories
-        for mem in relevant_memories:
-            category = mem.get("category", "")
-            memory_text = mem.get("memory", "") or mem.get("text", "")
-
-            if category == "biographical" and memory_text:
-                # Simple extraction patterns
-                memory_lower = memory_text.lower()
-
-                # Extract name patterns
-                if "name is" in memory_lower or "called" in memory_lower:
-                    # Try to extract name
-                    parts = memory_text.split()
-                    for i, part in enumerate(parts):
-                        if part.lower() in ["is", "called", "named"] and i + 1 < len(parts):
-                            name = parts[i + 1].strip(".,!?")
-                            if name and len(name) > 1:
-                                entity_facts["Name"] = name
-                                break
-
-                # Extract OS patterns
-                if "ubuntu" in memory_lower or "linux" in memory_lower:
-                    if "ubuntu" in memory_lower:
-                        entity_facts["OS"] = "Ubuntu"
-                    elif "linux" in memory_lower:
-                        entity_facts["OS"] = "Linux"
-                elif "windows" in memory_lower or "macos" in memory_lower or "mac" in memory_lower:
-                    if "windows" in memory_lower:
-                        entity_facts["OS"] = "Windows"
-                    elif "macos" in memory_lower or "mac" in memory_lower:
-                        entity_facts["OS"] = "macOS"
-
-                # Extract language patterns
-                if "python" in memory_lower:
-                    entity_facts["Language"] = "Python"
-                elif "javascript" in memory_lower or "typescript" in memory_lower:
-                    entity_facts["Language"] = "JavaScript/TypeScript"
-                elif "java" in memory_lower:
-                    entity_facts["Language"] = "Java"
-                elif "rust" in memory_lower:
-                    entity_facts["Language"] = "Rust"
-                elif "go" in memory_lower:
-                    entity_facts["Language"] = "Go"
-
-                # Extract expertise level
-                if any(
-                    word in memory_lower for word in ["expert", "senior", "experienced", "advanced"]
-                ):
-                    entity_facts["Expertise"] = "expert"
-                elif any(
-                    word in memory_lower
-                    for word in ["beginner", "learning", "new to", "just started"]
-                ):
-                    entity_facts["Expertise"] = "beginner"
-                elif any(
-                    word in memory_lower for word in ["intermediate", "moderate", "some experience"]
-                ):
-                    entity_facts["Expertise"] = "intermediate"
-
-        # Also check preferences category for preferences
-        for mem in relevant_memories:
-            category = mem.get("category", "")
-            memory_text = mem.get("memory", "") or mem.get("text", "")
-
-            if category == "preferences" and memory_text:
-                # Store preferences as entity facts
-                if "prefers" in memory_text.lower() or "likes" in memory_text.lower():
-                    # Extract preference
-                    if "dark mode" in memory_text.lower() or "dark theme" in memory_text.lower():
-                        entity_facts["UI_Preference"] = "dark mode"
-                    elif (
-                        "light mode" in memory_text.lower() or "light theme" in memory_text.lower()
-                    ):
-                        entity_facts["UI_Preference"] = "light mode"
-
-        return entity_facts
-
-    def _build_dynamic_persona(
-        self,
-        persona: dict[str, Any] | None,
-        entity_facts: dict[str, str],
-        relevant_memories: list[dict[str, Any]],
-    ) -> str:
-        """
-        Build dynamic persona instructions based on user context.
-
-        Analyzes entity facts and retrieved memories to generate dynamic
-        instructions that adapt the persona's behavior.
-
-        Args:
-            persona: Persona document from PersonaEngine (or None)
-            entity_facts: Extracted entity facts
-            relevant_memories: Retrieved memories from LTM
-
-        Returns:
-            Dynamic instruction string (empty if no adaptation needed)
-        """
-        if not self.enable_dynamic_persona:
-            return ""
-
-        instructions = []
-
-        # Expertise-based adaptation
-        expertise = entity_facts.get("Expertise", "").lower()
-        if expertise == "expert":
-            instructions.append(
-                "User is an expert. Be concise and technical. Skip basic explanations. "
-                "Assume advanced knowledge."
-            )
-        elif expertise == "beginner":
-            instructions.append(
-                "User is learning. Be educational and patient. Explain concepts clearly. "
-                "Provide examples and step-by-step guidance."
-            )
-        elif expertise == "intermediate":
-            instructions.append(
-                "User has moderate experience. Provide balanced explanations with some detail. "
-                "Assume foundational knowledge but explain advanced concepts."
-            )
-
-        # Emotion-based adaptation
-        high_emotion_count = 0
-        for mem in relevant_memories:
-            emotion = mem.get("emotion", 0.0)
-            if isinstance(emotion, int | float) and emotion > 0.7:
-                high_emotion_count += 1
-
-        if high_emotion_count >= 2:
-            instructions.append(
-                "User has shared emotionally significant information. Be empathetic and "
-                "acknowledge feelings. Show understanding and support."
-            )
-
-        # Trait-based adaptation (from persona)
-        if persona and persona.get("traits"):
-            traits = persona.get("traits", {})
-
-            # Adjust based on persona traits
-            if traits.get("humor", 0) > 0.6:
-                instructions.append(
-                    "Use appropriate humor when relevant. Be friendly and engaging."
-                )
-
-            if traits.get("formality", 0) > 0.7:
-                instructions.append("Maintain a professional and formal tone.")
-            elif traits.get("formality", 0) < 0.4:
-                instructions.append("Use a casual and conversational tone.")
-
-            if traits.get("empathy", 0) > 0.7:
-                instructions.append("Show high empathy and emotional intelligence.")
-
-            if traits.get("technical_focus", 0) > 0.7:
-                instructions.append("Focus on technical accuracy and precision.")
-
-        return " ".join(instructions) if instructions else ""
-
-    def _optimize_stm_context(
-        self,
-        stm_context: list[dict[str, str]],
-        session_id: str,
-        user_id: str,
-    ) -> tuple[list[dict[str, str]], str | None]:
-        """
-        Optimize STM context using sliding window + summary pattern.
-
-        Keeps the last N messages raw (immediate context) and summarizes
-        older messages to optimize token usage.
-
-        Args:
-            stm_context: Full STM context list
-            session_id: Session identifier
-            user_id: User identifier
-
-        Returns:
-            Tuple of (recent_messages, summary)
-            - recent_messages: Last N messages to keep raw
-            - summary: Summary of older messages (None if not needed)
-        """
-        if not self.enable_context_engineering or len(stm_context) <= self.stm_raw_window:
-            return (stm_context, None)
-
-        # Split into recent (raw) and older (to summarize)
-        recent_messages = stm_context[-self.stm_raw_window :]
-        older_messages = stm_context[: -self.stm_raw_window]
-
-        # For now, return recent messages and a simple summary placeholder
-        # Full summarization would require LLM call (can be async/background)
-        summary = f"Previous conversation context ({len(older_messages)} messages): "
-        summary += " ".join([msg.get("content", "")[:50] for msg in older_messages[:3]])
-        if len(older_messages) > 3:
-            summary += f" ... ({len(older_messages) - 3} more messages)"
-
-        return (recent_messages, summary)
-
-    def _format_persona_layer(self, persona: dict[str, Any] | None) -> str:
-        """
-        Format persona layer for system prompt.
-
-        Args:
-            persona: Persona document from PersonaEngine (or None)
-
-        Returns:
-            Formatted persona string (empty if no persona)
-        """
-        if not persona:
-            return ""
-
-        role = persona.get("role", "")
-        description = persona.get("description", "")
-        traits = persona.get("traits", {})
-
-        persona_text = f"[PERSONA LAYER]\n{role}\n{description}\n"
-
-        if traits:
-            trait_list = []
-            for trait_name, trait_value in traits.items():
-                if isinstance(trait_value, int | float):
-                    trait_list.append(f"{trait_name}: {trait_value:.1f}")
-                else:
-                    trait_list.append(f"{trait_name}: {trait_value}")
-
-            if trait_list:
-                persona_text += f"\nTraits: {', '.join(trait_list)}\n"
-
-        return persona_text
-
-    def _format_entity_memory(self, entity_facts: dict[str, str]) -> str:
-        """
-        Format entity facts as USER CONTEXT section.
-
-        Args:
-            entity_facts: Dict of entity facts
-
-        Returns:
-            Formatted entity memory string (empty if no facts)
-        """
-        if not entity_facts:
-            return ""
-
-        facts_list = [f"{k}: {v}" for k, v in entity_facts.items()]
-        return f"[USER CONTEXT]\nKnown Facts: {', '.join(facts_list)}\n\n"
-
-    def _format_memory_layer(self, ltm_context: str, graph_context: str) -> str:
-        """
-        Format LTM and Graph context sections.
-
-        Args:
-            ltm_context: Formatted LTM context string
-            graph_context: Formatted Graph context string
-
-        Returns:
-            Combined memory layer string
-        """
-        sections = []
-
-        if graph_context:
-            sections.append(f"[GRAPH CONTEXT]\n{graph_context}")
-
-        if ltm_context:
-            sections.append(f"[RELEVANT MEMORY]\n{ltm_context}")
-
-        return "\n\n".join(sections) if sections else ""
-
-    def _format_stm_layer(self, recent_messages: list[dict[str, str]], summary: str | None) -> str:
-        """
-        Format STM layer with optional summary.
-
-        Args:
-            recent_messages: Recent messages to include raw
-            summary: Optional summary of older messages
-
-        Returns:
-            Formatted STM layer string
-        """
-        sections = []
-
-        if summary:
-            sections.append(f"[PREVIOUS CONTEXT]\n{summary}\n")
-
-        if recent_messages:
-            sections.append("[CHAT HISTORY]")
-            # Messages will be added separately to messages list
-
-        return "\n".join(sections) if sections else ""
-
-    def _construct_context_engineered_prompt(
-        self,
-        persona: dict[str, Any] | None,
-        entity_facts: dict[str, str],
-        ltm_context: str,
-        graph_context: str,
-        dynamic_instructions: str,
-        stm_summary: str | None,
-    ) -> str:
-        """
-        Construct context-engineered system prompt.
-
-        Assembles all context layers according to Context Engineering principles:
-        Context = P_static + M_relevant + Q_current
-
-        Args:
-            persona: Persona document (P_static)
-            entity_facts: Extracted entity facts
-            ltm_context: Formatted LTM context
-            graph_context: Formatted Graph context
-            dynamic_instructions: Dynamic persona instructions
-            stm_summary: Summary of older STM messages
-
-        Returns:
-            Complete system prompt string
-        """
-        sections = []
-
-        # 1. Persona Layer (P_static)
-        persona_layer = self._format_persona_layer(persona)
-        if persona_layer:
-            sections.append(persona_layer)
-
-        # 2. Dynamic Instructions (META-INSTRUCTIONS)
-        if dynamic_instructions:
-            sections.append(f"[META-INSTRUCTIONS]\n{dynamic_instructions}\n")
-
-        # 3. Entity Memory (USER CONTEXT)
-        entity_layer = self._format_entity_memory(entity_facts)
-        if entity_layer:
-            sections.append(entity_layer)
-
-        # 4. Memory Layer (M_relevant: LTM + Graph)
-        memory_layer = self._format_memory_layer(ltm_context, graph_context)
-        if memory_layer:
-            sections.append(memory_layer)
-
-        # 5. STM Summary (PREVIOUS CONTEXT)
-        if stm_summary:
-            sections.append(f"[PREVIOUS CONTEXT]\n{stm_summary}\n")
-
-        # 6. Instructions for using context
-        sections.append(
-            "Use the Chat History to maintain conversation flow. "
-            "Use the context above to provide accurate and relevant responses."
+        # Store ProceduralMemory for skill retrieval during chat
+        # Priority: explicit procedural_memory > memory service's _procedural_memory
+        if procedural_memory:
+            self._procedural_memory: ProceduralMemoryProtocol | None = procedural_memory
+            logger.info("Using provided ProceduralMemory for skill retrieval")
+        else:
+            self._procedural_memory = getattr(self.ltm, "_procedural_memory", None)
+            if self._procedural_memory:
+                logger.info("Using ProceduralMemory from memory service")
+            else:
+                logger.debug("ProceduralMemory not available - skill retrieval disabled")
+
+        # Initialize Context Engineer (composed object for prompt construction)
+        self._context_engineer = ContextEngineer(
+            ltm=self.ltm,
+            stm=self.stm,
+            graph_service=self._graph_service,
+            embedding_service=getattr(self.ltm, "embedding_provider", None),
+            llm_service=self.llm_service,
+            config={
+                "enable_context_engineering": self.enable_context_engineering,
+                "stm_raw_window": self.stm_raw_window,
+                "enable_entity_extraction": self.enable_entity_extraction,
+                "enable_dynamic_persona": self.enable_dynamic_persona,
+                "graph_min_hop_distance": self.graph_min_hop_distance,
+                "graph_min_edges": self.graph_min_edges,
+                "graph_deduplication_threshold": self.graph_deduplication_threshold,
+                "graph_min_nodes": self.graph_min_nodes,
+                "summary_staleness_threshold": self.summary_staleness_threshold,
+            },
+            profile_service=getattr(self.ltm, "_profile_service", None),
         )
 
-        return "\n".join(sections)
+        # Wire neuroplasticity engine into context engineer for per-user trait overrides
+        neuroplasticity_engine = getattr(self.ltm, "_neuroplasticity_engine", None)
+        if neuroplasticity_engine:
+            self._context_engineer._neuroplasticity_engine = neuroplasticity_engine  # noqa: SLF001
+            logger.info("NeuroplasticityEngine wired into ContextEngineer")
+
+    @property
+    def graph_service(self) -> GraphServiceProtocol | None:
+        """
+        Public property to access the graph service.
+
+        Returns:
+            GraphService instance if available, None otherwise.
+        """
+        return self._graph_service
+
+    @property
+    def has_graph_service(self) -> bool:
+        """
+        Public property to check if graph service is available.
+
+        Returns:
+            True if graph service is available, False otherwise.
+        """
+        return self._graph_service is not None
 
     async def chat(
         self,
@@ -998,6 +298,8 @@ class CognitiveEngine:
         bucket_id: str | None = None,
         bucket_type: str | None = None,
         search_filters: dict[str, Any] | None = None,
+        search_strategy: str | None = None,
+        skill_feedback: dict[str, bool] | None = None,
         **kwargs,
     ) -> dict[str, Any]:
         """
@@ -1028,6 +330,18 @@ class CognitiveEngine:
                         Used in conjunction with bucket_id for memory organization.
             search_filters: Optional additional filters for LTM search.
                            Example: {"metadata": {"category": "work"}}
+            search_strategy: Optional GraphRAG search strategy override.
+                            When None or "auto", the query classifier decides which
+                            strategy to use (default behavior). When set to an explicit
+                            value, the classifier is bypassed entirely.
+                            Valid values: "local", "global", "drift", "basic", "auto".
+                            Use this for deterministic features ("Generate Report" always
+                            uses "global"), cost control (disable expensive strategies),
+                            or debugging (test specific strategies in isolation).
+            skill_feedback: Optional explicit feedback for skills used in the *previous*
+                           exchange.  Maps skill name to success boolean, e.g.
+                           ``{"Clear Cache Workflow": True}``.  When provided, updates
+                           ``ProceduralMemory.mark_procedure_used()`` for each entry.
             **kwargs: Additional arguments passed to LLM provider (e.g., model, temperature)
 
         Returns:
@@ -1037,6 +351,8 @@ class CognitiveEngine:
                 - ltm_memories (List[Dict]): Long-term memories retrieved and used
                 - graph_context (Dict|None): GraphRAG context with entry_nodes and graph_context
                                             (related nodes via $graphLookup traversal)
+                - skills_matched (List[Dict]): Procedural skills matched for this query.
+                                              Empty list if no skills available or matched.
                 - session_message_count (int): Number of messages in the session
                 - memories_stored (List[Dict]): New memories stored during this chat call.
                                               Empty list if extract_facts=False or no memories
@@ -1077,10 +393,145 @@ class CognitiveEngine:
             print(result["response"])  # AI response
             # [{"id": "...", "memory": "User loves chocolate", ...}]
             print(result["memories_stored"])
+
+            # Force a specific GraphRAG search strategy (bypass classifier)
+            result = await cognitive_engine.chat(
+                user_id="user123",
+                session_id="session456",
+                user_query="Generate a summary of all project risks",
+                search_strategy="global"  # Always use global map-reduce
+            )
             ```
         """
-        # --- Step 1: Ingest User Message (STM) ---
-        self.stm.add_message(
+        with create_span(
+            "chat_engine.chat",
+            {
+                "chat.user_id": user_id,
+                "chat.session_id": session_id,
+                "chat.extract_facts": extract_facts,
+            },
+        ) as parent_span:
+            # Phase 0: Validate & process skill feedback
+            self._validate_chat_inputs(user_id, session_id, user_query, bucket_id, search_strategy)
+            await self._process_skill_feedback(skill_feedback)
+
+            # Phase 1: Store user message in STM
+            with create_span("chat_engine.chat.save_to_stm"):
+                await self._store_user_message(session_id, user_id, user_query)
+
+            # Phase 2-3: Parallel context retrieval (LTM, STM, Graph, Skills, Triggers)
+            with create_span("chat_engine.chat.fetch_context"):
+                ltm, stm_ctx, stm_summary, graph, skills, triggers = await self._fetch_all_context(
+                    user_id,
+                    session_id,
+                    user_query,
+                    bucket_id,
+                    bucket_type,
+                    search_filters,
+                    search_strategy,
+                )
+
+            parent_span.set_attribute("chat.ltm_count", len(ltm) if ltm else 0)
+
+            # Phase 4: Format all context into prompt-ready strings
+            with create_span("chat_engine.chat.format_context"):
+                formatted = await self._format_context(ltm, stm_ctx, stm_summary, graph, skills, triggers, user_id)
+
+            # Phase 5: Construct system prompt
+            with create_span("chat_engine.chat.build_system_prompt"):
+                prompt_meta = await self._build_system_prompt(
+                    system_prompt,
+                    ltm,
+                    formatted,
+                    user_id,
+                    **kwargs,
+                )
+
+            # Phase 6: Generate LLM response
+            with create_span("chat_engine.chat.llm_generate"):
+                ai_response = await self._generate_response(
+                    prompt_meta["system_prompt"], formatted.stm_messages, **kwargs
+                )
+
+            # Phase 7: Save assistant response to STM
+            with create_span("chat_engine.chat.save_response"):
+                await self._store_assistant_response(session_id, user_id, ai_response)
+
+            # Phase 8: Extract & store facts in LTM
+            with create_span("chat_engine.chat.extract_facts"):
+                memories_stored = await self._extract_and_store_facts(
+                    extract_facts,
+                    user_id,
+                    session_id,
+                    user_query,
+                    bucket_id,
+                    bucket_type,
+                )
+
+            parent_span.set_attribute("chat.memories_stored", len(memories_stored) if memories_stored else 0)
+
+            # Phase 9: Build result dict
+            session_message_count = await self.stm.get_session_count(session_id, user_id)
+            if session_message_count > self.auto_summarize_threshold:
+                logger.info("Session %s has %d messages, considering summarization", session_id, session_message_count)
+
+            # Fetch neuroplasticity adaptations (async) before building sync result
+            adaptations = await self._fetch_active_adaptations(user_id)
+
+            return self._build_chat_result(
+                ai_response=ai_response,
+                stm_context=formatted.stm_messages,
+                relevant_memories=ltm,
+                graph_results=graph,
+                skills_results=skills,
+                session_message_count=session_message_count,
+                memories_stored=memories_stored,
+                prompt_meta=prompt_meta,
+                user_id=user_id,
+                adaptations=adaptations,
+            )
+
+    # ------------------------------------------------------------------
+    # chat() helper methods — one per phase
+    # ------------------------------------------------------------------
+
+    def _validate_chat_inputs(
+        self,
+        user_id: str,
+        session_id: str,
+        user_query: str,
+        bucket_id: str | None,
+        search_strategy: str | None,
+    ) -> None:
+        """Phase 0a: defence-in-depth input validation."""
+        validate_user_id(user_id)
+        validate_session_id(session_id)
+        validate_text_content(user_query, field_name="user_query")
+        if bucket_id is not None:
+            validate_identifier(bucket_id, "bucket_id")
+
+        from ..core.types import VALID_SEARCH_STRATEGIES
+
+        if search_strategy not in VALID_SEARCH_STRATEGIES:
+            raise ValueError(
+                f"Invalid search_strategy '{search_strategy}'. "
+                f"Must be one of: local, global, drift, basic, auto (or None)."
+            )
+
+    async def _process_skill_feedback(self, skill_feedback: dict[str, bool] | None) -> None:
+        """Phase 0b: record explicit skill feedback from the previous exchange."""
+        if not skill_feedback or not self._procedural_memory:
+            return
+        for skill_name, success in skill_feedback.items():
+            try:
+                await self._procedural_memory.mark_procedure_used(name=skill_name, success=success)
+                logger.info("[Skills] Feedback recorded: %s (%s)", skill_name, "success" if success else "failure")
+            except (ValueError, RuntimeError, AttributeError) as e:
+                logger.warning("[Skills] Failed to record feedback for %s: %s", skill_name, e)
+
+    async def _store_user_message(self, session_id: str, user_id: str, user_query: str) -> None:
+        """Phase 1: ingest the user message into STM."""
+        await self.stm.add_message(
             session_id=session_id,
             role="user",
             content=user_query,
@@ -1088,275 +539,491 @@ class CognitiveEngine:
             metadata={"source": "cognitive_engine"},
         )
 
-        # --- Step 2 & 3: Retrieve LTM and STM in PARALLEL ---
-        # These are independent operations, so we run them concurrently for ~2x speedup
-        ltm_collection = getattr(self.ltm, "collection_name", "unknown")
-        ltm_db = getattr(self.ltm, "db_name", "unknown")
-        ltm_id = id(self.ltm)
-        logger.info(
-            f"⚡ [CognitiveEngine] Parallel fetch: LTM (service_id={ltm_id}) + STM "
-            f"(user_id={user_id}, session_id={session_id})"
-        )
+    # -- parallel fetchers (used by _fetch_all_context) ------------------
 
-        async def _fetch_ltm():
-            """Fetch relevant memories from LTM with optional bucket filtering."""
-            try:
-                # Build filters for bucket-aware search
-                ltm_filters = dict(search_filters) if search_filters else {}
-
-                # Add bucket filter if provided (bucket awareness)
-                # Use associated_bucket_id to find BOTH:
-                # - Conversation memories (where associated_bucket_id = bucket_id)
-                # - File memories (where associated_bucket_id links to category bucket)
-                # This ensures file memories in a category bucket are included in search
-                if bucket_id:
-                    if "metadata" not in ltm_filters:
-                        ltm_filters["metadata"] = {}
-                    ltm_filters["metadata"]["associated_bucket_id"] = bucket_id
-                    logger.info(
-                        f"🪣 [CognitiveEngine] Bucket-aware search: "
-                        f"associated_bucket_id={bucket_id}, bucket_type={bucket_type}"
-                    )
-
-                return await asyncio.to_thread(
-                    self.ltm.search,
-                    query=user_query,
-                    user_id=user_id,
-                    limit=self.ltm_search_limit,
-                    filters=ltm_filters if ltm_filters else None,
-                )
-            except (ValueError, RuntimeError, AttributeError) as e:
-                logger.warning(
-                    f"⚠️ LTM search failed for query '{user_query}': {e}. "
-                    "Continuing without LTM context.",
-                    exc_info=True,
-                )
-                return []
-
-        async def _fetch_stm():
-            """Fetch chat context from STM."""
-            full_context = await asyncio.to_thread(
-                self.stm.get_context,
-                session_id=session_id,
-                limit=self.stm_context_limit,
-                user_id=user_id,
-            )
-            # Optimize STM context with sliding window + summary
-            if self.enable_context_engineering:
-                recent_messages, summary = self._optimize_stm_context(
-                    full_context, session_id, user_id
-                )
-                return recent_messages, summary
-            return full_context, None
-
-        async def _fetch_graph():
-            """Fetch graph context for GraphRAG."""
-            if not self._graph_service:
-                return None
-            try:
-                return await asyncio.to_thread(
-                    self._graph_service.hybrid_search,
-                    query=user_query,
-                    user_id=user_id,
-                    max_depth=2,
-                    vector_limit=3,
-                )
-            except (ValueError, RuntimeError, AttributeError) as e:
-                logger.warning(f"⚠️ Graph search failed: {e}")
-                return None
-
-        # Run all fetches in parallel (LTM, STM, and optionally Graph)
-        if self._graph_service:
-            results = await asyncio.gather(
-                _fetch_ltm(),
-                _fetch_stm(),
-                _fetch_graph(),
-            )
-            relevant_memories = results[0]
-            stm_result = results[1]
-            graph_results = results[2]
-        else:
-            results = await asyncio.gather(
-                _fetch_ltm(),
-                _fetch_stm(),
-            )
-            relevant_memories = results[0]
-            stm_result = results[1]
-            graph_results = None
-
-        # Unpack STM result (may be tuple if optimized)
-        if isinstance(stm_result, tuple):
-            stm_context, stm_summary = stm_result
-        else:
-            stm_context = stm_result
-            stm_summary = None
-
-        ltm_count = len(relevant_memories) if relevant_memories else 0
-        stm_count = len(stm_context) if stm_context else 0
-        graph_count = graph_results.get("total_nodes", 0) if graph_results else "disabled"
-        logger.info(
-            f"⚡ [Parallel Fetch] LTM: {ltm_count} memories, "
-            f"STM: {stm_count} messages, "
-            f"Graph: {graph_count}"
-        )
-        if relevant_memories:
-            for i, mem in enumerate(relevant_memories):
+    async def _fetch_ltm(
+        self,
+        user_query: str,
+        user_id: str,
+        bucket_id: str | None,
+        bucket_type: str | None,
+        search_filters: dict[str, Any] | None,
+    ) -> list[dict[str, Any]]:
+        """Fetch relevant memories from LTM with optional bucket filtering."""
+        try:
+            ltm_filters = dict(search_filters) if search_filters else {}
+            if bucket_id:
+                ltm_filters.setdefault("metadata", {})["associated_bucket_id"] = bucket_id
                 logger.info(
-                    f"  Memory {i+1}: {mem.get('memory', '')[:100]}... "
-                    f"(score: {mem.get('score', 'N/A')})"
+                    "[CognitiveEngine] Bucket-aware search: associated_bucket_id=%s, bucket_type=%s",
+                    bucket_id,
+                    bucket_type,
                 )
 
-        # Format LTM for the prompt
-        ltm_context = ""
-        if relevant_memories:
-            ltm_context = "RELEVANT FACTS FROM LONG-TERM MEMORY:\n"
-            for mem in relevant_memories:
+            # NO FALLBACK — if no results, that's explicit
+            results = await self.ltm.search(
+                query=user_query,
+                user_id=user_id,
+                limit=self.ltm_search_limit,
+                filters=ltm_filters if ltm_filters else None,
+            )
+
+            if not results and bucket_id:
+                logger.error(
+                    "[CognitiveEngine] NO MEMORIES FOUND with bucket filter. "
+                    "Search bucket_id='%s', filter=%s. "
+                    "Verify stored memories have metadata.associated_bucket_id='%s'",
+                    bucket_id,
+                    ltm_filters,
+                    bucket_id,
+                )
+            elif results:
+                logger.info("[CognitiveEngine] Found %d memories for bucket_id='%s'", len(results), bucket_id)
+
+            return results
+        except (ValueError, RuntimeError, AttributeError) as e:
+            logger.warning("LTM search failed: %s. Continuing without LTM context.", e, exc_info=True)
+            return []
+
+    async def _fetch_stm(
+        self,
+        session_id: str,
+        user_id: str,
+    ) -> tuple[list[dict[str, str]], str | None]:
+        """Fetch chat context from STM, optionally optimised with a sliding window."""
+        full_context = await self.stm.get_context(
+            session_id=session_id,
+            limit=self.stm_context_limit,
+            user_id=user_id,
+        )
+        if self.enable_context_engineering:
+            recent, summary = await self._context_engineer.optimize_stm_context(full_context, session_id, user_id)
+            return recent, summary
+        return full_context, None
+
+    async def _fetch_graph(
+        self,
+        user_query: str,
+        user_id: str,
+        search_strategy: str | None,
+    ) -> dict[str, Any] | None:
+        """Fetch graph context via GraphRAG query classification and routing."""
+        if not self._graph_service:
+            return None
+        try:
+            if search_strategy and search_strategy != "auto":
+                query_type = search_strategy
+                logger.info("[GraphRAG] Using explicit strategy: %s", query_type)
+            else:
+                query_type = self._graph_service.classify_query(user_query)
+                logger.info("[GraphRAG] Query classified as: %s", query_type)
+
+            search_fn = {
+                "osi_metric": lambda: self._graph_service.metric_search(query=user_query, user_id=user_id, max_depth=2),
+                "local": lambda: self._graph_service.local_search(query=user_query, user_id=user_id, max_depth=2),
+                "global": lambda: self._graph_service.global_search(
+                    query=user_query,
+                    user_id=user_id,
+                    max_communities=10,
+                ),
+                "drift": lambda: self._graph_service.drift_search(query=user_query, user_id=user_id, max_depth=2),
+            }
+            result = await search_fn.get(
+                query_type,
+                lambda: self._graph_service.hybrid_search(query=user_query, user_id=user_id, max_depth=2),
+            )()
+
+            if isinstance(result, dict):
+                result["search_strategy_used"] = query_type
+            return result
+        except (ValueError, RuntimeError, AttributeError) as e:
+            logger.warning("Graph search failed (non-fatal): %s. Continuing without graph context.", e, exc_info=True)
+            return None
+
+    async def _fetch_skills(self, user_query: str) -> list[dict[str, Any]]:
+        """Fetch relevant skills/procedures for the current query."""
+        if not self._procedural_memory:
+            return []
+        try:
+            procedures = await self._procedural_memory.search_procedures(task_description=user_query, limit=3)
+            if procedures:
+                logger.info("[Skills] Found %d relevant skills for query", len(procedures))
+            return procedures
+        except (ValueError, RuntimeError, AttributeError) as e:
+            logger.warning("Skill search failed (non-fatal): %s. Continuing without skill context.", e, exc_info=True)
+            return []
+
+    async def _check_prospective_triggers(self, user_query: str, user_id: str) -> list[dict[str, Any]]:
+        """Check if any prospective memory triggers should fire."""
+        if not self._prospective_memory:
+            return []
+        try:
+            fired = await self._prospective_memory.check_triggers(current_context=user_query, user_id=user_id)
+            for trigger in fired:
+                await self._prospective_memory.mark_triggered(trigger["trigger_id"])
+            return fired
+        except (PyMongoError, ConnectionError, TimeoutError, ValueError) as e:
+            logger.warning("Prospective trigger check failed: %s", e)
+            return []
+
+    # -- aggregated fetch ------------------------------------------------
+
+    async def _fetch_all_context(
+        self,
+        user_id: str,
+        session_id: str,
+        user_query: str,
+        bucket_id: str | None,
+        bucket_type: str | None,
+        search_filters: dict[str, Any] | None,
+        search_strategy: str | None,
+    ) -> tuple[
+        list[dict[str, Any]],  # LTM memories
+        list[dict[str, str]],  # STM messages
+        str | None,  # STM summary
+        dict[str, Any] | None,  # Graph results
+        list[dict[str, Any]],  # Skills
+        list[dict[str, Any]],  # Prospective triggers
+    ]:
+        """Phase 2-3: run all context fetches in parallel."""
+        logger.info(
+            "[CognitiveEngine] Parallel fetch: LTM (service_id=%d) + STM (user=%s, session=%s)",
+            id(self.ltm),
+            user_id,
+            session_id,
+        )
+
+        fetch_tasks: list[Any] = [
+            self._fetch_ltm(user_query, user_id, bucket_id, bucket_type, search_filters),
+            self._fetch_stm(session_id, user_id),
+        ]
+        if self._graph_service:
+            fetch_tasks.append(self._fetch_graph(user_query, user_id, search_strategy))
+        if self._procedural_memory:
+            fetch_tasks.append(self._fetch_skills(user_query))
+        if self._prospective_memory:
+            fetch_tasks.append(self._check_prospective_triggers(user_query, user_id))
+
+        results = await asyncio.gather(*fetch_tasks, return_exceptions=True)
+
+        # Log failures
+        for i, r in enumerate(results):
+            if isinstance(r, BaseException):
+                logger.error("Parallel fetch task %d failed: %s", i, r, exc_info=r)
+
+        # Unpack required results
+        ltm = results[0] if not isinstance(results[0], BaseException) else []
+        stm_raw = results[1] if not isinstance(results[1], BaseException) else ([], None)
+        stm_ctx, stm_summary = stm_raw if isinstance(stm_raw, tuple) else (stm_raw, None)
+
+        # Unpack optional results
+        idx = 2
+        graph: dict[str, Any] | None = None
+        skills: list[dict[str, Any]] = []
+        triggers: list[dict[str, Any]] = []
+        if self._graph_service:
+            raw = results[idx] if idx < len(results) else None
+            graph = raw if not isinstance(raw, BaseException) else None
+            idx += 1
+        if self._procedural_memory:
+            raw = results[idx] if idx < len(results) else []
+            skills = raw if not isinstance(raw, BaseException) else []
+            idx += 1
+        if self._prospective_memory:
+            raw = results[idx] if idx < len(results) else []
+            triggers = raw if not isinstance(raw, BaseException) else []
+
+        logger.info(
+            "[Parallel Fetch] LTM: %d memories, STM: %d messages, Graph: %s, Skills: %d",
+            len(ltm) if ltm else 0,
+            len(stm_ctx) if stm_ctx else 0,
+            graph.get("total_nodes", 0) if graph else "disabled",
+            len(skills),
+        )
+        return ltm, stm_ctx, stm_summary, graph, skills, triggers
+
+    # -- formatting ------------------------------------------------------
+
+    async def _format_context(
+        self,
+        ltm: list[dict[str, Any]],
+        stm_ctx: list[dict[str, str]],
+        stm_summary: str | None,
+        graph: dict[str, Any] | None,
+        skills: list[dict[str, Any]],
+        triggers: list[dict[str, Any]],
+        user_id: str,
+    ) -> _FormattedContext:
+        """Phase 4: format raw context into prompt-ready strings."""
+        # LTM
+        ltm_text = ""
+        if ltm:
+            ltm_text = "RELEVANT FACTS FROM LONG-TERM MEMORY:\n"
+            for mem in ltm:
                 memory_text = mem.get("memory", "")
                 if memory_text:
-                    ltm_context += f"- {memory_text}\n"
-            ltm_context += "\n"
-            logger.info(f"✅ Formatted LTM context with {len(relevant_memories)} memories")
-        else:
-            logger.warning(f"⚠️ No relevant memories found for query: '{user_query}'")
+                    ltm_text += f"- {memory_text}\n"
+            ltm_text += "\n"
 
-        # Format Graph context for GraphRAG
-        graph_context = ""
-        if graph_results and (
-            graph_results.get("entry_nodes") or graph_results.get("graph_context")
-        ):
-            if self._graph_service:
-                graph_context = self._graph_service.format_graph_context(
-                    graph_results,
-                    max_nodes=8,
-                    include_edges=True,
-                )
-                if graph_context:
-                    graph_context += "\n\n"
-                    graph_node_count = graph_results.get("total_nodes", 0)
-                    logger.info(f"✅ Formatted graph context with {graph_node_count} nodes")
+        # Prospective triggers
+        triggers_text = ""
+        if triggers:
+            triggers_text = "PROSPECTIVE MEMORY TRIGGERS (action reminders):\n"
+            for t in triggers:
+                action = t.get("action", "")
+                condition = t.get("condition", "")
+                if action:
+                    triggers_text += f"- REMINDER: {action} (triggered by: {condition})\n"
+            triggers_text += "\n"
+            logger.info("%d prospective triggers fired", len(triggers))
 
-        session_message_count = self.stm.get_session_count(session_id, user_id)
+        # Skills
+        from .procedural import ProceduralMemory
 
-        # --- Step 4: Check for Auto-Summarization ---
-        if session_message_count > self.auto_summarize_threshold:
-            logger.info(
-                f"Session {session_id} has {session_message_count} messages, "
-                f"considering summarization"
-            )
-            # This will be handled asynchronously to not block the response
+        skills_text = ProceduralMemory.format_for_prompt(skills) if skills else ""
 
-        # --- Step 5: Construct Context-Engineered System Prompt ---
-        persona_used = None
-        entity_facts = {}
-        dynamic_instructions = ""
+        # Graph (deduplicate + format)
+        graph_text = await self._format_graph_context(graph, ltm, user_id)
 
-        if not system_prompt:
-            if self.enable_context_engineering:
-                # Get Persona from PersonaEngine (if available)
-                persona_engine = getattr(self.ltm, "persona_engine", None)
-                if persona_engine:
-                    try:
-                        persona_used = persona_engine.get_persona()
-                        role = persona_used.get("role", "Unknown") if persona_used else "None"
-                        logger.info(f"✅ Retrieved persona: {role}")
-                    except (PyMongoError, AttributeError, TypeError) as e:
-                        logger.warning(f"⚠️ Failed to get persona: {e}")
-                        persona_used = None
-
-                # Extract entity facts
-                if self.enable_entity_extraction:
-                    entity_facts = self._extract_entity_facts(user_id, relevant_memories)
-                    if entity_facts:
-                        logger.info(
-                            f"✅ Extracted {len(entity_facts)} entity facts: "
-                            f"{list(entity_facts.keys())}"
-                        )
-
-                # Build dynamic persona instructions
-                if self.enable_dynamic_persona:
-                    dynamic_instructions = self._build_dynamic_persona(
-                        persona_used, entity_facts, relevant_memories
-                    )
-                    if dynamic_instructions:
-                        logger.info("✅ Generated dynamic persona instructions")
-
-                # Construct context-engineered prompt
-                system_prompt = self._construct_context_engineered_prompt(
-                    persona=persona_used,
-                    entity_facts=entity_facts,
-                    ltm_context=ltm_context,
-                    graph_context=graph_context,
-                    dynamic_instructions=dynamic_instructions,
-                    stm_summary=stm_summary,
-                )
-
-                logger.info(
-                    f"✅ Context-engineered system prompt constructed: "
-                    f"persona={'yes' if persona_used else 'no'}, "
-                    f"entities={len(entity_facts)}, "
-                    f"dynamic_instructions={'yes' if dynamic_instructions else 'no'}, "
-                    f"stm_summary={'yes' if stm_summary else 'no'}"
-                )
-            else:
-                # Fallback to original behavior
-                context_sections = []
-
-                if graph_context:
-                    context_sections.append(graph_context)
-
-                if ltm_context:
-                    context_sections.append(ltm_context)
-
-                if context_sections:
-                    system_prompt = (
-                        "You are a helpful AI assistant.\n"
-                        "Use the following context to answer if relevant.\n"
-                        "Use the Chat History to maintain conversation flow.\n\n"
-                        + "".join(context_sections)
-                    )
-                    logger.info(
-                        f"✅ System prompt includes {len(relevant_memories)} memories"
-                        + (
-                            f", {graph_results.get('total_nodes', 0)} graph nodes"
-                            if graph_results
-                            else ""
-                        )
-                    )
-                else:
-                    system_prompt = (
-                        "You are a helpful AI assistant.\n"
-                        "Use the Chat History to maintain conversation flow."
-                    )
-                    logger.warning(
-                        "⚠️ System prompt created WITHOUT memory context (no memories found)"
-                    )
-
-        # Prepare messages for LLM
-        messages = [{"role": "system", "content": system_prompt}]
-        messages.extend(stm_context)  # Append STM (includes the latest user query we just added)
-
-        logger.debug(
-            f"📝 Prepared {len(messages)} messages for LLM "
-            f"(1 system + {len(stm_context)} chat history)"
+        return _FormattedContext(
+            ltm_text=ltm_text,
+            graph_text=graph_text,
+            skills_text=skills_text,
+            triggers_text=triggers_text,
+            stm_messages=stm_ctx,
+            stm_summary=stm_summary,
         )
 
-        # --- Step 6: Generate Response ---
-        if not self.llm_provider:
-            raise CognitiveMemoryServiceError("No LLM provider available for chat generation")
+    async def _format_graph_context(
+        self,
+        graph_results: dict[str, Any] | None,
+        ltm: list[dict[str, Any]],
+        user_id: str,
+    ) -> str:
+        """Deduplicate graph nodes against LTM and format for the prompt."""
+        if not graph_results:
+            return ""
+        if not (
+            graph_results.get("entry_nodes") or graph_results.get("context_nodes") or graph_results.get("graph_context")
+        ):
+            return ""
 
-        # Get model from kwargs or use default
-        chat_model = kwargs.get("model", None)
+        # Normalise format
+        if "context_nodes" in graph_results and "graph_context" not in graph_results:
+            graph_results["graph_context"] = [{"node": n} for n in graph_results.get("context_nodes", [])]
 
-        # Generate response using LLM provider abstraction
-        def _generate_response():
-            return self.llm_provider.generate_chat_completion(
-                messages=messages, model=chat_model, **kwargs
+        graph_results = await self._context_engineer.deduplicate_graph_against_memories(
+            graph_results,
+            ltm,
+            similarity_threshold=self.graph_deduplication_threshold,
+            user_id=user_id,
+        )
+
+        context_nodes = graph_results.get("context_nodes", [])
+        if not context_nodes and graph_results.get("graph_context"):
+            context_nodes = [item.get("node", item) for item in graph_results.get("graph_context", [])]
+        entry_count = len(graph_results.get("entry_nodes", []))
+        total = len(context_nodes) + entry_count
+
+        if total < self.graph_min_nodes:
+            logger.debug("Skipping graph context - only %d nodes (minimum: %d)", total, self.graph_min_nodes)
+            return ""
+
+        if not self._graph_service:
+            return ""
+
+        graph_text = self._render_graph_text(graph_results, context_nodes, entry_count, total)
+        if graph_text:
+            graph_text += "\n\n"
+        return graph_text
+
+    def _render_graph_text(
+        self,
+        graph_results: dict[str, Any],
+        context_nodes: list[Any],
+        entry_count: int,
+        total: int,
+    ) -> str:
+        """Render graph results into a prompt string based on query type."""
+        query_type = graph_results.get("query_type")
+
+        # OSI Metric
+        if query_type == "osi_metric" and graph_results.get("metrics"):
+            text = "[GRAPH INSIGHTS - GOVERNED METRIC]\n"
+            for m in graph_results["metrics"]:
+                text += f"Metric: {m['name']}\n"
+                text += f"  Governed definition: {m.get('expression', 'N/A')}\n"
+                if m.get("description"):
+                    text += f"  Description: {m['description']}\n"
+                text += f"  Source model: {m.get('model', 'N/A')}\n"
+                synonyms = m.get("synonyms", [])
+                if synonyms:
+                    text += f"  Also known as: {', '.join(synonyms)}\n"
+            text += (
+                "\nNote: This is a governed metric definition from the OSI semantic layer. "
+                "Present the definition to the user and explain what it measures.\n"
             )
+            if graph_results.get("graph_context"):
+                text += "\n[RELATED KNOWLEDGE]\n"
+                text += self._graph_service.format_graph_context(graph_results, max_nodes=5, include_edges=True)
+            return text
 
-        ai_response = await asyncio.to_thread(_generate_response)
+        # Global Search
+        if graph_results.get("synthesized_answer"):
+            text = f"[GRAPH INSIGHTS - GLOBAL ANALYSIS]\n{graph_results['synthesized_answer']}\n"
+            comms = graph_results.get("communities", [])
+            if comms:
+                text += f"\nBased on {len(comms)} communities.\n"
+            return text
 
-        # --- Step 7: Save AI Response (STM) ---
-        self.stm.add_message(
+        # Local / DRIFT with community summaries
+        summaries = graph_results.get("community_summaries") or graph_results.get("community_context", [])
+        if summaries:
+            text = "[GRAPH INSIGHTS - COMMUNITY CONTEXT]\n"
+            for s in summaries[:5]:
+                cs = s.get("summary", "")
+                if cs:
+                    text += f"- {cs}\n"
+            text += "\n[GRAPH CONNECTIONS]\n"
+            text += self._graph_service.format_graph_context(graph_results, max_nodes=10, include_edges=True)
+            return text
+
+        # Advanced search (backward compatibility)
+        if graph_results.get("strategy"):
+            strategy = graph_results["strategy"]
+            raw_narrative = self._graph_service.format_graph_narrative(graph_results, max_nodes=8)
+            if raw_narrative:
+                heading = "PATHS FOUND" if strategy == "pathfinding" else "CONTEXT"
+                blurb = (
+                    "The system found direct connections between entities in the query."
+                    if strategy == "pathfinding"
+                    else "Network neighborhood around key concepts:"
+                )
+                return f"[GRAPH INSIGHTS - {heading}]\n{blurb}\n{raw_narrative}\n"
+            return ""
+
+        # Fallback
+        text = self._graph_service.format_graph_context(graph_results, max_nodes=8, include_edges=True)
+        if text:
+            logger.info(
+                "Formatted graph context (type: %s): %d entry, %d context (total: %d)",
+                query_type or "standard",
+                entry_count,
+                len(context_nodes),
+                total,
+            )
+        return text
+
+    # -- system prompt ---------------------------------------------------
+
+    async def _build_system_prompt(
+        self,
+        system_prompt_override: str | None,
+        ltm: list[dict[str, Any]],
+        formatted: _FormattedContext,
+        user_id: str,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Phase 5: construct or pass through the system prompt.
+
+        Returns a dict with ``system_prompt`` plus context-engineering metadata.
+        """
+        meta: dict[str, Any] = {
+            "persona_used": None,
+            "entity_facts": {},
+            "dynamic_instructions": "",
+            "system_prompt": "",
+        }
+
+        if system_prompt_override:
+            meta["system_prompt"] = system_prompt_override
+            return meta
+
+        ltm_context = formatted.ltm_text + formatted.triggers_text
+
+        if self.enable_context_engineering:
+            persona = await self._get_persona()
+            meta["persona_used"] = persona
+
+            entity_facts: dict[str, str] = {}
+            if self.enable_entity_extraction:
+                entity_facts = self._context_engineer.extract_entity_facts(user_id, ltm)
+            meta["entity_facts"] = entity_facts
+
+            dynamic_instructions = ""
+            if self.enable_dynamic_persona:
+                dynamic_instructions = await self._context_engineer.build_dynamic_persona(
+                    persona,
+                    entity_facts,
+                    ltm,
+                    user_id=user_id,
+                )
+            meta["dynamic_instructions"] = dynamic_instructions
+
+            meta["system_prompt"] = self._context_engineer.construct_context_engineered_prompt(
+                persona=persona,
+                entity_facts=entity_facts,
+                ltm_context=ltm_context,
+                graph_context=formatted.graph_text,
+                dynamic_instructions=dynamic_instructions,
+                stm_summary=formatted.stm_summary,
+                skills_context=formatted.skills_text,
+                max_prompt_tokens=self._max_prompt_tokens,
+                model=kwargs.get("model") or "gpt-4o",
+            )
+        else:
+            sections = [s for s in (formatted.skills_text, formatted.graph_text, ltm_context) if s]
+            if sections:
+                meta["system_prompt"] = (
+                    "You are a helpful AI assistant.\n"
+                    "Use the following context to answer if relevant.\n"
+                    "Use the Chat History to maintain conversation flow.\n\n" + "".join(sections)
+                )
+            else:
+                meta["system_prompt"] = (
+                    "You are a helpful AI assistant.\nUse the Chat History to maintain conversation flow."
+                )
+
+        return meta
+
+    async def _get_persona(self) -> dict[str, Any] | None:
+        """Retrieve the current persona from PersonaEngine, if available."""
+        persona_engine = getattr(self.ltm, "persona_engine", None)
+        if not persona_engine:
+            return None
+        try:
+            persona = await persona_engine.get_persona()
+            role = persona.get("role", "Unknown") if persona else "None"
+            logger.info("Retrieved persona: %s", role)
+            return persona
+        except (PyMongoError, AttributeError, TypeError) as e:
+            logger.warning("Failed to get persona: %s", e)
+            return None
+
+    # -- LLM call --------------------------------------------------------
+
+    async def _generate_response(
+        self,
+        system_prompt: str,
+        stm_context: list[dict[str, str]],
+        **kwargs: Any,
+    ) -> str:
+        """Phase 6: call the LLM with the assembled messages."""
+        if not self.llm_service:
+            raise CognitiveMemoryServiceError("No LLM service available for chat generation")
+
+        messages: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
+        messages.extend(stm_context)
+        logger.debug("Prepared %d messages for LLM (1 system + %d chat history)", len(messages), len(stm_context))
+
+        chat_model = kwargs.pop("model", None)
+        return await self.llm_service.chat_completion(messages=messages, model=chat_model, **kwargs)
+
+    # -- store response --------------------------------------------------
+
+    async def _store_assistant_response(self, session_id: str, user_id: str, ai_response: str) -> None:
+        """Phase 7: persist the assistant reply in STM."""
+        await self.stm.add_message(
             session_id=session_id,
             role="assistant",
             content=ai_response,
@@ -1364,104 +1031,118 @@ class CognitiveEngine:
             metadata={"source": "cognitive_engine"},
         )
 
-        # --- Step 8: Consolidate Memories (LTM) ---
-        # CRITICAL: We don't want to save "Hello" or "Thanks" to LTM.
-        # We use the existing 'add' method which has the LLM extraction logic built-in!
-        # We only run this on the USER'S input to extract facts about THEM.
-        # Use asyncio.to_thread for synchronous memory service methods
-        memories_stored = []  # Track stored memories for return value
-        logger.info(
-            f"💾 [CognitiveEngine] Step 8: extract_facts={extract_facts}, "
-            f"ltm service available: {self.ltm is not None}"
-        )
-        if extract_facts:
-            if not self.ltm:
-                logger.error(
-                    "❌ [CognitiveEngine] Cannot store memories: ltm (memory service) is None!"
-                )
-            else:
-                try:
-                    ltm_collection = getattr(self.ltm, "collection_name", "unknown")
-                    ltm_db = getattr(self.ltm, "db_name", "unknown")
-                    ltm_id = id(self.ltm)
+    # -- extract & store facts -------------------------------------------
 
-                    # Use provided bucket_id/bucket_type for bucket awareness,
-                    # otherwise fall back to session-based bucket
-                    storage_bucket_id = bucket_id if bucket_id else f"session:{session_id}"
-                    storage_bucket_type = bucket_type if bucket_type else "conversation"
+    async def _extract_and_store_facts(
+        self,
+        extract_facts: bool,
+        user_id: str,
+        session_id: str,
+        user_query: str,
+        bucket_id: str | None,
+        bucket_type: str | None,
+    ) -> list[dict[str, Any]]:
+        """Phase 8: extract facts from the user query and store in LTM."""
+        if not extract_facts:
+            logger.info("[CognitiveEngine] Skipping memory storage (extract_facts=False)")
+            return []
 
-                    # Build metadata with associated_bucket_id for unified search
-                    # associated_bucket_id allows finding both conversation and file memories
-                    # in the same bucket when searching
-                    storage_metadata = {
-                        "source": "chat_session",
-                        "session_id": session_id,
-                        "associated_bucket_id": storage_bucket_id,  # For unified bucket search
-                    }
+        if not self.ltm:
+            logger.error("[CognitiveEngine] Cannot store memories: ltm (memory service) is None!")
+            return []
 
-                    query_preview = user_query[:50]
-                    logger.info(
-                        f"💾 [CognitiveEngine] Storing memory (service_id={ltm_id}): "
-                        f"user_id={user_id}, query='{query_preview}...', "
-                        f"session_id={session_id}, bucket_id={storage_bucket_id}, "
-                        f"bucket_type={storage_bucket_type}, "
-                        f"collection={ltm_collection}, db={ltm_db}"
-                    )
-                    stored = await asyncio.to_thread(
-                        self.ltm.add,
-                        messages=user_query,
-                        user_id=user_id,
-                        metadata=storage_metadata,
-                        bucket_id=storage_bucket_id,
-                        bucket_type=storage_bucket_type,
-                    )
-                    logger.info(
-                        f"💾 [CognitiveEngine] Memory storage SUCCESS: "
-                        f"{len(stored) if stored else 0} memories stored "
-                        f"in collection={ltm_collection}, db={ltm_db}"
-                    )
-                    if stored:
-                        memories_stored = stored  # Store for return value
-                        for i, mem in enumerate(stored):
-                            logger.info(
-                                f"  Memory {i+1}: id={mem.get('id', 'unknown')}, "
-                                f"text='{mem.get('memory', '')[:50]}...'"
-                            )
-                    else:
-                        logger.warning(
-                            "⚠️ [CognitiveEngine] Storage returned empty list - "
-                            "no memories extracted!"
-                        )
-                except (
-                    PyMongoError,
-                    CognitiveMemoryServiceError,
-                    ValueError,
-                    TypeError,
-                    RuntimeError,
-                    ConnectionError,
-                    OSError,
-                ) as e:
-                    logger.error(
-                        f"❌ [CognitiveEngine] Failed to extract facts to LTM: {e}", exc_info=True
-                    )
-        else:
-            logger.info("💾 [CognitiveEngine] Skipping memory storage (extract_facts=False)")
+        try:
+            storage_bucket_id = bucket_id or f"session:{session_id}"
+            storage_bucket_type = bucket_type or "conversation"
+            storage_metadata = {
+                "source": "chat_session",
+                "session_id": session_id,
+                "associated_bucket_id": storage_bucket_id,
+            }
 
-        result = {
+            logger.info(
+                "[CognitiveEngine] Storing memory: user_id=%s, session=%s, bucket=%s",
+                user_id,
+                session_id,
+                storage_bucket_id,
+            )
+            stored = await self.ltm.add(
+                messages=user_query,
+                user_id=user_id,
+                metadata=storage_metadata,
+                bucket_id=storage_bucket_id,
+                bucket_type=storage_bucket_type,
+            )
+            logger.info("[CognitiveEngine] Memory storage SUCCESS: %d memories stored", len(stored) if stored else 0)
+            return stored if stored else []
+        except (
+            PyMongoError,
+            CognitiveMemoryServiceError,
+            ValueError,
+            TypeError,
+            RuntimeError,
+            ConnectionError,
+            OSError,
+        ) as e:
+            logger.error("[CognitiveEngine] Failed to extract facts to LTM: %s", e, exc_info=True)
+            return []
+
+    # -- neuroplasticity -------------------------------------------------
+
+    async def _fetch_active_adaptations(self, user_id: str) -> list[dict[str, Any]]:
+        """Fetch active neuroplasticity adaptations for the user."""
+        engine = getattr(self.ltm, "_neuroplasticity_engine", None)
+        if not engine:
+            return []
+        try:
+            active = await engine.get_active_adaptations(user_id)
+            return [{"type": a["type"], "key": a["key"], "value": a["value"]} for a in active]
+        except (AttributeError, RuntimeError, ValueError, TypeError) as e:
+            logger.debug("Could not fetch active adaptations: %s", e)
+            return []
+
+    # -- result assembly -------------------------------------------------
+
+    def _build_chat_result(
+        self,
+        *,
+        ai_response: str,
+        stm_context: list[dict[str, str]],
+        relevant_memories: list[dict[str, Any]],
+        graph_results: dict[str, Any] | None,
+        skills_results: list[dict[str, Any]],
+        session_message_count: int,
+        memories_stored: list[dict[str, Any]],
+        prompt_meta: dict[str, Any],
+        user_id: str,
+        adaptations: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Phase 9: assemble the final return dict."""
+        result: dict[str, Any] = {
             "response": ai_response,
             "stm_context": stm_context,
             "ltm_memories": relevant_memories,
-            "graph_context": graph_results,  # GraphRAG context (nodes and relationships)
+            "graph_context": graph_results,
+            "skills_matched": skills_results,
             "session_message_count": session_message_count,
-            "memories_stored": memories_stored,  # New memories stored during this chat
+            "memories_stored": memories_stored,
         }
 
-        # Add Context Engineering metadata if enabled
         if self.enable_context_engineering:
-            result["persona_used"] = persona_used
-            result["entity_facts"] = entity_facts
-            result["dynamic_instructions"] = dynamic_instructions
-            result["stm_summary"] = stm_summary
+            result["persona_used"] = prompt_meta.get("persona_used")
+            result["entity_facts"] = prompt_meta.get("entity_facts", {})
+            result["dynamic_instructions"] = prompt_meta.get("dynamic_instructions", "")
+            result["stm_summary"] = prompt_meta.get("stm_summary")
+
+        # Neuroplasticity metadata
+        if adaptations:
+            result["adaptations_active"] = adaptations
+        if relevant_memories and getattr(self.ltm, "_neuroplasticity_engine", None):
+            type_counts: dict[str, int] = {}
+            for mem in relevant_memories:
+                et = mem.get("emotion_type", "neutral")
+                type_counts[et] = type_counts.get(et, 0) + 1
+            result["emotion_types_matched"] = type_counts
 
         return result
 
@@ -1484,17 +1165,17 @@ class CognitiveEngine:
         Returns:
             Summary text if successful, None otherwise
         """
-        if not self.llm_client:
-            logger.warning("No LLM client available for summarization")
+        validate_user_id(user_id)
+        validate_session_id(session_id)
+
+        if not self.llm_service:
+            logger.warning("No LLM service available for summarization")
             return None
 
         # Get oldest messages
         query = {"session_id": session_id, "user_id": str(user_id)}
-        old_messages = list(
-            self.stm.collection.find(query)
-            .sort("created_at", ASCENDING)
-            .limit(messages_to_summarize)
-        )
+        cursor = self.stm.collection.find(query).sort("created_at", ASCENDING).limit(messages_to_summarize)
+        old_messages = await cursor.to_list(length=messages_to_summarize)
 
         if not old_messages:
             return None
@@ -1511,33 +1192,14 @@ class CognitiveEngine:
         )
 
         try:
-            # Detect if using Azure
-            chat_model = "gpt-4o"
+            # Generate summary using async LLM provider
+            summary = await self.llm_service.chat_completion(
+                messages=[{"role": "user", "content": summary_prompt}],
+                temperature=0.3,
+            )
 
-            def _generate_summary():
-                if isinstance(self.llm_client, type) and "Azure" in str(type(self.llm_client)):
-                    import os
-
-                    deployment_name = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", chat_model)
-                    return self.llm_client.chat.completions.create(
-                        model=deployment_name,
-                        messages=[{"role": "user", "content": summary_prompt}],
-                        temperature=0.3,
-                    )
-                else:
-                    return self.llm_client.chat.completions.create(
-                        model=chat_model,
-                        messages=[{"role": "user", "content": summary_prompt}],
-                        temperature=0.3,
-                    )
-
-            # Run LLM call in thread pool
-            response = await asyncio.to_thread(_generate_summary)
-            summary = response.choices[0].message.content
-
-            # Store summary in LTM (use asyncio.to_thread for synchronous method)
-            await asyncio.to_thread(
-                self.ltm.inject,
+            # Store summary in LTM
+            await self.ltm.inject(
                 memory=summary,
                 user_id=user_id,
                 metadata={
@@ -1551,7 +1213,7 @@ class CognitiveEngine:
 
             # Delete summarized messages from STM
             message_ids = [msg["_id"] for msg in old_messages]
-            self.stm.collection.delete_many({"_id": {"$in": message_ids}})
+            await self.stm.collection.delete_many({"_id": {"$in": message_ids}})
 
             logger.info(f"Summarized {len(old_messages)} messages from session {session_id}")
             return summary
@@ -1570,7 +1232,7 @@ class CognitiveEngine:
             logger.exception(f"Failed to summarize session {session_id}: {e}")
             return None
 
-    def get_full_context(
+    async def get_full_context(
         self,
         user_id: str,
         session_id: str,
@@ -1589,14 +1251,19 @@ class CognitiveEngine:
         Returns:
             Dict with stm_context and ltm_memories
         """
-        stm_context = self.stm.get_context(
+        validate_user_id(user_id)
+        validate_session_id(session_id)
+        if query is not None:
+            validate_text_content(query, field_name="query")
+
+        stm_context = await self.stm.get_context(
             session_id=session_id,
             limit=self.stm_context_limit,
             user_id=user_id,
         )
 
         search_query = query or f"session {session_id}"
-        ltm_memories = self.ltm.search(
+        ltm_memories = await self.ltm.search(
             query=search_query,
             user_id=user_id,
             limit=self.ltm_search_limit,
@@ -1610,7 +1277,7 @@ class CognitiveEngine:
             "user_id": user_id,
         }
 
-    def inject_thought(
+    async def inject_thought(
         self,
         user_id: str,
         thought: str,
@@ -1630,6 +1297,11 @@ class CognitiveEngine:
             visibility: Visibility level ("private", "shared", etc.)
             metadata: Additional metadata
         """
+        validate_user_id(user_id)
+        validate_text_content(thought, field_name="thought")
+        if session_id is not None:
+            validate_session_id(session_id)
+
         final_metadata = metadata or {}
         final_metadata.update(
             {
@@ -1640,10 +1312,15 @@ class CognitiveEngine:
         if session_id:
             final_metadata["session_id"] = session_id
 
-        self.ltm.inject(
+        await self.ltm.inject(
             memory=thought,
             user_id=user_id,
             metadata=final_metadata,
             bucket_type="thought",
         )
         logger.debug(f"Injected thought for user {user_id}")
+
+
+# Public alias — simpler name for the conversation orchestrator.
+# "CognitiveEngine" remains importable for backwards compatibility.
+ChatEngine = CognitiveEngine

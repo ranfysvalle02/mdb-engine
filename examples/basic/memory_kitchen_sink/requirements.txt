@@ -1,6 +1,9 @@
-# MDB-Engine Memory Kitchen Sink Example
-mdb-engine
+# Perfect Brain Demo Dependencies
+# Install mdb-engine from source (NOT published to PyPI):
+#   pip install -e "../../..[ai]"
+
 fastapi
 uvicorn[standard]
 python-dotenv
 pydantic
+voyageai

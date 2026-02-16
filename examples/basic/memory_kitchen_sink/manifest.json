@@ -1,30 +1,37 @@
 {
   "schema_version": "2.0",
-  "slug": "memory_kitchen_sink",
-  "name": "Memory Kitchen Sink - Memory + Graph Features Demo",
-  "description": "Demonstrates ALL MDB-Engine memory features using inject() plus graph/knowledge graph features - no CSFLE",
+  "slug": "perfect_brain",
+  "name": "Perfect Brain - Complete Cognitive Architecture Demo",
+  "description": "Demonstrates the FULL Perfect Brain: all memory tiers, cognitive features, GraphRAG, prospective memory, vetoes, shared memory, reflective/predictive memory, versioning, recall policies, and brain hygiene.",
   "status": "active",
 
   "memory_config": {
     "enabled": true,
     "provider": "cognitive",
     "collection_name": "memories",
-    "embedding_model": "text-embedding-3-small",
+    "embedding_model": "text-embedding-3-large",
     "chat_model": "gpt-4o",
-    "embedding_model_dims": 1536,
+    "embedding_model_dims": 3072,
     "infer": false,
     "async_mode": true,
     "enable_cognitive": true,
-    "max_depth": 100,
+    "max_depth": 200,
+
+    "similarity_threshold": 0.90,
+    "reinforcement_factor": 1.2,
+    "merge_threshold_low": 0.70,
+    "merge_threshold_high": 0.85,
+
+    "emotion_weight": 0.15,
+    "recency_weight": 0.10,
+    "recency_half_life_hours": 168,
+    "spreading_activation": true,
+    "activation_discount": 0.5,
+    "salience_gate": true,
+    "salience_threshold": 0.3,
 
     "cognitive": {
       "enabled": true,
-      "decay": {
-        "enabled": true,
-        "default_stability_hours": 48,
-        "min_stability": 0.1,
-        "use_server_side_pipeline": true
-      },
       "emotion": {
         "enabled": true,
         "flashbulb_threshold": 0.7,
@@ -36,32 +43,31 @@
       },
       "pruning": {
         "enabled": true,
-        "max_capacity": 100,
-        "prune_percentage": 0.1,
+        "max_capacity": 10000,
+        "prune_percentage": 0.05,
         "strategy": "soft_delete"
       },
       "cold_storage": {
         "enabled": true,
-        "retention_days": 365
-      }
-    },
-
-    "redaction": {
-      "enabled": true,
-      "replacement": "[REDACTED]",
-      "patterns": {
-        "ssn": true,
-        "credit_card": true,
-        "password": true,
-        "api_key": true,
-        "phone": false,
-        "email": false
+        "retention_days": 730
       }
     },
 
     "categories": {
       "enabled": true,
-      "custom_categories": ["biographical", "preferences", "work", "health", "finance", "travel", "hobbies"]
+      "custom_categories": [
+        "biographical", "preferences", "work", "health",
+        "finance", "travel", "hobbies", "relationships",
+        "goals", "skills"
+      ]
+    },
+
+    "memory_types": {
+      "enabled": true,
+      "auto_detect": true,
+      "default_type": "semantic",
+      "episodic_retention_days": 730,
+      "working_ttl_hours": 24
     },
 
     "reflection": {
@@ -72,32 +78,46 @@
       "store_reflections": true
     },
 
-    "entities": {
-      "enabled": true,
-      "auto_extract": true
+    "consolidation": {
+      "extract_entities": true,
+      "route_by_type": true,
+      "link_to_graph": true
     },
 
     "graph": {
       "enabled": true,
       "auto_extract": true
+    },
+
+    "persona": {
+      "name": "Atlas",
+      "role": "Cognitive memory companion with perfect recall",
+      "traits": ["precise", "empathetic", "proactive", "self-aware"],
+      "expertise": ["knowledge management", "pattern recognition", "relationship mapping"],
+      "communication_style": "warm but analytical"
     }
   },
 
   "graph_config": {
     "enabled": true,
-    "collection_name": "__kg",
+    "collection_name": "kg",
     "auto_extract": true,
-    "default_max_depth": 2,
+    "default_max_depth": 3,
     "vector_index_name": "graph_vector_index",
-    "embedding_dims": 1536,
-    "node_types": ["person", "interest", "event", "location", "organization", "product", "concept"]
+    "embedding_dims": 3072,
+    "node_types": [
+      "person", "organization", "location", "event",
+      "interest", "concept", "product", "skill",
+      "project", "goal"
+    ]
   },
 
   "llm_config": {
     "enabled": true,
-    "default_model": "openai/gpt-4o",
-    "temperature": 0.3,
-    "fallbacks": ["gpt-4o-mini"],
+    "providers": {
+      "chat": "openai/gpt-4o",
+      "extraction": "openai/gpt-4o-mini"
+    },
     "litellm_config": {
       "num_retries": 2,
       "request_timeout": 60
@@ -106,7 +126,7 @@
 
   "embedding_config": {
     "enabled": true,
-    "default_embedding_model": "text-embedding-3-small",
+    "default_embedding_model": "text-embedding-3-large",
     "max_tokens_per_chunk": 1000
   },
 

@@ -22,8 +22,10 @@ import logging
 import os
 import time
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
+
+from ..observability.tracing import create_span
 
 # Optional OpenAI SDK import
 try:
@@ -35,6 +37,15 @@ except ImportError:
     AsyncOpenAI = None
     AsyncAzureOpenAI = None
 
+# Optional LiteLLM import
+try:
+    import litellm
+
+    LITELLM_AVAILABLE = True
+except ImportError:
+    LITELLM_AVAILABLE = False
+    litellm = None  # type: ignore[assignment]
+
 # Optional dependencies
 try:
     from semantic_text_splitter import TextSplitter
@@ -44,10 +55,12 @@ except ImportError:
     SEMANTIC_SPLITTER_AVAILABLE = False
     TextSplitter = None
 
+from ..exceptions import MongoDBEngineError
+
 logger = logging.getLogger(__name__)
 
 
-class EmbeddingServiceError(Exception):
+class EmbeddingServiceError(MongoDBEngineError):
     """Base exception for embedding service failures."""
 
     pass
@@ -93,15 +106,11 @@ class OpenAIEmbeddingProvider(BaseEmbeddingProvider):
             default_model: Default embedding model (default: "text-embedding-3-small")
         """
         if not OPENAI_AVAILABLE:
-            raise EmbeddingServiceError(
-                "OpenAI SDK not available. Install with: pip install openai"
-            )
+            raise EmbeddingServiceError("OpenAI SDK not available. Install with: pip install openai")
 
         api_key = api_key or os.getenv("OPENAI_API_KEY")
         if not api_key:
-            raise EmbeddingServiceError(
-                "OpenAI API key not found. Set OPENAI_API_KEY environment variable."
-            )
+            raise EmbeddingServiceError("OpenAI API key not found. Set OPENAI_API_KEY environment variable.")
 
         self.client = AsyncOpenAI(api_key=api_key)
         self.default_model = default_model
@@ -162,9 +171,7 @@ class AzureOpenAIEmbeddingProvider(BaseEmbeddingProvider):
                 (default: "text-embedding-3-small")
         """
         if not OPENAI_AVAILABLE:
-            raise EmbeddingServiceError(
-                "OpenAI SDK not available. Install with: pip install openai"
-            )
+            raise EmbeddingServiceError("OpenAI SDK not available. Install with: pip install openai")
 
         api_key = api_key or os.getenv("AZURE_OPENAI_API_KEY")
         endpoint = endpoint or os.getenv("AZURE_OPENAI_ENDPOINT")
@@ -182,9 +189,7 @@ class AzureOpenAIEmbeddingProvider(BaseEmbeddingProvider):
             )
 
         # Use AsyncAzureOpenAI for Azure (not AsyncOpenAI with Azure params)
-        self.client = AsyncAzureOpenAI(
-            api_key=api_key, api_version=api_version, azure_endpoint=endpoint
-        )
+        self.client = AsyncAzureOpenAI(api_key=api_key, api_version=api_version, azure_endpoint=endpoint)
         self.default_model = default_model
 
     async def embed(self, text: str | list[str], model: str | None = None) -> list[list[float]]:
@@ -215,19 +220,103 @@ class AzureOpenAIEmbeddingProvider(BaseEmbeddingProvider):
             raise EmbeddingServiceError(f"Azure OpenAI embedding failed: {str(e)}") from e
 
 
+class LiteLLMEmbeddingProvider(BaseEmbeddingProvider):
+    """
+    LiteLLM embedding provider — supports 20+ embedding providers through a unified API.
+
+    LiteLLM routes to the correct provider based on the model string prefix:
+        - "text-embedding-3-small"          → OpenAI
+        - "cohere/embed-english-v3.0"       → Cohere
+        - "bedrock/amazon.titan-embed-text-v1" → AWS Bedrock
+        - "vertex_ai/textembedding-gecko"   → Google Vertex AI
+        - "huggingface/BAAI/bge-large-en"   → HuggingFace
+        - "voyage/voyage-02"                → Voyage AI
+        - "mistral/mistral-embed"           → Mistral
+
+    Requires ``pip install mdb-engine[ai]`` (litellm is included).
+    Provider-specific API keys must be set as environment variables
+    (e.g., ``OPENAI_API_KEY``, ``COHERE_API_KEY``).
+
+    See https://docs.litellm.ai/docs/embedding/supported_embedding for the full list.
+    """
+
+    def __init__(
+        self,
+        default_model: str = "text-embedding-3-small",
+        **litellm_kwargs: Any,
+    ):
+        """
+        Initialize LiteLLM embedding provider.
+
+        Args:
+            default_model: Default embedding model string. Use the LiteLLM model
+                format with a provider prefix (e.g., ``"cohere/embed-english-v3.0"``).
+                Defaults to ``"text-embedding-3-small"`` (OpenAI).
+            **litellm_kwargs: Additional keyword arguments passed to every
+                ``litellm.aembedding()`` call (e.g., ``api_key``, ``api_base``).
+        """
+        if not LITELLM_AVAILABLE:
+            raise EmbeddingServiceError("LiteLLM not available. Install with: pip install mdb-engine[ai]")
+        self.default_model = default_model
+        self._litellm_kwargs = litellm_kwargs
+
+    async def embed(self, text: str | list[str], model: str | None = None) -> list[list[float]]:
+        """Generate embeddings using LiteLLM (supports 20+ providers)."""
+        model = model or self.default_model
+
+        if isinstance(text, str):
+            text = [text]
+
+        try:
+            response = await litellm.aembedding(model=model, input=text, **self._litellm_kwargs)
+            vectors = [item["embedding"] for item in response.data]
+            return vectors
+        except (
+            ImportError,
+            AttributeError,
+            TypeError,
+            ValueError,
+            RuntimeError,
+            ConnectionError,
+            OSError,
+            KeyError,
+        ) as e:
+            logger.exception(f"LiteLLM embedding failed: {e}")
+            raise EmbeddingServiceError(f"LiteLLM embedding failed: {str(e)}") from e
+
+
 def _detect_provider_from_env() -> str:
     """
-    Detect provider from environment variables.
+    Detect embedding provider from environment variables.
+
+    Detection order:
+        1. Azure OpenAI — if ``AZURE_OPENAI_API_KEY`` **and** ``AZURE_OPENAI_ENDPOINT`` are set.
+        2. OpenAI — if ``OPENAI_API_KEY`` is set.
+        3. LiteLLM — if ``litellm`` is installed and *any* common provider key is set
+           (``COHERE_API_KEY``, ``VOYAGE_API_KEY``, ``MISTRAL_API_KEY``,
+           ``HF_TOKEN``, ``ANTHROPIC_API_KEY``, ``GEMINI_API_KEY``).
+        4. Falls back to ``"openai"`` (will fail at init if no key is present).
 
     Returns:
-        "azure" if Azure OpenAI credentials are present, otherwise "openai"
+        One of ``"azure"``, ``"openai"``, or ``"litellm"``.
     """
     if os.getenv("AZURE_OPENAI_API_KEY") and os.getenv("AZURE_OPENAI_ENDPOINT"):
         return "azure"
     elif os.getenv("OPENAI_API_KEY"):
         return "openai"
+    elif LITELLM_AVAILABLE and any(
+        os.getenv(k)
+        for k in (
+            "COHERE_API_KEY",
+            "VOYAGE_API_KEY",
+            "MISTRAL_API_KEY",
+            "HF_TOKEN",
+            "ANTHROPIC_API_KEY",
+            "GEMINI_API_KEY",
+        )
+    ):
+        return "litellm"
     else:
-        # Default to openai if nothing is configured
         return "openai"
 
 
@@ -235,8 +324,8 @@ class EmbeddingProvider:
     """
     Standalone embedding provider wrapper.
 
-    Auto-detects OpenAI or AzureOpenAI from environment variables.
-    Supports OpenAI and AzureOpenAI only.
+    Auto-detects OpenAI, AzureOpenAI, or LiteLLM from environment variables.
+    Supports OpenAI, AzureOpenAI, and LiteLLM (20+ providers).
 
     Example:
         # Auto-detects from environment variables
@@ -245,6 +334,12 @@ class EmbeddingProvider:
         # Or explicitly provide a provider
         from mdb_engine.embeddings import OpenAIEmbeddingProvider
         provider = EmbeddingProvider(embedding_provider=OpenAIEmbeddingProvider())
+
+        # Use LiteLLM for Cohere, Voyage, HuggingFace, etc.
+        from mdb_engine.embeddings import LiteLLMEmbeddingProvider
+        provider = EmbeddingProvider(
+            embedding_provider=LiteLLMEmbeddingProvider(default_model="cohere/embed-english-v3.0")
+        )
     """
 
     def __init__(
@@ -277,15 +372,49 @@ class EmbeddingProvider:
 
             if provider_type == "azure":
                 self.embedding_provider = AzureOpenAIEmbeddingProvider(default_model=default_model)
-                logger.info(
-                    f"Auto-detected Azure OpenAI embedding provider (model: {default_model})"
-                )
+                logger.info(f"Auto-detected Azure OpenAI embedding provider (model: {default_model})")
+            elif provider_type == "litellm":
+                self.embedding_provider = LiteLLMEmbeddingProvider(default_model=default_model)
+                logger.info(f"Auto-detected LiteLLM embedding provider (model: {default_model})")
             else:
                 self.embedding_provider = OpenAIEmbeddingProvider(default_model=default_model)
                 logger.info(f"Auto-detected OpenAI embedding provider (model: {default_model})")
 
         # Store config for potential future use
         self.config = config or {}
+
+        # --- Apply shared resilience (retry + backoff + circuit breaker) ---
+        try:
+            from ..core.resilience import (
+                circuit_breaker_from_config,
+                policy_from_config,
+                resilient,
+            )
+
+            resilience_cfg = self.config.get("resilience", {})
+            _policy = policy_from_config(
+                resilience_cfg,
+                name="embeddings",
+                default_retries=3,
+                default_backoff_base=0.5,
+                default_backoff_max=15.0,
+                default_timeout=30.0,
+                extra_retryable=(EmbeddingServiceError,),
+            )
+            self._circuit_breaker = circuit_breaker_from_config(
+                resilience_cfg,
+                name="embeddings",
+            )
+            _original_embed = self.embed
+
+            @resilient(_policy, circuit_breaker=self._circuit_breaker)
+            async def _resilient_embed(*args, **kwargs):
+                return await _original_embed(*args, **kwargs)
+
+            self.embed = _resilient_embed  # type: ignore[assignment]
+            logger.debug(f"Embedding resilience enabled: retries={_policy.max_retries}, " f"timeout={_policy.timeout}s")
+        except ImportError:
+            logger.debug("Resilience module not available; embedding calls will not be retried")
 
     async def embed(self, text: str | list[str], model: str | None = None) -> list[list[float]]:
         """
@@ -309,22 +438,33 @@ class EmbeddingProvider:
             ```
         """
         start_time = time.time()
+        item_count = 1 if isinstance(text, str) else len(text)
+        model_to_use = model or getattr(self, "model", "unknown")
 
-        try:
-            vectors = await self.embedding_provider.embed(text, model)
+        with create_span(
+            "gen_ai.embed",
+            {
+                "gen_ai.system": "embedding",
+                "gen_ai.request.model": str(model_to_use),
+                "embedding.input_count": item_count,
+            },
+        ) as span:
+            try:
+                vectors = await self.embedding_provider.embed(text, model)
 
-            duration = time.time() - start_time
-            item_count = 1 if isinstance(text, str) else len(text)
+                duration = time.time() - start_time
+                span.set_attribute("embedding.dimensions", len(vectors[0]) if vectors else 0)
 
-            logger.info(
-                "EMBED_SUCCESS",
-                extra={"count": item_count, "latency_sec": round(duration, 3)},
-            )
-            return vectors
+                logger.info(
+                    "EMBED_SUCCESS",
+                    extra={"count": item_count, "latency_sec": round(duration, 3)},
+                )
+                return vectors
 
-        except (AttributeError, TypeError, ValueError, RuntimeError, KeyError) as e:
-            logger.exception(f"EMBED_FAILED: {str(e)}")
-            raise EmbeddingServiceError(f"Embedding failed: {str(e)}") from e
+            except (AttributeError, TypeError, ValueError, RuntimeError, KeyError) as e:
+                span.set_attribute("error", True)
+                logger.exception(f"EMBED_FAILED: {str(e)}")
+                raise EmbeddingServiceError(f"Embedding failed: {str(e)}") from e
 
 
 class EmbeddingService:
@@ -377,8 +517,7 @@ class EmbeddingService:
         """
         if not SEMANTIC_SPLITTER_AVAILABLE:
             raise EmbeddingServiceError(
-                "semantic-text-splitter not available. Install with: "
-                "pip install semantic-text-splitter"
+                "semantic-text-splitter not available. Install with: " "pip install semantic-text-splitter"
             )
 
         # Create embedding provider if not provided
@@ -490,26 +629,6 @@ class EmbeddingService:
             logger.error(f"Error generating embeddings: {e}", exc_info=True)
             raise EmbeddingServiceError(f"Embedding generation failed: {str(e)}") from e
 
-    async def embed_chunks(self, chunks: list[str], model: str | None = None) -> list[list[float]]:
-        """
-        Generate embeddings for text chunks (list only).
-
-        DEPRECATED: Use embed() instead, which accepts both strings and lists.
-        This method is kept for backward compatibility.
-
-        Args:
-            chunks: List of text chunks to embed
-            model: Optional model identifier (passed to embedding provider)
-
-        Returns:
-            List of embedding vectors (each is a list of floats)
-
-        Example:
-            chunks = ["chunk 1", "chunk 2"]
-            vectors = await service.embed_chunks(chunks, model="text-embedding-3-small")
-        """
-        return await self.embed(chunks, model=model)
-
     async def process_and_store(
         self,
         text_content: str,
@@ -557,9 +676,7 @@ class EmbeddingService:
         logger.info(f"Processing source: {source_id}")
 
         # Step 1: Chunk the text
-        chunks = await self.chunk_text(
-            text_content, max_tokens=max_tokens, tokenizer_model=tokenizer_model
-        )
+        chunks = await self.chunk_text(text_content, max_tokens=max_tokens, tokenizer_model=tokenizer_model)
 
         if not chunks:
             logger.warning(f"No chunks generated for source: {source_id}")
@@ -571,7 +688,7 @@ class EmbeddingService:
 
         # Step 2: Generate embeddings (batch for efficiency)
         try:
-            vectors = await self.embed_chunks(chunks, model=embedding_model)
+            vectors = await self.embed(chunks, model=embedding_model)
         except (
             AttributeError,
             TypeError,
@@ -584,9 +701,7 @@ class EmbeddingService:
             raise EmbeddingServiceError(f"Embedding generation failed: {str(e)}") from e
 
         if len(vectors) != len(chunks):
-            raise EmbeddingServiceError(
-                f"Mismatch: {len(chunks)} chunks but {len(vectors)} embeddings"
-            )
+            raise EmbeddingServiceError(f"Mismatch: {len(chunks)} chunks but {len(vectors)} embeddings")
 
         # Step 3: Prepare documents for insertion
         documents_to_insert = []
@@ -599,7 +714,7 @@ class EmbeddingService:
                 "metadata": {
                     "model": embedding_model or "custom",
                     "token_count": len(chunk_text),  # Approximation
-                    "created_at": datetime.utcnow(),
+                    "created_at": datetime.now(timezone.utc),
                 },
             }
 
@@ -673,20 +788,16 @@ class EmbeddingService:
                 print(f"Chunk {result['chunk_index']}: {result['text'][:50]}...")
         """
         # Chunk the text
-        chunks = await self.chunk_text(
-            text_content, max_tokens=max_tokens, tokenizer_model=tokenizer_model
-        )
+        chunks = await self.chunk_text(text_content, max_tokens=max_tokens, tokenizer_model=tokenizer_model)
 
         if not chunks:
             return []
 
         # Generate embeddings
-        vectors = await self.embed_chunks(chunks, model=embedding_model)
+        vectors = await self.embed(chunks, model=embedding_model)
 
         if len(vectors) != len(chunks):
-            raise EmbeddingServiceError(
-                f"Mismatch: {len(chunks)} chunks but {len(vectors)} embeddings"
-            )
+            raise EmbeddingServiceError(f"Mismatch: {len(chunks)} chunks but {len(vectors)} embeddings")
 
         # Prepare results
         results = []
@@ -699,7 +810,7 @@ class EmbeddingService:
                     "metadata": {
                         "model": embedding_model or "custom",
                         "token_count": len(chunk_text),
-                        "created_at": datetime.utcnow(),
+                        "created_at": datetime.now(timezone.utc),
                     },
                 }
             )

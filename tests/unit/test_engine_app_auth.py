@@ -39,9 +39,7 @@ async def mongodb_engine_with_secrets(master_key, mock_mongo_client):
 class TestEngineAppAuthentication:
     """Test engine app authentication integration."""
 
-    async def test_register_app_generates_secret(
-        self, mongodb_engine_with_secrets, sample_manifest, master_key
-    ):
+    async def test_register_app_generates_secret(self, mongodb_engine_with_secrets, sample_manifest, master_key):
         """Test that register_app generates and stores secret."""
         engine = mongodb_engine_with_secrets
         await engine.initialize()
@@ -57,9 +55,7 @@ class TestEngineAppAuthentication:
         # Verify secret was stored
         assert secrets_collection.insert_one.called
 
-    async def test_register_app_stores_secret(
-        self, mongodb_engine_with_secrets, sample_manifest, master_key
-    ):
+    async def test_register_app_stores_secret(self, mongodb_engine_with_secrets, sample_manifest, master_key):
         """Test that secret is stored encrypted."""
         engine = mongodb_engine_with_secrets
         await engine.initialize()
@@ -99,9 +95,7 @@ class TestEngineAppAuthentication:
                 # (secret doesn't exist yet)
                 None,  # Second call: register_app -> store_app_secret
                 # -> find_one (check before insert)
-                {
-                    "_id": "test_app"
-                },  # Third call: get_scoped_db_async -> app_secret_exists (secret exists)
+                {"_id": "test_app"},  # Third call: get_scoped_db_async -> app_secret_exists (secret exists)
             ]
         )
         secrets_collection.insert_one = AsyncMock()
@@ -112,9 +106,7 @@ class TestEngineAppAuthentication:
         with pytest.raises(ValueError, match="App token required"):
             await engine.get_scoped_db_async("test_app")
 
-    async def test_get_scoped_db_valid_token(
-        self, mongodb_engine_with_secrets, sample_manifest, master_key
-    ):
+    async def test_get_scoped_db_valid_token(self, mongodb_engine_with_secrets, sample_manifest, master_key):
         """Test that get_scoped_db works with valid token."""
         engine = mongodb_engine_with_secrets
         await engine.initialize()
@@ -127,12 +119,10 @@ class TestEngineAppAuthentication:
 
         # In async context, verification is skipped, so this should work
         # The token will be verified at query time
-        db = engine.get_scoped_db("test_app", app_token=secret)
+        db = await engine.get_scoped_db("test_app", app_token=secret)
         assert db is not None
 
-    async def test_get_scoped_db_invalid_token(
-        self, mongodb_engine_with_secrets, sample_manifest, master_key
-    ):
+    async def test_get_scoped_db_invalid_token(self, mongodb_engine_with_secrets, sample_manifest, master_key):
         """Test that get_scoped_db rejects invalid token."""
         engine = mongodb_engine_with_secrets
         await engine.initialize()
@@ -143,9 +133,7 @@ class TestEngineAppAuthentication:
         with pytest.raises(ValueError, match="Invalid app token"):
             await engine.get_scoped_db_async("test_app", app_token="invalid_token")
 
-    async def test_get_scoped_db_uses_manifest_read_scopes(
-        self, mongodb_engine_with_secrets, master_key
-    ):
+    async def test_get_scoped_db_uses_manifest_read_scopes(self, mongodb_engine_with_secrets, master_key):
         """Test that get_scoped_db uses manifest read_scopes if not provided."""
         engine = mongodb_engine_with_secrets
         await engine.initialize()
@@ -164,14 +152,12 @@ class TestEngineAppAuthentication:
         secret = await engine._app_secrets_manager.get_app_secret("test_app")  # noqa: SLF001
 
         # In async context, verification is skipped but read_scopes are still used
-        engine.get_scoped_db("test_app", app_token=secret)
+        await engine.get_scoped_db("test_app", app_token=secret)
         # Verify read_scopes were set from manifest
         assert "test_app" in engine._app_read_scopes["test_app"]  # noqa: SLF001
         assert "other_app" in engine._app_read_scopes["test_app"]  # noqa: SLF001
 
-    async def test_get_scoped_db_validates_read_scopes(
-        self, mongodb_engine_with_secrets, master_key
-    ):
+    async def test_get_scoped_db_validates_read_scopes(self, mongodb_engine_with_secrets, master_key):
         """Test that get_scoped_db validates requested read_scopes."""
         engine = mongodb_engine_with_secrets
         await engine.initialize()
@@ -192,7 +178,7 @@ class TestEngineAppAuthentication:
         # Try to access unauthorized scope
         # In async context, token verification is skipped, but authorization is still checked
         with pytest.raises(ValueError, match="not authorized to read from"):
-            engine.get_scoped_db(
+            await engine.get_scoped_db(
                 "test_app",
                 app_token=secret,
                 read_scopes=["test_app", "unauthorized_app"],

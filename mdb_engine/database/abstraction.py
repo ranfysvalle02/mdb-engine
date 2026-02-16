@@ -88,9 +88,7 @@ class Collection:
         """
         self._collection = scoped_collection
 
-    async def find_one(
-        self, filter: dict[str, Any] | None = None, *args, **kwargs
-    ) -> dict[str, Any] | None:
+    async def find_one(self, filter: dict[str, Any] | None = None, *args, **kwargs) -> dict[str, Any] | None:
         """
         Find a single document matching the filter.
 
@@ -168,9 +166,7 @@ class Collection:
             return await self._collection.insert_one(document, *args, **kwargs)
         except (OperationFailure, AutoReconnect) as e:
             logger.exception("Database operation failed in insert_one")
-            raise MongoDBEngineError(
-                "Failed to insert document", context={"operation": "insert_one"}
-            ) from e
+            raise MongoDBEngineError("Failed to insert document", context={"operation": "insert_one"}) from e
         except (InvalidOperation, TypeError, ValueError, AttributeError) as e:
             logger.exception("Error in insert_one")
             raise MongoDBEngineError(
@@ -178,9 +174,7 @@ class Collection:
                 context={"operation": "insert_one"},
             ) from e
 
-    async def insert_many(
-        self, documents: list[dict[str, Any]], *args, **kwargs
-    ) -> InsertManyResult:
+    async def insert_many(self, documents: list[dict[str, Any]], *args, **kwargs) -> InsertManyResult:
         """
         Insert multiple documents at once.
 
@@ -213,9 +207,7 @@ class Collection:
                 context={"operation": "insert_many", "count": len(documents)},
             ) from e
 
-    async def update_one(
-        self, filter: dict[str, Any], update: dict[str, Any], *args, **kwargs
-    ) -> UpdateResult:
+    async def update_one(self, filter: dict[str, Any], update: dict[str, Any], *args, **kwargs) -> UpdateResult:
         """
         Update a single document matching the filter.
 
@@ -241,9 +233,7 @@ class Collection:
             return await self._collection.update_one(filter, update, *args, **kwargs)
         except (OperationFailure, AutoReconnect) as e:
             logger.exception("Database operation failed in update_one")
-            raise MongoDBEngineError(
-                "Failed to update document", context={"operation": "update_one"}
-            ) from e
+            raise MongoDBEngineError("Failed to update document", context={"operation": "update_one"}) from e
         except (InvalidOperation, TypeError, ValueError, AttributeError) as e:
             logger.exception("Error in update_one")
             raise MongoDBEngineError(
@@ -251,9 +241,7 @@ class Collection:
                 context={"operation": "update_one"},
             ) from e
 
-    async def update_many(
-        self, filter: dict[str, Any], update: dict[str, Any], *args, **kwargs
-    ) -> UpdateResult:
+    async def update_many(self, filter: dict[str, Any], update: dict[str, Any], *args, **kwargs) -> UpdateResult:
         """
         Update multiple documents matching the filter.
 
@@ -278,9 +266,7 @@ class Collection:
             return await self._collection.update_many(filter, update, *args, **kwargs)
         except (OperationFailure, AutoReconnect) as e:
             logger.exception("Database operation failed in update_many")
-            raise MongoDBEngineError(
-                "Failed to update documents", context={"operation": "update_many"}
-            ) from e
+            raise MongoDBEngineError("Failed to update documents", context={"operation": "update_many"}) from e
         except (InvalidOperation, TypeError, ValueError, AttributeError) as e:
             logger.exception("Error in update_many")
             raise MongoDBEngineError(
@@ -288,9 +274,7 @@ class Collection:
                 context={"operation": "update_many"},
             ) from e
 
-    async def replace_one(
-        self, filter: dict[str, Any], replacement: dict[str, Any], *args, **kwargs
-    ) -> UpdateResult:
+    async def replace_one(self, filter: dict[str, Any], replacement: dict[str, Any], *args, **kwargs) -> UpdateResult:
         """
         Replace a single document matching the filter.
 
@@ -332,11 +316,7 @@ class Collection:
                 # Create UpdateResult with proper structure
                 # modified_count = 1 if we deleted and inserted, 0 if we only inserted (upsert)
                 modified_count = 1 if delete_result.deleted_count > 0 else 0
-                upserted_id = (
-                    insert_result.inserted_id
-                    if upsert and delete_result.deleted_count == 0
-                    else None
-                )
+                upserted_id = insert_result.inserted_id if upsert and delete_result.deleted_count == 0 else None
 
                 # Create a proper UpdateResult
                 # UpdateResult expects raw_result dict with specific keys
@@ -353,14 +333,10 @@ class Collection:
                 # Document not found and upsert=False
                 from pymongo.results import UpdateResult
 
-                return UpdateResult(
-                    raw_result={"ok": 1.0, "n": 0, "nModified": 0}, acknowledged=True
-                )
+                return UpdateResult(raw_result={"ok": 1.0, "n": 0, "nModified": 0}, acknowledged=True)
         except (OperationFailure, AutoReconnect) as e:
             logger.exception("Database operation failed in replace_one")
-            raise MongoDBEngineError(
-                "Failed to replace document", context={"operation": "replace_one"}
-            ) from e
+            raise MongoDBEngineError("Failed to replace document", context={"operation": "replace_one"}) from e
         except (InvalidOperation, TypeError, ValueError, AttributeError) as e:
             logger.exception("Error in replace_one")
             raise MongoDBEngineError(
@@ -390,9 +366,7 @@ class Collection:
             return await self._collection.delete_one(filter, *args, **kwargs)
         except (OperationFailure, AutoReconnect) as e:
             logger.exception("Database operation failed in delete_one")
-            raise MongoDBEngineError(
-                "Failed to delete document", context={"operation": "delete_one"}
-            ) from e
+            raise MongoDBEngineError("Failed to delete document", context={"operation": "delete_one"}) from e
         except (InvalidOperation, TypeError, ValueError, AttributeError) as e:
             logger.exception("Error in delete_one")
             raise MongoDBEngineError(
@@ -400,9 +374,7 @@ class Collection:
                 context={"operation": "delete_one"},
             ) from e
 
-    async def delete_many(
-        self, filter: dict[str, Any] | None = None, *args, **kwargs
-    ) -> DeleteResult:
+    async def delete_many(self, filter: dict[str, Any] | None = None, *args, **kwargs) -> DeleteResult:
         """
         Delete multiple documents matching the filter.
 
@@ -423,9 +395,7 @@ class Collection:
             return await self._collection.delete_many(filter or {}, *args, **kwargs)
         except (OperationFailure, AutoReconnect) as e:
             logger.exception("Database operation failed in delete_many")
-            raise MongoDBEngineError(
-                "Failed to delete documents", context={"operation": "delete_many"}
-            ) from e
+            raise MongoDBEngineError("Failed to delete documents", context={"operation": "delete_many"}) from e
         except (InvalidOperation, TypeError, ValueError, AttributeError) as e:
             logger.exception("Error in delete_many")
             raise MongoDBEngineError(

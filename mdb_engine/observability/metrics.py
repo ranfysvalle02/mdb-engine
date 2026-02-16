@@ -11,7 +11,7 @@ import time
 from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -47,7 +47,7 @@ class OperationMetrics:
         self.max_duration_ms = max(self.max_duration_ms, duration_ms)
         if not success:
             self.error_count += 1
-        self.last_execution = datetime.now()
+        self.last_execution = datetime.now(timezone.utc)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert metrics to dictionary."""
@@ -55,9 +55,7 @@ class OperationMetrics:
             "operation": self.operation_name,
             "count": self.count,
             "avg_duration_ms": round(self.avg_duration_ms, 2),
-            "min_duration_ms": (
-                round(self.min_duration_ms, 2) if self.min_duration_ms != float("inf") else 0.0
-            ),
+            "min_duration_ms": (round(self.min_duration_ms, 2) if self.min_duration_ms != float("inf") else 0.0),
             "max_duration_ms": round(self.max_duration_ms, 2),
             "error_count": self.error_count,
             "error_rate_percent": round(self.error_rate, 2),
@@ -87,10 +85,26 @@ class MetricsCollector:
         self._metrics: OrderedDict[str, OperationMetrics] = OrderedDict()
         self._lock = threading.Lock()
         self._max_metrics = max_metrics
+        # Optional OpenTelemetry metric instruments
+        self._otel_meter: Any | None = None
+        self._otel_counters: dict[str, Any] = {}
+        self._otel_histograms: dict[str, Any] = {}
 
-    def record_operation(
-        self, operation_name: str, duration_ms: float, success: bool = True, **tags: Any
-    ) -> None:
+    def configure_otel(self, meter: Any) -> None:
+        """Attach an OpenTelemetry ``Meter`` for metric export.
+
+        When configured, every :meth:`record_operation` call will also
+        update OTel Counter and Histogram instruments, bridging the
+        in-memory metrics to any OTel-compatible backend (Prometheus,
+        OTLP, etc.).
+
+        Args:
+            meter: An ``opentelemetry.metrics.Meter`` instance.
+        """
+        self._otel_meter = meter
+        logger.info("MetricsCollector: OpenTelemetry meter bridge configured")
+
+    def record_operation(self, operation_name: str, duration_ms: float, success: bool = True, **tags: Any) -> None:
         """
         Record an operation execution.
 
@@ -122,6 +136,36 @@ class MetricsCollector:
 
             self._metrics[key].record(duration_ms, success)
 
+        # Bridge to OpenTelemetry metrics if configured
+        if self._otel_meter is not None:
+            otel_attrs = {"success": str(success)}
+            for tag_key, tag_value in tags.items():
+                otel_attrs[tag_key] = str(tag_value)
+
+            self._get_or_create_counter(operation_name).add(1, attributes=otel_attrs)
+            self._get_or_create_histogram(operation_name).record(duration_ms, attributes=otel_attrs)
+
+    def _get_or_create_counter(self, operation_name: str) -> Any:
+        """Return (or lazily create) an OTel Counter for *operation_name*."""
+        if operation_name not in self._otel_counters:
+            safe_name = operation_name.replace(".", "_")
+            self._otel_counters[operation_name] = self._otel_meter.create_counter(
+                name=f"mdb_engine.{safe_name}.count",
+                description=f"Number of {operation_name} executions",
+            )
+        return self._otel_counters[operation_name]
+
+    def _get_or_create_histogram(self, operation_name: str) -> Any:
+        """Return (or lazily create) an OTel Histogram for *operation_name*."""
+        if operation_name not in self._otel_histograms:
+            safe_name = operation_name.replace(".", "_")
+            self._otel_histograms[operation_name] = self._otel_meter.create_histogram(
+                name=f"mdb_engine.{safe_name}.duration_ms",
+                description=f"Duration of {operation_name} in milliseconds",
+                unit="ms",
+            )
+        return self._otel_histograms[operation_name]
+
     def get_metrics(self, operation_name: str | None = None) -> dict[str, Any]:
         """
         Get metrics for operations.
@@ -134,9 +178,7 @@ class MetricsCollector:
         """
         with self._lock:
             if operation_name:
-                metrics = {
-                    k: v.to_dict() for k, v in self._metrics.items() if k.startswith(operation_name)
-                }
+                metrics = {k: v.to_dict() for k, v in self._metrics.items() if k.startswith(operation_name)}
                 # Move accessed metrics to end (LRU)
                 for key in list(self._metrics.keys()):
                     if key.startswith(operation_name):
@@ -150,7 +192,7 @@ class MetricsCollector:
             total_operations = len(self._metrics)
 
         return {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "metrics": metrics,
             "total_operations": total_operations,
         }
@@ -165,7 +207,7 @@ class MetricsCollector:
         with self._lock:
             if not self._metrics:
                 return {
-                    "timestamp": datetime.now().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                     "total_operations": 0,
                     "summary": {},
                 }
@@ -184,9 +226,7 @@ class MetricsCollector:
                 agg.min_duration_ms = min(agg.min_duration_ms, metric.min_duration_ms)
                 agg.max_duration_ms = max(agg.max_duration_ms, metric.max_duration_ms)
                 agg.error_count += metric.error_count
-                if metric.last_execution and (
-                    not agg.last_execution or metric.last_execution > agg.last_execution
-                ):
+                if metric.last_execution and (not agg.last_execution or metric.last_execution > agg.last_execution):
                     agg.last_execution = metric.last_execution
 
             # Move all accessed metrics to end (LRU)
@@ -197,7 +237,7 @@ class MetricsCollector:
             summary = {name: m.to_dict() for name, m in aggregated.items()}
 
         return {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "total_operations": total_operations,
             "summary": summary,
         }
@@ -219,21 +259,27 @@ class MetricsCollector:
 
 # Global metrics collector instance
 _metrics_collector: MetricsCollector | None = None
+_metrics_lock = threading.Lock()
 
 
 def get_metrics_collector() -> MetricsCollector:
-    """Get or create the global metrics collector."""
+    """Get or create the global metrics collector (thread-safe)."""
     global _metrics_collector
-    if _metrics_collector is None:
-        _metrics_collector = MetricsCollector()
-    return _metrics_collector
+    if _metrics_collector is not None:  # Fast path
+        return _metrics_collector
+    with _metrics_lock:  # Double-check
+        if _metrics_collector is None:
+            _metrics_collector = MetricsCollector()
+        return _metrics_collector
 
 
-def record_operation(
-    operation_name: str, duration_ms: float, success: bool = True, **tags: Any
-) -> None:
+def record_operation(operation_name: str, duration_ms: float, success: bool = True, **tags: Any) -> None:
     """
     Record an operation in the global metrics collector.
+
+    When OpenTelemetry is available, also annotates the current span with
+    operation attributes so that every ``record_operation`` call site
+    automatically enriches the active trace.
 
     Args:
         operation_name: Name of the operation
@@ -244,19 +290,37 @@ def record_operation(
     collector = get_metrics_collector()
     collector.record_operation(operation_name, duration_ms, success, **tags)
 
+    # Annotate the active OTel span (if any)
+    from .tracing import otel_available
+
+    if otel_available():
+        from opentelemetry import trace
+
+        span = trace.get_current_span()
+        if span and span.is_recording():
+            span.set_attribute("operation.name", operation_name)
+            span.set_attribute("operation.duration_ms", round(duration_ms, 2))
+            span.set_attribute("operation.success", success)
+            for tag_key, tag_value in tags.items():
+                span.set_attribute(f"operation.{tag_key}", str(tag_value))
+
 
 def timed_operation(operation_name: str, **tags: Any):
     """
     Decorator to automatically time and record an operation.
 
-    Usage:
+    When OpenTelemetry is available the decorated call is also wrapped in a
+    span named *operation_name*.  Duration, success, tags, and any raised
+    exception are recorded as span attributes / events.
+
+    Usage::
+
         @timed_operation("engine.initialize")
         async def initialize(self):
             ...
     """
 
     # Common exceptions that indicate operation failure (not system-level exits)
-    # This is comprehensive to handle any decorated function's failures
     _OPERATION_FAILURES = (
         RuntimeError,
         ValueError,
@@ -285,34 +349,64 @@ def timed_operation(operation_name: str, **tags: Any):
         if hasattr(func, "__code__") and func.__code__.co_flags & 0x80:  # CO_COROUTINE
             # Async function
             async def async_wrapper(*args, **kwargs):
-                start_time = time.time()
-                success = True
-                try:
-                    result = await func(*args, **kwargs)
-                    return result
-                except _OPERATION_FAILURES:
-                    success = False
-                    raise
-                finally:
-                    duration_ms = (time.time() - start_time) * 1000
-                    record_operation(operation_name, duration_ms, success, **tags)
+                from .tracing import get_tracer, otel_available
+
+                tracer = get_tracer(__name__) if otel_available() else None
+                span_ctx = (
+                    tracer.start_as_current_span(operation_name) if tracer and otel_available() else _nullcontext()
+                )
+
+                with span_ctx as span:
+                    start_time = time.time()
+                    success = True
+                    try:
+                        result = await func(*args, **kwargs)
+                        return result
+                    except _OPERATION_FAILURES as exc:
+                        success = False
+                        if span and hasattr(span, "record_exception"):
+                            span.record_exception(exc)
+                        raise
+                    finally:
+                        duration_ms = (time.time() - start_time) * 1000
+                        record_operation(operation_name, duration_ms, success, **tags)
 
             return async_wrapper
         else:
             # Sync function
             def sync_wrapper(*args, **kwargs):
-                start_time = time.time()
-                success = True
-                try:
-                    result = func(*args, **kwargs)
-                    return result
-                except _OPERATION_FAILURES:
-                    success = False
-                    raise
-                finally:
-                    duration_ms = (time.time() - start_time) * 1000
-                    record_operation(operation_name, duration_ms, success, **tags)
+                from .tracing import get_tracer, otel_available
+
+                tracer = get_tracer(__name__) if otel_available() else None
+                span_ctx = (
+                    tracer.start_as_current_span(operation_name) if tracer and otel_available() else _nullcontext()
+                )
+
+                with span_ctx as span:
+                    start_time = time.time()
+                    success = True
+                    try:
+                        result = func(*args, **kwargs)
+                        return result
+                    except _OPERATION_FAILURES as exc:
+                        success = False
+                        if span and hasattr(span, "record_exception"):
+                            span.record_exception(exc)
+                        raise
+                    finally:
+                        duration_ms = (time.time() - start_time) * 1000
+                        record_operation(operation_name, duration_ms, success, **tags)
 
             return sync_wrapper
 
     return decorator
+
+
+class _nullcontext:
+    """Minimal context manager that yields ``None`` (Python 3.10 compat)."""
+
+    def __enter__(self) -> None:
+        return None
+
+    def __exit__(self, *args: Any) -> None:
+        pass

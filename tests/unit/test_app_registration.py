@@ -28,9 +28,7 @@ class TestAppRegistrationErrorHandling:
     """Test error handling in app registration."""
 
     @pytest.mark.asyncio
-    async def test_validate_manifest_exception_handling(
-        self, app_registration_manager, sample_manifest
-    ):
+    async def test_validate_manifest_exception_handling(self, app_registration_manager, sample_manifest):
         """Test handling exceptions during manifest validation."""
         # Mock validator to raise exception
         with patch.object(
@@ -42,9 +40,7 @@ class TestAppRegistrationErrorHandling:
                 await app_registration_manager.validate_manifest(sample_manifest)
 
     @pytest.mark.asyncio
-    async def test_register_app_callback_errors(
-        self, app_registration_manager, sample_manifest, mock_mongo_database
-    ):
+    async def test_register_app_callback_errors(self, app_registration_manager, sample_manifest, mock_mongo_database):
         """Test handling callback execution errors."""
         # Mock successful validation - validate is a sync method that returns a tuple
         with patch.object(
@@ -54,9 +50,7 @@ class TestAppRegistrationErrorHandling:
         ):
             # Mock database operations
             mock_collection = MagicMock()
-            mock_collection.replace_one = AsyncMock(
-                return_value=MagicMock(modified_count=1, upserted_id="test_id")
-            )
+            mock_collection.replace_one = AsyncMock(return_value=MagicMock(modified_count=1, upserted_id="test_id"))
             mock_mongo_database.__getitem__ = lambda name: mock_collection  # noqa: SLF001
             app_registration_manager.mongo_db = mock_mongo_database
             # Also need to set apps_config attribute
@@ -94,9 +88,7 @@ class TestAppRegistrationErrorHandling:
         ):
             mock_collection = MagicMock()
             # Test ConnectionFailure
-            mock_collection.replace_one = AsyncMock(
-                side_effect=ConnectionFailure("Connection failed")
-            )
+            mock_collection.replace_one = AsyncMock(side_effect=ConnectionFailure("Connection failed"))
             mock_mongo_database.__getitem__ = lambda name: mock_collection  # noqa: SLF001
             mock_mongo_database.apps_config = mock_collection
             app_registration_manager.mongo_db = mock_mongo_database
@@ -108,9 +100,7 @@ class TestAppRegistrationErrorHandling:
             assert sample_manifest["slug"] in app_registration_manager.apps
 
             # Test OperationFailure
-            mock_collection.replace_one = AsyncMock(
-                side_effect=OperationFailure("Operation failed")
-            )
+            mock_collection.replace_one = AsyncMock(side_effect=OperationFailure("Operation failed"))
             result = await app_registration_manager.register_app(sample_manifest)
             assert result is True
 
@@ -131,9 +121,7 @@ class TestAppRegistrationErrorHandling:
             return_value=(True, None, None),
         ):
             mock_collection = MagicMock()
-            mock_collection.replace_one = AsyncMock(
-                return_value=MagicMock(modified_count=1, upserted_id="test_id")
-            )
+            mock_collection.replace_one = AsyncMock(return_value=MagicMock(modified_count=1, upserted_id="test_id"))
             mock_mongo_database.__getitem__ = lambda name: mock_collection  # noqa: SLF001
             mock_mongo_database.apps_config = mock_collection
             app_registration_manager.mongo_db = mock_mongo_database
@@ -174,9 +162,7 @@ class TestAppRegistrationEdgeCases:
     """Test edge cases in app registration."""
 
     @pytest.mark.asyncio
-    async def test_register_app_with_callbacks(
-        self, app_registration_manager, sample_manifest, mock_mongo_database
-    ):
+    async def test_register_app_with_callbacks(self, app_registration_manager, sample_manifest, mock_mongo_database):
         """Test registering app with all callback types."""
         # Mock successful validation - validate is a sync method that returns a tuple
         with patch.object(
@@ -186,9 +172,7 @@ class TestAppRegistrationEdgeCases:
         ):
             # Mock database operations
             mock_collection = MagicMock()
-            mock_collection.replace_one = AsyncMock(
-                return_value=MagicMock(modified_count=1, upserted_id="test_id")
-            )
+            mock_collection.replace_one = AsyncMock(return_value=MagicMock(modified_count=1, upserted_id="test_id"))
             mock_mongo_database.__getitem__ = lambda name: mock_collection  # noqa: SLF001
             app_registration_manager.mongo_db = mock_mongo_database
             # Also need to set apps_config attribute
@@ -204,9 +188,7 @@ class TestAppRegistrationEdgeCases:
 
             manifest_with_all = {
                 **sample_manifest,
-                "managed_indexes": {
-                    "collection": [{"name": "idx", "type": "regular", "keys": [("field", 1)]}]
-                },
+                "managed_indexes": {"collection": [{"name": "idx", "type": "regular", "keys": [("field", 1)]}]},
                 "initial_data": {"collection": [{"field": "value"}]},
                 "memory_config": {"enabled": True},
                 "websockets": {"endpoint": {"path": "/ws"}},
@@ -231,9 +213,7 @@ class TestAppRegistrationEdgeCases:
             setup_observability_callback.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_register_app_callback_failures(
-        self, app_registration_manager, sample_manifest, mock_mongo_database
-    ):
+    async def test_register_app_callback_failures(self, app_registration_manager, sample_manifest, mock_mongo_database):
         """Test handling callback failures gracefully."""
         # Mock successful validation - validate is a sync method that returns a tuple
         with patch.object(
@@ -243,9 +223,7 @@ class TestAppRegistrationEdgeCases:
         ):
             # Mock database operations
             mock_collection = MagicMock()
-            mock_collection.replace_one = AsyncMock(
-                return_value=MagicMock(modified_count=1, upserted_id="test_id")
-            )
+            mock_collection.replace_one = AsyncMock(return_value=MagicMock(modified_count=1, upserted_id="test_id"))
             mock_mongo_database.__getitem__ = lambda name: mock_collection  # noqa: SLF001
             app_registration_manager.mongo_db = mock_mongo_database
             # Also need to set apps_config attribute
@@ -281,9 +259,7 @@ class TestAppRegistrationEdgeCases:
         ):
             # Mock database operations
             mock_collection = MagicMock()
-            mock_collection.replace_one = AsyncMock(
-                return_value=MagicMock(modified_count=1, upserted_id="test_id")
-            )
+            mock_collection.replace_one = AsyncMock(return_value=MagicMock(modified_count=1, upserted_id="test_id"))
             mock_mongo_database.__getitem__ = lambda name: mock_collection  # noqa: SLF001
             app_registration_manager.mongo_db = mock_mongo_database
             app_registration_manager._mongo_db = mock_mongo_database  # noqa: SLF001
@@ -310,9 +286,7 @@ class TestAppRegistrationEdgeCases:
 
             manifest_with_callbacks = {
                 **sample_manifest,
-                "managed_indexes": {
-                    "collection": [{"name": "idx", "type": "regular", "keys": [("field", 1)]}]
-                },
+                "managed_indexes": {"collection": [{"name": "idx", "type": "regular", "keys": [("field", 1)]}]},
                 "initial_data": {"collection": [{"field": "value"}]},
                 "memory_config": {"enabled": True},
             }
@@ -355,9 +329,7 @@ class TestAppRegistrationEdgeCases:
         ):
             # Mock database operations
             mock_collection = MagicMock()
-            mock_collection.replace_one = AsyncMock(
-                return_value=MagicMock(modified_count=1, upserted_id="test_id")
-            )
+            mock_collection.replace_one = AsyncMock(return_value=MagicMock(modified_count=1, upserted_id="test_id"))
             mock_mongo_database.__getitem__ = lambda name: mock_collection  # noqa: SLF001
             app_registration_manager.mongo_db = mock_mongo_database
             app_registration_manager._mongo_db = mock_mongo_database  # noqa: SLF001
@@ -377,9 +349,7 @@ class TestAppRegistrationEdgeCases:
 
             manifest_with_callbacks = {
                 **sample_manifest,
-                "managed_indexes": {
-                    "collection": [{"name": "idx", "type": "regular", "keys": [("field", 1)]}]
-                },
+                "managed_indexes": {"collection": [{"name": "idx", "type": "regular", "keys": [("field", 1)]}]},
                 "initial_data": {"collection": [{"field": "value"}]},
             }
 
@@ -410,9 +380,7 @@ class TestAppRegistrationEdgeCases:
         ):
             # Mock database operations
             mock_collection = MagicMock()
-            mock_collection.replace_one = AsyncMock(
-                return_value=MagicMock(modified_count=1, upserted_id="test_id")
-            )
+            mock_collection.replace_one = AsyncMock(return_value=MagicMock(modified_count=1, upserted_id="test_id"))
             mock_mongo_database.__getitem__ = lambda name: mock_collection  # noqa: SLF001
             app_registration_manager.mongo_db = mock_mongo_database
             app_registration_manager._mongo_db = mock_mongo_database  # noqa: SLF001
@@ -423,9 +391,7 @@ class TestAppRegistrationEdgeCases:
 
             manifest_with_callbacks = {
                 **sample_manifest,
-                "managed_indexes": {
-                    "collection": [{"name": "idx", "type": "regular", "keys": [("field", 1)]}]
-                },
+                "managed_indexes": {"collection": [{"name": "idx", "type": "regular", "keys": [("field", 1)]}]},
             }
 
             # Should not raise exception
@@ -466,9 +432,7 @@ class TestAppRegistrationEdgeCases:
         register_callback.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_reload_apps_with_errors(
-        self, app_registration_manager, mock_mongo_database, sample_manifest
-    ):
+    async def test_reload_apps_with_errors(self, app_registration_manager, mock_mongo_database, sample_manifest):
         """Test handling errors during app reload."""
         # Mock cursor with apps - find() returns cursor, then limit(), then to_list()
         # The code does: await self._mongo_db.apps_config.find(...).limit(500).to_list(None)
@@ -490,17 +454,15 @@ class TestAppRegistrationEdgeCases:
 
         failing_callback = AsyncMock(side_effect=OperationFailure("Registration failed"))
 
-        # Should handle MongoDB errors gracefully and return 0
-        # Note: reload_apps catches MongoDB exceptions and returns 0
+        # Should handle MongoDB errors gracefully and return -1
+        # Note: reload_apps catches MongoDB exceptions and returns -1 to indicate failure
         count = await app_registration_manager.reload_apps(register_app_callback=failing_callback)
 
-        # Should return 0 when MongoDB errors occur
-        assert count == 0
+        # Should return -1 when MongoDB errors occur (0 means "no apps to reload")
+        assert count == -1
 
     @pytest.mark.asyncio
-    async def test_reload_apps_success(
-        self, app_registration_manager, mock_mongo_database, sample_manifest
-    ):
+    async def test_reload_apps_success(self, app_registration_manager, mock_mongo_database, sample_manifest):
         """Test successful app reload."""
         # Mock cursor with apps - find() returns cursor, then limit(), then to_list()
         mock_cursor = MagicMock()
@@ -516,9 +478,7 @@ class TestAppRegistrationEdgeCases:
         app_registration_manager._mongo_db = mock_mongo_database  # noqa: SLF001
 
         # Mock successful validation
-        app_registration_manager.manifest_validator.validate = AsyncMock(
-            return_value=(True, None, None)
-        )
+        app_registration_manager.manifest_validator.validate = AsyncMock(return_value=(True, None, None))
 
         register_callback = AsyncMock(return_value=True)
 

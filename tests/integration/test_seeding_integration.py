@@ -34,8 +34,12 @@ class TestSeedingIntegration:
 
         await engine.register_app(manifest, create_indexes=False)
 
+        secret = None
+        if engine._app_secrets_manager:
+            secret = await engine._app_secrets_manager.get_app_secret("seeding_test")
+
         # Verify documents were seeded
-        scoped_db = engine.get_scoped_db("seeding_test")
+        scoped_db = await engine.get_scoped_db("seeding_test", app_token=secret)
         collection = scoped_db.documents
 
         docs = await collection.find({}).to_list(length=100)
@@ -65,7 +69,11 @@ class TestSeedingIntegration:
         # First registration
         await engine.register_app(manifest, create_indexes=False)
 
-        scoped_db = engine.get_scoped_db("idempotent_test")
+        secret = None
+        if engine._app_secrets_manager:
+            secret = await engine._app_secrets_manager.get_app_secret("idempotent_test")
+
+        scoped_db = await engine.get_scoped_db("idempotent_test", app_token=secret)
         collection = scoped_db.documents
 
         docs_after_first = await collection.find({}).to_list(length=100)
@@ -95,8 +103,12 @@ class TestSeedingIntegration:
 
         await engine.register_app(manifest, create_indexes=False)
 
+        secret = None
+        if engine._app_secrets_manager:
+            secret = await engine._app_secrets_manager.get_app_secret("metadata_test")
+
         # Check metadata collection
-        scoped_db = engine.get_scoped_db("metadata_test")
+        scoped_db = await engine.get_scoped_db("metadata_test", app_token=secret)
         metadata_collection = scoped_db.app_seeding_metadata
 
         metadata = await metadata_collection.find_one({"app_slug": "metadata_test"})
@@ -120,7 +132,11 @@ class TestSeedingIntegration:
 
         await engine.register_app(manifest, create_indexes=False)
 
-        scoped_db = engine.get_scoped_db("datetime_test")
+        secret = None
+        if engine._app_secrets_manager:
+            secret = await engine._app_secrets_manager.get_app_secret("datetime_test")
+
+        scoped_db = await engine.get_scoped_db("datetime_test", app_token=secret)
         collection = scoped_db.events
 
         docs = await collection.find({}).to_list(length=100)
@@ -137,7 +153,7 @@ class TestSeedingIntegration:
         engine = real_mongodb_engine
 
         # First, manually insert data into a collection
-        scoped_db = engine.get_scoped_db("prepopulated_test")
+        scoped_db = await engine.get_scoped_db("prepopulated_test")
         collection = scoped_db.prepopulated_collection
 
         await collection.insert_one({"existing": "data"})
@@ -178,7 +194,11 @@ class TestSeedingIntegration:
 
         await engine.register_app(manifest, create_indexes=False)
 
-        scoped_db = engine.get_scoped_db("multi_collection_test")
+        secret = None
+        if engine._app_secrets_manager:
+            secret = await engine._app_secrets_manager.get_app_secret("multi_collection_test")
+
+        scoped_db = await engine.get_scoped_db("multi_collection_test", app_token=secret)
 
         # Verify all collections were seeded
         users = await scoped_db.users.find({}).to_list(length=100)
@@ -208,7 +228,11 @@ class TestSeedingIntegration:
 
         await engine.register_app(manifest, create_indexes=False)
 
-        scoped_db = engine.get_scoped_db("created_at_test")
+        secret = None
+        if engine._app_secrets_manager:
+            secret = await engine._app_secrets_manager.get_app_secret("created_at_test")
+
+        scoped_db = await engine.get_scoped_db("created_at_test", app_token=secret)
         collection = scoped_db.items
 
         docs = await collection.find({}).to_list(length=100)

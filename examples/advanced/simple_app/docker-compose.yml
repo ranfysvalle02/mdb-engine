@@ -9,7 +9,6 @@ services:
     environment:
       - MONGODB_URI=mongodb://mongo:27017
       - MONGODB_DB=mdb_runtime
-      - ENABLE_RAY=false
     depends_on:
       mongo:
         condition: service_healthy

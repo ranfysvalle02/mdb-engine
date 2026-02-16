@@ -142,9 +142,7 @@ class TestIndexManager:
             "mdb_engine.core.manifest.validate_managed_indexes",
             return_value=(True, None),
         ):
-            with patch(
-                "mdb_engine.core.index_management.run_index_creation_for_collection"
-            ) as mock_create:
+            with patch("mdb_engine.core.index_management.run_index_creation_for_collection") as mock_create:
                 mock_create.return_value = AsyncMock()
                 await manager.create_app_indexes("test_app", sample_manifest)
 
@@ -160,18 +158,14 @@ class TestIndexManager:
             "mdb_engine.core.manifest.validate_managed_indexes",
             return_value=(True, None),
         ):
-            with patch(
-                "mdb_engine.core.index_management.run_index_creation_for_collection"
-            ) as mock_create:
+            with patch("mdb_engine.core.index_management.run_index_creation_for_collection") as mock_create:
                 mock_create.side_effect = OperationFailure("Index creation failed")
 
                 with pytest.raises(OperationFailure):
                     await manager.create_app_indexes("test_app", sample_manifest)
 
     @pytest.mark.asyncio
-    async def test_create_app_indexes_connection_failure(
-        self, mock_mongo_database, sample_manifest
-    ):
+    async def test_create_app_indexes_connection_failure(self, mock_mongo_database, sample_manifest):
         """Test handling ConnectionFailure during index creation."""
         manager = IndexManager(mock_mongo_database)
 
@@ -179,9 +173,7 @@ class TestIndexManager:
             "mdb_engine.core.manifest.validate_managed_indexes",
             return_value=(True, None),
         ):
-            with patch(
-                "mdb_engine.core.index_management.run_index_creation_for_collection"
-            ) as mock_create:
+            with patch("mdb_engine.core.index_management.run_index_creation_for_collection") as mock_create:
                 mock_create.side_effect = ConnectionFailure("Connection failed")
 
                 with pytest.raises(ConnectionFailure):
@@ -196,9 +188,7 @@ class TestIndexManager:
             "mdb_engine.core.manifest.validate_managed_indexes",
             return_value=(True, None),
         ):
-            with patch(
-                "mdb_engine.core.index_management.run_index_creation_for_collection"
-            ) as mock_create:
+            with patch("mdb_engine.core.index_management.run_index_creation_for_collection") as mock_create:
                 mock_create.side_effect = ServerSelectionTimeoutError("Timeout")
 
                 with pytest.raises(ServerSelectionTimeoutError):
@@ -213,9 +203,7 @@ class TestIndexManager:
             "mdb_engine.core.manifest.validate_managed_indexes",
             return_value=(True, None),
         ):
-            with patch(
-                "mdb_engine.core.index_management.run_index_creation_for_collection"
-            ) as mock_create:
+            with patch("mdb_engine.core.index_management.run_index_creation_for_collection") as mock_create:
                 mock_create.side_effect = InvalidOperation("Invalid operation")
 
                 with pytest.raises(InvalidOperation):
@@ -230,9 +218,7 @@ class TestIndexManager:
             "mdb_engine.core.manifest.validate_managed_indexes",
             return_value=(True, None),
         ):
-            with patch(
-                "mdb_engine.core.index_management.run_index_creation_for_collection"
-            ) as mock_create:
+            with patch("mdb_engine.core.index_management.run_index_creation_for_collection") as mock_create:
                 mock_create.side_effect = ValueError("Invalid value")
 
                 with pytest.raises(ValueError):
@@ -247,9 +233,7 @@ class TestIndexManager:
             "mdb_engine.core.manifest.validate_managed_indexes",
             return_value=(True, None),
         ):
-            with patch(
-                "mdb_engine.core.index_management.run_index_creation_for_collection"
-            ) as mock_create:
+            with patch("mdb_engine.core.index_management.run_index_creation_for_collection") as mock_create:
                 mock_create.side_effect = TypeError("Invalid type")
 
                 with pytest.raises(TypeError):

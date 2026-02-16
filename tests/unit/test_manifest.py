@@ -58,28 +58,28 @@ class TestManifestSchemaVersion:
         assert migrated["name"] == "Test"
 
 
+@pytest.mark.asyncio
 class TestManifestValidator:
     """Test ManifestValidator class."""
 
-    def test_validate_valid_manifest(self, sample_manifest):
+    async def test_validate_valid_manifest(self, sample_manifest):
         """Test validation of valid manifest."""
         validator = ManifestValidator()
-        is_valid, error, paths = validator.validate(sample_manifest)
+        is_valid, error, paths = await validator.validate(sample_manifest)
 
         assert is_valid is True
         assert error is None
         assert paths is None
 
-    def test_validate_invalid_manifest(self, invalid_manifest):
+    async def test_validate_invalid_manifest(self, invalid_manifest):
         """Test validation of invalid manifest."""
         validator = ManifestValidator()
-        is_valid, error, paths = validator.validate(invalid_manifest)
+        is_valid, error, paths = await validator.validate(invalid_manifest)
 
         assert is_valid is False
         assert error is not None
         assert paths is not None
 
-    @pytest.mark.asyncio
     async def test_validate_async(self, sample_manifest):
         """Test async validation."""
         validator = ManifestValidator()
@@ -89,10 +89,10 @@ class TestManifestValidator:
         assert error is None
         assert paths is None
 
-    def test_validate_v1_manifest(self, sample_manifest_v1):
+    async def test_validate_v1_manifest(self, sample_manifest_v1):
         """Test validation of v1.0 manifest."""
         validator = ManifestValidator()
-        is_valid, error, paths = validator.validate(sample_manifest_v1)
+        is_valid, error, paths = await validator.validate(sample_manifest_v1)
 
         assert is_valid is True
 
@@ -229,9 +229,7 @@ class TestIndexDefinitionValidation:
         index_def = {
             "name": "vector_index",
             "type": "vectorSearch",
-            "definition": {
-                "fields": [{"type": "vector", "path": "embedding", "numDimensions": 128}]
-            },
+            "definition": {"fields": [{"type": "vector", "path": "embedding", "numDimensions": 128}]},
         }
 
         is_valid, error = validate_index_definition(index_def, "test_collection", "vector_index")
@@ -247,9 +245,7 @@ class TestIndexDefinitionValidation:
 
     def test_validate_managed_indexes_valid(self):
         """Test validation of valid managed indexes."""
-        managed_indexes = {
-            "test_collection": [{"name": "test_index", "type": "regular", "keys": [("field1", 1)]}]
-        }
+        managed_indexes = {"test_collection": [{"name": "test_index", "type": "regular", "keys": [("field1", 1)]}]}
 
         is_valid, error = validate_managed_indexes(managed_indexes)
         assert is_valid is True

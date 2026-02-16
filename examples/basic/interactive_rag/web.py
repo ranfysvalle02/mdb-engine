@@ -700,14 +700,14 @@ async def _direct_rag_chat(
 
     # Step 1: Generate query embedding
     # EmbeddingService handles model selection and API calls
-    query_vector = await embedding_service.embed_chunks(
+    query_vector = await embedding_service.embed(
         [request.query], model=request.embedding_model
     )
 
     if not query_vector or len(query_vector) == 0:
         raise HTTPException(
             status_code=500,
-            detail="Failed to generate query embedding: embed_chunks returned empty result",
+            detail="Failed to generate query embedding: embed returned empty result",
         )
 
     # Debug: Check if documents exist for this session
@@ -1315,7 +1315,7 @@ async def preview_search(
 ):
     """Preview vector search results"""
     # Generate query embedding
-    query_vector = await embedding_service.embed_chunks(
+    query_vector = await embedding_service.embed(
         [request.query], model=request.embedding_model
     )
     if not query_vector:
@@ -1654,7 +1654,7 @@ async def api_update_chunk(
 ):
     """Update a chunk and re-embed"""
     # Re-embed the content
-    vectors = await embedding_service.embed_chunks([content])
+    vectors = await embedding_service.embed([content])
     if not vectors:
         raise HTTPException(status_code=500, detail="Failed to generate embedding")
 

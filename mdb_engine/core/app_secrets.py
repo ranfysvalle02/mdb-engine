@@ -12,7 +12,7 @@ collection, which is only accessible via raw MongoDB client (not scoped wrapper)
 import base64
 import logging
 import secrets
-from datetime import datetime
+from datetime import datetime, timezone
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo.errors import OperationFailure, PyMongoError
@@ -72,7 +72,7 @@ class AppSecretsManager:
             encrypted_dek_b64 = base64.b64encode(encrypted_dek).decode()
 
             # Prepare document
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             document = {
                 "_id": app_slug,
                 "encrypted_secret": encrypted_secret_b64,
@@ -89,8 +89,7 @@ class AppSecretsManager:
                 document["rotation_count"] = existing.get("rotation_count", 0) + 1
                 await self._secrets_collection.replace_one({"_id": app_slug}, document)
                 logger.info(
-                    f"Updated encrypted secret for app '{app_slug}' "
-                    f"(rotation #{document['rotation_count']})"
+                    f"Updated encrypted secret for app '{app_slug}' " f"(rotation #{document['rotation_count']})"
                 )
             else:
                 # Insert new secret
@@ -103,40 +102,8 @@ class AppSecretsManager:
             logger.error(f"Database error storing secret for app '{app_slug}': {e}", exc_info=True)
             raise OperationFailure(f"Failed to store app secret: {e}") from e
         except (ValueError, TypeError) as e:
-            logger.error(
-                f"Encryption error storing secret for app '{app_slug}': {e}", exc_info=True
-            )
+            logger.error(f"Encryption error storing secret for app '{app_slug}': {e}", exc_info=True)
             raise
-
-    def verify_app_secret_sync(self, app_slug: str, provided_secret: str) -> bool:
-        """
-        Synchronous version of verify_app_secret for use in sync contexts.
-
-        Note: This uses asyncio.run() which creates a new event loop.
-        Use verify_app_secret() in async contexts for better performance.
-
-        Args:
-            app_slug: App slug identifier
-            provided_secret: Secret to verify
-
-        Returns:
-            True if secret matches, False otherwise
-        """
-        import asyncio
-
-        try:
-            # Try to get running loop
-            asyncio.get_running_loop()
-            # If we're in an async context, we can't use asyncio.run()
-            # Return False and log warning
-            logger.warning(
-                f"Cannot verify app secret synchronously in async context "
-                f"for '{app_slug}'. Use verify_app_secret() instead."
-            )
-            return False
-        except RuntimeError:
-            # No running loop - safe to use asyncio.run()
-            return asyncio.run(self.verify_app_secret(app_slug, provided_secret))
 
     async def verify_app_secret(self, app_slug: str, provided_secret: str) -> bool:
         """
@@ -244,36 +211,6 @@ class AppSecretsManager:
 
         logger.info(f"Rotated secret for app '{app_slug}'")
         return new_secret
-
-    def app_secret_exists_sync(self, app_slug: str) -> bool:
-        """
-        Synchronous version of app_secret_exists for use in sync contexts.
-
-        Args:
-            app_slug: App slug identifier
-
-        Returns:
-            True if secret exists, False otherwise
-
-        Note: If called from an async context, this will return False and log a warning.
-        Use app_secret_exists() in async contexts.
-        """
-        import asyncio
-
-        try:
-            # Try to get running loop
-            asyncio.get_running_loop()
-            # We're in an async context - can't safely check without blocking
-            # Return False (assume no secret) to allow backward compatibility
-            # The secret will be verified at query time through async methods
-            logger.debug(
-                f"Cannot check app secret existence synchronously in async context "
-                f"for '{app_slug}'. Assuming no secret exists (backward compatibility)."
-            )
-            return False
-        except RuntimeError:
-            # No running loop - safe to use asyncio.run()
-            return asyncio.run(self.app_secret_exists(app_slug))
 
     async def app_secret_exists(self, app_slug: str) -> bool:
         """

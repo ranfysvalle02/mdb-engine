@@ -9,7 +9,10 @@ This module is part of MDB_ENGINE - MongoDB Engine.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import os
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -52,11 +55,9 @@ async def get_casbin_model(model_type: str = "rbac") -> str:
                     return content
             except ImportError:
                 # Fallback to sync read if aiofiles not available
-                # This is acceptable during startup initialization
-                logger.debug(
-                    "aiofiles not available, using sync file read (acceptable during startup)"
-                )
-                return model_path.read_text()
+                # Offloaded to thread to avoid blocking the event loop
+                logger.debug("aiofiles not available, using threaded sync file read")
+                return await asyncio.to_thread(model_path.read_text)
         else:
             logger.warning(f"Casbin model file not found: {model_type}, using default RBAC model")
             return DEFAULT_RBAC_MODEL
@@ -89,9 +90,7 @@ async def create_casbin_enforcer(
         import casbin  # type: ignore
         from casbin_motor_adapter import Adapter  # type: ignore
     except ImportError as e:
-        raise ImportError(
-            "Casbin dependencies not installed. Install with: pip install mdb-engine[casbin]"
-        ) from e
+        raise ImportError("Casbin dependencies not installed. Install with: pip install mdb-engine[casbin]") from e
 
     # Get model string (async)
     model_str = await get_casbin_model(model)
@@ -106,15 +105,10 @@ async def create_casbin_enforcer(
         # Try passing collection name as third parameter
         try:
             adapter = Adapter(mongo_uri, db_name, policies_collection)
-            logger.debug(
-                f"Casbin MotorAdapter created successfully with custom "
-                f"collection '{policies_collection}'"
-            )
+            logger.debug(f"Casbin MotorAdapter created successfully with custom " f"collection '{policies_collection}'")
         except TypeError:
             # Fallback: adapter doesn't support collection parameter, use default
-            logger.warning(
-                "Adapter doesn't support custom collection name, " "using default collection"
-            )
+            logger.warning("Adapter doesn't support custom collection name, " "using default collection")
             adapter = Adapter(mongo_uri, db_name)
             logger.debug("Casbin MotorAdapter created successfully (using default collection)")
     except (RuntimeError, ValueError, AttributeError, TypeError, ConnectionError):
@@ -153,15 +147,12 @@ async def create_casbin_enforcer(
         # Try alternative: use temp file approach
         logger.info("Attempting alternative: using temporary model file...")
         try:
-            import os
-            import tempfile
-
             with tempfile.NamedTemporaryFile(mode="w", suffix=".conf", delete=False) as f:
                 f.write(model_str)
                 temp_model_path = f.name
             try:
                 enforcer = casbin.AsyncEnforcer(temp_model_path, adapter)
-                logger.info("✅ Enforcer created successfully using temp model file")
+                logger.info("Enforcer created successfully using temp model file")
                 # Clean up temp file
                 os.unlink(temp_model_path)
             except (RuntimeError, ValueError, AttributeError, TypeError, OSError) as e2:
@@ -175,10 +166,7 @@ async def create_casbin_enforcer(
 
     # Note: Removed default_roles creation - roles exist implicitly when assigned to users
 
-    logger.info(
-        f"Casbin enforcer created with model '{model}' and "
-        f"policies collection '{policies_collection}'"
-    )
+    logger.info(f"Casbin enforcer created with model '{model}' and " f"policies collection '{policies_collection}'")
 
     return enforcer
 
@@ -187,9 +175,7 @@ async def create_casbin_enforcer(
 # No need to "create" roles beforehand with self-referencing policies
 
 
-async def initialize_casbin_from_manifest(
-    engine, app_slug: str, auth_config: dict[str, Any]
-) -> CasbinAdapter | None:
+async def initialize_casbin_from_manifest(engine, app_slug: str, auth_config: dict[str, Any]) -> CasbinAdapter | None:
     """
     Initialize Casbin provider from manifest configuration.
 
@@ -225,10 +211,7 @@ async def initialize_casbin_from_manifest(
         initial_roles = authorization.get("initial_roles", [])
 
         # Create enforcer with MongoDB connection info from engine
-        logger.debug(
-            f"Creating Casbin enforcer with URI: {engine.mongo_uri[:50]}..., "
-            f"db: {engine.db_name}"
-        )
+        logger.debug(f"Creating Casbin enforcer with URI: {engine.mongo_uri[:50]}..., " f"db: {engine.db_name}")
         try:
             enforcer = await create_casbin_enforcer(
                 mongo_uri=engine.mongo_uri,
@@ -252,7 +235,7 @@ async def initialize_casbin_from_manifest(
         # Create adapter
         try:
             adapter = CasbinAdapter(enforcer)
-            logger.info("✅ CasbinAdapter created successfully")
+            logger.info("CasbinAdapter created successfully")
         except (RuntimeError, ValueError, AttributeError, TypeError):
             logger.exception(f"Failed to create CasbinAdapter for '{app_slug}'")
             return None
@@ -273,9 +256,7 @@ async def initialize_casbin_from_manifest(
                             if added:
                                 logger.debug(f"  Added policy: {role} -> {resource}:{action}")
                             else:
-                                logger.warning(
-                                    f"  Failed to add policy: {role} -> " f"{resource}:{action}"
-                                )
+                                logger.warning(f"  Failed to add policy: {role} -> " f"{resource}:{action}")
                     except (ValueError, TypeError, RuntimeError, AttributeError) as e:
                         logger.warning(f"  Failed to add policy {policy}: {e}", exc_info=True)
 
@@ -300,27 +281,22 @@ async def initialize_casbin_from_manifest(
                         try:
                             # Check if role assignment already exists
                             exists = await adapter.has_role_for_user(user, role)
-                            logger.debug(
-                                f"  Checking role assignment: {user} -> {role}, " f"exists={exists}"
-                            )
+                            logger.debug(f"  Checking role assignment: {user} -> {role}, " f"exists={exists}")
                             if exists:
-                                logger.info(f"  ✓ Role assignment already exists: {user} -> {role}")
+                                logger.info(f"  Role assignment already exists: {user} -> {role}")
                             else:
                                 logger.info(f"  Adding role assignment: {user} -> {role}")
                                 # Use enforcer directly with add_grouping_policy
                                 added = await enforcer.add_grouping_policy(user, role)
                                 if added:
-                                    logger.info(
-                                        f"  ✓ Successfully assigned role '{role}' "
-                                        f"to user '{user}'"
-                                    )
+                                    logger.info(f"  Successfully assigned role '{role}' " f"to user '{user}'")
                                 else:
                                     logger.warning(
-                                        f"  ⚠ Failed to assign role '{role}' to "
+                                        f"  Failed to assign role '{role}' to "
                                         f"user '{user}' - add_grouping_policy returned False"
                                     )
                         except (ValueError, TypeError, RuntimeError, AttributeError):
-                            logger.exception(f"  ✗ Exception assigning role {role_assignment}")
+                            logger.exception(f"  Exception assigning role {role_assignment}")
 
             # Restore auto_save setting
             if hasattr(enforcer, "auto_save"):
@@ -345,9 +321,7 @@ async def initialize_casbin_from_manifest(
                     role = role_assignment.get("role")
                     if user and role and await adapter.has_role_for_user(user, role):
                         verified += 1
-            logger.info(
-                f"Verified {verified}/{len(initial_roles)} role assignments " f"exist in memory"
-            )
+            logger.info(f"Verified {verified}/{len(initial_roles)} role assignments " f"exist in memory")
 
         # Save policies to persist them to database
         # Only save if auto_save was disabled (to avoid double-saving)
@@ -356,25 +330,19 @@ async def initialize_casbin_from_manifest(
             if saved:
                 logger.debug("Policies saved to database successfully")
             else:
-                logger.warning(
-                    "Failed to save policies to database - they may not " "persist across restarts"
-                )
+                logger.warning("Failed to save policies to database - they may not " "persist across restarts")
         else:
-            logger.debug(
-                "Skipping manual save_policy() - auto_save is enabled, "
-                "policies already persisted"
-            )
+            logger.debug("Skipping manual save_policy() - auto_save is enabled, " "policies already persisted")
 
-        logger.info(f"✅ Casbin provider initialized for app '{app_slug}'")
-        logger.info(f"✅ CasbinAdapter ready for use - type: {type(adapter).__name__}")
+        logger.info(f"Casbin provider initialized for app '{app_slug}'")
+        logger.info(f"CasbinAdapter ready for use - type: {type(adapter).__name__}")
 
         return adapter
 
     except ImportError as e:
         # ImportError is expected if Casbin is not installed - use warning, not error
         logger.warning(
-            f"❌ Casbin not available for app '{app_slug}': {e}. "
-            "Install with: pip install mdb-engine[casbin]"
+            f"Casbin not available for app '{app_slug}': {e}. " "Install with: pip install mdb-engine[casbin]"
         )
         return None
     except (
@@ -385,10 +353,10 @@ async def initialize_casbin_from_manifest(
         RuntimeError,
         KeyError,
     ) as e:
-        logger.exception(f"❌ Error initializing Casbin provider for app '{app_slug}': {e}")
+        logger.exception(f"Error initializing Casbin provider for app '{app_slug}': {e}")
         # Informational message, not exception logging
         logger.error(  # noqa: TRY400
-            f"❌ Casbin provider initialization FAILED for '{app_slug}' - "
+            f"Casbin provider initialization FAILED for '{app_slug}' - "
             "check logs above for detailed error information"
         )
         return None

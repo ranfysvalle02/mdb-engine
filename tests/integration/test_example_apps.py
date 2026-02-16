@@ -63,9 +63,7 @@ def dashboard_manifest():
 class TestExampleApps:
     """Test example apps end-to-end."""
 
-    async def test_click_tracker_app_startup(
-        self, mongodb_engine_with_secrets, click_tracker_manifest, master_key
-    ):
+    async def test_click_tracker_app_startup(self, mongodb_engine_with_secrets, click_tracker_manifest, master_key):
         """Test that ClickTracker app can start successfully."""
         engine = mongodb_engine_with_secrets
         await engine.initialize()
@@ -90,7 +88,7 @@ class TestExampleApps:
         secret = await engine._app_secrets_manager.get_app_secret("click_tracker")  # noqa: SLF001
 
         # Simulate track endpoint
-        db = engine.get_scoped_db("click_tracker", app_token=secret)
+        db = await engine.get_scoped_db("click_tracker", app_token=secret)
 
         click_doc = {
             "user_id": "user@example.com",
@@ -130,7 +128,7 @@ class TestExampleApps:
         )
 
         # Insert clicks via ClickTracker
-        tracker_db = engine.get_scoped_db("click_tracker", app_token=tracker_secret)
+        tracker_db = await engine.get_scoped_db("click_tracker", app_token=tracker_secret)
         for i in range(5):
             await tracker_db.clicks.insert_one(
                 {
@@ -142,12 +140,10 @@ class TestExampleApps:
             )
 
         # Read analytics via Dashboard (cross-app access)
-        dashboard_db = engine.get_scoped_db("click_tracker_dashboard", app_token=dashboard_secret)
+        dashboard_db = await engine.get_scoped_db("click_tracker_dashboard", app_token=dashboard_secret)
 
         # Access ClickTracker's collection
-        clicks = (
-            await dashboard_db.get_collection("click_tracker_clicks").find({}).to_list(length=100)
-        )
+        clicks = await dashboard_db.get_collection("click_tracker_clicks").find({}).to_list(length=100)
 
         assert len(clicks) == 5
         assert all(c["app_id"] == "click_tracker" for c in clicks)
@@ -174,7 +170,7 @@ class TestExampleApps:
         )
 
         # Step 1: Track clicks
-        tracker_db = engine.get_scoped_db("click_tracker", app_token=tracker_secret)
+        tracker_db = await engine.get_scoped_db("click_tracker", app_token=tracker_secret)
         click_ids = []
         for i in range(10):
             result = await tracker_db.clicks.insert_one(
@@ -188,12 +184,10 @@ class TestExampleApps:
             click_ids.append(result.inserted_id)
 
         # Step 2: View analytics via dashboard
-        dashboard_db = engine.get_scoped_db("click_tracker_dashboard", app_token=dashboard_secret)
+        dashboard_db = await engine.get_scoped_db("click_tracker_dashboard", app_token=dashboard_secret)
 
         # Get all clicks
-        all_clicks = (
-            await dashboard_db.get_collection("click_tracker_clicks").find({}).to_list(length=100)
-        )
+        all_clicks = await dashboard_db.get_collection("click_tracker_clicks").find({}).to_list(length=100)
 
         assert len(all_clicks) == 10
 

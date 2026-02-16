@@ -55,7 +55,10 @@ class TestConnectionPooling:
 
         await engine.register_app(manifest, create_indexes=False)
 
-        scoped_db = engine.get_scoped_db("pool_ops_test")
+        secret = None
+        if engine._app_secrets_manager:
+            secret = await engine._app_secrets_manager.get_app_secret("pool_ops_test")
+        scoped_db = await engine.get_scoped_db("pool_ops_test", app_token=secret)
         collection = scoped_db.test_collection
 
         # Perform multiple operations
@@ -82,7 +85,10 @@ class TestConnectionPooling:
 
         await engine.register_app(manifest, create_indexes=False)
 
-        scoped_db = engine.get_scoped_db("concurrent_pool_test")
+        secret = None
+        if engine._app_secrets_manager:
+            secret = await engine._app_secrets_manager.get_app_secret("concurrent_pool_test")
+        scoped_db = await engine.get_scoped_db("concurrent_pool_test", app_token=secret)
         collection = scoped_db.test_collection
 
         # Concurrent inserts

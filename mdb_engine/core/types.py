@@ -17,6 +17,24 @@ else:
 
 
 # ============================================================================
+# GraphRAG Search Strategy Type
+# ============================================================================
+
+GraphSearchStrategy = Literal["local", "global", "drift", "basic", "auto"]
+"""Valid search strategies for GraphRAG query routing.
+
+- ``"auto"``: Use the automatic query classifier (default).
+- ``"local"``: Entity-focused search with community summaries.
+- ``"global"``: Thematic map-reduce over all communities (expensive).
+- ``"drift"``: Entity-focused with entry-node community context.
+- ``"basic"``: Hybrid vector + graph traversal (fast, cheap).
+"""
+
+VALID_SEARCH_STRATEGIES: set[str | None] = {"local", "global", "drift", "basic", "auto", None}
+"""Set of accepted ``search_strategy`` values (includes ``None`` for auto)."""
+
+
+# ============================================================================
 # Index Definition Types
 # ============================================================================
 
@@ -267,15 +285,6 @@ class WebSocketsDict(TypedDict):
 # ============================================================================
 
 
-class CognitiveDecayConfigDict(TypedDict, total=False):
-    """Cognitive decay (Ebbinghaus Forgetting Curve) configuration."""
-
-    enabled: bool
-    default_stability_hours: float
-    min_stability: float
-    use_server_side_pipeline: bool
-
-
 class CognitiveEmotionConfigDict(TypedDict, total=False):
     """Cognitive emotion (Flashbulb Memory) configuration."""
 
@@ -312,34 +321,10 @@ class CognitiveConfigDict(TypedDict, total=False):
     """Full cognitive memory configuration."""
 
     enabled: bool
-    decay: CognitiveDecayConfigDict
     emotion: CognitiveEmotionConfigDict
     conflict_resolution: ConflictResolutionConfigDict
     pruning: PruningConfigDict
     cold_storage: ColdStorageConfigDict
-
-
-class RedactionPatternsDict(TypedDict, total=False):
-    """Redaction patterns configuration."""
-
-    ssn: bool
-    credit_card: bool
-    phone: bool
-    email: bool
-    ip_address: bool
-    api_key: bool
-    password: bool
-    custom: list[str]
-
-
-class RedactionConfigDict(TypedDict, total=False):
-    """Redaction layer configuration."""
-
-    enabled: bool
-    replacement: str
-    patterns: RedactionPatternsDict
-    allow_list: list[str]
-    log_redactions: bool
 
 
 class ReflectionConfigDict(TypedDict, total=False):
@@ -367,17 +352,6 @@ class CategoriesConfigDict(TypedDict, total=False):
     custom_categories: list[str]
 
 
-class FusionConfigDict(TypedDict, total=False):
-    """Memory fusion (intelligent deduplication) configuration."""
-
-    enabled: bool
-    use_llm: bool
-    similarity_threshold: float
-    fallback_to_simple: bool
-    parallel_limit: int
-    timeout_seconds: int
-
-
 class MemoryGraphConfigDict(TypedDict, total=False):
     """Graph-powered memory layer configuration."""
 
@@ -390,18 +364,9 @@ class MemoryTypesConfigDict(TypedDict, total=False):
 
     enabled: bool
     auto_detect: bool
-    default_type: Literal["semantic", "entity", "procedural", "episodic", "working"]
+    default_type: Literal["semantic", "entity", "episodic", "working"]
     episodic_retention_days: int
     working_ttl_hours: int
-
-
-class ProceduralConfigDict(TypedDict, total=False):
-    """Procedural memory configuration."""
-
-    enabled: bool
-    auto_extract: bool
-    detect_code: bool
-    detect_workflows: bool
 
 
 class ConsolidationConfigDict(TypedDict, total=False):
@@ -410,7 +375,57 @@ class ConsolidationConfigDict(TypedDict, total=False):
     extract_entities: bool
     route_by_type: bool
     link_to_graph: bool
-    extract_procedural: bool
+
+
+# ============================================================================
+# Strategy Configuration Types (Pluggable Memory Mechanics)
+# ============================================================================
+
+
+class ScoringStrategyConfigDict(TypedDict, total=False):
+    """Configuration for the scoring strategy.
+
+    The ``strategy`` key selects a built-in implementation.
+    Other keys are passed as constructor kwargs to the selected strategy.
+
+    Available strategies: ``"perfect_recall"`` (default), ``"recency_decay"``.
+    """
+
+    strategy: str
+    half_life_hours: float
+
+
+class DecayStrategyConfigDict(TypedDict, total=False):
+    """Configuration for the decay strategy.
+
+    Available strategies: ``"none"`` (default), ``"exponential"``, ``"linear"``.
+    """
+
+    strategy: str
+    half_life_hours: float
+    lifetime_hours: float
+    archive_threshold: float
+
+
+class ImportanceStrategyConfigDict(TypedDict, total=False):
+    """Configuration for the importance assessment strategy.
+
+    Available strategies: ``"llm"`` (default), ``"rule_based"``.
+    """
+
+    strategy: str
+    default_importance: float
+
+
+class PersonaBlendingConfigDict(TypedDict, total=False):
+    """Configuration for persona blending strategy.
+
+    Available strategies: ``"weighted"`` (default), ``"custom_weight"``.
+    """
+
+    strategy: str
+    query_weight: float
+    persona_weight: float
 
 
 class MemoryConfigDict(TypedDict, total=False):
@@ -431,23 +446,32 @@ class MemoryConfigDict(TypedDict, total=False):
     max_depth: int | None
     similarity_threshold: float
     reinforcement_factor: float
-    decay_factor: float
     merge_threshold_low: float
     merge_threshold_high: float
+    # Scoring enhancements
+    emotion_weight: float
+    recency_weight: float
+    recency_half_life_hours: float
+    spreading_activation: bool
+    activation_discount: float
+    salience_gate: bool
+    salience_threshold: float
     # Nested configurations
     cognitive: CognitiveConfigDict
-    redaction: RedactionConfigDict
     reflection: ReflectionConfigDict
     entities: EntitiesConfigDict
     categories: CategoriesConfigDict
-    fusion: FusionConfigDict
     graph: MemoryGraphConfigDict
     # Cognitive Blueprint v2.0 configurations
     memory_types: MemoryTypesConfigDict
-    procedural: ProceduralConfigDict
     consolidation: ConsolidationConfigDict
     persona: dict[str, Any]  # Persona configuration
-    perceptions: dict[str, Any]  # Perceptions configuration
+    verification: dict[str, Any]  # Verification configuration
+    # Pluggable strategy configurations (select built-in or configure custom)
+    scoring: ScoringStrategyConfigDict
+    decay: DecayStrategyConfigDict
+    importance: ImportanceStrategyConfigDict
+    persona_blending: PersonaBlendingConfigDict
 
 
 # ============================================================================
@@ -475,6 +499,8 @@ class HealthChecksConfigDict(TypedDict, total=False):
     enabled: bool
     endpoint: str
     interval_seconds: int
+    include_details: bool
+    export_metrics: bool
 
 
 class MetricsConfigDict(TypedDict, total=False):
@@ -484,6 +510,9 @@ class MetricsConfigDict(TypedDict, total=False):
     collect_operation_metrics: bool
     collect_performance_metrics: bool
     custom_metrics: list[str]
+    export_prometheus: bool
+    export_otlp: bool
+    otlp_endpoint: str
 
 
 class LoggingConfigDict(TypedDict, total=False):
@@ -493,6 +522,17 @@ class LoggingConfigDict(TypedDict, total=False):
     format: Literal["json", "text"]
     include_request_id: bool
     log_sensitive_data: bool
+    inject_trace_ids: bool
+
+
+class TracingConfigDict(TypedDict, total=False):
+    """Distributed tracing configuration."""
+
+    enabled: bool
+    service_name: str
+    endpoint: str
+    exporter: Literal["otlp", "console", "none"]
+    sample_rate: float
 
 
 class ObservabilityConfigDict(TypedDict, total=False):
@@ -501,6 +541,7 @@ class ObservabilityConfigDict(TypedDict, total=False):
     health_checks: HealthChecksConfigDict
     metrics: MetricsConfigDict
     logging: LoggingConfigDict
+    tracing: TracingConfigDict
 
 
 # ============================================================================
@@ -536,6 +577,32 @@ class InitialDataDict(TypedDict):
 # ============================================================================
 
 
+class ProfileUserConfigDict(TypedDict, total=False):
+    """User profile configuration."""
+
+    enabled: bool
+    rebuild_interval_hours: int
+    incremental_on_memory_add: bool
+    collection_name: str
+
+
+class ProfileCommunityConfigDict(TypedDict, total=False):
+    """Community profile configuration."""
+
+    enabled: bool
+    rebuild_interval_hours: int
+    min_users_for_aggregation: int
+    collection_name: str
+
+
+class ProfileConfigDict(TypedDict, total=False):
+    """Profile system configuration."""
+
+    enabled: bool
+    user_profiles: ProfileUserConfigDict
+    community_profile: ProfileCommunityConfigDict
+
+
 class ManifestDict(TypedDict, total=False):
     """Main manifest structure."""
 
@@ -553,6 +620,7 @@ class ManifestDict(TypedDict, total=False):
     websockets: WebSocketsDict | None
     embedding_config: EmbeddingConfigDict | None
     memory_config: MemoryConfigDict | None
+    profile_config: ProfileConfigDict | None
     cors: CORSConfigDict | None
     observability: ObservabilityConfigDict | None
     initial_data: InitialDataDict | None

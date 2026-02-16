@@ -66,18 +66,12 @@ class QueryValidator:
         # Merge custom dangerous operators with defaults
         if dangerous_operators is not None:
             # Convert DANGEROUS_OPERATORS tuple to set for union operation
-            default_ops = (
-                set(DANGEROUS_OPERATORS)
-                if isinstance(DANGEROUS_OPERATORS, tuple)
-                else DANGEROUS_OPERATORS
-            )
+            default_ops = set(DANGEROUS_OPERATORS) if isinstance(DANGEROUS_OPERATORS, tuple) else DANGEROUS_OPERATORS
             self.dangerous_operators = default_ops | set(dangerous_operators)
         else:
             # Convert tuple to set for consistency
             self.dangerous_operators = (
-                set(DANGEROUS_OPERATORS)
-                if isinstance(DANGEROUS_OPERATORS, tuple)
-                else DANGEROUS_OPERATORS
+                set(DANGEROUS_OPERATORS) if isinstance(DANGEROUS_OPERATORS, tuple) else DANGEROUS_OPERATORS
             )
 
     def validate_filter(self, filter: dict[str, Any] | None, path: str = "") -> None:
@@ -127,8 +121,7 @@ class QueryValidator:
         # Check pipeline length
         if len(pipeline) > self.max_pipeline_stages:
             raise QueryValidationError(
-                f"Aggregation pipeline exceeds maximum stages: "
-                f"{len(pipeline)} > {self.max_pipeline_stages}",
+                f"Aggregation pipeline exceeds maximum stages: " f"{len(pipeline)} > {self.max_pipeline_stages}",
                 query_type="pipeline",
                 context={
                     "stages": len(pipeline),
@@ -167,8 +160,7 @@ class QueryValidator:
         # Check length
         if len(pattern) > self.max_regex_length:
             raise QueryValidationError(
-                f"Regex pattern exceeds maximum length: "
-                f"{len(pattern)} > {self.max_regex_length}",
+                f"Regex pattern exceeds maximum length: " f"{len(pattern)} > {self.max_regex_length}",
                 query_type="regex",
                 path=path,
                 context={
@@ -181,8 +173,7 @@ class QueryValidator:
         complexity = self._calculate_regex_complexity(pattern)
         if complexity > self.max_regex_complexity:
             raise QueryValidationError(
-                f"Regex pattern exceeds maximum complexity: "
-                f"{complexity} > {self.max_regex_complexity}",
+                f"Regex pattern exceeds maximum complexity: " f"{complexity} > {self.max_regex_complexity}",
                 query_type="regex",
                 path=path,
                 context={
@@ -218,8 +209,7 @@ class QueryValidator:
         sort_fields = self._extract_sort_fields(sort)
         if len(sort_fields) > MAX_SORT_FIELDS:
             raise QueryValidationError(
-                f"Sort specification exceeds maximum fields: "
-                f"{len(sort_fields)} > {MAX_SORT_FIELDS}",
+                f"Sort specification exceeds maximum fields: " f"{len(sort_fields)} > {MAX_SORT_FIELDS}",
                 query_type="sort",
                 context={
                     "fields": len(sort_fields),
@@ -227,9 +217,7 @@ class QueryValidator:
                 },
             )
 
-    def _check_dangerous_operators(
-        self, query: dict[str, Any], path: str = "", depth: int = 0
-    ) -> None:
+    def _check_dangerous_operators(self, query: dict[str, Any], path: str = "", depth: int = 0) -> None:
         """
         Recursively check for dangerous operators in a query.
 
@@ -254,10 +242,7 @@ class QueryValidator:
 
             # Check if key is a dangerous operator
             if key in self.dangerous_operators:
-                logger.warning(
-                    f"Security: Dangerous operator '{key}' detected in query "
-                    f"at path '{current_path}'"
-                )
+                logger.warning(f"Security: Dangerous operator '{key}' detected in query " f"at path '{current_path}'")
                 raise QueryValidationError(
                     f"Dangerous operator '{key}' is not allowed for security reasons. "
                     f"Found at path: {current_path}",

@@ -30,7 +30,9 @@ For Scale:
 
 import asyncio
 import hashlib
+import json
 import logging
+from collections import OrderedDict
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -51,8 +53,19 @@ logger = logging.getLogger(__name__)
 SCHEMA_REGISTRY: dict[str, dict[str, Any]] = {}
 
 # Validation cache: maps (manifest_hash, version) -> validation_result
-_validation_cache: dict[str, tuple[bool, str | None, list[str] | None]] = {}
+# Bounded to prevent memory exhaustion in long-running / multi-tenant processes.
+_MAX_VALIDATION_CACHE_SIZE = 1024
+_validation_cache: OrderedDict[str, tuple[bool, str | None, list[str] | None]] = OrderedDict()
 _cache_lock = asyncio.Lock()
+
+
+def _cache_put(key: str, value: tuple[bool, str | None, list[str] | None]) -> None:
+    """Insert into the validation cache, evicting the oldest entry if full."""
+    _validation_cache[key] = value
+    # Move to end so most-recently-used entries survive eviction
+    _validation_cache.move_to_end(key)
+    while len(_validation_cache) > _MAX_VALIDATION_CACHE_SIZE:
+        _validation_cache.popitem(last=False)
 
 
 def _convert_tuples_to_lists(obj: Any) -> Any:
@@ -88,12 +101,8 @@ def _convert_tuples_to_lists(obj: Any) -> Any:
 
 def _get_manifest_hash(manifest_data: dict[str, Any]) -> str:
     """Generate a hash for manifest caching."""
-    import json
-
     # Normalize manifest by removing metadata fields that don't affect validation
-    normalized = {
-        k: v for k, v in manifest_data.items() if k not in ["_id", "_updated", "_created", "url"]
-    }
+    normalized = {k: v for k, v in manifest_data.items() if k not in ["_id", "_updated", "_created", "url"]}
     normalized_str = json.dumps(normalized, sort_keys=True)
     return hashlib.sha256(normalized_str.encode()).hexdigest()[:16]
 
@@ -107,8 +116,7 @@ MANIFEST_SCHEMA_V2 = {
             "pattern": "^\\d+\\.\\d+$",
             "default": "2.0",
             "description": (
-                "Schema version for this manifest (format: 'major.minor'). "
-                "Defaults to 2.0 if not specified."
+                "Schema version for this manifest (format: 'major.minor'). " "Defaults to 2.0 if not specified."
             ),
         },
         "slug": {
@@ -146,8 +154,7 @@ MANIFEST_SCHEMA_V2 = {
                     "type": "array",
                     "items": {"type": "string"},
                     "description": (
-                        "Available roles for this app (shared mode only). "
-                        "Example: ['viewer', 'editor', 'admin']"
+                        "Available roles for this app (shared mode only). " "Example: ['viewer', 'editor', 'admin']"
                     ),
                 },
                 "default_role": {
@@ -319,8 +326,7 @@ MANIFEST_SCHEMA_V2 = {
                                                 "minItems": 3,
                                                 "maxItems": 3,
                                                 "description": (
-                                                    "Casbin policy as array: "
-                                                    '["role", "resource", "action"]'
+                                                    "Casbin policy as array: " '["role", "resource", "action"]'
                                                 ),
                                             },
                                             {
@@ -433,8 +439,7 @@ MANIFEST_SCHEMA_V2 = {
                             "type": "boolean",
                             "default": True,
                             "description": (
-                                "If true (default), the app owner "
-                                "(developer_id) can always access the app."
+                                "If true (default), the app owner " "(developer_id) can always access the app."
                             ),
                         },
                     },
@@ -497,16 +502,14 @@ MANIFEST_SCHEMA_V2 = {
                             "minimum": 60,
                             "default": 86400,
                             "description": (
-                                "Session TTL in seconds (default: 86400 = "
-                                "24 hours). Used for app-specific sessions."
+                                "Session TTL in seconds (default: 86400 = " "24 hours). Used for app-specific sessions."
                             ),
                         },
                         "allow_registration": {
                             "type": "boolean",
                             "default": False,
                             "description": (
-                                "Allow users to self-register in the app "
-                                "(when strategy is 'app_users')."
+                                "Allow users to self-register in the app " "(when strategy is 'app_users')."
                             ),
                         },
                         "link_platform_users": {
@@ -561,9 +564,7 @@ MANIFEST_SCHEMA_V2 = {
                                     "role": {
                                         "type": "string",
                                         "default": "user",
-                                        "description": (
-                                            "Role for demo user in app " "(default: 'user')"
-                                        ),
+                                        "description": ("Role for demo user in app " "(default: 'user')"),
                                     },
                                     "auto_create": {
                                         "type": "boolean",
@@ -653,17 +654,14 @@ MANIFEST_SCHEMA_V2 = {
                                 "type": "integer",
                                 "minimum": 1,
                                 "default": 5,
-                                "description": (
-                                    "Maximum attempts allowed in the time window " "(default: 5)."
-                                ),
+                                "description": ("Maximum attempts allowed in the time window " "(default: 5)."),
                             },
                             "window_seconds": {
                                 "type": "integer",
                                 "minimum": 1,
                                 "default": 300,
                                 "description": (
-                                    "Time window in seconds for rate limiting "
-                                    "(default: 300 = 5 minutes)."
+                                    "Time window in seconds for rate limiting " "(default: 300 = 5 minutes)."
                                 ),
                             },
                         },
@@ -690,9 +688,7 @@ MANIFEST_SCHEMA_V2 = {
                             "type": "integer",
                             "minimum": 1,
                             "default": 90,
-                            "description": (
-                                "Number of days to retain audit logs " "(default: 90 days)."
-                            ),
+                            "description": ("Number of days to retain audit logs " "(default: 90 days)."),
                         },
                     },
                     "additionalProperties": False,
@@ -710,10 +706,7 @@ MANIFEST_SCHEMA_V2 = {
                                 "enabled": {
                                     "type": "boolean",
                                     "default": True,
-                                    "description": (
-                                        "Enable CSRF protection "
-                                        "(default: true for shared auth mode)."
-                                    ),
+                                    "description": ("Enable CSRF protection " "(default: true for shared auth mode)."),
                                 },
                                 "exempt_routes": {
                                     "type": "array",
@@ -736,9 +729,7 @@ MANIFEST_SCHEMA_V2 = {
                                     "type": "integer",
                                     "minimum": 60,
                                     "default": 3600,
-                                    "description": (
-                                        "CSRF token TTL in seconds " "(default: 3600 = 1 hour)."
-                                    ),
+                                    "description": ("CSRF token TTL in seconds " "(default: 3600 = 1 hour)."),
                                 },
                             },
                             "additionalProperties": False,
@@ -761,24 +752,18 @@ MANIFEST_SCHEMA_V2 = {
                                 "enabled": {
                                     "type": "boolean",
                                     "default": True,
-                                    "description": (
-                                        "Enable HSTS header in production " "(default: true)."
-                                    ),
+                                    "description": ("Enable HSTS header in production " "(default: true)."),
                                 },
                                 "max_age": {
                                     "type": "integer",
                                     "minimum": 0,
                                     "default": 31536000,
-                                    "description": (
-                                        "HSTS max-age in seconds " "(default: 31536000 = 1 year)."
-                                    ),
+                                    "description": ("HSTS max-age in seconds " "(default: 31536000 = 1 year)."),
                                 },
                                 "include_subdomains": {
                                     "type": "boolean",
                                     "default": True,
-                                    "description": (
-                                        "Include subdomains in HSTS policy " "(default: true)."
-                                    ),
+                                    "description": ("Include subdomains in HSTS policy " "(default: true)."),
                                 },
                                 "preload": {
                                     "type": "boolean",
@@ -798,9 +783,7 @@ MANIFEST_SCHEMA_V2 = {
                         },
                     },
                     "additionalProperties": False,
-                    "description": (
-                        "Security settings including HSTS, headers, and other " "security controls."
-                    ),
+                    "description": ("Security settings including HSTS, headers, and other " "security controls."),
                 },
                 "jwt": {
                     "type": "object",
@@ -825,8 +808,7 @@ MANIFEST_SCHEMA_V2 = {
                     },
                     "additionalProperties": False,
                     "description": (
-                        "JWT configuration for shared auth mode. "
-                        "Controls algorithm and token lifetime."
+                        "JWT configuration for shared auth mode. " "Controls algorithm and token lifetime."
                     ),
                 },
                 "password_policy": {
@@ -842,24 +824,17 @@ MANIFEST_SCHEMA_V2 = {
                             "type": "integer",
                             "minimum": 0,
                             "default": 50,
-                            "description": (
-                                "Minimum password entropy in bits "
-                                "(default: 50). Set to 0 to disable."
-                            ),
+                            "description": ("Minimum password entropy in bits " "(default: 50). Set to 0 to disable."),
                         },
                         "require_uppercase": {
                             "type": "boolean",
                             "default": True,
-                            "description": (
-                                "Require at least one uppercase letter " "(default: true)."
-                            ),
+                            "description": ("Require at least one uppercase letter " "(default: true)."),
                         },
                         "require_lowercase": {
                             "type": "boolean",
                             "default": True,
-                            "description": (
-                                "Require at least one lowercase letter " "(default: true)."
-                            ),
+                            "description": ("Require at least one lowercase letter " "(default: true)."),
                         },
                         "require_numbers": {
                             "type": "boolean",
@@ -869,16 +844,12 @@ MANIFEST_SCHEMA_V2 = {
                         "require_special": {
                             "type": "boolean",
                             "default": False,
-                            "description": (
-                                "Require at least one special character " "(default: false)."
-                            ),
+                            "description": ("Require at least one special character " "(default: false)."),
                         },
                         "check_common_passwords": {
                             "type": "boolean",
                             "default": True,
-                            "description": (
-                                "Check against common password list " "(default: true)."
-                            ),
+                            "description": ("Check against common password list " "(default: true)."),
                         },
                         "check_breaches": {
                             "type": "boolean",
@@ -902,8 +873,7 @@ MANIFEST_SCHEMA_V2 = {
                             "type": "boolean",
                             "default": False,
                             "description": (
-                                "Bind sessions to IP address. Strict mode: "
-                                "reject if IP changes (default: false)."
+                                "Bind sessions to IP address. Strict mode: " "reject if IP changes (default: false)."
                             ),
                         },
                         "bind_fingerprint": {
@@ -928,6 +898,119 @@ MANIFEST_SCHEMA_V2 = {
                         "Session binding configuration. Ties sessions to client "
                         "characteristics for additional security against session "
                         "hijacking."
+                    ),
+                },
+                "oauth": {
+                    "type": "object",
+                    "properties": {
+                        "session_secret": {
+                            "type": "string",
+                            "description": (
+                                "Secret key for Starlette SessionMiddleware used during "
+                                "OAuth redirect flow (stores OIDC state/nonce). "
+                                "Supports ${ENV_VAR} syntax. Required when OAuth is enabled."
+                            ),
+                        },
+                        "providers": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "object",
+                                "properties": {
+                                    "client_id": {
+                                        "type": "string",
+                                        "description": ("OAuth client ID. Supports ${ENV_VAR} syntax."),
+                                    },
+                                    "client_secret": {
+                                        "type": "string",
+                                        "description": ("OAuth client secret. Supports ${ENV_VAR} syntax."),
+                                    },
+                                    "server_metadata_url": {
+                                        "type": "string",
+                                        "format": "uri",
+                                        "description": (
+                                            "OIDC discovery URL (e.g., "
+                                            "'https://accounts.google.com/.well-known/openid-configuration'). "
+                                            "If provided, authorize_url, access_token_url, and "
+                                            "userinfo_url are auto-discovered."
+                                        ),
+                                    },
+                                    "authorize_url": {
+                                        "type": "string",
+                                        "format": "uri",
+                                        "description": (
+                                            "OAuth authorization endpoint URL. Required if "
+                                            "server_metadata_url is not provided."
+                                        ),
+                                    },
+                                    "access_token_url": {
+                                        "type": "string",
+                                        "format": "uri",
+                                        "description": (
+                                            "OAuth token endpoint URL. Required if "
+                                            "server_metadata_url is not provided."
+                                        ),
+                                    },
+                                    "userinfo_url": {
+                                        "type": "string",
+                                        "format": "uri",
+                                        "description": (
+                                            "OAuth userinfo endpoint URL. Required for "
+                                            "non-OIDC providers (e.g., GitHub)."
+                                        ),
+                                    },
+                                    "scopes": {
+                                        "type": "array",
+                                        "items": {"type": "string"},
+                                        "description": (
+                                            "OAuth scopes to request. Example: " "['openid', 'email', 'profile']."
+                                        ),
+                                    },
+                                },
+                                "required": ["client_id", "client_secret"],
+                            },
+                            "description": (
+                                "Map of provider names to their OAuth configuration. "
+                                "Keys are provider names (e.g., 'google', 'github', "
+                                "'keycloak'). Each provider must have client_id and "
+                                "client_secret. Use server_metadata_url for OIDC "
+                                "discovery or provide endpoints manually."
+                            ),
+                        },
+                        "user_strategy": {
+                            "type": "string",
+                            "enum": ["link_or_create", "create_only"],
+                            "default": "link_or_create",
+                            "description": (
+                                "Strategy for handling OAuth users. 'link_or_create' "
+                                "(default) matches by email and links to existing "
+                                "users or creates new ones. 'create_only' always "
+                                "creates a new user record."
+                            ),
+                        },
+                        "default_role": {
+                            "type": "string",
+                            "default": "user",
+                            "description": ("Default role assigned to new OAuth users " "(default: 'user')."),
+                        },
+                        "redirect_after_login": {
+                            "type": "string",
+                            "default": "/",
+                            "description": ("URL to redirect to after successful OAuth login " "(default: '/')."),
+                        },
+                        "redirect_after_logout": {
+                            "type": "string",
+                            "default": "/",
+                            "description": ("URL to redirect to after logout " "(default: '/')."),
+                        },
+                    },
+                    "required": ["session_secret", "providers"],
+                    "additionalProperties": False,
+                    "description": (
+                        "OAuth 2.0 / OpenID Connect configuration. Enables login "
+                        "via external identity providers (Google, GitHub, Keycloak, "
+                        "Auth0, etc.). After OAuth login, users receive standard "
+                        "MDB-Engine JWT tokens so all existing auth middleware, "
+                        "decorators, and dependencies continue to work."
                     ),
                 },
             },
@@ -964,18 +1047,13 @@ MANIFEST_SCHEMA_V2 = {
                 "token_rotation": {
                     "type": "boolean",
                     "default": True,
-                    "description": (
-                        "Enable refresh token rotation "
-                        "(new refresh token on each use). Default: true."
-                    ),
+                    "description": ("Enable refresh token rotation " "(new refresh token on each use). Default: true."),
                 },
                 "max_sessions_per_user": {
                     "type": "integer",
                     "minimum": 1,
                     "default": 10,
-                    "description": (
-                        "Maximum number of concurrent sessions per user " "(default: 10)."
-                    ),
+                    "description": ("Maximum number of concurrent sessions per user " "(default: 10)."),
                 },
                 "session_inactivity_timeout": {
                     "type": "integer",
@@ -992,9 +1070,7 @@ MANIFEST_SCHEMA_V2 = {
                         "require_https": {
                             "type": "boolean",
                             "default": False,
-                            "description": (
-                                "Require HTTPS in production " "(default: false, auto-detected)."
-                            ),
+                            "description": ("Require HTTPS in production " "(default: false, auto-detected)."),
                         },
                         "cookie_secure": {
                             "type": "string",
@@ -1083,10 +1159,7 @@ MANIFEST_SCHEMA_V2 = {
                                 "allow_plain_text": {
                                     "type": "boolean",
                                     "default": False,
-                                    "description": (
-                                        "Allow plain text passwords "
-                                        "(NOT recommended, default: false)"
-                                    ),
+                                    "description": ("Allow plain text passwords " "(NOT recommended, default: false)"),
                                 },
                                 "min_length": {
                                     "type": "integer",
@@ -1112,9 +1185,7 @@ MANIFEST_SCHEMA_V2 = {
                                 "require_special": {
                                     "type": "boolean",
                                     "default": False,
-                                    "description": (
-                                        "Require special characters " "(default: false)"
-                                    ),
+                                    "description": ("Require special characters " "(default: false)"),
                                 },
                             },
                             "additionalProperties": False,
@@ -1126,23 +1197,17 @@ MANIFEST_SCHEMA_V2 = {
                                 "enabled": {
                                     "type": "boolean",
                                     "default": True,
-                                    "description": (
-                                        "Enable session fingerprinting " "(default: true)"
-                                    ),
+                                    "description": ("Enable session fingerprinting " "(default: true)"),
                                 },
                                 "validate_on_login": {
                                     "type": "boolean",
                                     "default": True,
-                                    "description": (
-                                        "Validate fingerprint on login " "(default: true)"
-                                    ),
+                                    "description": ("Validate fingerprint on login " "(default: true)"),
                                 },
                                 "validate_on_refresh": {
                                     "type": "boolean",
                                     "default": True,
-                                    "description": (
-                                        "Validate fingerprint on token refresh " "(default: true)"
-                                    ),
+                                    "description": ("Validate fingerprint on token refresh " "(default: true)"),
                                 },
                                 "validate_on_request": {
                                     "type": "boolean",
@@ -1177,25 +1242,19 @@ MANIFEST_SCHEMA_V2 = {
                                     "type": "integer",
                                     "minimum": 1,
                                     "default": 5,
-                                    "description": (
-                                        "Maximum failed login attempts before "
-                                        "lockout (default: 5)"
-                                    ),
+                                    "description": ("Maximum failed login attempts before " "lockout (default: 5)"),
                                 },
                                 "lockout_duration_seconds": {
                                     "type": "integer",
                                     "minimum": 1,
                                     "default": 900,
-                                    "description": (
-                                        "Lockout duration in seconds " "(default: 900 = 15 minutes)"
-                                    ),
+                                    "description": ("Lockout duration in seconds " "(default: 900 = 15 minutes)"),
                                 },
                                 "reset_on_success": {
                                     "type": "boolean",
                                     "default": True,
                                     "description": (
-                                        "Reset failed attempts counter on "
-                                        "successful login (default: true)"
+                                        "Reset failed attempts counter on " "successful login (default: true)"
                                     ),
                                 },
                             },
@@ -1208,24 +1267,17 @@ MANIFEST_SCHEMA_V2 = {
                                 "enabled": {
                                     "type": "boolean",
                                     "default": False,
-                                    "description": (
-                                        "Enable IP address validation " "(default: false)"
-                                    ),
+                                    "description": ("Enable IP address validation " "(default: false)"),
                                 },
                                 "strict": {
                                     "type": "boolean",
                                     "default": False,
-                                    "description": (
-                                        "Strict mode: reject requests if IP "
-                                        "changes (default: false)"
-                                    ),
+                                    "description": ("Strict mode: reject requests if IP " "changes (default: false)"),
                                 },
                                 "allow_ip_change": {
                                     "type": "boolean",
                                     "default": True,
-                                    "description": (
-                                        "Allow IP address changes during session " "(default: true)"
-                                    ),
+                                    "description": ("Allow IP address changes during session " "(default: true)"),
                                 },
                             },
                             "additionalProperties": False,
@@ -1237,9 +1289,7 @@ MANIFEST_SCHEMA_V2 = {
                                 "enabled": {
                                     "type": "boolean",
                                     "default": True,
-                                    "description": (
-                                        "Enable token fingerprinting " "(default: true)"
-                                    ),
+                                    "description": ("Enable token fingerprinting " "(default: true)"),
                                 },
                                 "bind_to_device": {
                                     "type": "boolean",
@@ -1257,9 +1307,7 @@ MANIFEST_SCHEMA_V2 = {
                 "auto_setup": {
                     "type": "boolean",
                     "default": True,
-                    "description": (
-                        "Automatically set up token management on app startup " "(default: true)."
-                    ),
+                    "description": ("Automatically set up token management on app startup " "(default: true)."),
                 },
             },
             "additionalProperties": False,
@@ -1375,8 +1423,7 @@ MANIFEST_SCHEMA_V2 = {
                                     "type": "boolean",
                                     "default": False,
                                     "description": (
-                                        "Allow anonymous connections even if "
-                                        "auth is required (default: false)"
+                                        "Allow anonymous connections even if " "auth is required (default: false)"
                                     ),
                                 },
                                 "csrf_required": {
@@ -1394,15 +1441,12 @@ MANIFEST_SCHEMA_V2 = {
                             },
                             "additionalProperties": False,
                             "description": (
-                                "Authentication configuration. If not specified, "
-                                "uses app's auth.policy settings."
+                                "Authentication configuration. If not specified, " "uses app's auth.policy settings."
                             ),
                         },
                         "description": {
                             "type": "string",
-                            "description": (
-                                "Description of what this WebSocket endpoint " "is used for"
-                            ),
+                            "description": ("Description of what this WebSocket endpoint " "is used for"),
                         },
                         "ping_interval": {
                             "type": "integer",
@@ -1410,8 +1454,7 @@ MANIFEST_SCHEMA_V2 = {
                             "maximum": 300,
                             "default": 30,
                             "description": (
-                                "Ping interval in seconds to keep connection "
-                                "alive (default: 30, min: 5, max: 300)"
+                                "Ping interval in seconds to keep connection " "alive (default: 30, min: 5, max: 300)"
                             ),
                         },
                         "ticket_ttl_seconds": {
@@ -1493,6 +1536,49 @@ MANIFEST_SCHEMA_V2 = {
                         "'text-embedding-ada-002'). Examples should implement "
                         "their own embedding clients."
                     ),
+                },
+                "resilience": {
+                    "type": "object",
+                    "properties": {
+                        "max_retries": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "default": 3,
+                            "description": "Maximum retry attempts for transient failures.",
+                        },
+                        "backoff_base": {
+                            "type": "number",
+                            "minimum": 0,
+                            "default": 0.5,
+                            "description": "Base delay (seconds) for exponential backoff.",
+                        },
+                        "backoff_max": {
+                            "type": "number",
+                            "minimum": 0,
+                            "default": 15.0,
+                            "description": "Maximum backoff delay in seconds.",
+                        },
+                        "timeout": {
+                            "type": ["number", "null"],
+                            "minimum": 0,
+                            "default": 30,
+                            "description": "Per-call timeout in seconds (null = no timeout).",
+                        },
+                        "circuit_failure_threshold": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "default": 5,
+                            "description": "Consecutive failures before circuit breaker opens.",
+                        },
+                        "circuit_recovery_window": {
+                            "type": "number",
+                            "minimum": 0,
+                            "default": 30.0,
+                            "description": "Seconds before an open circuit transitions to half-open.",
+                        },
+                    },
+                    "additionalProperties": False,
+                    "description": "Resilience policy for embedding calls (retry, backoff, circuit breaker).",
                 },
             },
             "additionalProperties": False,
@@ -1577,6 +1663,19 @@ MANIFEST_SCHEMA_V2 = {
                         "Default: 'helpful assistant'."
                     ),
                 },
+                "providers": {
+                    "type": "object",
+                    "additionalProperties": {"type": "string"},
+                    "description": (
+                        "Named providers mapping provider names to LiteLLM model strings. "
+                        "Each key is a provider name (e.g., 'chat', 'analysis', 'code') "
+                        "and each value is a LiteLLM model string (e.g., 'openai/gpt-4o', "
+                        "'gemini/gemini-3-flash-preview'). "
+                        "Use provider_name parameter in chat_completion() to select a provider. "
+                        "The system auto-detects provider from model string and uses "
+                        "corresponding environment variables."
+                    ),
+                },
                 "provider": {
                     "type": "string",
                     "description": (
@@ -1584,6 +1683,49 @@ MANIFEST_SCHEMA_V2 = {
                         "Use 'default_model' with LiteLLM format instead (e.g., 'openai/gpt-4o'). "
                         "This will be converted to LiteLLM format automatically."
                     ),
+                },
+                "resilience": {
+                    "type": "object",
+                    "properties": {
+                        "max_retries": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "default": 3,
+                            "description": "Maximum retry attempts for transient failures.",
+                        },
+                        "backoff_base": {
+                            "type": "number",
+                            "minimum": 0,
+                            "default": 1.0,
+                            "description": "Base delay (seconds) for exponential backoff.",
+                        },
+                        "backoff_max": {
+                            "type": "number",
+                            "minimum": 0,
+                            "default": 30.0,
+                            "description": "Maximum backoff delay in seconds.",
+                        },
+                        "timeout": {
+                            "type": ["number", "null"],
+                            "minimum": 0,
+                            "default": 60,
+                            "description": "Per-call timeout in seconds (null = no timeout).",
+                        },
+                        "circuit_failure_threshold": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "default": 5,
+                            "description": "Consecutive failures before circuit breaker opens.",
+                        },
+                        "circuit_recovery_window": {
+                            "type": "number",
+                            "minimum": 0,
+                            "default": 30.0,
+                            "description": "Seconds before an open circuit transitions to half-open.",
+                        },
+                    },
+                    "additionalProperties": False,
+                    "description": "Resilience policy for LLM calls (retry, backoff, circuit breaker).",
                 },
             },
             "additionalProperties": False,
@@ -1660,8 +1802,7 @@ MANIFEST_SCHEMA_V2 = {
                             "type": "string",
                             "default": "encryption.__keyVault",
                             "description": (
-                                "Namespace for CSFLE key vault (database.collection). "
-                                "Default: encryption.__keyVault"
+                                "Namespace for CSFLE key vault (database.collection). " "Default: encryption.__keyVault"
                             ),
                         },
                         "crypt_shared_lib_path": {
@@ -1750,6 +1891,17 @@ MANIFEST_SCHEMA_V2 = {
                         "OpenAI or Azure OpenAI compatible models."
                     ),
                 },
+                "extraction_provider": {
+                    "type": "string",
+                    "description": (
+                        "Named provider from llm_config.providers to use for fast memory extraction. "
+                        "If specified, uses synchronous completion with the named provider "
+                        "for speed-critical extraction operations. "
+                        "Example: Set to 'extraction' and configure "
+                        "'extraction': 'gemini/gemini-2.5-flash-lite' in llm_config.providers. "
+                        "Falls back to memory_llm_model if not specified."
+                    ),
+                },
                 "temperature": {
                     "type": "number",
                     "minimum": 0.0,
@@ -1821,18 +1973,7 @@ MANIFEST_SCHEMA_V2 = {
                     "maximum": 2.0,
                     "default": 1.1,
                     "description": (
-                        "Factor by which to increase importance when reinforcing memories "
-                        "(cognitive provider only)."
-                    ),
-                },
-                "decay_factor": {
-                    "type": "number",
-                    "minimum": 0.0,
-                    "maximum": 1.0,
-                    "default": 0.99,
-                    "description": (
-                        "Factor by which to decrease importance for unused memories "
-                        "(cognitive provider only)."
+                        "Factor by which to increase importance when reinforcing memories " "(cognitive provider only)."
                     ),
                 },
                 "merge_threshold_low": {
@@ -1855,179 +1996,75 @@ MANIFEST_SCHEMA_V2 = {
                         "Memories between merge_threshold_low and merge_threshold_high are merged."
                     ),
                 },
-                "fusion": {
-                    "type": "object",
-                    "properties": {
-                        "enabled": {
-                            "type": "boolean",
-                            "default": True,
-                            "description": (
-                                "Enable LLM-powered memory fusion for intelligent deduplication. "
-                                "When enabled, semantically similar facts extracted from the same "
-                                "message are fused into a single, high-quality memory using LLM."
-                            ),
-                        },
-                        "use_llm": {
-                            "type": "boolean",
-                            "default": True,
-                            "description": (
-                                "Use LLM for fusion (default: true). If false, uses simple "
-                                "heuristic merge (longest text, highest emotion, best category)."
-                            ),
-                        },
-                        "similarity_threshold": {
-                            "type": "number",
-                            "minimum": 0.5,
-                            "maximum": 1.0,
-                            "default": 0.8,
-                            "description": (
-                                "Cosine similarity threshold for clustering facts. "
-                                "Facts above this threshold are grouped and fused together."
-                            ),
-                        },
-                        "fallback_to_simple": {
-                            "type": "boolean",
-                            "default": True,
-                            "description": (
-                                "Fall back to simple heuristic merge if LLM fusion fails. "
-                                "Provides graceful degradation on LLM errors or timeouts."
-                            ),
-                        },
-                        "parallel_limit": {
-                            "type": "integer",
-                            "minimum": 1,
-                            "maximum": 10,
-                            "default": 5,
-                            "description": (
-                                "Maximum concurrent LLM fusion calls. "
-                                "Controls parallelization for multiple clusters."
-                            ),
-                        },
-                        "timeout_seconds": {
-                            "type": "integer",
-                            "minimum": 5,
-                            "maximum": 60,
-                            "default": 10,
-                            "description": "Timeout for each LLM fusion call in seconds.",
-                        },
-                    },
-                    "additionalProperties": False,
+                "emotion_weight": {
+                    "type": "number",
+                    "minimum": 0.0,
+                    "maximum": 2.0,
+                    "default": 0.5,
                     "description": (
-                        "Memory fusion configuration. Enables intelligent deduplication "
-                        "of facts extracted from the same message using LLM-powered semantic "
-                        "synthesis. Prevents storing duplicates like 'User loves chocolate' "
-                        "and 'Chocolate is user's favorite candy' by fusing them into a "
-                        "single, comprehensive memory."
+                        "Weight of emotional intensity in memory scoring (amygdala effect). "
+                        "Higher values make emotionally charged memories surface more strongly. "
+                        "0.0 disables emotion weighting. Default: 0.5."
                     ),
                 },
-                "redaction": {
-                    "type": "object",
-                    "properties": {
-                        "enabled": {
-                            "type": "boolean",
-                            "default": False,
-                            "description": (
-                                "Enable redaction layer to protect sensitive data "
-                                "from being stored in memory or sent to LLMs. "
-                                "Disabled by default - opt-in for privacy protection."
-                            ),
-                        },
-                        "provider": {
-                            "type": "string",
-                            "enum": ["regexp", "presidio"],
-                            "default": "regexp",
-                            "description": (
-                                "Redaction provider: 'regexp' (default, pattern-based) "
-                                "or 'presidio' (ML-based, requires presidio-analyzer)."
-                            ),
-                        },
-                        "replacement": {
-                            "type": "string",
-                            "default": "[REDACTED]",
-                            "description": "Text to replace sensitive data with.",
-                        },
-                        "patterns": {
-                            "type": "object",
-                            "properties": {
-                                "ssn": {
-                                    "type": "boolean",
-                                    "default": True,
-                                    "description": "Redact Social Security Numbers (XXX-XX-XXXX).",
-                                },
-                                "credit_card": {
-                                    "type": "boolean",
-                                    "default": True,
-                                    "description": "Redact credit card numbers (13-16 digits).",
-                                },
-                                "phone": {
-                                    "type": "boolean",
-                                    "default": False,
-                                    "description": "Redact phone numbers.",
-                                },
-                                "email": {
-                                    "type": "boolean",
-                                    "default": False,
-                                    "description": "Redact email addresses.",
-                                },
-                                "ip_address": {
-                                    "type": "boolean",
-                                    "default": False,
-                                    "description": "Redact IP addresses.",
-                                },
-                                "api_key": {
-                                    "type": "boolean",
-                                    "default": True,
-                                    "description": "Redact API keys and secrets.",
-                                },
-                                "password": {
-                                    "type": "boolean",
-                                    "default": True,
-                                    "description": "Redact password assignments.",
-                                },
-                                "custom": {
-                                    "type": "array",
-                                    "items": {"type": "string"},
-                                    "description": (
-                                        "Custom regex patterns to redact. "
-                                        "Example: ['\\\\bsecret\\\\s*[:=]\\\\s*\\\\S+']"
-                                    ),
-                                },
-                            },
-                            "additionalProperties": False,
-                            "description": "Configure which patterns to redact.",
-                        },
-                        "allow_list": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": (
-                                "Values that should never be redacted. "
-                                "Example: ['support@company.com']"
-                            ),
-                        },
-                        "log_redactions": {
-                            "type": "boolean",
-                            "default": True,
-                            "description": "Log redaction counts (without exposing data).",
-                        },
-                        "entities": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": (
-                                "Entity types to detect (Presidio provider only). "
-                                "Example: ['NAME', 'PHONE_NUMBER', 'EMAIL_ADDRESS']"
-                            ),
-                        },
-                        "language": {
-                            "type": "string",
-                            "default": "en",
-                            "description": "Language code for Presidio provider (default: 'en').",
-                        },
-                    },
-                    "additionalProperties": False,
+                "recency_weight": {
+                    "type": "number",
+                    "minimum": 0.0,
+                    "maximum": 2.0,
+                    "default": 0.3,
                     "description": (
-                        "Redaction layer configuration. Protects sensitive data "
-                        "(SSN, credit cards, passwords, API keys) from being stored "
-                        "in memory or sent to LLMs for fact extraction."
+                        "Strength of temporal recency bias in memory scoring. "
+                        "Higher values make recent memories score higher. "
+                        "0.0 disables recency bias. Default: 0.3."
+                    ),
+                },
+                "recency_half_life_hours": {
+                    "type": "number",
+                    "minimum": 1.0,
+                    "maximum": 87600.0,
+                    "default": 168.0,
+                    "description": (
+                        "Half-life for recency decay in hours. Controls how quickly "
+                        "the recency boost fades. 168 = 1 week (default), "
+                        "24 = 1 day (aggressive), 8760 = 1 year (gentle)."
+                    ),
+                },
+                "spreading_activation": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": (
+                        "Enable spreading activation via knowledge graph. "
+                        "After vector search, traverses graph neighbors of seed results "
+                        "to find associatively connected memories. Requires graph service."
+                    ),
+                },
+                "activation_discount": {
+                    "type": "number",
+                    "minimum": 0.0,
+                    "maximum": 1.0,
+                    "default": 0.7,
+                    "description": (
+                        "Score discount for memories discovered via spreading activation. "
+                        "Lower values penalize graph-discovered memories more. Default: 0.7."
+                    ),
+                },
+                "salience_gate": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": (
+                        "Enable salience-gated encoding. When enabled, low-salience messages "
+                        "(chit-chat, greetings) skip expensive LLM fact extraction and are "
+                        "stored as episodic memory only. Saves LLM costs."
+                    ),
+                },
+                "salience_threshold": {
+                    "type": "number",
+                    "minimum": 0.0,
+                    "maximum": 1.0,
+                    "default": 0.3,
+                    "description": (
+                        "Minimum salience score (0.0-1.0) for full fact extraction. "
+                        "Messages below this threshold are stored as episodic only. Default: 0.3."
                     ),
                 },
                 "reflection": {
@@ -2054,8 +2091,7 @@ MANIFEST_SCHEMA_V2 = {
                             "maximum": 500,
                             "default": 50,
                             "description": (
-                                "Number of memories to trigger reflection "
-                                "(alternative to time-based trigger)."
+                                "Number of memories to trigger reflection " "(alternative to time-based trigger)."
                             ),
                         },
                         "min_salience_to_keep": {
@@ -2120,51 +2156,6 @@ MANIFEST_SCHEMA_V2 = {
                                 "conflict resolution, and soft-delete pruning."
                             ),
                         },
-                        "decay": {
-                            "type": "object",
-                            "properties": {
-                                "enabled": {
-                                    "type": "boolean",
-                                    "default": True,
-                                    "description": (
-                                        "Enable Ebbinghaus Forgetting Curve decay. "
-                                        "Memories weaken over time based on stability."
-                                    ),
-                                },
-                                "default_stability_hours": {
-                                    "type": "number",
-                                    "minimum": 0.1,
-                                    "maximum": 10000,
-                                    "default": 24,
-                                    "description": (
-                                        "Default stability (half-life) in hours for new memories. "
-                                        "Higher values = slower decay. Default: 24 hours."
-                                    ),
-                                },
-                                "min_stability": {
-                                    "type": "number",
-                                    "minimum": 0.01,
-                                    "maximum": 1,
-                                    "default": 0.1,
-                                    "description": (
-                                        "Minimum stability value to prevent division by zero."
-                                    ),
-                                },
-                                "use_server_side_pipeline": {
-                                    "type": "boolean",
-                                    "default": True,
-                                    "description": (
-                                        "Use MongoDB aggregation pipeline for decay calculations. "
-                                        "Improves performance for large memory stores."
-                                    ),
-                                },
-                            },
-                            "additionalProperties": False,
-                            "description": (
-                                "Decay configuration based on Ebbinghaus Forgetting Curve. "
-                                "Retrieval strength = importance * exp(-time / stability)."
-                            ),
-                        },
                         "emotion": {
                             "type": "object",
                             "properties": {
@@ -2210,8 +2201,7 @@ MANIFEST_SCHEMA_V2 = {
                                     "type": "boolean",
                                     "default": True,
                                     "description": (
-                                        "Enable LLM-based conflict detection. "
-                                        "Prevents storing contradictory facts."
+                                        "Enable LLM-based conflict detection. " "Prevents storing contradictory facts."
                                     ),
                                 },
                                 "similarity_threshold": {
@@ -2227,8 +2217,7 @@ MANIFEST_SCHEMA_V2 = {
                                 "llm_model": {
                                     "type": "string",
                                     "description": (
-                                        "Override LLM model for conflict detection. "
-                                        "Defaults to memory_llm_model."
+                                        "Override LLM model for conflict detection. " "Defaults to memory_llm_model."
                                     ),
                                 },
                             },
@@ -2244,9 +2233,7 @@ MANIFEST_SCHEMA_V2 = {
                                 "enabled": {
                                     "type": "boolean",
                                     "default": True,
-                                    "description": (
-                                        "Enable automatic memory pruning when capacity exceeded."
-                                    ),
+                                    "description": ("Enable automatic memory pruning when capacity exceeded."),
                                 },
                                 "max_capacity": {
                                     "type": "integer",
@@ -2264,8 +2251,7 @@ MANIFEST_SCHEMA_V2 = {
                                     "maximum": 0.5,
                                     "default": 0.1,
                                     "description": (
-                                        "Extra percentage to prune to avoid constant triggers. "
-                                        "Default: 10% buffer."
+                                        "Extra percentage to prune to avoid constant triggers. " "Default: 10% buffer."
                                     ),
                                 },
                                 "strategy": {
@@ -2280,8 +2266,7 @@ MANIFEST_SCHEMA_V2 = {
                             },
                             "additionalProperties": False,
                             "description": (
-                                "Memory pruning configuration. "
-                                "Removes weakest memories when capacity is exceeded."
+                                "Memory pruning configuration. " "Removes weakest memories when capacity is exceeded."
                             ),
                         },
                         "cold_storage": {
@@ -2301,8 +2286,7 @@ MANIFEST_SCHEMA_V2 = {
                                     "maximum": 3650,
                                     "default": 365,
                                     "description": (
-                                        "Days to retain memories in cold storage. "
-                                        "Default: 365 days (1 year)."
+                                        "Days to retain memories in cold storage. " "Default: 365 days (1 year)."
                                     ),
                                 },
                             },
@@ -2372,7 +2356,7 @@ MANIFEST_SCHEMA_V2 = {
                         },
                         "default_type": {
                             "type": "string",
-                            "enum": ["semantic", "entity", "procedural", "episodic", "working"],
+                            "enum": ["semantic", "entity", "episodic", "working"],
                             "default": "semantic",
                             "description": "Default memory type when auto_detect is disabled.",
                         },
@@ -2402,43 +2386,7 @@ MANIFEST_SCHEMA_V2 = {
                     "description": (
                         "Memory types configuration (Cognitive Blueprint v2.0). "
                         "Enables directory strategy with semantic, entity, "
-                        "procedural, episodic, and working memory types."
-                    ),
-                },
-                "procedural": {
-                    "type": "object",
-                    "properties": {
-                        "enabled": {
-                            "type": "boolean",
-                            "default": True,
-                            "description": (
-                                "Enable procedural memory support. Stores how-to "
-                                "workflows, code snippets, and step-by-step procedures."
-                            ),
-                        },
-                        "auto_extract": {
-                            "type": "boolean",
-                            "default": True,
-                            "description": (
-                                "Automatically extract procedural content from memories. "
-                                "Detects code, workflows, and procedures."
-                            ),
-                        },
-                        "detect_code": {
-                            "type": "boolean",
-                            "default": True,
-                            "description": "Detect code snippets and programming instructions.",
-                        },
-                        "detect_workflows": {
-                            "type": "boolean",
-                            "default": True,
-                            "description": "Detect step-by-step workflows and procedures.",
-                        },
-                    },
-                    "additionalProperties": False,
-                    "description": (
-                        "Procedural memory configuration. Enables storage of how-to workflows, "
-                        "code snippets, and procedures with success tracking."
+                        "episodic, and working memory types."
                     ),
                 },
                 "consolidation": {
@@ -2484,6 +2432,106 @@ MANIFEST_SCHEMA_V2 = {
                         "routing, and procedural knowledge extraction."
                     ),
                 },
+                "skills": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": (
+                                "Enable procedural memory (skills) layer. "
+                                "When enabled, skills are retrieved during chat() and "
+                                "injected into the system prompt as [AVAILABLE SKILLS]."
+                            ),
+                        },
+                        "collection_name": {
+                            "type": "string",
+                            "default": "skills",
+                            "description": (
+                                "MongoDB collection name for storing skills. "
+                                "Automatically prefixed with the app slug."
+                            ),
+                        },
+                        "auto_compile": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": (
+                                "Automatically compile skills from repeated procedural "
+                                "patterns found during memory consolidation. "
+                                "This is the 'myelination' step."
+                            ),
+                        },
+                        "compile_threshold": {
+                            "type": "integer",
+                            "minimum": 2,
+                            "default": 5,
+                            "description": (
+                                "Number of times a procedure must be extracted before "
+                                "it is compiled into a high-confidence skill."
+                            ),
+                        },
+                        "min_success_rate": {
+                            "type": "number",
+                            "minimum": 0.0,
+                            "maximum": 1.0,
+                            "default": 0.7,
+                            "description": (
+                                "Minimum success rate for a skill to be included "
+                                "in chat context. Skills below this threshold are "
+                                "excluded from search results."
+                            ),
+                        },
+                        "max_skills_per_query": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 10,
+                            "default": 3,
+                            "description": (
+                                "Maximum number of skills to retrieve per chat query. "
+                                "Higher values provide more context but consume more tokens."
+                            ),
+                        },
+                        "prune_below_rate": {
+                            "type": "number",
+                            "minimum": 0.0,
+                            "maximum": 1.0,
+                            "default": 0.5,
+                            "description": (
+                                "Skills with success_rate below this value are "
+                                "deactivated during daily hygiene. "
+                                "Only applies after prune_min_uses is reached."
+                            ),
+                        },
+                        "prune_min_uses": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "default": 5,
+                            "description": (
+                                "Minimum number of uses before a skill can be pruned. "
+                                "Prevents pruning skills that haven't been tried enough."
+                            ),
+                        },
+                    },
+                    "additionalProperties": False,
+                    "description": (
+                        "Procedural memory (skills) configuration. "
+                        "Enables skill retrieval during chat and automatic "
+                        "compilation from repeated patterns. Skills are stored "
+                        "as vector-searchable procedures with success rate tracking."
+                    ),
+                },
+                "max_prompt_tokens": {
+                    "type": "integer",
+                    "minimum": 100,
+                    "description": (
+                        "Maximum token budget for context-engineered system prompts. "
+                        "When set, the prompt builder truncates lowest-priority sections "
+                        "(graph, LTM, STM summary) to stay within this limit. "
+                        "Requires the 'tiktoken' package for accurate counting "
+                        "(falls back to word-based estimation otherwise). "
+                        "Leave unset for unbounded prompts (default behaviour)."
+                    ),
+                },
                 "persona": {
                     "type": "object",
                     "properties": {
@@ -2495,15 +2543,13 @@ MANIFEST_SCHEMA_V2 = {
                         "default_role": {
                             "type": "string",
                             "description": (
-                                "Default persona role (e.g., 'AI Assistant', "
-                                "'Senior Python Architect')."
+                                "Default persona role (e.g., 'AI Assistant', " "'Senior Python Architect')."
                             ),
                         },
                         "default_description": {
                             "type": "string",
                             "description": (
-                                "Default persona description explaining the AI's "
-                                "identity and capabilities."
+                                "Default persona description explaining the AI's " "identity and capabilities."
                             ),
                         },
                         "default_traits": {
@@ -2523,31 +2569,23 @@ MANIFEST_SCHEMA_V2 = {
                         "Used by PersonaEngine to maintain consistent persona across conversations."
                     ),
                 },
-                "perceptions": {
+                "verification": {
                     "type": "object",
                     "properties": {
                         "enabled": {
                             "type": "boolean",
-                            "default": True,
-                            "description": "Enable perception analysis for memory context.",
+                            "default": False,
+                            "description": "Enable memory verification.",
                         },
-                        "auto_analyze": {
-                            "type": "boolean",
-                            "default": True,
-                            "description": "Automatically analyze perceptions from memories.",
-                        },
-                        "update_frequency": {
-                            "type": "string",
-                            "enum": ["per_interaction", "daily", "weekly"],
-                            "default": "per_interaction",
-                            "description": "Frequency of perception updates.",
+                        "max_file_size_kb": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "default": 100,
+                            "description": "Maximum file size in KB for verification.",
                         },
                     },
-                    "additionalProperties": True,
-                    "description": (
-                        "Perceptions configuration for cognitive memory features. "
-                        "Enables analysis of user perceptions and context from memories."
-                    ),
+                    "additionalProperties": False,
+                    "description": "Memory verification configuration.",
                 },
             },
             "additionalProperties": False,
@@ -2559,6 +2597,120 @@ MANIFEST_SCHEMA_V2 = {
                 "Configure AZURE_OPENAI_API_KEY/AZURE_OPENAI_ENDPOINT or OPENAI_API_KEY "
                 "in your .env file."
             ),
+        },
+        "graphrag_config": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Enable GraphRAG features (community detection, summaries, query classification)",
+                },
+                "community_detection": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "Enable hierarchical community detection",
+                        },
+                        "rebuild_threshold": {
+                            "type": "integer",
+                            "default": 100,
+                            "minimum": 1,
+                            "description": "Number of graph changes before triggering community rebuild",
+                        },
+                        "rebuild_interval_hours": {
+                            "type": "integer",
+                            "default": 24,
+                            "minimum": 1,
+                            "description": "Time-based rebuild interval in hours",
+                        },
+                        "min_community_size": {
+                            "type": "integer",
+                            "default": 2,
+                            "minimum": 1,
+                            "description": "Minimum nodes required for a community",
+                        },
+                        "max_community_size": {
+                            "type": "integer",
+                            "default": 1000,
+                            "minimum": 1,
+                            "description": "Maximum nodes allowed in a community",
+                        },
+                    },
+                    "additionalProperties": False,
+                },
+                "community_summaries": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "Enable LLM-powered community summary generation",
+                        },
+                        "generate_on_detection": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "Generate summaries immediately after community detection",
+                        },
+                        "regenerate_on_rebuild": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "Regenerate summaries when communities are rebuilt",
+                        },
+                    },
+                    "additionalProperties": False,
+                },
+                "query_classification": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "Enable automatic query classification",
+                        },
+                        "use_llm": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "Use LLM for ambiguous query classification",
+                        },
+                        "cache_results": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "Cache classification results for performance",
+                        },
+                    },
+                    "additionalProperties": False,
+                },
+                "search_methods": {
+                    "type": "object",
+                    "properties": {
+                        "local_enabled": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "Enable Local Search (entity-focused queries)",
+                        },
+                        "global_enabled": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "Enable Global Search (thematic queries with map-reduce)",
+                        },
+                        "drift_enabled": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "Enable DRIFT Search (entity + community context)",
+                        },
+                        "basic_fallback": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "Enable Basic Search fallback (vector similarity)",
+                        },
+                    },
+                    "additionalProperties": False,
+                },
+            },
+            "additionalProperties": False,
         },
         "graph_config": {
             "type": "object",
@@ -2576,10 +2728,10 @@ MANIFEST_SCHEMA_V2 = {
                 "collection_name": {
                     "type": "string",
                     "pattern": "^[a-zA-Z0-9_]+$",
-                    "default": "__kg",
+                    "default": "kg",
                     "description": (
                         "Collection name for knowledge graph nodes "
-                        "(defaults to '__kg'). Will be prefixed with app slug."
+                        "(defaults to 'kg'). Will be prefixed with app slug."
                     ),
                 },
                 "auto_extract": {
@@ -2641,9 +2793,60 @@ MANIFEST_SCHEMA_V2 = {
                         "concept",
                     ],
                     "description": (
-                        "Allowed node types for graph extraction. "
-                        "LLM will classify nodes into these types."
+                        "Allowed node types for graph extraction. " "LLM will classify nodes into these types."
                     ),
+                },
+                "osi_models_path": {
+                    "type": "string",
+                    "description": (
+                        "Path to directory containing OSI semantic model YAML files. "
+                        "Models are auto-loaded and used to enrich extraction prompts "
+                        "with domain-specific entity types, synonyms, and relationships. "
+                        "Requires PyYAML (pip install pyyaml)."
+                    ),
+                },
+                "resilience": {
+                    "type": "object",
+                    "properties": {
+                        "max_retries": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "default": 2,
+                            "description": "Maximum retry attempts for transient failures.",
+                        },
+                        "backoff_base": {
+                            "type": "number",
+                            "minimum": 0,
+                            "default": 1.0,
+                            "description": "Base delay (seconds) for exponential backoff.",
+                        },
+                        "backoff_max": {
+                            "type": "number",
+                            "minimum": 0,
+                            "default": 15.0,
+                            "description": "Maximum backoff delay in seconds.",
+                        },
+                        "timeout": {
+                            "type": ["number", "null"],
+                            "minimum": 0,
+                            "default": 45,
+                            "description": "Per-call timeout in seconds (null = no timeout).",
+                        },
+                        "circuit_failure_threshold": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "default": 5,
+                            "description": "Consecutive failures before circuit breaker opens.",
+                        },
+                        "circuit_recovery_window": {
+                            "type": "number",
+                            "minimum": 0,
+                            "default": 30.0,
+                            "description": "Seconds before an open circuit transitions to half-open.",
+                        },
+                    },
+                    "additionalProperties": False,
+                    "description": "Resilience policy for graph calls (retry, backoff, circuit breaker).",
                 },
             },
             "additionalProperties": False,
@@ -2652,6 +2855,168 @@ MANIFEST_SCHEMA_V2 = {
                 "with MongoDB $graphLookup for multi-hop traversal. Combines vector "
                 "search (semantic entry points) with graph traversal (structural "
                 "relationships) for GraphRAG. Can be used independently of memory service."
+            ),
+        },
+        "osi_config": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": (
+                        "Enable Open Semantic Interchange (OSI) integration. "
+                        "When enabled, loads semantic models and provides entity resolution, "
+                        "metric routing, and graph-to-OSI export capabilities."
+                    ),
+                },
+                "models_path": {
+                    "type": "string",
+                    "description": (
+                        "Path to directory containing OSI semantic model YAML files. "
+                        "All .yaml/.yml files in this directory will be loaded."
+                    ),
+                },
+                "models": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Specific OSI model YAML file paths to load.",
+                },
+                "entity_resolution": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": (
+                        "Enable post-extraction entity resolution against OSI definitions. "
+                        "Re-maps extracted node types to match OSI dataset names using synonyms."
+                    ),
+                },
+                "metric_routing": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": (
+                        "Enable query routing for OSI-defined governed metrics. "
+                        "Detects when user queries match metric definitions and surfaces them."
+                    ),
+                },
+                "export_enabled": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Enable graph-to-OSI export API endpoint (/api/osi/export).",
+                },
+                "sync_interval_minutes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 60,
+                    "description": (
+                        "Polling interval (minutes) for OSI model file changes. "
+                        "Set to 0 to disable automatic reloading."
+                    ),
+                },
+                "semantic_models": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": (
+                        "Inline OSI semantic model definitions. Alternative to external YAML files. "
+                        "Follows the OSI spec structure: datasets, fields, relationships, metrics."
+                    ),
+                },
+            },
+            "additionalProperties": False,
+            "description": (
+                "Open Semantic Interchange (OSI) integration configuration. "
+                "Enables MDB-Engine to consume, produce, and bridge OSI semantic models "
+                "with conversational knowledge graphs. Supports three tiers: "
+                "Tier 1 (graph_config.osi_models_path), Tier 2 (this section), "
+                "Tier 3 (inline semantic_models)."
+            ),
+        },
+        "profile_config": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": (
+                        "Enable the profile system. Materializes user profiles "
+                        "and optional community profiles from memory + graph data "
+                        "for instant AI context injection."
+                    ),
+                },
+                "user_profiles": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "Enable per-user materialized profiles.",
+                        },
+                        "rebuild_interval_hours": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "default": 24,
+                            "description": (
+                                "Hours between automatic full profile rebuilds. "
+                                "A full rebuild re-synthesizes from all memories + graph."
+                            ),
+                        },
+                        "incremental_on_memory_add": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": (
+                                "Incrementally update profile when new memories are stored. "
+                                "Cheaper than full rebuild — merges new facts only."
+                            ),
+                        },
+                        "collection_name": {
+                            "type": "string",
+                            "pattern": "^[a-zA-Z0-9_]+$",
+                            "default": "user_profiles",
+                            "description": "MongoDB collection name for user profiles.",
+                        },
+                    },
+                    "additionalProperties": False,
+                },
+                "community_profile": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": (
+                                "Enable app-wide community profile. Aggregates anonymous "
+                                "statistics across all users (no individual data exposed)."
+                            ),
+                        },
+                        "rebuild_interval_hours": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "default": 168,
+                            "description": "Hours between community profile rebuilds (default: weekly).",
+                        },
+                        "min_users_for_aggregation": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "default": 3,
+                            "description": (
+                                "Minimum number of users required before community "
+                                "aggregation runs (privacy threshold)."
+                            ),
+                        },
+                        "collection_name": {
+                            "type": "string",
+                            "pattern": "^[a-zA-Z0-9_]+$",
+                            "default": "community_profile",
+                            "description": "MongoDB collection name for community profile.",
+                        },
+                    },
+                    "additionalProperties": False,
+                },
+            },
+            "additionalProperties": False,
+            "description": (
+                "Profile system configuration. Materializes user profiles (prefrontal "
+                "self-model) and community profiles from memory + graph data for "
+                "instant AI context injection. User profiles are updated incrementally "
+                "on memory.add() and fully rebuilt periodically."
             ),
         },
         "cors": {
@@ -2667,16 +3032,13 @@ MANIFEST_SCHEMA_V2 = {
                     "items": {"type": "string"},
                     "default": ["*"],
                     "description": (
-                        "List of allowed origins (use ['*'] for all origins, "
-                        "not recommended for production)"
+                        "List of allowed origins (use ['*'] for all origins, " "not recommended for production)"
                     ),
                 },
                 "allow_credentials": {
                     "type": "boolean",
                     "default": False,
-                    "description": (
-                        "Allow credentials (cookies, authorization headers) " "in CORS requests"
-                    ),
+                    "description": ("Allow credentials (cookies, authorization headers) " "in CORS requests"),
                 },
                 "allow_methods": {
                     "type": "array",
@@ -2727,15 +3089,12 @@ MANIFEST_SCHEMA_V2 = {
                     "type": "array",
                     "items": {"type": "string"},
                     "description": (
-                        "List of app slugs this app can read from. "
-                        "Defaults to [app_slug] if not specified."
+                        "List of app slugs this app can read from. " "Defaults to [app_slug] if not specified."
                     ),
                 },
                 "write_scope": {
                     "type": "string",
-                    "description": (
-                        "App slug this app writes to. " "Defaults to app_slug if not specified."
-                    ),
+                    "description": ("App slug this app writes to. " "Defaults to app_slug if not specified."),
                 },
                 "cross_app_policy": {
                     "type": "string",
@@ -2792,9 +3151,7 @@ MANIFEST_SCHEMA_V2 = {
                         "collect_operation_metrics": {
                             "type": "boolean",
                             "default": True,
-                            "description": (
-                                "Collect operation-level metrics " "(duration, errors, etc.)"
-                            ),
+                            "description": ("Collect operation-level metrics " "(duration, errors, etc.)"),
                         },
                         "collect_performance_metrics": {
                             "type": "boolean",
@@ -2842,9 +3199,53 @@ MANIFEST_SCHEMA_V2 = {
                     "additionalProperties": False,
                     "description": "Logging configuration",
                 },
+                "tracing": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": (
+                                "Enable OpenTelemetry distributed tracing. "
+                                "Requires `pip install mdb-engine[otel]` (default: false)"
+                            ),
+                        },
+                        "exporter": {
+                            "type": "string",
+                            "enum": ["otlp", "console", "none"],
+                            "default": "otlp",
+                            "description": (
+                                "Span exporter type: 'otlp' sends to an OTLP collector, "
+                                "'console' prints to stdout, 'none' disables export (default: 'otlp')"
+                            ),
+                        },
+                        "endpoint": {
+                            "type": "string",
+                            "default": "http://localhost:4317",
+                            "description": "OTLP collector gRPC endpoint (default: 'http://localhost:4317')",
+                        },
+                        "service_name": {
+                            "type": "string",
+                            "description": (
+                                "Logical service name attached to every span. " "Defaults to the app slug when omitted."
+                            ),
+                        },
+                        "sample_rate": {
+                            "type": "number",
+                            "minimum": 0.0,
+                            "maximum": 1.0,
+                            "default": 1.0,
+                            "description": (
+                                "Fraction of traces to sample (0.0–1.0). " "1.0 means sample everything (default: 1.0)"
+                            ),
+                        },
+                    },
+                    "additionalProperties": False,
+                    "description": "OpenTelemetry distributed tracing configuration",
+                },
             },
             "additionalProperties": False,
-            "description": "Observability configuration (health checks, metrics, logging)",
+            "description": "Observability configuration (health checks, metrics, logging, tracing)",
         },
         "multi_app": {
             "type": "object",
@@ -2862,15 +3263,12 @@ MANIFEST_SCHEMA_V2 = {
                             "slug": {
                                 "type": "string",
                                 "pattern": "^[a-z0-9_-]+$",
-                                "description": (
-                                    "App slug (lowercase alphanumeric, underscores, hyphens)"
-                                ),
+                                "description": ("App slug (lowercase alphanumeric, underscores, hyphens)"),
                             },
                             "manifest": {
                                 "type": "string",
                                 "description": (
-                                    "Path to manifest.json file "
-                                    "(relative to multi_app manifest or absolute)"
+                                    "Path to manifest.json file " "(relative to multi_app manifest or absolute)"
                                 ),
                             },
                             "path_prefix": {
@@ -2916,16 +3314,12 @@ MANIFEST_SCHEMA_V2 = {
                         "rate_limiting": {
                             "type": "boolean",
                             "default": True,
-                            "description": (
-                                "Enable rate limiting middleware at parent level (default: true)"
-                            ),
+                            "description": ("Enable rate limiting middleware at parent level (default: true)"),
                         },
                         "health_checks": {
                             "type": "boolean",
                             "default": True,
-                            "description": (
-                                "Enable unified health check endpoint at /health (default: true)"
-                            ),
+                            "description": ("Enable unified health check endpoint at /health (default: true)"),
                         },
                     },
                     "additionalProperties": False,
@@ -2952,6 +3346,57 @@ MANIFEST_SCHEMA_V2 = {
                 "Initial data to seed into collections. Only seeds if "
                 "collection is empty (idempotent). Each key is a collection "
                 "name, value is an array of documents to insert."
+            ),
+        },
+        "prompt_safety": {
+            "type": "object",
+            "properties": {
+                "injection_mode": {
+                    "type": "string",
+                    "enum": ["log", "block", "block_high_confidence"],
+                    "default": "log",
+                    "description": (
+                        "How to handle detected prompt-injection patterns. "
+                        "'log' (default) logs a warning but never blocks. "
+                        "'block' raises PromptInjectionError on any match. "
+                        "'block_high_confidence' blocks only high-confidence "
+                        "patterns (ChatML tokens, Llama markers) while logging the rest."
+                    ),
+                },
+                "max_input_length": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 0,
+                    "description": (
+                        "Maximum character length for user input text. "
+                        "0 means no limit (default). When exceeded, "
+                        "sanitize_for_prompt raises ValueError."
+                    ),
+                },
+                "custom_blocked_patterns": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Additional regex patterns to treat as injection attempts. "
+                        "Patterns are compiled with IGNORECASE flag. Invalid regexes "
+                        "are logged and skipped."
+                    ),
+                },
+                "allow_patterns": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Regex patterns to whitelist. If any allow_pattern matches "
+                        "the input text, injection detection is skipped entirely. "
+                        "Useful for known-safe content patterns."
+                    ),
+                },
+            },
+            "additionalProperties": False,
+            "description": (
+                "Prompt safety configuration. Controls how prompt injection "
+                "detection behaves, including block vs log-only mode, custom "
+                "patterns, and input length limits."
             ),
         },
         "developer_id": {
@@ -3038,16 +3483,11 @@ MANIFEST_SCHEMA_V2 = {
                             },
                         },
                     ],
-                    "description": (
-                        "Index keys (required for regular, text, geospatial, "
-                        "ttl, partial indexes)"
-                    ),
+                    "description": ("Index keys (required for regular, text, geospatial, " "ttl, partial indexes)"),
                 },
                 "definition": {
                     "type": "object",
-                    "description": (
-                        "Index definition (required for vectorSearch and " "search indexes)"
-                    ),
+                    "description": ("Index definition (required for vectorSearch and " "search indexes)"),
                 },
                 "hybrid": {
                     "type": "object",
@@ -3058,16 +3498,12 @@ MANIFEST_SCHEMA_V2 = {
                                 "name": {
                                     "type": "string",
                                     "pattern": "^[a-zA-Z0-9_]+$",
-                                    "description": (
-                                        "Name for the vector index " "(defaults to '{name}_vector')"
-                                    ),
+                                    "description": ("Name for the vector index " "(defaults to '{name}_vector')"),
                                 },
                                 "definition": {
                                     "type": "object",
                                     "description": (
-                                        "Vector index definition with "
-                                        "mappings.fields containing knnVector "
-                                        "fields"
+                                        "Vector index definition with " "mappings.fields containing knnVector " "fields"
                                     ),
                                 },
                             },
@@ -3080,16 +3516,11 @@ MANIFEST_SCHEMA_V2 = {
                                 "name": {
                                     "type": "string",
                                     "pattern": "^[a-zA-Z0-9_]+$",
-                                    "description": (
-                                        "Name for the text index " "(defaults to '{name}_text')"
-                                    ),
+                                    "description": ("Name for the text index " "(defaults to '{name}_text')"),
                                 },
                                 "definition": {
                                     "type": "object",
-                                    "description": (
-                                        "Text index definition with mappings "
-                                        "for full-text search"
-                                    ),
+                                    "description": ("Text index definition with mappings " "for full-text search"),
                                 },
                             },
                             "required": ["definition"],
@@ -3122,9 +3553,7 @@ MANIFEST_SCHEMA_V2 = {
                         },
                         "weights": {
                             "type": "object",
-                            "patternProperties": {
-                                "^[a-zA-Z0-9_.]+$": {"type": "integer", "minimum": 1}
-                            },
+                            "patternProperties": {"^[a-zA-Z0-9_.]+$": {"type": "integer", "minimum": 1}},
                             "description": "Field weights for text indexes",
                         },
                         "default_language": {
@@ -3160,11 +3589,7 @@ MANIFEST_SCHEMA_V2 = {
                 {
                     "if": {"properties": {"type": {"const": "partial"}}},
                     "then": {"required": ["keys", "options"]},
-                    "else": {
-                        "properties": {
-                            "options": {"not": {"required": ["partialFilterExpression"]}}
-                        }
-                    },
+                    "else": {"properties": {"options": {"not": {"required": ["partialFilterExpression"]}}}},
                 },
                 {
                     "if": {"properties": {"type": {"const": "vectorSearch"}}},
@@ -3324,22 +3749,18 @@ def get_schema_version(manifest_data: dict[str, Any]) -> str:
     if version:
         # Validate version format
         if not isinstance(version, str) or not version.replace(".", "").isdigit():
-            raise ValueError(
-                f"Invalid schema_version format: {version}. Expected format: 'major.minor'"
-            )
+            raise ValueError(f"Invalid schema_version format: {version}. Expected format: 'major.minor'")
         return str(version)
 
     # Heuristic: If manifest has new fields, assume 2.0, otherwise 1.0
-    v2_fields = ["auth", "collection_settings", "auth_policy"]
+    v2_fields = ["auth", "collection_settings", "auth_policy", "prompt_safety"]
     if any(field in manifest_data for field in v2_fields):
         return "2.0"
 
     return DEFAULT_SCHEMA_VERSION
 
 
-def migrate_manifest(
-    manifest_data: dict[str, Any], target_version: str = CURRENT_SCHEMA_VERSION
-) -> dict[str, Any]:
+def migrate_manifest(manifest_data: dict[str, Any], target_version: str = CURRENT_SCHEMA_VERSION) -> dict[str, Any]:
     """
     Migrate manifest from one schema version to another.
 
@@ -3403,19 +3824,15 @@ def get_schema_for_version(version: str) -> dict[str, Any]:
     major = version.split(".")[0]
     for reg_version in sorted(SCHEMA_REGISTRY.keys(), reverse=True):
         if reg_version.startswith(major + "."):
-            logger.warning(
-                f"Schema version {version} not found, using compatible version {reg_version}"
-            )
+            logger.warning(f"Schema version {version} not found, using compatible version {reg_version}")
             return SCHEMA_REGISTRY[reg_version]
 
     # Fallback to current
-    logger.warning(
-        f"Schema version {version} not found, using current version " f"{CURRENT_SCHEMA_VERSION}"
-    )
+    logger.warning(f"Schema version {version} not found, using current version " f"{CURRENT_SCHEMA_VERSION}")
     return SCHEMA_REGISTRY[CURRENT_SCHEMA_VERSION]
 
 
-async def _validate_manifest_async(
+async def validate_manifest(
     manifest_data: dict[str, Any], use_cache: bool = True
 ) -> tuple[bool, str | None, list[str] | None]:
     """
@@ -3425,7 +3842,8 @@ async def _validate_manifest_async(
     1. Detects schema version from manifest (defaults to 1.0 if not specified)
     2. Uses appropriate schema for validation
     3. Caches validation results for performance
-    4. Supports parallel validation for scale
+    4. Validates SSO WebSocket auth requirements (security check)
+    5. Supports parallel validation for scale
 
     Args:
     manifest_data: The manifest data to validate
@@ -3445,6 +3863,7 @@ async def _validate_manifest_async(
     if use_cache:
         cache_key = _get_manifest_hash(manifest_data) + "_" + get_schema_version(manifest_data)
         if cache_key in _validation_cache:
+            _validation_cache.move_to_end(cache_key)
             return _validation_cache[cache_key]
 
     try:
@@ -3457,11 +3876,19 @@ async def _validate_manifest_async(
         # Validate against appropriate schema
         validate(instance=manifest_data, schema=schema)
 
+        # Validate SSO WebSocket auth requirements (security check)
+        sso_result = _validate_sso_websocket_auth(manifest_data)
+        if not sso_result[0]:
+            if use_cache:
+                cache_key = _get_manifest_hash(manifest_data) + "_" + version
+                _cache_put(cache_key, sso_result)
+            return sso_result
+
         # Cache success result
         result = (True, None, None)
         if use_cache:
             cache_key = _get_manifest_hash(manifest_data) + "_" + version
-            _validation_cache[cache_key] = result
+            _cache_put(cache_key, result)
 
         return result
 
@@ -3494,7 +3921,7 @@ async def _validate_manifest_async(
         result = (False, error_message, error_paths)
         if use_cache:
             cache_key = _get_manifest_hash(manifest_data) + "_" + version
-            _validation_cache[cache_key] = result
+            _cache_put(cache_key, result)
 
         return result
 
@@ -3503,7 +3930,7 @@ async def _validate_manifest_async(
         result = (False, error_message, ["schema"])
         if use_cache:
             cache_key = _get_manifest_hash(manifest_data) + "_" + get_schema_version(manifest_data)
-            _validation_cache[cache_key] = result
+            _cache_put(cache_key, result)
 
         return result
 
@@ -3521,7 +3948,7 @@ async def _validate_manifest_async(
         result = (False, error_message, error_paths if error_paths else None)
         if use_cache:
             cache_key = _get_manifest_hash(manifest_data) + "_" + get_schema_version(manifest_data)
-            _validation_cache[cache_key] = result
+            _cache_put(cache_key, result)
 
         return result
     except (TypeError, ValueError, KeyError) as e:
@@ -3531,12 +3958,12 @@ async def _validate_manifest_async(
         result = (False, error_message, None)
         if use_cache:
             cache_key = _get_manifest_hash(manifest_data) + "_" + get_schema_version(manifest_data)
-            _validation_cache[cache_key] = result
+            _cache_put(cache_key, result)
 
         return result
 
 
-def clear_validation_cache():
+def clear_validation_cache() -> None:
     """Clear the validation cache. Useful for testing or when schemas change."""
     global _validation_cache
     _validation_cache.clear()
@@ -3562,7 +3989,7 @@ async def validate_manifests_parallel(
         manifest: dict[str, Any],
     ) -> tuple[bool, str | None, list[str] | None, str | None]:
         slug = manifest.get("slug", "unknown")
-        is_valid, error, paths = await _validate_manifest_async(manifest, use_cache=use_cache)
+        is_valid, error, paths = await validate_manifest(manifest, use_cache=use_cache)
         return (is_valid, error, paths, slug)
 
     # Run validations in parallel
@@ -3646,10 +4073,8 @@ async def validate_manifest_with_db(
         - error_message: Human-readable error message (None if valid)
         - error_paths: List of JSON paths with errors (None if valid)
     """
-    # First validate schema (with versioning support) - use async version directly
-    is_valid, error_message, error_paths = await _validate_manifest_async(
-        manifest_data, use_cache=use_cache
-    )
+    # First validate schema and SSO WebSocket auth (included in validate_manifest)
+    is_valid, error_message, error_paths = await validate_manifest(manifest_data, use_cache=use_cache)
     if not is_valid:
         return False, error_message, error_paths
 
@@ -3663,11 +4088,6 @@ async def validate_manifest_with_db(
                 f"developer_id validation failed: {error_msg}",
                 ["developer_id"],
             )
-
-    # Validate SSO apps require WebSocket auth (security requirement)
-    validation_result = _validate_sso_websocket_auth(manifest_data)
-    if not validation_result[0]:
-        return validation_result
 
     return True, None, None
 
@@ -3729,67 +4149,11 @@ def _validate_sso_websocket_auth(
         # (some apps may legitimately need public WebSocket endpoints)
         if require_role and not require_auth and allow_anonymous:
             logger.warning(
-                f"⚠️ SSO app '{manifest_data.get('slug', 'unknown')}' allows anonymous "
+                f"SSO app '{manifest_data.get('slug', 'unknown')}' allows anonymous "
                 f"WebSocket connections on endpoint '{endpoint_name}' despite requiring "
                 f"role '{require_role}' for HTTP routes. This may be intentional, but "
                 f"ensure this is the desired security model."
             )
-
-    return True, None, None
-
-
-# Public API: Synchronous wrapper for backward compatibility
-# Most callers use this synchronously, so we provide a sync wrapper
-def validate_manifest(
-    manifest_data: dict[str, Any], use_cache: bool = True
-) -> tuple[bool, str | None, list[str] | None]:
-    """
-    Validate a manifest against the JSON Schema with versioning and caching
-    support (synchronous wrapper).
-
-    This function wraps the async validation for backward compatibility.
-    In async contexts, use _validate_manifest_async() directly for better performance.
-
-    Args:
-    manifest_data: The manifest data to validate
-    use_cache: Whether to use validation cache (default: True)
-
-    Returns:
-        Tuple of (is_valid, error_message, error_paths)
-        - is_valid: True if valid, False otherwise
-        - error_message: Human-readable error message (None if valid)
-        - error_paths: List of JSON paths with errors (None if valid)
-    """
-    import asyncio
-
-    # First validate schema
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            # If we're in an async context, use a thread pool to run sync
-            import concurrent.futures
-
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(
-                    lambda: asyncio.run(_validate_manifest_async(manifest_data, use_cache))
-                )
-                schema_result = future.result()
-        else:
-            schema_result = loop.run_until_complete(
-                _validate_manifest_async(manifest_data, use_cache)
-            )
-    except RuntimeError:
-        # No event loop, create one
-        schema_result = asyncio.run(_validate_manifest_async(manifest_data, use_cache))
-
-    # If schema validation failed, return early
-    if not schema_result[0]:
-        return schema_result
-
-    # Then validate SSO WebSocket auth requirements (security check)
-    sso_result = _validate_sso_websocket_auth(manifest_data)
-    if not sso_result[0]:
-        return sso_result
 
     return True, None, None
 
@@ -3801,15 +4165,10 @@ def _validate_regular_index(
     if "keys" not in index_def:
         return (
             False,
-            f"Regular index '{index_name}' in collection "
-            f"'{collection_name}' requires 'keys' field",
+            f"Regular index '{index_name}' in collection " f"'{collection_name}' requires 'keys' field",
         )
     keys = index_def.get("keys")
-    if (
-        not keys
-        or (isinstance(keys, dict) and len(keys) == 0)
-        or (isinstance(keys, list) and len(keys) == 0)
-    ):
+    if not keys or (isinstance(keys, dict) and len(keys) == 0) or (isinstance(keys, list) and len(keys) == 0):
         return (
             False,
             f"Regular index '{index_name}' in collection " f"'{collection_name}' has empty 'keys'",
@@ -3832,9 +4191,7 @@ def _validate_regular_index(
     return True, None
 
 
-def _validate_ttl_index(
-    index_def: dict[str, Any], collection_name: str, index_name: str
-) -> tuple[bool, str | None]:
+def _validate_ttl_index(index_def: dict[str, Any], collection_name: str, index_name: str) -> tuple[bool, str | None]:
     """Validate a TTL index definition."""
     if "keys" not in index_def:
         return (
@@ -3845,8 +4202,7 @@ def _validate_ttl_index(
     if "expireAfterSeconds" not in options:
         return (
             False,
-            f"TTL index '{index_name}' in collection '{collection_name}' "
-            f"requires 'expireAfterSeconds' in options",
+            f"TTL index '{index_name}' in collection '{collection_name}' " f"requires 'expireAfterSeconds' in options",
         )
     expire_after = options.get("expireAfterSeconds")
     if not isinstance(expire_after, int) or expire_after < MIN_TTL_SECONDS:
@@ -3873,8 +4229,7 @@ def _validate_partial_index(
     if "keys" not in index_def:
         return (
             False,
-            f"Partial index '{index_name}' in collection "
-            f"'{collection_name}' requires 'keys' field",
+            f"Partial index '{index_name}' in collection " f"'{collection_name}' requires 'keys' field",
         )
     options = index_def.get("options", {})
     if "partialFilterExpression" not in options:
@@ -3887,15 +4242,12 @@ def _validate_partial_index(
     return True, None
 
 
-def _validate_text_index(
-    index_def: dict[str, Any], collection_name: str, index_name: str
-) -> tuple[bool, str | None]:
+def _validate_text_index(index_def: dict[str, Any], collection_name: str, index_name: str) -> tuple[bool, str | None]:
     """Validate a text index definition."""
     if "keys" not in index_def:
         return (
             False,
-            f"Text index '{index_name}' in collection '{collection_name}' "
-            f"requires 'keys' field",
+            f"Text index '{index_name}' in collection '{collection_name}' " f"requires 'keys' field",
         )
     keys = index_def.get("keys")
     # Text indexes should have text type in keys
@@ -3920,8 +4272,7 @@ def _validate_geospatial_index(
     if "keys" not in index_def:
         return (
             False,
-            f"Geospatial index '{index_name}' in collection "
-            f"'{collection_name}' requires 'keys' field",
+            f"Geospatial index '{index_name}' in collection " f"'{collection_name}' requires 'keys' field",
         )
     keys = index_def.get("keys")
     # Geospatial indexes should have geospatial type in keys
@@ -3947,8 +4298,7 @@ def _validate_vector_search_index(
     if "definition" not in index_def:
         return (
             False,
-            f"{index_type} index '{index_name}' in collection "
-            f"'{collection_name}' requires 'definition' field",
+            f"{index_type} index '{index_name}' in collection " f"'{collection_name}' requires 'definition' field",
         )
     definition = index_def.get("definition")
     if not isinstance(definition, dict):
@@ -3988,22 +4338,18 @@ def _validate_vector_search_index(
     return True, None
 
 
-def _validate_hybrid_index(
-    index_def: dict[str, Any], collection_name: str, index_name: str
-) -> tuple[bool, str | None]:
+def _validate_hybrid_index(index_def: dict[str, Any], collection_name: str, index_name: str) -> tuple[bool, str | None]:
     """Validate a hybrid index definition."""
     if "hybrid" not in index_def:
         return (
             False,
-            f"Hybrid index '{index_name}' in collection '{collection_name}' "
-            f"requires 'hybrid' field",
+            f"Hybrid index '{index_name}' in collection '{collection_name}' " f"requires 'hybrid' field",
         )
     hybrid = index_def.get("hybrid")
     if not isinstance(hybrid, dict):
         return (
             False,
-            f"Hybrid index '{index_name}' in collection '{collection_name}' "
-            f"requires 'hybrid' to be an object",
+            f"Hybrid index '{index_name}' in collection '{collection_name}' " f"requires 'hybrid' to be an object",
         )
 
     # Validate vector_index
@@ -4091,8 +4437,7 @@ def validate_index_definition(
     else:
         return (
             False,
-            f"Unknown index type '{index_type}' for index '{index_name}' "
-            f"in collection '{collection_name}'",
+            f"Unknown index type '{index_type}' for index '{index_name}' " f"in collection '{collection_name}'",
         )
 
 
@@ -4165,9 +4510,7 @@ class ManifestValidator:
         self.use_cache = use_cache
 
     @staticmethod
-    def validate(
-        manifest: dict[str, Any], use_cache: bool = True
-    ) -> tuple[bool, str | None, list[str] | None]:
+    async def validate(manifest: dict[str, Any], use_cache: bool = True) -> tuple[bool, str | None, list[str] | None]:
         """
         Validate manifest against schema.
 
@@ -4178,7 +4521,7 @@ class ManifestValidator:
         Returns:
             Tuple of (is_valid, error_message, error_paths)
         """
-        return validate_manifest(manifest, use_cache=use_cache)
+        return await validate_manifest(manifest, use_cache=use_cache)
 
     @staticmethod
     async def validate_async(
@@ -4198,7 +4541,7 @@ class ManifestValidator:
         Returns:
             Tuple of (is_valid, error_message, error_paths)
         """
-        return await _validate_manifest_async(manifest, use_cache=use_cache)
+        return await validate_manifest(manifest, use_cache=use_cache)
 
     @staticmethod
     async def validate_with_db(
@@ -4265,9 +4608,7 @@ class ManifestValidator:
         return get_schema_version(manifest)
 
     @staticmethod
-    def migrate(
-        manifest: dict[str, Any], target_version: str = CURRENT_SCHEMA_VERSION
-    ) -> dict[str, Any]:
+    def migrate(manifest: dict[str, Any], target_version: str = CURRENT_SCHEMA_VERSION) -> dict[str, Any]:
         """
         Migrate manifest to target schema version.
 
@@ -4319,21 +4660,22 @@ class ManifestParser:
             FileNotFoundError: If file doesn't exist
             ValueError: If validation fails
         """
-        import json
         from pathlib import Path
 
         path_obj = Path(path) if not isinstance(path, Path) else path
 
-        if not path_obj.exists():
-            raise FileNotFoundError(f"Manifest file not found: {path_obj}")
+        def _load_manifest_sync() -> dict[str, Any]:
+            if not path_obj.exists():
+                raise FileNotFoundError(f"Manifest file not found: {path_obj}")
+            content = path_obj.read_text(encoding="utf-8")
+            return json.loads(content)
 
-        # Read file
-        content = path_obj.read_text(encoding="utf-8")
-        manifest_data = json.loads(content)
+        # Read file without blocking the event loop
+        manifest_data = await asyncio.to_thread(_load_manifest_sync)
 
         # Validate if requested
         if validate:
-            is_valid, error, paths = ManifestValidator.validate(manifest_data)
+            is_valid, error, paths = await ManifestValidator.validate(manifest_data)
             if not is_valid:
                 error_path_str = f" (errors in: {', '.join(paths[:3])})" if paths else ""
                 raise ValueError(f"Manifest validation failed: {error}{error_path_str}")
@@ -4357,7 +4699,7 @@ class ManifestParser:
         """
         # Validate if requested
         if validate:
-            is_valid, error, paths = ManifestValidator.validate(data)
+            is_valid, error, paths = await ManifestValidator.validate(data)
             if not is_valid:
                 error_path_str = f" (errors in: {', '.join(paths[:3])})" if paths else ""
                 raise ValueError(f"Manifest validation failed: {error}{error_path_str}")
@@ -4380,8 +4722,6 @@ class ManifestParser:
             json.JSONDecodeError: If JSON is invalid
             ValueError: If validation fails
         """
-        import json
-
         manifest_data = json.loads(content)
         return await ManifestParser.load_from_dict(manifest_data, validate=validate)
 

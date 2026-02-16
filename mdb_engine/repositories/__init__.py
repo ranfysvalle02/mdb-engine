@@ -17,7 +17,7 @@ Usage:
 
     # In FastAPI routes using UnitOfWork
     @app.get("/users/{user_id}")
-    async def get_user(user_id: str, ctx: RequestContext = Depends()):
+    async def get_user(user_id: str, ctx: RequestContext = Depends(get_request_context)):
         user = await ctx.uow.users.get(user_id)
         return user
 """

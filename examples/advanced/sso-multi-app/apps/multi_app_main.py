@@ -90,6 +90,11 @@ app = engine.create_multi_app(
             "manifest": APPS_DIR / "sso-app-2" / "manifest.json",
             "path_prefix": "/flux",
         },
+        {
+            "slug": "member",
+            "manifest": APPS_DIR / "member" / "manifest.json",
+            "path_prefix": "/member",
+        },
     ],
     title="SSO Multi-App Platform",
     description="Multi-app deployment with SSO support",
@@ -101,6 +106,7 @@ logger.info("Apps will be accessible at:")
 logger.info("  - /auth-hub/*  (Auth Hub)")
 logger.info("  - /pwd-zero/*  (pwd-zero)")
 logger.info("  - /flux/*      (FLUX)")
+logger.info("  - /member/*    (Member - Cognitive Memory Showcase)")
 logger.info("  - /health      (Unified health check)")
 
 # ============================================================================
@@ -150,6 +156,7 @@ async def info():
             "auth_hub": "/auth-hub",
             "pwd_zero": "/pwd-zero",
             "flux": "/flux",
+            "member": "/member",
         },
     }
 
@@ -169,6 +176,7 @@ if __name__ == "__main__":
     logger.info(f"  http://{host}:{port}/auth-hub")
     logger.info(f"  http://{host}:{port}/pwd-zero")
     logger.info(f"  http://{host}:{port}/flux")
+    logger.info(f"  http://{host}:{port}/member")
     logger.info(f"  http://{host}:{port}/health")
 
     uvicorn.run(

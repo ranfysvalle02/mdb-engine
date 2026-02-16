@@ -69,9 +69,7 @@ class TestCollectionFindOne:
     @pytest.mark.asyncio
     async def test_find_one_connection_failure(self, mock_scoped_collection):
         """Test find_one handles ConnectionFailure (lines 105-107)."""
-        mock_scoped_collection.find_one = AsyncMock(
-            side_effect=ConnectionFailure("Connection error")
-        )
+        mock_scoped_collection.find_one = AsyncMock(side_effect=ConnectionFailure("Connection error"))
         collection = Collection(mock_scoped_collection)
 
         result = await collection.find_one({"_id": "test_id"})
@@ -363,9 +361,7 @@ class TestCollectionCountDocuments:
     @pytest.mark.asyncio
     async def test_count_documents_connection_failure(self, mock_scoped_collection):
         """Test count_documents handles ConnectionFailure (lines 453-455)."""
-        mock_scoped_collection.count_documents = AsyncMock(
-            side_effect=ConnectionFailure("Connection error")
-        )
+        mock_scoped_collection.count_documents = AsyncMock(side_effect=ConnectionFailure("Connection error"))
         collection = Collection(mock_scoped_collection)
 
         result = await collection.count_documents({"status": "active"})

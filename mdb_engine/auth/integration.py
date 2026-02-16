@@ -113,9 +113,7 @@ async def get_auth_config(slug_id: str, engine) -> dict[str, Any]:
         return {}
 
 
-async def _setup_authorization_provider(
-    app: FastAPI, engine, slug_id: str, config: dict[str, Any]
-) -> None:
+async def _setup_authorization_provider(app: FastAPI, engine, slug_id: str, config: dict[str, Any]) -> None:
     """Set up authorization provider (Casbin/OSO/custom) from manifest."""
     auth = config.get("auth", {})
     auth_policy = auth.get("policy", {})
@@ -149,10 +147,10 @@ async def _setup_authorization_provider(
             authz_provider = await initialize_oso_from_manifest(engine, slug_id, config)
             if authz_provider:
                 app.state.authz_provider = authz_provider
-                logger.info(f"✅ Authorization provider (OSO Cloud) auto-created for {slug_id}")
+                logger.info(f"Authorization provider (OSO Cloud) auto-created for {slug_id}")
             else:
                 logger.error(
-                    f"❌ OSO Cloud provider not created for {slug_id}. "
+                    f"OSO Cloud provider not created for {slug_id}. "
                     f"Check logs above for details. "
                     f"OSO_AUTH={'SET' if os.getenv('OSO_AUTH') else 'NOT SET'}, "
                     f"OSO_URL={os.getenv('OSO_URL', 'NOT SET')}"
@@ -167,7 +165,7 @@ async def _setup_authorization_provider(
             KeyError,
         ) as e:
             logger.error(
-                f"❌ Could not auto-create OSO Cloud provider for {slug_id}: {e}",
+                f"Could not auto-create OSO Cloud provider for {slug_id}: {e}",
                 exc_info=True,
             )
     elif provider == "custom":
@@ -196,7 +194,7 @@ async def _setup_demo_users(app: FastAPI, engine, slug_id: str, config: dict[str
             try:
                 from .users import ensure_demo_users_exist
 
-                db = engine.get_scoped_db(slug_id)
+                db = await engine.get_scoped_db(slug_id)
 
                 logger.info(
                     f"Auto-creating demo users for {slug_id} "
@@ -213,14 +211,11 @@ async def _setup_demo_users(app: FastAPI, engine, slug_id: str, config: dict[str
                 )
                 if demo_users:
                     logger.info(
-                        f"✅ Created/verified {len(demo_users)} demo user(s) for {slug_id}: "
+                        f"Created/verified {len(demo_users)} demo user(s) for {slug_id}: "
                         f"{', '.join([u.get('email', 'unknown') for u in demo_users])}"
                     )
                 else:
-                    logger.debug(
-                        f"No demo users created for {slug_id} "
-                        f"(may already exist or config disabled)"
-                    )
+                    logger.debug(f"No demo users created for {slug_id} " f"(may already exist or config disabled)")
             except (
                 ValueError,
                 TypeError,
@@ -240,9 +235,7 @@ async def _setup_demo_users(app: FastAPI, engine, slug_id: str, config: dict[str
                 f"and auto_link_platform_demo is disabled"
             )
     elif seed_strategy == "disabled":
-        logger.debug(
-            f"Demo user creation disabled for {slug_id} (demo_user_seed_strategy: disabled)"
-        )
+        logger.debug(f"Demo user creation disabled for {slug_id} (demo_user_seed_strategy: disabled)")
     elif seed_strategy == "manual":
         logger.debug(f"Demo user creation set to manual for {slug_id} - skipping auto-creation")
 
@@ -273,20 +266,15 @@ async def _setup_demo_users(app: FastAPI, engine, slug_id: str, config: dict[str
                                 if is_casbin:
                                     # For Casbin, use email as subject to match initial_roles format
                                     # This ensures consistency with how initial_roles are set up
-                                    await app.state.authz_provider.add_role_for_user(
-                                        user_email, role
-                                    )
+                                    await app.state.authz_provider.add_role_for_user(user_email, role)
                                     logger.info(
-                                        f"✅ Assigned Casbin role '{role}' "
-                                        f"to demo user '{user_email}' for {slug_id}"
+                                        f"Assigned Casbin role '{role}' " f"to demo user '{user_email}' for {slug_id}"
                                     )
                                 else:
                                     # For OSO, use email, role, resource
-                                    await app.state.authz_provider.add_role_for_user(
-                                        user_email, role, resource
-                                    )
+                                    await app.state.authz_provider.add_role_for_user(user_email, role, resource)
                                     logger.info(
-                                        f"✅ Assigned role '{role}' on resource '{resource}' "
+                                        f"Assigned role '{role}' on resource '{resource}' "
                                         f"to demo user '{user_email}' for {slug_id}"
                                     )
                             except (
@@ -297,8 +285,7 @@ async def _setup_demo_users(app: FastAPI, engine, slug_id: str, config: dict[str
                                 ConnectionError,
                             ) as e:
                                 logger.warning(
-                                    f"Failed to assign role '{role}' to user '{user_email}' "
-                                    f"for {slug_id}: {e}"
+                                    f"Failed to assign role '{role}' to user '{user_email}' " f"for {slug_id}: {e}"
                                 )
         except (
             ValueError,
@@ -316,13 +303,11 @@ async def _setup_demo_users(app: FastAPI, engine, slug_id: str, config: dict[str
     return demo_users
 
 
-async def _setup_token_management(
-    app: FastAPI, engine, slug_id: str, token_management: dict[str, Any]
-) -> None:
+async def _setup_token_management(app: FastAPI, engine, slug_id: str, token_management: dict[str, Any]) -> None:
     """Initialize token management (blacklist and session manager)."""
     if token_management.get("auto_setup", True):
         try:
-            db = engine.get_scoped_db(slug_id)
+            db = await engine.get_scoped_db(slug_id)
             await initialize_token_management(app, db)
 
             # Configure session fingerprinting if session manager exists
@@ -347,9 +332,7 @@ async def _setup_token_management(
             # Continue without token management (backward compatibility)
 
 
-async def _setup_security_middleware(
-    app: FastAPI, slug_id: str, security_config: dict[str, Any]
-) -> None:
+async def _setup_security_middleware(app: FastAPI, slug_id: str, security_config: dict[str, Any]) -> None:
     """Set up security middleware (if not already added)."""
     if security_config.get("csrf_protection", True) or security_config.get("require_https", False):
         try:
@@ -383,9 +366,7 @@ async def _setup_security_middleware(
             logger.warning(f"Could not set up security middleware for {slug_id}: {e}")
 
 
-async def _setup_cors_and_observability(
-    app: FastAPI, engine, slug_id: str, config: dict[str, Any]
-) -> None:
+async def _setup_cors_and_observability(app: FastAPI, engine, slug_id: str, config: dict[str, Any]) -> None:
     """Set up CORS and observability configs and middleware."""
     # Get manifest data first if available
     manifest_data = None
@@ -402,9 +383,7 @@ async def _setup_cors_and_observability(
 
     # Extract and store observability config
     observability_config = manifest_data.get("observability", {}) if manifest_data else {}
-    app.state.observability_config = merge_config_with_defaults(
-        observability_config, OBSERVABILITY_DEFAULTS
-    )
+    app.state.observability_config = merge_config_with_defaults(observability_config, OBSERVABILITY_DEFAULTS)
 
     # Set up CORS middleware if enabled
     if app.state.cors_config.get("enabled", False):
@@ -513,17 +492,13 @@ async def setup_auth_from_manifest(app: FastAPI, engine, slug_id: str) -> bool:
             return False
 
         # Store config in app state for easy access
-        merged_token_config = merge_config_with_defaults(
-            token_management, TOKEN_MANAGEMENT_DEFAULTS
-        )
+        merged_token_config = merge_config_with_defaults(token_management, TOKEN_MANAGEMENT_DEFAULTS)
         app.state.token_management_config = merged_token_config
         app.state.auth_config = config
 
         # Extract and store security policy config with defaults merged
         security_config = token_management.get("security", {})
-        app.state.security_config = merge_config_with_defaults(
-            security_config, SECURITY_CONFIG_DEFAULTS
-        )
+        app.state.security_config = merge_config_with_defaults(security_config, SECURITY_CONFIG_DEFAULTS)
 
         # Initialize token management
         await _setup_token_management(app, engine, slug_id, token_management)

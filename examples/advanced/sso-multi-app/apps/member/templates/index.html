@@ -1,0 +1,979 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Member | Cognitive Memory Showcase</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        const originalWarn = console.warn;
+        console.warn = function(...args) {
+            if (args[0] && typeof args[0] === 'string' && args[0].includes('cdn.tailwindcss.com')) return;
+            originalWarn.apply(console, args);
+        };
+    </script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'sans-serif'], mono: ['JetBrains Mono', 'monospace'] },
+                    colors: {
+                        berry: { 50: '#fdf4ff', 100: '#fae8ff', 200: '#f5d0fe', 300: '#f0abfc', 400: '#e879f9', 500: '#d946ef', 600: '#c026d3', 700: '#a21caf', 800: '#86198f', 900: '#701a75' },
+                        dark: { 800: '#1e1b2e', 900: '#13111c', 950: '#0a0910' }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { background: linear-gradient(135deg, #0a0910 0%, #13111c 50%, #1a0f2e 100%); color: #e2e8f0; font-family: 'Inter', sans-serif; min-height: 100vh; }
+        .glass { background: rgba(20, 16, 36, 0.7); backdrop-filter: blur(16px) saturate(180%); border: 1px solid rgba(217, 70, 239, 0.08); box-shadow: 0 8px 32px rgba(0,0,0,0.3); }
+        .glass-panel { background: linear-gradient(180deg, rgba(30, 27, 46, 0.5) 0%, rgba(20, 16, 36, 0.5) 100%); border: 1px solid rgba(217, 70, 239, 0.06); }
+        .berry-glow { box-shadow: 0 0 20px rgba(217, 70, 239, 0.15); }
+        .input-field { background: rgba(10, 9, 16, 0.7); border: 1px solid rgba(217, 70, 239, 0.12); transition: all 0.3s; }
+        .input-field:focus { border-color: #d946ef; outline: none; box-shadow: 0 0 0 3px rgba(217, 70, 239, 0.15); }
+        .btn-berry { background: linear-gradient(135deg, #d946ef 0%, #a21caf 100%); transition: all 0.2s; }
+        .btn-berry:hover { transform: translateY(-1px); box-shadow: 0 0 24px rgba(217, 70, 239, 0.4); }
+        .btn-berry:disabled { opacity: 0.5; pointer-events: none; }
+        .btn-ghost { background: rgba(217, 70, 239, 0.08); border: 1px solid rgba(217, 70, 239, 0.15); transition: all 0.2s; }
+        .btn-ghost:hover { background: rgba(217, 70, 239, 0.15); border-color: rgba(217, 70, 239, 0.3); }
+        .strength-bar { height: 6px; border-radius: 3px; background: rgba(255,255,255,0.06); overflow: hidden; }
+        .strength-fill { height: 100%; border-radius: 3px; transition: width 0.6s ease; }
+        .tab-active { border-bottom: 2px solid #d946ef; color: #e879f9; }
+        .tab-inactive { border-bottom: 2px solid transparent; color: #94a3b8; }
+        .tab-inactive:hover { color: #e2e8f0; border-color: rgba(217, 70, 239, 0.3); }
+        .chat-bubble-user { background: linear-gradient(135deg, rgba(217, 70, 239, 0.15), rgba(162, 28, 175, 0.1)); border: 1px solid rgba(217, 70, 239, 0.15); }
+        .chat-bubble-ai { background: rgba(30, 27, 46, 0.6); border: 1px solid rgba(255,255,255,0.05); }
+        .fade-in { animation: fadeIn 0.3s ease; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        ::-webkit-scrollbar { width: 5px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(217, 70, 239, 0.2); border-radius: 3px; }
+        .metric-card { background: rgba(20, 16, 36, 0.5); border: 1px solid rgba(217, 70, 239, 0.08); }
+        .node-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 9999px; font-size: 0.7rem; font-weight: 500; }
+        .collapsible-content { max-height: 0; overflow: hidden; transition: max-height 0.3s ease; }
+        .collapsible-content.open { max-height: 2000px; }
+    </style>
+</head>
+<body class="antialiased">
+
+<!-- Header -->
+<header class="glass sticky top-0 z-50 px-6 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-berry-500 to-berry-800 flex items-center justify-center text-lg">
+            🍇
+        </div>
+        <div>
+            <h1 class="text-lg font-bold bg-gradient-to-r from-berry-300 to-berry-500 bg-clip-text text-transparent">Member</h1>
+            <p class="text-[10px] text-slate-500 -mt-0.5">Cognitive Memory Showcase</p>
+        </div>
+    </div>
+    <div class="flex items-center gap-4">
+        <span class="text-xs text-slate-400">{{ user.email }}</span>
+        <form action="/logout" method="post" class="inline">
+            <button type="submit" class="text-xs text-slate-500 hover:text-berry-400 transition-colors">Logout</button>
+        </form>
+    </div>
+</header>
+
+<!-- Tab Navigation -->
+<nav class="px-6 pt-4 flex gap-1 border-b border-white/5 overflow-x-auto">
+    <button onclick="switchTab('chat')" id="tab-chat" class="tab-active px-4 py-2.5 text-sm font-medium transition-all whitespace-nowrap">Chat</button>
+    <button onclick="switchTab('memories')" id="tab-memories" class="tab-inactive px-4 py-2.5 text-sm font-medium transition-all whitespace-nowrap">Memories</button>
+    <button onclick="switchTab('graph')" id="tab-graph" class="tab-inactive px-4 py-2.5 text-sm font-medium transition-all whitespace-nowrap">Graph Explorer</button>
+    <button onclick="switchTab('mflix')" id="tab-mflix" class="tab-inactive px-4 py-2.5 text-sm font-medium transition-all whitespace-nowrap">mflix Demo</button>
+    <button onclick="switchTab('cold')" id="tab-cold" class="tab-inactive px-4 py-2.5 text-sm font-medium transition-all whitespace-nowrap">Cold Storage</button>
+</nav>
+
+<main class="flex gap-4 p-4 max-w-[1600px] mx-auto" style="min-height: calc(100vh - 120px);">
+
+    <!-- Main Content Area -->
+    <div class="flex-1 min-w-0">
+
+        <!-- ==================== CHAT TAB ==================== -->
+        <div id="panel-chat" class="fade-in">
+            <div class="glass rounded-xl overflow-hidden flex flex-col" style="height: calc(100vh - 180px);">
+                <!-- Chat Header -->
+                <div class="px-4 py-3 border-b border-white/5 flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                        <span class="text-sm font-medium text-berry-300">Chat with Member Berry</span>
+                        <span id="chat-session-count" class="text-xs text-slate-500"></span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <select id="bucket-select" class="input-field text-xs rounded-lg px-2 py-1.5" onchange="updateBucket()">
+                            <option value="">No Bucket</option>
+                            <option value="category:personal">Personal</option>
+                            <option value="category:work">Work</option>
+                            <option value="category:nostalgia">Nostalgia</option>
+                        </select>
+                        <label class="flex items-center gap-1.5 text-xs text-slate-400">
+                            <input type="checkbox" id="extract-facts" checked class="rounded border-berry-600 text-berry-500 focus:ring-berry-500/20">
+                            Extract Facts
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Chat Messages -->
+                <div id="chat-messages" class="flex-1 overflow-y-auto p-4 space-y-3">
+                    <div class="chat-bubble-ai rounded-xl px-4 py-3 max-w-[85%] fade-in">
+                        <p class="text-sm text-slate-300">Oh, I member! I'm your Member Berry -- a cognitive memory companion powered by MDB-Engine. I remember things with Ebbinghaus decay, flashbulb emotions, and graph relationships.</p>
+                        <p class="text-sm text-slate-300 mt-2">Try telling me about yourself, or ask me what I remember! Use the bucket selector to isolate memories by context.</p>
+                        <p class="text-xs text-slate-500 mt-2">Tip: Hit "Seed Demo" in the sidebar to load sample data.</p>
+                    </div>
+                </div>
+
+                <!-- Chat Input -->
+                <div class="px-4 py-3 border-t border-white/5">
+                    <div class="flex gap-2">
+                        <input type="text" id="chat-input" class="input-field flex-1 rounded-xl px-4 py-2.5 text-sm" placeholder="Member something..." onkeydown="if(event.key==='Enter')sendChat()">
+                        <button onclick="sendChat()" id="chat-send-btn" class="btn-berry rounded-xl px-5 py-2.5 text-sm font-medium text-white">Send</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== MEMORIES TAB ==================== -->
+        <div id="panel-memories" class="fade-in hidden">
+            <div class="glass rounded-xl p-4">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-sm font-semibold text-berry-300">Active Memories (Ebbinghaus Decay)</h2>
+                    <div class="flex gap-2">
+                        <select id="mem-bucket-filter" class="input-field text-xs rounded-lg px-2 py-1.5" onchange="loadMemories()">
+                            <option value="">All Buckets</option>
+                            <option value="category:personal">Personal</option>
+                            <option value="category:work">Work</option>
+                        </select>
+                        <button onclick="toggleInjectForm()" class="btn-ghost rounded-lg px-3 py-1.5 text-xs font-medium text-berry-300">+ Inject</button>
+                    </div>
+                </div>
+
+                <!-- Inject Form (hidden by default) -->
+                <div id="inject-form" class="hidden mb-4 glass-panel rounded-lg p-3 space-y-2 fade-in">
+                    <input type="text" id="inject-text" class="input-field w-full rounded-lg px-3 py-2 text-sm" placeholder="Memory text...">
+                    <div class="flex gap-2">
+                        <select id="inject-category" class="input-field text-xs rounded-lg px-2 py-1.5 flex-1">
+                            <option value="biographical">Biographical</option>
+                            <option value="preferences">Preferences</option>
+                            <option value="relationships">Relationships</option>
+                            <option value="work">Work</option>
+                            <option value="health">Health</option>
+                            <option value="goals">Goals</option>
+                            <option value="nostalgia">Nostalgia</option>
+                        </select>
+                        <input type="number" id="inject-importance" class="input-field w-20 rounded-lg px-2 py-1.5 text-xs" placeholder="Imp" value="0.7" min="0" max="1" step="0.1">
+                        <input type="number" id="inject-emotion" class="input-field w-20 rounded-lg px-2 py-1.5 text-xs" placeholder="Emo" value="0.3" min="0" max="1" step="0.1">
+                        <button onclick="injectMemory()" class="btn-berry rounded-lg px-4 py-1.5 text-xs font-medium text-white">Inject</button>
+                    </div>
+                </div>
+
+                <!-- Search -->
+                <div class="mb-4 flex gap-2">
+                    <input type="text" id="mem-search-input" class="input-field flex-1 rounded-lg px-3 py-2 text-sm" placeholder="Search memories..." onkeydown="if(event.key==='Enter')searchMemories()">
+                    <button onclick="searchMemories()" class="btn-ghost rounded-lg px-3 py-2 text-xs font-medium text-berry-300">Search</button>
+                </div>
+
+                <!-- Memory Table -->
+                <div id="memories-list" class="space-y-2 max-h-[60vh] overflow-y-auto">
+                    <p class="text-xs text-slate-500 text-center py-8">Loading memories...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== GRAPH EXPLORER TAB ==================== -->
+        <div id="panel-graph" class="fade-in hidden">
+            <div class="glass rounded-xl p-4">
+                <h2 class="text-sm font-semibold text-berry-300 mb-4">Knowledge Graph Explorer ($graphLookup)</h2>
+
+                <!-- Graph Controls -->
+                <div class="flex gap-2 mb-4">
+                    <input type="text" id="graph-start-id" class="input-field flex-1 rounded-lg px-3 py-2 text-sm" placeholder="Node ID (e.g. person:alex)">
+                    <div class="flex items-center gap-2">
+                        <label class="text-xs text-slate-400">Depth:</label>
+                        <input type="number" id="graph-depth" class="input-field w-16 rounded-lg px-2 py-1.5 text-xs text-center" value="2" min="1" max="5">
+                    </div>
+                    <button onclick="traverseGraph()" class="btn-berry rounded-lg px-4 py-2 text-xs font-medium text-white">Traverse</button>
+                    <button onclick="loadGraphNodes()" class="btn-ghost rounded-lg px-3 py-2 text-xs font-medium text-berry-300">List Nodes</button>
+                </div>
+
+                <!-- Graph Results -->
+                <div id="graph-results" class="space-y-2 max-h-[60vh] overflow-y-auto">
+                    <p class="text-xs text-slate-500 text-center py-8">Enter a node ID and click Traverse to explore the knowledge graph.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== MFLIX DEMO TAB ==================== -->
+        <div id="panel-mflix" class="fade-in hidden">
+            <div class="glass rounded-xl p-4">
+                <div class="mb-4">
+                    <h2 class="text-sm font-semibold text-berry-300">sample_mflix $graphLookup Demo</h2>
+                    <p class="text-xs text-slate-500 mt-1">"Member when Kevin Bacon was in..." -- Traverse movie cast networks</p>
+                </div>
+
+                <div class="flex gap-2 mb-4">
+                    <input type="text" id="mflix-actor" class="input-field flex-1 rounded-lg px-3 py-2 text-sm" placeholder="Actor name (e.g. Tom Hanks)" onkeydown="if(event.key==='Enter')mflixLookup()">
+                    <div class="flex items-center gap-2">
+                        <label class="text-xs text-slate-400">Depth:</label>
+                        <input type="number" id="mflix-depth" class="input-field w-16 rounded-lg px-2 py-1.5 text-xs text-center" value="1" min="1" max="3">
+                    </div>
+                    <button onclick="mflixLookup()" class="btn-berry rounded-lg px-4 py-2 text-xs font-medium text-white">Lookup</button>
+                    <button onclick="mflixBrowse()" class="btn-ghost rounded-lg px-3 py-2 text-xs font-medium text-berry-300">Browse Actors</button>
+                </div>
+
+                <div id="mflix-results" class="space-y-3 max-h-[60vh] overflow-y-auto">
+                    <div class="glass-panel rounded-lg p-4">
+                        <p class="text-xs text-slate-400 mb-2">This demo queries the <code class="text-berry-400 text-xs">sample_mflix.movies</code> collection directly using MongoDB aggregation pipelines to simulate $graphLookup on cast relationships.</p>
+                        <p class="text-xs text-slate-500">Requires <code class="text-berry-400 text-xs">sample_mflix</code> data loaded in MongoDB. See README for seeding instructions.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== COLD STORAGE TAB ==================== -->
+        <div id="panel-cold" class="fade-in hidden">
+            <div class="glass rounded-xl p-4">
+                <div class="flex items-center justify-between mb-4">
+                    <div>
+                        <h2 class="text-sm font-semibold text-berry-300">Cold Storage</h2>
+                        <p class="text-xs text-slate-500">Pruned memories -- gracefully forgotten but recoverable</p>
+                    </div>
+                    <button onclick="loadColdStorage()" class="btn-ghost rounded-lg px-3 py-1.5 text-xs font-medium text-berry-300">Refresh</button>
+                </div>
+
+                <div id="cold-storage-list" class="space-y-2 max-h-[60vh] overflow-y-auto">
+                    <p class="text-xs text-slate-500 text-center py-8">Loading cold storage...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== SIDEBAR ==================== -->
+    <aside class="w-72 flex-shrink-0 space-y-3">
+
+        <!-- Analytics Card -->
+        <div class="glass rounded-xl p-4">
+            <h3 class="text-xs font-semibold text-berry-300 uppercase tracking-wider mb-3">Memory Health</h3>
+            <div id="analytics-panel" class="space-y-3">
+                <div class="grid grid-cols-2 gap-2">
+                    <div class="metric-card rounded-lg p-2.5 text-center">
+                        <div id="stat-active" class="text-lg font-bold text-berry-400">--</div>
+                        <div class="text-[10px] text-slate-500">Active</div>
+                    </div>
+                    <div class="metric-card rounded-lg p-2.5 text-center">
+                        <div id="stat-cold" class="text-lg font-bold text-blue-400">--</div>
+                        <div class="text-[10px] text-slate-500">Cold</div>
+                    </div>
+                    <div class="metric-card rounded-lg p-2.5 text-center">
+                        <div id="stat-strong" class="text-lg font-bold text-emerald-400">--</div>
+                        <div class="text-[10px] text-slate-500">Strong</div>
+                    </div>
+                    <div class="metric-card rounded-lg p-2.5 text-center">
+                        <div id="stat-weak" class="text-lg font-bold text-amber-400">--</div>
+                        <div class="text-[10px] text-slate-500">Weak</div>
+                    </div>
+                </div>
+
+                <!-- Capacity Gauge -->
+                <div>
+                    <div class="flex justify-between text-[10px] text-slate-500 mb-1">
+                        <span>Capacity</span>
+                        <span id="stat-capacity">0%</span>
+                    </div>
+                    <div class="strength-bar">
+                        <div id="capacity-bar" class="strength-fill bg-gradient-to-r from-berry-500 to-berry-700" style="width: 0%"></div>
+                    </div>
+                </div>
+
+                <!-- Avg Strength -->
+                <div>
+                    <div class="flex justify-between text-[10px] text-slate-500 mb-1">
+                        <span>Avg Strength</span>
+                        <span id="stat-avg-strength">0</span>
+                    </div>
+                    <div class="strength-bar">
+                        <div id="strength-bar" class="strength-fill bg-gradient-to-r from-emerald-500 to-emerald-700" style="width: 0%"></div>
+                    </div>
+                </div>
+
+                <!-- Graph Nodes -->
+                <div class="flex justify-between text-[10px] text-slate-500">
+                    <span>Graph Nodes</span>
+                    <span id="stat-graph" class="text-berry-400 font-medium">--</span>
+                </div>
+
+                <!-- Categories -->
+                <div id="categories-list" class="space-y-1 pt-1 border-t border-white/5"></div>
+            </div>
+        </div>
+
+        <!-- Conflict Checker -->
+        <div class="glass rounded-xl p-4">
+            <h3 class="text-xs font-semibold text-berry-300 uppercase tracking-wider mb-3">Conflict Check</h3>
+            <input type="text" id="conflict-input" class="input-field w-full rounded-lg px-3 py-2 text-xs mb-2" placeholder="Enter a fact to check...">
+            <button onclick="checkConflict()" class="btn-ghost rounded-lg w-full py-1.5 text-xs font-medium text-berry-300">Check Conflicts</button>
+            <div id="conflict-results" class="mt-2 space-y-1"></div>
+        </div>
+
+        <!-- Actions -->
+        <div class="glass rounded-xl p-4 space-y-2">
+            <h3 class="text-xs font-semibold text-berry-300 uppercase tracking-wider mb-2">Actions</h3>
+            <button onclick="seedDemo()" id="seed-btn" class="btn-berry rounded-lg w-full py-2 text-xs font-medium text-white">🍇 Seed Demo Data</button>
+            <button onclick="resetDemo()" class="btn-ghost rounded-lg w-full py-2 text-xs font-medium text-red-400 border-red-500/20 hover:bg-red-500/10">Reset All Data</button>
+        </div>
+
+        <!-- Ebbinghaus Formula -->
+        <div class="glass rounded-xl p-4">
+            <h3 class="text-xs font-semibold text-berry-300 uppercase tracking-wider mb-2">Ebbinghaus Decay</h3>
+            <div class="font-mono text-xs text-slate-400 bg-black/30 rounded-lg p-3">
+                S = R &times; e<sup>(-t / H)</sup>
+            </div>
+            <div class="mt-2 space-y-0.5 text-[10px] text-slate-500">
+                <p><span class="text-berry-400 font-medium">S</span> = Retrieval Strength</p>
+                <p><span class="text-berry-400 font-medium">R</span> = Raw Importance (0.1-1.0)</p>
+                <p><span class="text-berry-400 font-medium">t</span> = Hours since last access</p>
+                <p><span class="text-berry-400 font-medium">H</span> = Stability (half-life)</p>
+            </div>
+        </div>
+    </aside>
+</main>
+
+<script>
+// ============================================================================
+// STATE
+// ============================================================================
+let currentTab = 'chat';
+let currentBucket = '';
+let chatSessionId = 'member:{{ user.email }}:default';
+
+// ============================================================================
+// TAB SWITCHING
+// ============================================================================
+function switchTab(tab) {
+    document.querySelectorAll('[id^="panel-"]').forEach(p => p.classList.add('hidden'));
+    document.querySelectorAll('[id^="tab-"]').forEach(t => { t.className = t.className.replace('tab-active', 'tab-inactive'); });
+    document.getElementById('panel-' + tab).classList.remove('hidden');
+    document.getElementById('tab-' + tab).className = document.getElementById('tab-' + tab).className.replace('tab-inactive', 'tab-active');
+    currentTab = tab;
+
+    // Load data for tab
+    if (tab === 'memories') loadMemories();
+    if (tab === 'cold') loadColdStorage();
+    if (tab === 'graph') loadGraphNodes();
+}
+
+// ============================================================================
+// CHAT
+// ============================================================================
+function updateBucket() {
+    const sel = document.getElementById('bucket-select');
+    currentBucket = sel.value;
+    chatSessionId = currentBucket
+        ? `member:{{ user.email }}:${currentBucket}`
+        : `member:{{ user.email }}:default`;
+}
+
+async function sendChat() {
+    const input = document.getElementById('chat-input');
+    const msg = input.value.trim();
+    if (!msg) return;
+
+    input.value = '';
+    const btn = document.getElementById('chat-send-btn');
+    btn.disabled = true;
+
+    // Add user bubble
+    appendChatBubble(msg, 'user');
+
+    // Show typing indicator
+    const typingId = 'typing-' + Date.now();
+    appendTypingIndicator(typingId);
+
+    try {
+        const body = {
+            message: msg,
+            session_id: chatSessionId,
+            extract_facts: document.getElementById('extract-facts').checked,
+        };
+        if (currentBucket) {
+            body.bucket_id = currentBucket + ':{{ user.email }}';
+            body.bucket_type = 'category';
+        }
+
+        const res = await fetch('/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Chat failed');
+
+        removeElement(typingId);
+
+        // AI response
+        appendChatBubble(data.response, 'ai', data);
+
+        // Update session count
+        if (data.session_message_count) {
+            document.getElementById('chat-session-count').textContent = `(${data.session_message_count} msgs)`;
+        }
+
+        // Refresh analytics
+        loadAnalytics();
+    } catch (e) {
+        removeElement(typingId);
+        appendChatBubble('Error: ' + e.message, 'error');
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+function appendChatBubble(text, type, data = null) {
+    const container = document.getElementById('chat-messages');
+    const div = document.createElement('div');
+    div.className = 'fade-in';
+
+    if (type === 'user') {
+        div.innerHTML = `<div class="chat-bubble-user rounded-xl px-4 py-3 max-w-[85%] ml-auto"><p class="text-sm text-slate-200">${escapeHtml(text)}</p></div>`;
+    } else if (type === 'error') {
+        div.innerHTML = `<div class="rounded-xl px-4 py-3 max-w-[85%] bg-red-500/10 border border-red-500/20"><p class="text-sm text-red-400">${escapeHtml(text)}</p></div>`;
+    } else {
+        let extra = '';
+        if (data) {
+            // Extracted memories
+            if (data.memories_stored && data.memories_stored.length > 0) {
+                const memItems = data.memories_stored.map(m =>
+                    `<li class="text-[11px] text-berry-300">${escapeHtml(m.text)} <span class="text-slate-500">(${m.category}, imp: ${m.importance})</span></li>`
+                ).join('');
+                extra += `<div class="mt-2 pt-2 border-t border-white/5"><p class="text-[10px] text-slate-500 mb-1">Extracted ${data.memories_stored.length} memories:</p><ul class="space-y-0.5 list-disc list-inside">${memItems}</ul></div>`;
+            }
+            // LTM used
+            if (data.ltm_memories && data.ltm_memories.length > 0) {
+                const ltmItems = data.ltm_memories.slice(0, 3).map(m =>
+                    `<li class="text-[11px] text-slate-400">${escapeHtml(m.text.substring(0, 80))}... <span class="text-berry-500">(str: ${(m.strength || 0).toFixed(2)})</span></li>`
+                ).join('');
+                extra += `<div class="mt-2 pt-2 border-t border-white/5"><p class="text-[10px] text-slate-500 mb-1">Recalled ${data.ltm_memories.length} LTM memories:</p><ul class="space-y-0.5 list-disc list-inside">${ltmItems}</ul></div>`;
+            }
+            // Graph context
+            if (data.graph_context && data.graph_context.entry_nodes > 0) {
+                extra += `<div class="mt-2 pt-2 border-t border-white/5"><p class="text-[10px] text-slate-500">Graph: ${data.graph_context.entry_nodes} entry nodes, ${data.graph_context.related_nodes} related</p></div>`;
+            }
+        }
+        div.innerHTML = `<div class="chat-bubble-ai rounded-xl px-4 py-3 max-w-[85%]"><p class="text-sm text-slate-300">${formatResponse(text)}</p>${extra}</div>`;
+    }
+
+    container.appendChild(div);
+    container.scrollTop = container.scrollHeight;
+}
+
+function appendTypingIndicator(id) {
+    const container = document.getElementById('chat-messages');
+    const div = document.createElement('div');
+    div.id = id;
+    div.className = 'fade-in';
+    div.innerHTML = `<div class="chat-bubble-ai rounded-xl px-4 py-3 max-w-[85%]"><div class="flex gap-1"><span class="w-2 h-2 bg-berry-500 rounded-full animate-bounce" style="animation-delay:0s"></span><span class="w-2 h-2 bg-berry-500 rounded-full animate-bounce" style="animation-delay:0.15s"></span><span class="w-2 h-2 bg-berry-500 rounded-full animate-bounce" style="animation-delay:0.3s"></span></div></div>`;
+    container.appendChild(div);
+    container.scrollTop = container.scrollHeight;
+}
+
+// ============================================================================
+// MEMORIES
+// ============================================================================
+async function loadMemories() {
+    const list = document.getElementById('memories-list');
+    const bucket = document.getElementById('mem-bucket-filter').value;
+    const url = bucket ? `/api/memories?bucket_id=${encodeURIComponent(bucket)}` : '/api/memories';
+
+    try {
+        const res = await fetch(url);
+        const data = await res.json();
+        if (!data.memories || data.memories.length === 0) {
+            list.innerHTML = '<p class="text-xs text-slate-500 text-center py-8">No memories yet. Chat or inject some!</p>';
+            return;
+        }
+        list.innerHTML = data.memories.map(m => renderMemoryCard(m)).join('');
+    } catch (e) {
+        list.innerHTML = `<p class="text-xs text-red-400 text-center py-4">${e.message}</p>`;
+    }
+}
+
+function renderMemoryCard(m) {
+    const strengthPct = Math.min(Math.max(m.strength * 100, 0), 100);
+    const strengthColor = strengthPct > 70 ? 'from-emerald-500 to-emerald-600' :
+                          strengthPct > 30 ? 'from-amber-500 to-amber-600' :
+                          'from-red-500 to-red-600';
+    const emotionDot = m.emotion > 0.7 ? '🔥' : m.emotion > 0.3 ? '💜' : '';
+
+    return `
+    <div class="glass-panel rounded-lg p-3 fade-in">
+        <div class="flex items-start justify-between gap-2">
+            <div class="flex-1 min-w-0">
+                <p class="text-sm text-slate-300 truncate">${escapeHtml(m.text)}</p>
+                <div class="flex items-center gap-2 mt-1.5">
+                    <span class="node-badge bg-berry-500/15 text-berry-400">${m.category}</span>
+                    <span class="text-[10px] text-slate-500">imp: ${m.importance}</span>
+                    <span class="text-[10px] text-slate-500">emo: ${m.emotion} ${emotionDot}</span>
+                    <span class="text-[10px] text-slate-500">H: ${m.stability}h</span>
+                    <span class="text-[10px] text-slate-500">age: ${m.t_hours}h</span>
+                </div>
+            </div>
+            <button onclick="deleteMemory('${m.id}')" class="text-slate-600 hover:text-red-400 transition-colors text-xs px-1">&times;</button>
+        </div>
+        <div class="mt-2">
+            <div class="flex justify-between text-[10px] text-slate-500 mb-0.5">
+                <span>Strength</span>
+                <span>${strengthPct.toFixed(1)}%</span>
+            </div>
+            <div class="strength-bar">
+                <div class="strength-fill bg-gradient-to-r ${strengthColor}" style="width: ${strengthPct}%"></div>
+            </div>
+        </div>
+    </div>`;
+}
+
+async function searchMemories() {
+    const query = document.getElementById('mem-search-input').value.trim();
+    if (!query) return loadMemories();
+
+    const list = document.getElementById('memories-list');
+    try {
+        const res = await fetch('/api/memories/search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query, limit: 20 }),
+        });
+        const data = await res.json();
+        if (!data.results || data.results.length === 0) {
+            list.innerHTML = '<p class="text-xs text-slate-500 text-center py-8">No matches found.</p>';
+            return;
+        }
+        list.innerHTML = data.results.map(m => renderMemoryCard({...m, t_hours: 0, stability: 48})).join('');
+    } catch (e) {
+        list.innerHTML = `<p class="text-xs text-red-400 text-center py-4">${e.message}</p>`;
+    }
+}
+
+function toggleInjectForm() {
+    document.getElementById('inject-form').classList.toggle('hidden');
+}
+
+async function injectMemory() {
+    const text = document.getElementById('inject-text').value.trim();
+    if (!text) return;
+
+    try {
+        const res = await fetch('/api/memories/inject', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                text,
+                importance: parseFloat(document.getElementById('inject-importance').value) || 0.7,
+                emotion: parseFloat(document.getElementById('inject-emotion').value) || 0.3,
+                category: document.getElementById('inject-category').value,
+                bucket_id: currentBucket ? currentBucket + ':{{ user.email }}' : null,
+                bucket_type: currentBucket ? 'category' : null,
+            }),
+        });
+        if (!res.ok) throw new Error('Inject failed');
+        document.getElementById('inject-text').value = '';
+        loadMemories();
+        loadAnalytics();
+    } catch (e) {
+        alert('Error: ' + e.message);
+    }
+}
+
+async function deleteMemory(id) {
+    if (!confirm('Delete this memory?')) return;
+    try {
+        await fetch(`/api/memories/${id}`, { method: 'DELETE' });
+        loadMemories();
+        loadAnalytics();
+    } catch (e) {
+        alert('Error: ' + e.message);
+    }
+}
+
+// ============================================================================
+// GRAPH EXPLORER
+// ============================================================================
+async function loadGraphNodes() {
+    const results = document.getElementById('graph-results');
+    try {
+        const res = await fetch('/api/graph/nodes?limit=30');
+        const data = await res.json();
+        if (!data.nodes || data.nodes.length === 0) {
+            results.innerHTML = '<p class="text-xs text-slate-500 text-center py-8">No graph nodes. Seed demo data first!</p>';
+            return;
+        }
+        results.innerHTML = data.nodes.map(n => `
+            <div class="glass-panel rounded-lg p-3 fade-in cursor-pointer hover:border-berry-500/20 transition-colors" onclick="document.getElementById('graph-start-id').value='${n.id}'; traverseGraph();">
+                <div class="flex items-center gap-2">
+                    <span class="node-badge ${getNodeColor(n.type)}">${n.type}</span>
+                    <span class="text-sm font-medium text-slate-300">${escapeHtml(n.label)}</span>
+                    <span class="text-[10px] text-slate-500 ml-auto">${n.edge_count} edges</span>
+                </div>
+                <p class="text-[10px] text-slate-500 mt-1 font-mono">${n.id}</p>
+            </div>
+        `).join('');
+    } catch (e) {
+        results.innerHTML = `<p class="text-xs text-red-400 text-center py-4">${e.message}</p>`;
+    }
+}
+
+async function traverseGraph() {
+    const startId = document.getElementById('graph-start-id').value.trim();
+    if (!startId) return;
+
+    const depth = parseInt(document.getElementById('graph-depth').value) || 2;
+    const results = document.getElementById('graph-results');
+    results.innerHTML = '<p class="text-xs text-slate-500 text-center py-4">Traversing...</p>';
+
+    try {
+        const res = await fetch('/api/graph/traverse', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ start_id: startId, max_depth: depth }),
+        });
+        const data = await res.json();
+
+        if (!data.start) {
+            results.innerHTML = `<p class="text-xs text-slate-500 text-center py-8">${data.message || 'Node not found'}</p>`;
+            return;
+        }
+
+        let html = `
+            <div class="glass-panel rounded-lg p-3 mb-2 berry-glow">
+                <div class="flex items-center gap-2">
+                    <span class="node-badge ${getNodeColor(data.start.type)}">${data.start.type}</span>
+                    <span class="text-sm font-bold text-berry-300">${escapeHtml(data.start.label)}</span>
+                    <span class="text-[10px] text-slate-500">START</span>
+                </div>
+                <p class="text-[10px] text-slate-500 mt-1 font-mono">${data.start.id}</p>
+            </div>
+            <p class="text-xs text-slate-500 my-2">Network: ${data.total_nodes} nodes discovered via $graphLookup</p>
+        `;
+
+        data.network.forEach(n => {
+            const edgeInfo = n.edges && n.edges.length > 0
+                ? n.edges.map(e => `<span class="text-berry-400">${e.relation}</span> &rarr; <span class="text-slate-400 font-mono">${e.target}</span>`).join(', ')
+                : '';
+            html += `
+                <div class="glass-panel rounded-lg p-3 fade-in" style="margin-left: ${n.hop * 20}px">
+                    <div class="flex items-center gap-2">
+                        <span class="text-[10px] text-slate-600">hop ${n.hop}</span>
+                        <span class="node-badge ${getNodeColor(n.type)}">${n.type}</span>
+                        <span class="text-sm text-slate-300">${escapeHtml(n.label)}</span>
+                    </div>
+                    ${edgeInfo ? `<p class="text-[10px] mt-1">${edgeInfo}</p>` : ''}
+                    <p class="text-[10px] text-slate-600 font-mono">${n.id}</p>
+                </div>
+            `;
+        });
+
+        results.innerHTML = html;
+    } catch (e) {
+        results.innerHTML = `<p class="text-xs text-red-400 text-center py-4">${e.message}</p>`;
+    }
+}
+
+function getNodeColor(type) {
+    const colors = {
+        person: 'bg-blue-500/15 text-blue-400',
+        interest: 'bg-emerald-500/15 text-emerald-400',
+        location: 'bg-amber-500/15 text-amber-400',
+        organization: 'bg-purple-500/15 text-purple-400',
+        food: 'bg-orange-500/15 text-orange-400',
+        movie: 'bg-pink-500/15 text-pink-400',
+        actor: 'bg-cyan-500/15 text-cyan-400',
+        genre: 'bg-rose-500/15 text-rose-400',
+        event: 'bg-teal-500/15 text-teal-400',
+        concept: 'bg-indigo-500/15 text-indigo-400',
+        pet: 'bg-lime-500/15 text-lime-400',
+    };
+    return colors[type] || 'bg-slate-500/15 text-slate-400';
+}
+
+// ============================================================================
+// MFLIX DEMO
+// ============================================================================
+async function mflixLookup() {
+    const actor = document.getElementById('mflix-actor').value.trim();
+    if (!actor) return;
+
+    const depth = parseInt(document.getElementById('mflix-depth').value) || 1;
+    const results = document.getElementById('mflix-results');
+    results.innerHTML = '<p class="text-xs text-slate-500 text-center py-4">Looking up co-star network...</p>';
+
+    try {
+        const res = await fetch('/api/mflix/graph-lookup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ actor, max_depth: depth }),
+        });
+        const data = await res.json();
+
+        if (data.error) {
+            results.innerHTML = `<div class="glass-panel rounded-lg p-4"><p class="text-xs text-amber-400">${data.error}</p></div>`;
+            return;
+        }
+
+        let html = `<div class="glass-panel rounded-lg p-3 berry-glow mb-3">
+            <p class="text-sm font-bold text-berry-300">${escapeHtml(data.actor)}</p>
+            <p class="text-xs text-slate-500">${data.total_connections} connections found</p>
+        </div>`;
+
+        if (data.co_stars && data.co_stars.length > 0) {
+            html += '<p class="text-xs text-slate-400 mb-2 font-medium">Co-Stars (1st degree):</p>';
+            data.co_stars.forEach(cs => {
+                html += `
+                    <div class="glass-panel rounded-lg p-3 mb-1.5 fade-in cursor-pointer hover:border-berry-500/20 transition-colors" onclick="document.getElementById('mflix-actor').value='${escapeHtml(cs.actor)}'; mflixLookup();">
+                        <div class="flex items-center justify-between">
+                            <span class="text-sm text-slate-300">${escapeHtml(cs.actor)}</span>
+                            <span class="text-[10px] text-berry-400">${cs.movie_count} shared</span>
+                        </div>
+                        <p class="text-[10px] text-slate-500 mt-0.5">${cs.shared_movies.map(m => escapeHtml(m)).join(', ')}</p>
+                    </div>
+                `;
+            });
+        }
+
+        if (data.second_degree && data.second_degree.length > 0) {
+            html += '<p class="text-xs text-slate-400 mb-2 mt-3 font-medium">2nd Degree (via ' + escapeHtml(data.co_stars[0]?.actor || '?') + '):</p>';
+            data.second_degree.forEach(cs => {
+                html += `
+                    <div class="glass-panel rounded-lg p-3 mb-1.5 fade-in" style="margin-left: 20px">
+                        <div class="flex items-center justify-between">
+                            <span class="text-sm text-slate-300">${escapeHtml(cs.actor)}</span>
+                            <span class="text-[10px] text-blue-400">via ${escapeHtml(cs.via)}</span>
+                        </div>
+                        <p class="text-[10px] text-slate-500 mt-0.5">${cs.shared_movies.map(m => escapeHtml(m)).join(', ')}</p>
+                    </div>
+                `;
+            });
+        }
+
+        results.innerHTML = html;
+    } catch (e) {
+        results.innerHTML = `<p class="text-xs text-red-400 text-center py-4">${e.message}</p>`;
+    }
+}
+
+async function mflixBrowse() {
+    const results = document.getElementById('mflix-results');
+    results.innerHTML = '<p class="text-xs text-slate-500 text-center py-4">Loading actors...</p>';
+
+    try {
+        const res = await fetch('/api/mflix/actors?limit=30');
+        const data = await res.json();
+
+        if (data.error) {
+            results.innerHTML = `<div class="glass-panel rounded-lg p-4"><p class="text-xs text-amber-400">${data.error}</p></div>`;
+            return;
+        }
+
+        if (data.actors && data.actors.length > 0) {
+            results.innerHTML = '<div class="flex flex-wrap gap-1.5">' +
+                data.actors.map(a =>
+                    `<button onclick="document.getElementById('mflix-actor').value='${escapeHtml(a)}'; mflixLookup();" class="btn-ghost rounded-full px-3 py-1 text-xs">${escapeHtml(a)}</button>`
+                ).join('') + '</div>';
+        } else {
+            results.innerHTML = '<p class="text-xs text-slate-500 text-center py-8">No actors found. Is sample_mflix loaded?</p>';
+        }
+    } catch (e) {
+        results.innerHTML = `<p class="text-xs text-red-400 text-center py-4">${e.message}</p>`;
+    }
+}
+
+// ============================================================================
+// COLD STORAGE
+// ============================================================================
+async function loadColdStorage() {
+    const list = document.getElementById('cold-storage-list');
+    try {
+        const res = await fetch('/api/cold-storage');
+        const data = await res.json();
+        if (!data.memories || data.memories.length === 0) {
+            list.innerHTML = '<p class="text-xs text-slate-500 text-center py-8">No pruned memories. The forgetting curve hasn\'t claimed any yet.</p>';
+            return;
+        }
+        list.innerHTML = data.memories.map(m => `
+            <div class="glass-panel rounded-lg p-3 fade-in opacity-60">
+                <div class="flex items-start justify-between gap-2">
+                    <div class="flex-1 min-w-0">
+                        <p class="text-sm text-slate-400 line-through truncate">${escapeHtml(m.text)}</p>
+                        <div class="flex items-center gap-2 mt-1">
+                            <span class="node-badge bg-slate-500/15 text-slate-400">${m.category}</span>
+                            <span class="text-[10px] text-slate-600">reason: ${m.pruning_reason}</span>
+                            <span class="text-[10px] text-slate-600">${m.pruned_at}</span>
+                        </div>
+                    </div>
+                    <button onclick="restoreMemory('${m.id}')" class="btn-ghost rounded-lg px-2 py-1 text-[10px] font-medium text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/10">Restore</button>
+                </div>
+            </div>
+        `).join('');
+    } catch (e) {
+        list.innerHTML = `<p class="text-xs text-red-400 text-center py-4">${e.message}</p>`;
+    }
+}
+
+async function restoreMemory(id) {
+    try {
+        const res = await fetch(`/api/cold-storage/${id}/restore`, { method: 'POST' });
+        if (!res.ok) throw new Error('Restore failed');
+        loadColdStorage();
+        loadAnalytics();
+    } catch (e) {
+        alert('Error: ' + e.message);
+    }
+}
+
+// ============================================================================
+// CONFLICT DETECTION
+// ============================================================================
+async function checkConflict() {
+    const fact = document.getElementById('conflict-input').value.trim();
+    if (!fact) return;
+
+    const results = document.getElementById('conflict-results');
+    results.innerHTML = '<p class="text-[10px] text-slate-500">Checking...</p>';
+
+    try {
+        const res = await fetch('/api/conflicts/check', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fact }),
+        });
+        const data = await res.json();
+
+        if (data.has_conflicts) {
+            results.innerHTML = data.potential_conflicts.map(c =>
+                `<div class="glass-panel rounded-lg p-2 mt-1"><p class="text-[10px] text-amber-400">Conflict (${(c.similarity * 100).toFixed(0)}% similar):</p><p class="text-[10px] text-slate-400">${escapeHtml(c.text)}</p></div>`
+            ).join('');
+        } else {
+            results.innerHTML = '<p class="text-[10px] text-emerald-400 mt-1">No conflicts detected.</p>';
+        }
+    } catch (e) {
+        results.innerHTML = `<p class="text-[10px] text-red-400">${e.message}</p>`;
+    }
+}
+
+// ============================================================================
+// ANALYTICS
+// ============================================================================
+async function loadAnalytics() {
+    try {
+        const res = await fetch('/api/analytics');
+        const data = await res.json();
+
+        document.getElementById('stat-active').textContent = data.active_memories || 0;
+        document.getElementById('stat-cold').textContent = data.cold_storage_memories || 0;
+        document.getElementById('stat-strong').textContent = data.strong_memories || 0;
+        document.getElementById('stat-weak').textContent = data.weak_memories || 0;
+        document.getElementById('stat-graph').textContent = data.graph_nodes || 0;
+
+        const capacityPct = Math.min((data.capacity_used || 0) * 100, 100);
+        document.getElementById('stat-capacity').textContent = capacityPct.toFixed(0) + '%';
+        document.getElementById('capacity-bar').style.width = capacityPct + '%';
+
+        const avgStr = data.average_strength || 0;
+        document.getElementById('stat-avg-strength').textContent = avgStr.toFixed(3);
+        document.getElementById('strength-bar').style.width = (avgStr * 100) + '%';
+
+        // Categories
+        const catList = document.getElementById('categories-list');
+        if (data.categories && Object.keys(data.categories).length > 0) {
+            catList.innerHTML = Object.entries(data.categories)
+                .sort((a, b) => b[1] - a[1])
+                .map(([cat, count]) =>
+                    `<div class="flex justify-between text-[10px]"><span class="text-slate-500">${cat}</span><span class="text-berry-400">${count}</span></div>`
+                ).join('');
+        } else {
+            catList.innerHTML = '<p class="text-[10px] text-slate-600">No categories yet</p>';
+        }
+    } catch (e) {
+        console.error('Analytics error:', e);
+    }
+}
+
+// ============================================================================
+// DEMO SEED / RESET
+// ============================================================================
+async function seedDemo() {
+    const btn = document.getElementById('seed-btn');
+    btn.disabled = true;
+    btn.textContent = 'Seeding...';
+
+    try {
+        const res = await fetch('/api/demo/seed', { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Seed failed');
+
+        btn.textContent = `Seeded! ${data.seeded.memories}m + ${data.seeded.graph_nodes}g`;
+        setTimeout(() => { btn.textContent = '🍇 Seed Demo Data'; btn.disabled = false; }, 2000);
+
+        loadAnalytics();
+        if (currentTab === 'memories') loadMemories();
+        if (currentTab === 'graph') loadGraphNodes();
+    } catch (e) {
+        btn.textContent = 'Error!';
+        setTimeout(() => { btn.textContent = '🍇 Seed Demo Data'; btn.disabled = false; }, 2000);
+        alert('Seed error: ' + e.message);
+    }
+}
+
+async function resetDemo() {
+    if (!confirm('This will delete ALL your memories, graph nodes, and chat history. Continue?')) return;
+
+    try {
+        const res = await fetch('/api/demo/reset', { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Reset failed');
+
+        alert(`Reset complete: ${data.deleted.memories} memories, ${data.deleted.graph_nodes} graph nodes, ${data.deleted.chat_messages} messages deleted.`);
+        loadAnalytics();
+        if (currentTab === 'memories') loadMemories();
+        if (currentTab === 'graph') loadGraphNodes();
+        if (currentTab === 'cold') loadColdStorage();
+    } catch (e) {
+        alert('Reset error: ' + e.message);
+    }
+}
+
+// ============================================================================
+// UTILS
+// ============================================================================
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function formatResponse(text) {
+    if (!text) return '';
+    // Basic markdown-like formatting
+    return escapeHtml(text)
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*(.*?)\*/g, '<em>$1</em>')
+        .replace(/`(.*?)`/g, '<code class="text-berry-400 text-xs bg-black/30 px-1 rounded">$1</code>')
+        .replace(/\n/g, '<br>');
+}
+
+function removeElement(id) {
+    const el = document.getElementById(id);
+    if (el) el.remove();
+}
+
+// ============================================================================
+// INIT
+// ============================================================================
+document.addEventListener('DOMContentLoaded', () => {
+    loadAnalytics();
+    lucide.createIcons();
+});
+</script>
+</body>
+</html>

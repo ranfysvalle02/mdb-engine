@@ -114,7 +114,7 @@ class TestWebSocketMultiAppSessionKeys:
         db_name = f"test_ws_session_keys_{os.getpid()}"
         engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name=db_name)
 
-        app = engine.create_multi_app(
+        app = await engine.create_multi_app(
             apps=[
                 {
                     "slug": "auth-hub",
@@ -139,9 +139,7 @@ class TestWebSocketMultiAppSessionKeys:
                 assert exc_info.value.code == 1008  # Policy violation
 
     @pytest.mark.asyncio
-    async def test_websocket_with_valid_session_key(
-        self, mongodb_connection_string, test_manifests
-    ):
+    async def test_websocket_with_valid_session_key(self, mongodb_connection_string, test_manifests):
         """
         Test successful WebSocket connection with valid session key.
 
@@ -154,7 +152,7 @@ class TestWebSocketMultiAppSessionKeys:
         db_name = f"test_ws_session_keys_valid_{os.getpid()}"
         engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name=db_name)
 
-        app = engine.create_multi_app(
+        app = await engine.create_multi_app(
             apps=[
                 {
                     "slug": "auth-hub",
@@ -187,9 +185,7 @@ class TestWebSocketMultiAppSessionKeys:
             def test_websocket():
                 with TestClient(app) as client:
                     try:
-                        with client.websocket_connect(
-                            f"/app-3/ws?session_key={session_key}"
-                        ) as websocket:
+                        with client.websocket_connect(f"/app-3/ws?session_key={session_key}") as websocket:
                             data = websocket.receive_json()
                             assert data["type"] == "connected"
                             assert data["app_slug"] == "app-3"
@@ -214,7 +210,7 @@ class TestWebSocketMultiAppSessionKeys:
         db_name = f"test_ws_invalid_key_{os.getpid()}"
         engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name=db_name)
 
-        app = engine.create_multi_app(
+        app = await engine.create_multi_app(
             apps=[
                 {
                     "slug": "auth-hub",
@@ -244,7 +240,7 @@ class TestWebSocketMultiAppSessionKeys:
         db_name = f"test_ws_expired_key_{os.getpid()}"
         engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name=db_name)
 
-        app = engine.create_multi_app(
+        app = await engine.create_multi_app(
             apps=[
                 {
                     "slug": "app-3",
@@ -288,7 +284,7 @@ class TestWebSocketMultiAppSessionKeys:
             db_name = f"test_ws_no_manager_{os.getpid()}"
             engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name=db_name)
 
-            app = engine.create_multi_app(
+            app = await engine.create_multi_app(
                 apps=[
                     {
                         "slug": "app-3",

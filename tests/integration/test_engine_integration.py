@@ -105,7 +105,7 @@ class TestMongoDBEngineIntegration:
         """Test getting scoped database with real MongoDB."""
         engine = real_mongodb_engine
 
-        scoped_db = engine.get_scoped_db("test_app")
+        scoped_db = await engine.get_scoped_db("test_app")
 
         assert scoped_db is not None
         assert scoped_db._read_scopes == ["test_app"]  # noqa: SLF001
@@ -139,7 +139,7 @@ class TestMongoDBEngineIntegration:
         """Test that security features work end-to-end through engine."""
         engine = real_mongodb_engine
 
-        db = engine.get_scoped_db("test_app")
+        db = await engine.get_scoped_db("test_app")
 
         # Verify validators and limiters are present
         assert hasattr(db, "_query_validator")

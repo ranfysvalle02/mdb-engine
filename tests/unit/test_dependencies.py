@@ -41,7 +41,7 @@ def mock_engine():
     """Create a mock MongoDBEngine."""
     engine = MagicMock()
     engine.initialized = True
-    engine.get_scoped_db = MagicMock(return_value=MagicMock())
+    engine.get_scoped_db = AsyncMock(return_value=MagicMock())
     engine.get_app = MagicMock(
         return_value={
             "embedding_config": {
@@ -256,24 +256,28 @@ class TestGetMemoryService:
 
     @pytest.mark.asyncio
     async def test_get_memory_service_not_configured(self, mock_request, mock_engine):
-        """Test memory service returns None when not configured."""
+        """Test memory service raises HTTPException(503) when not configured."""
+        from fastapi import HTTPException
+
         mock_engine.get_memory_service.return_value = None
         mock_request.app.state.engine = mock_engine
         mock_request.app.state.app_slug = "test_app"
 
-        result = await get_memory_service(mock_request)
-
-        assert result is None
+        with pytest.raises(HTTPException) as exc_info:
+            await get_memory_service(mock_request)
+        assert exc_info.value.status_code == 503
 
     @pytest.mark.asyncio
     async def test_get_memory_service_engine_not_found(self, mock_request):
-        """Test memory service returns None when engine not found."""
+        """Test memory service raises HTTPException(503) when engine not found."""
+        from fastapi import HTTPException
+
         mock_request.app.state.engine = None
         mock_request.app.state.app_slug = None
 
-        result = await get_memory_service(mock_request)
-
-        assert result is None
+        with pytest.raises(HTTPException) as exc_info:
+            await get_memory_service(mock_request)
+        assert exc_info.value.status_code == 503
 
 
 class TestGetLLMClient:
@@ -445,16 +449,18 @@ class TestRequestContext:
 
         assert ctx.slug == "my_app"
 
-    def test_app_context_db(self, mock_request, mock_engine):
-        """Test RequestContext.db property."""
+    @pytest.mark.asyncio
+    async def test_app_context_db(self, mock_request, mock_engine):
+        """Test RequestContext.get_db() method."""
         mock_db = MagicMock()
-        mock_engine.get_scoped_db.return_value = mock_db
+        mock_engine.get_scoped_db = AsyncMock(return_value=mock_db)
         mock_request.app.state.engine = mock_engine
         mock_request.app.state.app_slug = "my_app"
 
         ctx = RequestContext(request=mock_request)
 
-        assert ctx.db == mock_db
+        db = await ctx.get_db()
+        assert db == mock_db
         mock_engine.get_scoped_db.assert_called_once_with("my_app")
 
     def test_app_context_user(self, mock_request, mock_engine):

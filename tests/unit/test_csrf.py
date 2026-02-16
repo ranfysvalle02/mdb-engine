@@ -409,9 +409,7 @@ class TestCSRFMiddlewareFactory:
 
     def test_create_with_boolean_true(self):
         """Test creating middleware with boolean True config."""
-        middleware_class = create_csrf_middleware(
-            manifest_auth={"csrf_protection": True, "public_routes": ["/health"]}
-        )
+        middleware_class = create_csrf_middleware(manifest_auth={"csrf_protection": True, "public_routes": ["/health"]})
         assert middleware_class is not None
 
     def test_create_with_boolean_false(self):
@@ -700,9 +698,7 @@ class TestWebSocketOriginValidation:
         """Test that non-WebSocket requests are not detected."""
         middleware = CSRFMiddleware(MagicMock())
         request = MagicMock(spec=Request)
-        request.headers.get = lambda key, default="": {"upgrade": "http/1.1"}.get(
-            key.lower(), default
-        )
+        request.headers.get = lambda key, default="": {"upgrade": "http/1.1"}.get(key.lower(), default)
 
         assert middleware._is_websocket_upgrade(request) is False  # noqa: SLF001
 
@@ -969,9 +965,7 @@ class TestWebSocketOriginValidation:
         """Test Origin validation with exact match."""
         middleware = CSRFMiddleware(MagicMock())
         request = MagicMock(spec=Request)
-        request.headers.get = lambda key, default=None: {"origin": "https://example.com"}.get(
-            key.lower(), default
-        )
+        request.headers.get = lambda key, default=None: {"origin": "https://example.com"}.get(key.lower(), default)
         request.url.path = "/ws"
         request.app = MagicMock()
         request.app.state.cors_config = {"allow_origins": ["https://example.com"]}
@@ -982,9 +976,7 @@ class TestWebSocketOriginValidation:
         """Test Origin validation with no match."""
         middleware = CSRFMiddleware(MagicMock())
         request = MagicMock(spec=Request)
-        request.headers.get = lambda key, default=None: {"origin": "https://evil.com"}.get(
-            key.lower(), default
-        )
+        request.headers.get = lambda key, default=None: {"origin": "https://evil.com"}.get(key.lower(), default)
         request.url.path = "/ws"
         request.app = MagicMock()
         request.app.state.cors_config = {"allow_origins": ["https://example.com"]}

@@ -7,7 +7,7 @@ This module is part of MDB_ENGINE - MongoDB Engine.
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from pymongo.errors import (
@@ -19,9 +19,7 @@ from pymongo.errors import (
 logger = logging.getLogger(__name__)
 
 
-async def seed_initial_data(
-    db, app_slug: str, initial_data: dict[str, list[dict[str, Any]]]
-) -> dict[str, int]:
+async def seed_initial_data(db, app_slug: str, initial_data: dict[str, list[dict[str, Any]]]) -> dict[str, int]:
     """
     Seed initial data into collections.
 
@@ -49,17 +47,13 @@ async def seed_initial_data(
 
     # Get existing seeding metadata
     seeding_metadata = await metadata_collection.find_one({"app_slug": app_slug})
-    seeded_collections = (
-        set(seeding_metadata.get("seeded_collections", [])) if seeding_metadata else set()
-    )
+    seeded_collections = set(seeding_metadata.get("seeded_collections", [])) if seeding_metadata else set()
 
     for collection_name, documents in initial_data.items():
         try:
             # Check if already seeded
             if collection_name in seeded_collections:
-                logger.debug(
-                    f"Collection '{collection_name}' already seeded for {app_slug}, skipping"
-                )
+                logger.debug(f"Collection '{collection_name}' already seeded for {app_slug}, skipping")
                 results[collection_name] = 0
                 continue
 
@@ -110,7 +104,7 @@ async def seed_initial_data(
 
                 # Add created_at if not present and document doesn't have timestamp fields
                 if "created_at" not in prepared_doc and "date_created" not in prepared_doc:
-                    prepared_doc["created_at"] = datetime.utcnow()
+                    prepared_doc["created_at"] = datetime.now(timezone.utc)
 
                 prepared_docs.append(prepared_doc)
 
@@ -124,14 +118,11 @@ async def seed_initial_data(
                 seeded_collections.add(collection_name)
 
                 logger.info(
-                    f"✅ Seeded {inserted_count} document(s) into collection "
-                    f"'{collection_name}' for {app_slug}"
+                    f"Seeded {inserted_count} document(s) into collection " f"'{collection_name}' for {app_slug}"
                 )
             else:
                 results[collection_name] = 0
-                logger.warning(
-                    f"No documents to seed for collection '{collection_name}' in {app_slug}"
-                )
+                logger.warning(f"No documents to seed for collection '{collection_name}' in {app_slug}")
 
         except (
             OperationFailure,
@@ -155,7 +146,7 @@ async def seed_initial_data(
                 {
                     "app_slug": app_slug,
                     "seeded_collections": list(seeded_collections),
-                    "created_at": datetime.utcnow(),
+                    "created_at": datetime.now(timezone.utc),
                 }
             )
     except (

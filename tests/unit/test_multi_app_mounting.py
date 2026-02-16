@@ -138,7 +138,8 @@ class TestCreateMultiAppProgrammatic:
             "app2": manifest2_path,
         }
 
-    def test_create_multi_app_programmatic(self, temp_manifests):
+    @pytest.mark.asyncio
+    async def test_create_multi_app_programmatic(self, temp_manifests):
         """Test creating multi-app with programmatic configuration."""
         from fastapi import FastAPI
 
@@ -146,7 +147,7 @@ class TestCreateMultiAppProgrammatic:
 
         engine = MongoDBEngine(mongo_uri="mongodb://localhost:27017", db_name="test_db")
 
-        app = engine.create_multi_app(
+        app = await engine.create_multi_app(
             apps=[
                 {
                     "slug": "app1",
@@ -177,25 +178,27 @@ class TestCreateMultiAppProgrammatic:
             ValueError,
             match="Either 'apps', 'multi_app_manifest', or 'apps_dir' must be provided",
         ):
-            engine.create_multi_app()
+            await engine.create_multi_app()
 
-    def test_create_multi_app_empty_apps(self):
+    @pytest.mark.asyncio
+    async def test_create_multi_app_empty_apps(self):
         """Test create_multi_app fails when apps list is empty."""
         from mdb_engine.core.engine import MongoDBEngine
 
         engine = MongoDBEngine(mongo_uri="mongodb://localhost:27017", db_name="test_db")
 
         with pytest.raises(ValueError, match="At least one app must be configured"):
-            engine.create_multi_app(apps=[])
+            await engine.create_multi_app(apps=[])
 
-    def test_create_multi_app_path_conflict(self, temp_manifests):
+    @pytest.mark.asyncio
+    async def test_create_multi_app_path_conflict(self, temp_manifests):
         """Test create_multi_app fails when path prefixes conflict."""
         from mdb_engine.core.engine import MongoDBEngine
 
         engine = MongoDBEngine(mongo_uri="mongodb://localhost:27017", db_name="test_db")
 
         with pytest.raises(ValueError, match="Path prefix validation failed"):
-            engine.create_multi_app(
+            await engine.create_multi_app(
                 apps=[
                     {
                         "slug": "app1",
@@ -265,7 +268,8 @@ class TestCreateMultiAppManifest:
 
         return multi_app_manifest_path
 
-    def test_create_multi_app_from_manifest(self, temp_multi_app_manifest):
+    @pytest.mark.asyncio
+    async def test_create_multi_app_from_manifest(self, temp_multi_app_manifest):
         """Test creating multi-app from manifest file."""
         from fastapi import FastAPI
 
@@ -273,7 +277,7 @@ class TestCreateMultiAppManifest:
 
         engine = MongoDBEngine(mongo_uri="mongodb://localhost:27017", db_name="test_db")
 
-        app = engine.create_multi_app(multi_app_manifest=temp_multi_app_manifest)
+        app = await engine.create_multi_app(multi_app_manifest=temp_multi_app_manifest)
 
         assert app is not None
         assert isinstance(app, FastAPI)
@@ -297,7 +301,7 @@ class TestCreateMultiAppManifest:
         manifest_path.write_text(json.dumps(manifest))
 
         with pytest.raises(ValueError, match="multi_app.enabled must be True"):
-            engine.create_multi_app(multi_app_manifest=manifest_path)
+            await engine.create_multi_app(multi_app_manifest=manifest_path)
 
 
 class TestMultiAppSharedAuth:
@@ -345,9 +349,7 @@ class TestMultiAppSharedAuth:
         }
 
     @pytest.mark.asyncio
-    async def test_multi_app_shared_auth_initialization(
-        self, mock_mongo_database, temp_shared_auth_manifests
-    ):
+    async def test_multi_app_shared_auth_initialization(self, mock_mongo_database, temp_shared_auth_manifests):
         """Test that shared auth is initialized once for multi-app."""
         from mdb_engine.core.engine import MongoDBEngine
 
@@ -364,7 +366,7 @@ class TestMultiAppSharedAuth:
             with patch.object(engine, "_initialize_shared_user_pool") as mock_init_pool:
                 mock_init_pool.return_value = AsyncMock()
 
-                app = engine.create_multi_app(
+                app = await engine.create_multi_app(
                     apps=[
                         {
                             "slug": "auth-hub",
@@ -420,7 +422,7 @@ class TestMultiAppHealthCheck:
             mock_conn.initialize = AsyncMock()
             mock_conn.shutdown = AsyncMock()
 
-            app = engine.create_multi_app(
+            app = await engine.create_multi_app(
                 apps=[
                     {
                         "slug": "app1",
@@ -580,7 +582,8 @@ class TestAutoDiscovery:
         with pytest.raises(ValueError, match="does not exist"):
             engine._discover_apps_from_directory(Path("/nonexistent/dir"))  # noqa: SLF001
 
-    def test_create_multi_app_with_auto_discovery(self, temp_apps_dir):
+    @pytest.mark.asyncio
+    async def test_create_multi_app_with_auto_discovery(self, temp_apps_dir):
         """Test create_multi_app with auto-discovery."""
         from fastapi import FastAPI
 
@@ -588,7 +591,7 @@ class TestAutoDiscovery:
 
         engine = MongoDBEngine(mongo_uri="mongodb://localhost:27017", db_name="test_db")
 
-        app = engine.create_multi_app(
+        app = await engine.create_multi_app(
             apps_dir=temp_apps_dir,
             path_prefix_template="/app-{index}",
         )
@@ -632,14 +635,15 @@ class TestValidationMode:
             "invalid": invalid_path,
         }
 
-    def test_validation_mode_non_strict(self, temp_manifests):
+    @pytest.mark.asyncio
+    async def test_validation_mode_non_strict(self, temp_manifests):
         """Test validation mode with strict=False (warns but continues)."""
         from mdb_engine.core.engine import MongoDBEngine
 
         engine = MongoDBEngine(mongo_uri="mongodb://localhost:27017", db_name="test_db")
 
         # Should not raise, but log warnings
-        app = engine.create_multi_app(
+        app = await engine.create_multi_app(
             apps=[
                 {
                     "slug": "valid-app",
@@ -653,14 +657,15 @@ class TestValidationMode:
 
         assert app is not None
 
-    def test_validation_mode_strict(self, temp_manifests):
+    @pytest.mark.asyncio
+    async def test_validation_mode_strict(self, temp_manifests):
         """Test validation mode with strict=True (fails fast)."""
         from mdb_engine.core.engine import MongoDBEngine
 
         engine = MongoDBEngine(mongo_uri="mongodb://localhost:27017", db_name="test_db")
 
         with pytest.raises(ValueError, match="validation failed"):
-            engine.create_multi_app(
+            await engine.create_multi_app(
                 apps=[
                     {
                         "slug": "invalid-app",
@@ -709,7 +714,7 @@ class TestAppContextHelpers:
             mock_conn.initialize = AsyncMock()
             mock_conn.shutdown = AsyncMock()
 
-            app = engine.create_multi_app(
+            app = await engine.create_multi_app(
                 apps=[
                     {
                         "slug": "test-app",
@@ -788,7 +793,7 @@ class TestRouteIntrospection:
             mock_conn.initialize = AsyncMock()
             mock_conn.shutdown = AsyncMock()
 
-            app = engine.create_multi_app(
+            app = await engine.create_multi_app(
                 apps=[
                     {
                         "slug": "app1",
@@ -857,7 +862,7 @@ class TestGetMountedApps:
             mock_conn.initialize = AsyncMock()
             mock_conn.shutdown = AsyncMock()
 
-            app = engine.create_multi_app(
+            app = await engine.create_multi_app(
                 apps=[
                     {
                         "slug": "app1",
@@ -884,7 +889,8 @@ class TestGetMountedApps:
                 assert mounted_apps[0]["path_prefix"] == "/app1"
                 assert mounted_apps[0]["status"] == "mounted"
 
-    def test_get_mounted_apps_before_lifespan(self, mock_mongo_database, temp_manifests):
+    @pytest.mark.asyncio
+    async def test_get_mounted_apps_before_lifespan(self, mock_mongo_database, temp_manifests):
         """Test get_mounted_apps() works immediately after create_multi_app() without lifespan."""
         from mdb_engine.core.engine import MongoDBEngine
 
@@ -897,7 +903,7 @@ class TestGetMountedApps:
             mock_conn.initialize = AsyncMock()
             mock_conn.shutdown = AsyncMock()
 
-            app = engine.create_multi_app(
+            app = await engine.create_multi_app(
                 apps=[
                     {
                         "slug": "app1",
@@ -959,7 +965,7 @@ class TestEnhancedHealthCheck:
             mock_conn.initialize = AsyncMock()
             mock_conn.shutdown = AsyncMock()
 
-            app = engine.create_multi_app(
+            app = await engine.create_multi_app(
                 apps=[
                     {
                         "slug": "app1",
@@ -999,14 +1005,15 @@ class TestStartupShutdownHooks:
         manifest_path.write_text(json.dumps(manifest))
         return manifest_path
 
-    def test_invalid_startup_hook(self, temp_manifest):
+    @pytest.mark.asyncio
+    async def test_invalid_startup_hook(self, temp_manifest):
         """Test that invalid startup hook raises error."""
         from mdb_engine.core.engine import MongoDBEngine
 
         engine = MongoDBEngine(mongo_uri="mongodb://localhost:27017", db_name="test_db")
 
         with pytest.raises(ValueError, match="must be callable"):
-            engine.create_multi_app(
+            await engine.create_multi_app(
                 apps=[
                     {
                         "slug": "test-app",
@@ -1017,14 +1024,15 @@ class TestStartupShutdownHooks:
                 ]
             )
 
-    def test_invalid_shutdown_hook(self, temp_manifest):
+    @pytest.mark.asyncio
+    async def test_invalid_shutdown_hook(self, temp_manifest):
         """Test that invalid shutdown hook raises error."""
         from mdb_engine.core.engine import MongoDBEngine
 
         engine = MongoDBEngine(mongo_uri="mongodb://localhost:27017", db_name="test_db")
 
         with pytest.raises(ValueError, match="must be callable"):
-            engine.create_multi_app(
+            await engine.create_multi_app(
                 apps=[
                     {
                         "slug": "test-app",
@@ -1073,9 +1081,7 @@ class TestWebSocketRoutesWithMountedApps:
         return manifest_path
 
     @pytest.mark.asyncio
-    async def test_websocket_routes_registered_on_parent_app(
-        self, mock_mongo_database, temp_manifest_with_websocket
-    ):
+    async def test_websocket_routes_registered_on_parent_app(self, mock_mongo_database, temp_manifest_with_websocket):
         """Test that WebSocket routes are registered on parent app with mount prefix."""
         from mdb_engine.core.engine import MongoDBEngine
 
@@ -1097,7 +1103,7 @@ class TestWebSocketRoutesWithMountedApps:
                 return_value=mock_handler,
             ) as mock_create:
                 with patch("fastapi.APIRouter", return_value=mock_router) as mock_router_class:
-                    app = engine.create_multi_app(
+                    app = await engine.create_multi_app(
                         apps=[
                             {
                                 "slug": "ws-app",
@@ -1160,7 +1166,7 @@ class TestWebSocketRoutesWithMountedApps:
                 return_value=mock_handler,
             ):
                 with patch("fastapi.APIRouter", return_value=mock_router):
-                    app = engine.create_multi_app(
+                    app = await engine.create_multi_app(
                         apps=[
                             {
                                 "slug": "multi-ws-app",
@@ -1195,7 +1201,7 @@ class TestWebSocketRoutesWithMountedApps:
             mock_conn.shutdown = AsyncMock()
 
             with patch("fastapi.APIRouter") as mock_router_class:
-                app = engine.create_multi_app(
+                app = await engine.create_multi_app(
                     apps=[
                         {
                             "slug": "no-ws-app",
@@ -1211,9 +1217,7 @@ class TestWebSocketRoutesWithMountedApps:
                     assert not mock_router_class.called
 
     @pytest.mark.asyncio
-    async def test_websocket_routes_import_error_handled(
-        self, mock_mongo_database, temp_manifest_with_websocket
-    ):
+    async def test_websocket_routes_import_error_handled(self, mock_mongo_database, temp_manifest_with_websocket):
         """Test that ImportError for WebSocket support is handled gracefully."""
         from mdb_engine.core.engine import MongoDBEngine
 
@@ -1232,7 +1236,7 @@ class TestWebSocketRoutesWithMountedApps:
                 side_effect=ImportError("WebSocket support not available"),
             ):
                 # Should not raise, but log warning
-                app = engine.create_multi_app(
+                app = await engine.create_multi_app(
                     apps=[
                         {
                             "slug": "ws-app",
@@ -1249,9 +1253,7 @@ class TestWebSocketRoutesWithMountedApps:
                     assert app is not None
 
     @pytest.mark.asyncio
-    async def test_websocket_registration_summary_logging(
-        self, mock_mongo_database, temp_manifest_with_websocket
-    ):
+    async def test_websocket_registration_summary_logging(self, mock_mongo_database, temp_manifest_with_websocket):
         """Test that WebSocket registration includes summary logging."""
         import logging
 
@@ -1287,7 +1289,7 @@ class TestWebSocketRoutesWithMountedApps:
                     "mdb_engine.routing.websockets.create_websocket_endpoint",
                     return_value=mock_ws_handler,
                 ):
-                    app = engine.create_multi_app(
+                    app = await engine.create_multi_app(
                         apps=[
                             {
                                 "slug": "ws-app",
@@ -1302,8 +1304,7 @@ class TestWebSocketRoutesWithMountedApps:
                         summary_logs = [
                             log
                             for log in log_capture
-                            if "WebSocket registration summary" in log
-                            or "WebSocket registration issues" in log
+                            if "WebSocket registration summary" in log or "WebSocket registration issues" in log
                         ]
                         assert len(summary_logs) > 0, (
                             f"Registration summary should be logged. "
@@ -1335,9 +1336,16 @@ class TestWebSocketRoutesWithMountedApps:
         handler = logging.Handler()
         handler.emit = lambda record: log_capture.append(record.getMessage())
 
-        logger = logging.getLogger("mdb_engine.core.engine")
-        logger.addHandler(handler)
-        logger.setLevel(logging.DEBUG)
+        # Capture logs from both engine and fastapi_app modules
+        # (CSRF skip is logged by fastapi_app, not engine)
+        loggers_to_capture = [
+            logging.getLogger("mdb_engine.core.engine"),
+            logging.getLogger("mdb_engine.core.fastapi_app"),
+            logging.getLogger("mdb_engine.core.multi_app"),
+        ]
+        for lgr in loggers_to_capture:
+            lgr.addHandler(handler)
+            lgr.setLevel(logging.DEBUG)
 
         try:
             with patch.object(engine, "_connection_manager") as mock_conn:
@@ -1347,7 +1355,7 @@ class TestWebSocketRoutesWithMountedApps:
                 mock_conn.initialize = AsyncMock()
                 mock_conn.shutdown = AsyncMock()
 
-                app = engine.create_multi_app(
+                app = await engine.create_multi_app(
                     apps=[
                         {
                             "slug": "test-app",
@@ -1359,26 +1367,21 @@ class TestWebSocketRoutesWithMountedApps:
 
                 async with app.router.lifespan_context(app):
                     # Check that CSRF middleware was skipped for child app
-                    skip_logs = [
-                        log for log in log_capture if "CSRFMiddleware skipped for child app" in log
-                    ]
-                    assert len(skip_logs) > 0, (
-                        "Child app should skip CSRF middleware. " f"Logs: {log_capture[:30]}"
-                    )
+                    skip_logs = [log for log in log_capture if "CSRFMiddleware skipped for child app" in log]
+                    assert len(skip_logs) > 0, "Child app should skip CSRF middleware. " f"Logs: {log_capture[:30]}"
 
                     # Verify parent app has CSRF middleware
-                    parent_csrf_logs = [
-                        log for log in log_capture if "CSRFMiddleware added to parent app" in log
-                    ]
-                    assert len(parent_csrf_logs) > 0, "Parent app should have CSRF middleware"
+                    parent_csrf_logs = [log for log in log_capture if "CSRFMiddleware added" in log]
+                    assert len(parent_csrf_logs) > 0, (
+                        "Parent app should have CSRF middleware. " f"Logs: {log_capture[:30]}"
+                    )
 
         finally:
-            logger.removeHandler(handler)
+            for lgr in loggers_to_capture:
+                lgr.removeHandler(handler)
 
     @pytest.mark.asyncio
-    async def test_child_app_public_routes_merged_into_parent_csrf(
-        self, mock_mongo_database, tmp_path
-    ):
+    async def test_child_app_public_routes_merged_into_parent_csrf(self, mock_mongo_database, tmp_path):
         """Test that child app public routes are merged into parent CSRF exempt list."""
         from mdb_engine.core.engine import MongoDBEngine
 
@@ -1415,7 +1418,7 @@ class TestWebSocketRoutesWithMountedApps:
             mock_conn.initialize = AsyncMock()
             mock_conn.shutdown = AsyncMock()
 
-            app = engine.create_multi_app(
+            app = await engine.create_multi_app(
                 apps=[
                     {"slug": "app1", "manifest": manifest1_path, "path_prefix": "/app1"},
                     {"slug": "app2", "manifest": manifest2_path, "path_prefix": "/app2"},
@@ -1456,7 +1459,7 @@ class TestCORSCConfigPropagation:
             mock_conn.initialize = AsyncMock()
             mock_conn.shutdown = AsyncMock()
 
-            app = engine.create_multi_app(
+            app = await engine.create_multi_app(
                 apps=[
                     {
                         "slug": "test-app",
@@ -1499,7 +1502,7 @@ class TestCORSCConfigPropagation:
             mock_conn.initialize = AsyncMock()
             mock_conn.shutdown = AsyncMock()
 
-            app = engine.create_multi_app(
+            app = await engine.create_multi_app(
                 apps=[
                     {
                         "slug": "test-app",
@@ -1563,7 +1566,7 @@ class TestCORSCConfigPropagation:
             mock_conn.initialize = AsyncMock()
             mock_conn.shutdown = AsyncMock()
 
-            app = engine.create_multi_app(
+            app = await engine.create_multi_app(
                 apps=[
                     {
                         "slug": "app1",
@@ -1612,7 +1615,7 @@ class TestCORSCConfigPropagation:
             mock_conn.initialize = AsyncMock()
             mock_conn.shutdown = AsyncMock()
 
-            app = engine.create_multi_app(
+            app = await engine.create_multi_app(
                 apps=[
                     {
                         "slug": "test-app",

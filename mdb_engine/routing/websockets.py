@@ -23,9 +23,10 @@ This module is part of MDB_ENGINE - MongoDB Engine.
 import asyncio
 import json
 import logging
+import os
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 # Check if FastAPI WebSocket support is available (OPTIONAL dependency)
@@ -41,6 +42,9 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# Cache the Docker container check to avoid filesystem I/O on every WebSocket connection.
+_IS_DOCKER: bool = os.path.exists("/.dockerenv")
+
 
 @dataclass
 class WebSocketConnection:
@@ -54,7 +58,7 @@ class WebSocketConnection:
 
     def __post_init__(self):
         if self.connected_at is None:
-            self.connected_at = datetime.utcnow()
+            self.connected_at = datetime.now(timezone.utc)
 
 
 class WebSocketConnectionManager:
@@ -75,6 +79,7 @@ class WebSocketConnectionManager:
         self.app_slug = app_slug
         self.active_connections: list[WebSocketConnection] = []  # List of connection metadata
         self._lock = asyncio.Lock()
+        self._background_tasks: set[asyncio.Task] = set()  # prevent GC of fire-and-forget tasks
         logger.debug(f"Initialized WebSocket manager for app: {app_slug}")
 
     async def connect(
@@ -125,15 +130,15 @@ class WebSocketConnectionManager:
 
         async def _disconnect():
             async with self._lock:
-                self.active_connections = [
-                    conn for conn in self.active_connections if conn.websocket is not websocket
-                ]
+                self.active_connections = [conn for conn in self.active_connections if conn.websocket is not websocket]
             logger.info(
                 f"WebSocket disconnected for app '{self.app_slug}'. "
                 f"Remaining connections: {len(self.active_connections)}"
             )
 
-        asyncio.create_task(_disconnect())
+        task = asyncio.create_task(_disconnect())
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
 
     async def broadcast(self, message: dict[str, Any], filter_by_user: str | None = None) -> int:
         """
@@ -153,7 +158,7 @@ class WebSocketConnectionManager:
         message_with_context = {
             **message,
             "app_slug": self.app_slug,  # Ensure message is scoped to this app
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         message_json = json.dumps(message_with_context)
         disconnected = []
@@ -165,13 +170,13 @@ class WebSocketConnectionManager:
         # Use DEBUG level for broadcast logging to reduce log noise
         filter_type = type(filter_by_user).__name__ if filter_by_user else "None"
         logger.debug(
-            f"📡 Broadcasting to {len(connections)} connection(s) for app '{self.app_slug}' "
+            f"Broadcasting to {len(connections)} connection(s) for app '{self.app_slug}' "
             f"(filter_by_user: {filter_by_user}, type: {filter_type})"
         )
         if connections:
             user_ids = [str(c.user_id) if c.user_id else "None" for c in connections]
             user_types = [type(c.user_id).__name__ if c.user_id else "None" for c in connections]
-            logger.debug(f"📡 Active connections user_ids: {user_ids} (types: {user_types})")
+            logger.debug(f"Active connections user_ids: {user_ids} (types: {user_types})")
 
         for connection in connections:
             # Filter by user if specified
@@ -187,8 +192,7 @@ class WebSocketConnectionManager:
                     )
                     continue
                 logger.debug(
-                    f"✅ User match: connection.user_id={connection_user_id}, "
-                    f"filter_by_user={filter_user_id}"
+                    f"User match: connection.user_id={connection_user_id}, " f"filter_by_user={filter_user_id}"
                 )
 
             # Check WebSocket state before attempting to send
@@ -246,7 +250,7 @@ class WebSocketConnectionManager:
             message_with_context = {
                 **message,
                 "app_slug": self.app_slug,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
             message_json = json.dumps(message_with_context)
             await websocket.send_text(message_json)
@@ -313,11 +317,11 @@ def set_global_websocket_ticket_store(ticket_store: Any) -> None:
     _global_websocket_ticket_store = ticket_store
     if ticket_store:
         logger.info(
-            f"✅ Global WebSocket ticket store set for multi-app WebSocket authentication "
+            f"Global WebSocket ticket store set for multi-app WebSocket authentication "
             f"(store type: {type(ticket_store).__name__})"
         )
     else:
-        logger.warning("⚠️  Global WebSocket ticket store set to None")
+        logger.warning("Global WebSocket ticket store set to None")
 
 
 async def get_websocket_manager(app_slug: str) -> WebSocketConnectionManager:
@@ -456,10 +460,7 @@ async def _validate_websocket_origin_in_handler(websocket: Any, app_slug: str) -
                             if cors_config and cors_config.get("enabled", False):
                                 try:
                                     allowed_origins = get_cors_allowed_origins(cors_config)
-                                    logger.info(
-                                        f"Using parent app CORS config for '{app_slug}': "
-                                        f"{allowed_origins}"
-                                    )
+                                    logger.info(f"Using parent app CORS config for '{app_slug}': " f"{allowed_origins}")
                                     break
                                 except ValueError as e:
                                     logger.warning(f"Invalid CORS config in parent app: {e}")
@@ -478,8 +479,7 @@ async def _validate_websocket_origin_in_handler(websocket: Any, app_slug: str) -
                             try:
                                 allowed_origins = get_cors_allowed_origins(cors_config)
                                 logger.info(
-                                    f"Using CORS config from app '{app_title}' for '{app_slug}': "
-                                    f"{allowed_origins}"
+                                    f"Using CORS config from app '{app_title}' for '{app_slug}': " f"{allowed_origins}"
                                 )
                                 break
                             except ValueError as e:
@@ -491,12 +491,10 @@ async def _validate_websocket_origin_in_handler(websocket: Any, app_slug: str) -
                         current_app = parent_app
 
             if not allowed_origins:
-                import os
-
                 is_dev = (
                     os.getenv("ENVIRONMENT", "").lower() in ["development", "dev"]
                     or os.getenv("G_NOME_ENV", "").lower() in ["development", "dev"]
-                    or os.path.exists("/.dockerenv")
+                    or _IS_DOCKER
                 )
 
                 if not is_dev:
@@ -545,12 +543,10 @@ async def _validate_websocket_origin_in_handler(websocket: Any, app_slug: str) -
             return True
 
         if not origin:
-            import os
-
             is_dev = (
                 os.getenv("ENVIRONMENT", "").lower() in ["development", "dev"]
                 or os.getenv("G_NOME_ENV", "").lower() in ["development", "dev"]
-                or os.path.exists("/.dockerenv")
+                or _IS_DOCKER
             )
             if is_dev:
                 logger.warning(
@@ -612,9 +608,7 @@ async def authenticate_websocket(
         WebSocketDisconnect: If authentication is required but fails
     """
     if not WEBSOCKETS_AVAILABLE:
-        raise ImportError(
-            "WebSocket support is not available. FastAPI WebSocket support must be installed."
-        )
+        raise ImportError("WebSocket support is not available. FastAPI WebSocket support must be installed.")
 
     from fastapi import WebSocketDisconnect
 
@@ -651,10 +645,7 @@ async def authenticate_websocket(
             if not websocket_ticket_store:
                 websocket_ticket_store = getattr(app.state, "websocket_ticket_store", None)
                 if websocket_ticket_store:
-                    logger.debug(
-                        f"Found websocket_ticket_store on app '{app_title}' "
-                        f"for app_slug '{app_slug}'"
-                    )
+                    logger.debug(f"Found websocket_ticket_store on app '{app_title}' " f"for app_slug '{app_slug}'")
 
         # Ticket authentication (primary method for multi-app SSO)
         # Try ticket auth even if require_auth=False (for user association)
@@ -687,7 +678,7 @@ async def authenticate_websocket(
         # SECURITY: If require_auth=True, we must fail
         if require_auth:
             logger.error(
-                f"❌ WebSocket authentication failed for app '{app_slug}'. "
+                f"WebSocket authentication failed for app '{app_slug}'. "
                 "No valid ticket found. Generate ticket via /auth/ticket endpoint."
             )
             return None, None
@@ -748,9 +739,7 @@ def register_message_handler(
     logger.info(f"Registered message handler for app '{app_slug}', endpoint '{endpoint_name}'")
 
 
-def get_message_handler(
-    app_slug: str, endpoint_name: str
-) -> Callable[[Any, dict[str, Any]], Awaitable[None]] | None:
+def get_message_handler(app_slug: str, endpoint_name: str) -> Callable[[Any, dict[str, Any]], Awaitable[None]] | None:
     """
     Get a registered message handler for an endpoint.
 
@@ -773,29 +762,22 @@ async def _accept_websocket_connection(websocket: Any, app_slug: str) -> None:
     """
     try:
         await websocket.accept()
-        logger.info(f"✅ WebSocket accepted for app '{app_slug}'")
-
-        print(f"✅ [WEBSOCKET ACCEPTED] App: '{app_slug}'")
+        logger.info(f"WebSocket accepted for app '{app_slug}'")
     except (RuntimeError, ConnectionError, OSError) as accept_error:
-        print(f"❌ [WEBSOCKET ACCEPT FAILED] App: '{app_slug}', Error: {accept_error}")
         logger.error(
-            f"❌ Failed to accept WebSocket for app '{app_slug}': {accept_error}",
+            f"Failed to accept WebSocket for app '{app_slug}': {accept_error}",
             exc_info=True,
         )
         raise
 
 
-async def _authenticate_websocket_connection(
-    websocket: Any, app_slug: str, require_auth: bool
-) -> tuple:
+async def _authenticate_websocket_connection(websocket: Any, app_slug: str, require_auth: bool) -> tuple:
     """Authenticate WebSocket connection and return (user_id, user_email)."""
     try:
         user_id, user_email = await authenticate_websocket(websocket, app_slug, require_auth)
 
         if require_auth and not user_id:
-            logger.warning(
-                f"WebSocket authentication failed for app '{app_slug}' - closing connection"
-            )
+            logger.warning(f"WebSocket authentication failed for app '{app_slug}' - closing connection")
             try:
                 await websocket.close(code=1008, reason="Authentication required")
             except (WebSocketDisconnect, RuntimeError, OSError) as e:
@@ -805,9 +787,7 @@ async def _authenticate_websocket_connection(
         return user_id, user_email
 
     except WebSocketDisconnect:
-        logger.warning(
-            f"WebSocket connection rejected for app '{app_slug}' - authentication failed"
-        )
+        logger.warning(f"WebSocket connection rejected for app '{app_slug}' - authentication failed")
         raise
     except (
         ValueError,
@@ -817,8 +797,7 @@ async def _authenticate_websocket_connection(
         RuntimeError,
     ) as auth_error:
         logger.error(
-            f"Unexpected error during WebSocket authentication for app "
-            f"'{app_slug}': {auth_error}",
+            f"Unexpected error during WebSocket authentication for app " f"'{app_slug}': {auth_error}",
             exc_info=True,
         )
         try:
@@ -848,9 +827,7 @@ async def _handle_websocket_message(
                 if data.get("type") == "pong":
                     return True
 
-                current_handler = (
-                    handler if handler else get_message_handler(app_slug, endpoint_name)
-                )
+                current_handler = handler if handler else get_message_handler(app_slug, endpoint_name)
 
                 if current_handler:
                     # Type 4: Let handler errors bubble up to framework
@@ -920,49 +897,7 @@ def create_websocket_endpoint(
 
     async def websocket_endpoint(websocket: websocket_type):
         """WebSocket endpoint handler with authentication and app isolation."""
-        # CRITICAL: Log immediately - this proves the handler is being called
-        # This print should appear in server logs when a WebSocket connection is attempted
-        import sys
-
-        # Log BEFORE any operations to catch if handler is called at all
-        try:
-            print(
-                f"🔌 [WEBSOCKET HANDLER CALLED] App: '{app_slug}', Path: {path}",
-                file=sys.stderr,
-                flush=True,
-            )
-            print(f"🔌 [WEBSOCKET HANDLER CALLED] App: '{app_slug}', Path: {path}", flush=True)
-            logger.info(f"🔌 [WEBSOCKET HANDLER CALLED] App: '{app_slug}', Path: {path}")
-
-            # Try to access websocket properties to see if we can even access it
-            try:
-                ws_path = (
-                    getattr(websocket, "url", {}).path if hasattr(websocket, "url") else "unknown"
-                )
-                ws_headers = (
-                    dict(getattr(websocket, "headers", {})) if hasattr(websocket, "headers") else {}
-                )
-                origin = ws_headers.get("origin", "missing")
-                print(
-                    f"🔌 [WEBSOCKET DETAILS] Path: {ws_path}, Origin: {origin}, "
-                    f"Headers: {list(ws_headers.keys())}",
-                    file=sys.stderr,
-                    flush=True,
-                )
-            except (AttributeError, RuntimeError, TypeError) as access_error:
-                print(
-                    f"⚠️ [WEBSOCKET ACCESS ERROR] "
-                    f"Could not access websocket properties: {access_error}",
-                    file=sys.stderr,
-                    flush=True,
-                )
-        except (RuntimeError, AttributeError) as log_error:
-            # Even logging failed - this is very bad
-            print(
-                f"❌ [CRITICAL] Failed to log WebSocket handler call: {log_error}",
-                file=sys.stderr,
-                flush=True,
-            )
+        logger.info(f"[WEBSOCKET HANDLER CALLED] App: '{app_slug}', Path: {path}")
 
         connection = None
         try:
@@ -979,12 +914,8 @@ def create_websocket_endpoint(
             except (AttributeError, TypeError) as e:
                 query_str = f"Error accessing query_params: {e}"
 
-            # CRITICAL: Log immediately to verify handler is being called
-            print(
-                f"🔌 [WEBSOCKET HANDLER CALLED] App: '{app_slug}', Path: {path}, Query: {query_str}"
-            )
             logger.info(
-                f"🔌 WebSocket connection attempt for app '{app_slug}' "
+                f"WebSocket connection attempt for app '{app_slug}' "
                 f"(require_auth={require_auth}, query_params={query_str})"
             )
 
@@ -993,18 +924,11 @@ def create_websocket_endpoint(
             # We'll validate origin after accept, but before processing messages
             try:
                 await websocket.accept()
-                logger.info(
-                    f"✅ WebSocket accepted for app '{app_slug}' (before origin validation)"
-                )
-                print(f"✅ [WEBSOCKET ACCEPTED] App: '{app_slug}'", flush=True)
+                logger.info(f"WebSocket accepted for app '{app_slug}' (before origin validation)")
             except (RuntimeError, ConnectionError, OSError, ValueError) as accept_error:
                 logger.error(
-                    f"❌ Failed to accept WebSocket for app '{app_slug}': {accept_error}",
+                    f"Failed to accept WebSocket for app '{app_slug}': {accept_error}",
                     exc_info=True,
-                )
-                print(
-                    f"❌ [WEBSOCKET ACCEPT FAILED] App: '{app_slug}', Error: {accept_error}",
-                    flush=True,
                 )
                 return
 
@@ -1013,8 +937,7 @@ def create_websocket_endpoint(
             origin_valid = await _validate_websocket_origin_in_handler(websocket, app_slug)
             if not origin_valid:
                 logger.error(
-                    f"❌ WebSocket origin validation FAILED for app '{app_slug}' - "
-                    f"closing connection after accept"
+                    f"WebSocket origin validation FAILED for app '{app_slug}' - " f"closing connection after accept"
                 )
                 try:
                     await websocket.close(code=1008, reason="Invalid origin")
@@ -1032,10 +955,7 @@ def create_websocket_endpoint(
             try:
                 cookies = _get_cookies_from_websocket(websocket)
                 cookie_names = list(cookies.keys()) if cookies else []
-                logger.info(
-                    f"🔍 WebSocket cookies for app '{app_slug}': {cookie_names} "
-                    f"(require_auth={require_auth})"
-                )
+                logger.info(f"WebSocket cookies for app '{app_slug}': {cookie_names} " f"(require_auth={require_auth})")
             except (AttributeError, TypeError, KeyError, RuntimeError) as cookie_error:
                 logger.warning(f"Could not extract cookies for debugging: {cookie_error}")
 
@@ -1044,7 +964,7 @@ def create_websocket_endpoint(
             # Handle authentication failure
             if require_auth and not user_id:
                 logger.error(
-                    f"❌ WebSocket authentication FAILED for app '{app_slug}' - "
+                    f"WebSocket authentication FAILED for app '{app_slug}' - "
                     f"rejecting connection. require_auth={require_auth}, "
                     f"user_id={user_id}, user_email={user_email}"
                 )
@@ -1063,13 +983,11 @@ def create_websocket_endpoint(
             # Ensure user_id is a string for consistent storage and filtering
             normalized_user_id = str(user_id) if user_id else None
             logger.info(
-                f"🔌 Connecting WebSocket for app '{app_slug}': "
+                f"Connecting WebSocket for app '{app_slug}': "
                 f"user_id={normalized_user_id} (type: {type(normalized_user_id).__name__}), "
                 f"user_email={user_email}"
             )
-            connection = await manager.connect(
-                websocket, user_id=normalized_user_id, user_email=user_email
-            )
+            connection = await manager.connect(websocket, user_id=normalized_user_id, user_email=user_email)
 
             # Send initial connection confirmation
             await manager.send_to_connection(
@@ -1080,7 +998,7 @@ def create_websocket_endpoint(
                     "message": "WebSocket connected successfully",
                     "authenticated": user_id is not None,
                     "user_email": user_email,
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                 },
             )
 
@@ -1088,9 +1006,7 @@ def create_websocket_endpoint(
             while True:
                 try:
                     # Wait for messages with timeout for ping/pong
-                    message = await asyncio.wait_for(
-                        websocket.receive(), timeout=float(ping_interval)
-                    )
+                    message = await asyncio.wait_for(websocket.receive(), timeout=float(ping_interval))
 
                     should_continue = await _handle_websocket_message(
                         websocket, message, manager, app_slug, endpoint_name, handler
@@ -1105,7 +1021,7 @@ def create_websocket_endpoint(
                             websocket,
                             {
                                 "type": "ping",
-                                "timestamp": datetime.utcnow().isoformat(),
+                                "timestamp": datetime.now(timezone.utc).isoformat(),
                             },
                         )
                     except (
@@ -1122,10 +1038,7 @@ def create_websocket_endpoint(
                     OSError,
                 ) as e:
                     error_msg = str(e).lower()
-                    if any(
-                        keyword in error_msg
-                        for keyword in ["disconnect", "closed", "connection", "broken"]
-                    ):
+                    if any(keyword in error_msg for keyword in ["disconnect", "closed", "connection", "broken"]):
                         logger.info(f"WebSocket disconnected for app '{app_slug}': {e}")
                         break
                     logger.warning(f"WebSocket receive error for app '{app_slug}': {e}")
@@ -1150,9 +1063,7 @@ def create_websocket_endpoint(
     return websocket_endpoint
 
 
-async def broadcast_to_app(
-    app_slug: str, message: dict[str, Any], user_id: str | None = None
-) -> int:
+async def broadcast_to_app(app_slug: str, message: dict[str, Any], user_id: str | None = None) -> int:
     """
     Convenience function to broadcast a message to all WebSocket clients for an app.
 

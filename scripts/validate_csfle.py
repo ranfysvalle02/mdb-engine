@@ -172,12 +172,8 @@ def test_encryption(manifest_path: Path, mongo_uri: str, db_name: str) -> bool:
             if raw_doc:
                 raw_content = raw_doc.get("content")
                 # Encrypted content should be Binary type or look encrypted
-                if isinstance(raw_content, bytes) or (
-                    isinstance(raw_content, str) and len(raw_content) > 100
-                ):
-                    print(
-                        f"✅ Content is encrypted in database (type: {type(raw_content).__name__})"
-                    )
+                if isinstance(raw_content, bytes) or (isinstance(raw_content, str) and len(raw_content) > 100):
+                    print(f"✅ Content is encrypted in database (type: {type(raw_content).__name__})")
                     print(f"   Encrypted value length: {len(str(raw_content))}")
                 else:
                     print(f"⚠️  Content may not be encrypted (type: {type(raw_content).__name__})")

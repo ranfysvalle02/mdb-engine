@@ -64,9 +64,7 @@ class ResourceLimiter:
         self.max_batch_size = max_batch_size
         self.max_document_size = max_document_size
 
-    def enforce_query_timeout(
-        self, kwargs: dict[str, Any], default_timeout: int | None = None
-    ) -> dict[str, Any]:
+    def enforce_query_timeout(self, kwargs: dict[str, Any], default_timeout: int | None = None) -> dict[str, Any]:
         """
         Enforce query timeout by adding maxTimeMS if not present.
 
@@ -115,9 +113,7 @@ class ResourceLimiter:
             return max_allowed
 
         if limit > max_allowed:
-            logger.warning(
-                f"Result limit {limit} exceeds maximum {max_allowed}. " f"Capping to {max_allowed}"
-            )
+            logger.warning(f"Result limit {limit} exceeds maximum {max_allowed}. " f"Capping to {max_allowed}")
             return max_allowed
 
         return limit
@@ -139,10 +135,7 @@ class ResourceLimiter:
             return max_allowed
 
         if batch_size > max_allowed:
-            logger.warning(
-                f"Batch size {batch_size} exceeds maximum {max_allowed}. "
-                f"Capping to {max_allowed}"
-            )
+            logger.warning(f"Batch size {batch_size} exceeds maximum {max_allowed}. " f"Capping to {max_allowed}")
             return max_allowed
 
         return batch_size
@@ -166,8 +159,7 @@ class ResourceLimiter:
 
             if actual_size > self.max_document_size:
                 raise ResourceLimitExceeded(
-                    f"Document size {actual_size} bytes exceeds maximum "
-                    f"{self.max_document_size} bytes",
+                    f"Document size {actual_size} bytes exceeds maximum " f"{self.max_document_size} bytes",
                     limit_type="document_size",
                     limit_value=self.max_document_size,
                     actual_value=actual_size,

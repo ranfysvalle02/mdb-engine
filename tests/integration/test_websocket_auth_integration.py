@@ -11,6 +11,7 @@ Tests end-to-end WebSocket authentication flow with:
 
 import base64
 import json
+import logging
 import os
 from datetime import datetime, timedelta
 
@@ -99,7 +100,7 @@ class TestWebSocketCookieAuthIntegration:
         manifest_path.write_text(json.dumps(test_manifest))
 
         # Create app with WebSocket support using create_multi_app
-        app = engine.create_multi_app(
+        app = await engine.create_multi_app(
             apps=[
                 {
                     "slug": test_manifest["slug"],
@@ -172,7 +173,7 @@ class TestWebSocketCookieAuthIntegration:
         manifest_path.write_text(json.dumps(test_manifest))
 
         # Create app with WebSocket support using create_multi_app
-        app = engine.create_multi_app(
+        app = await engine.create_multi_app(
             apps=[
                 {
                     "slug": test_manifest["slug"],
@@ -220,7 +221,7 @@ class TestWebSocketCookieAuthIntegration:
         manifest_path.write_text(json.dumps(test_manifest))
 
         # Create app with WebSocket support using create_multi_app
-        app = engine.create_multi_app(
+        app = await engine.create_multi_app(
             apps=[
                 {
                     "slug": test_manifest["slug"],
@@ -286,7 +287,7 @@ class TestWebSocketCookieAuthIntegration:
         manifest_path.write_text(json.dumps(test_manifest))
 
         # Create app with WebSocket support using create_multi_app
-        app = engine.create_multi_app(
+        app = await engine.create_multi_app(
             apps=[
                 {
                     "slug": test_manifest["slug"],
@@ -347,7 +348,7 @@ class TestWebSocketCookieAuthIntegration:
         manifest_path.write_text(json.dumps(test_manifest))
 
         # Create app with WebSocket support using create_multi_app
-        app = engine.create_multi_app(
+        app = await engine.create_multi_app(
             apps=[
                 {
                     "slug": test_manifest["slug"],
@@ -411,7 +412,7 @@ class TestWebSocketCookieAuthIntegration:
         manifest_path.write_text(json.dumps(test_manifest))
 
         # Create app with WebSocket support
-        app = engine.create_multi_app(
+        app = await engine.create_multi_app(
             apps=[
                 {
                     "slug": test_manifest["slug"],
@@ -440,8 +441,8 @@ class TestWebSocketCookieAuthIntegration:
                     password="testpass123",
                     app_roles={test_manifest["slug"]: ["viewer"]},
                 )
-            except Exception:
-                pass  # User might already exist
+            except (ValueError, Exception) as exc:  # ValueError if user already exists
+                logging.getLogger(__name__).debug("create_user skipped: %s", exc)
 
             # Authenticate to get session key
             auth_result = await user_pool.authenticate(
@@ -501,7 +502,7 @@ class TestWebSocketCookieAuthIntegration:
         manifest_path.write_text(json.dumps(test_manifest))
 
         # Create app with WebSocket support
-        app = engine.create_multi_app(
+        app = await engine.create_multi_app(
             apps=[
                 {
                     "slug": test_manifest["slug"],
@@ -534,9 +535,7 @@ class TestWebSocketCookieAuthIntegration:
             await asyncio.to_thread(test_websocket)
 
     @pytest.mark.asyncio
-    async def test_websocket_session_endpoint_requires_auth(
-        self, mongodb_connection_string, test_manifest, tmp_path
-    ):
+    async def test_websocket_session_endpoint_requires_auth(self, mongodb_connection_string, test_manifest, tmp_path):
         """Test that WebSocket session endpoint requires authentication."""
         from mdb_engine.core.engine import MongoDBEngine
 
@@ -550,7 +549,7 @@ class TestWebSocketCookieAuthIntegration:
         manifest_path.write_text(json.dumps(test_manifest))
 
         # Create app with WebSocket support
-        app = engine.create_multi_app(
+        app = await engine.create_multi_app(
             apps=[
                 {
                     "slug": test_manifest["slug"],
@@ -589,7 +588,7 @@ class TestWebSocketCookieAuthIntegration:
         manifest_path.write_text(json.dumps(test_manifest))
 
         # Create app with WebSocket support
-        app = engine.create_multi_app(
+        app = await engine.create_multi_app(
             apps=[
                 {
                     "slug": test_manifest["slug"],
@@ -613,8 +612,8 @@ class TestWebSocketCookieAuthIntegration:
                         password="testpass123",
                         app_roles={test_manifest["slug"]: ["viewer"]},
                     )
-                except Exception:
-                    pass  # User might already exist
+                except (ValueError, Exception) as exc:  # ValueError if user already exists
+                    logging.getLogger(__name__).debug("create_user skipped: %s", exc)
 
                 # Authenticate to get a valid token (this ensures user exists and token is valid)
                 auth_result = await user_pool.authenticate(
@@ -630,9 +629,7 @@ class TestWebSocketCookieAuthIntegration:
                 jwt_token = valid_jwt_token
 
             # Use AsyncClient for async tests to avoid event loop conflicts
-            async with AsyncClient(
-                transport=ASGITransport(app=app), base_url="http://test"
-            ) as client:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
                 # Access endpoint with authentication
                 response = await client.get(
                     "/auth/websocket-session",

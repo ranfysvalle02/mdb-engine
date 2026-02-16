@@ -5,9 +5,14 @@ Implements the Repository interface using MongoDB through ScopedCollectionWrappe
 This provides automatic app scoping and security features.
 """
 
+from __future__ import annotations
+
 import logging
-from datetime import datetime
-from typing import Any, Generic, TypeVar
+from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Any, Generic, TypeVar
+
+if TYPE_CHECKING:
+    from mdb_engine.database.scoped_wrapper import ScopedCollectionWrapper
 
 from bson import ObjectId
 
@@ -40,7 +45,7 @@ class MongoRepository(Repository[T], Generic[T]):
 
     def __init__(
         self,
-        collection: Any,  # ScopedCollectionWrapper - avoid import cycle
+        collection: ScopedCollectionWrapper,
         entity_class: type[T],
     ):
         """
@@ -103,7 +108,7 @@ class MongoRepository(Repository[T], Generic[T]):
 
     async def add(self, entity: T) -> str:
         """Add a new entity and return its ID."""
-        entity.created_at = datetime.utcnow()
+        entity.created_at = datetime.now(timezone.utc)
         doc = self._to_document(entity)
 
         result = await self._collection.insert_one(doc)
@@ -114,7 +119,7 @@ class MongoRepository(Repository[T], Generic[T]):
 
     async def add_many(self, entities: list[T]) -> list[str]:
         """Add multiple entities and return their IDs."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         docs = []
 
         for entity in entities:
@@ -137,7 +142,7 @@ class MongoRepository(Repository[T], Generic[T]):
         except (TypeError, ValueError):
             return False
 
-        entity.updated_at = datetime.utcnow()
+        entity.updated_at = datetime.now(timezone.utc)
         doc = self._to_document(entity)
 
         result = await self._collection.update_one({"_id": object_id}, {"$set": doc})
@@ -151,7 +156,7 @@ class MongoRepository(Repository[T], Generic[T]):
         except (TypeError, ValueError):
             return False
 
-        fields["updated_at"] = datetime.utcnow()
+        fields["updated_at"] = datetime.now(timezone.utc)
 
         result = await self._collection.update_one({"_id": object_id}, {"$set": fields})
 
@@ -214,7 +219,7 @@ class MongoRepository(Repository[T], Generic[T]):
         if "$set" not in update:
             update = {"$set": update}
 
-        update["$set"]["updated_at"] = datetime.utcnow()
+        update["$set"]["updated_at"] = datetime.now(timezone.utc)
 
         result = await self._collection.update_many(filter, update)
         return result.modified_count

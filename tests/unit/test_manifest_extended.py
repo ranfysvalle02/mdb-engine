@@ -192,9 +192,7 @@ class TestManifestExtendedValidation:
         index_def = {
             "name": "vec_idx",
             "type": "vectorSearch",
-            "definition": {
-                "fields": [{"type": "vector", "path": "embedding", "numDimensions": 10001}]
-            },
+            "definition": {"fields": [{"type": "vector", "path": "embedding", "numDimensions": 10001}]},
         }
         is_valid, error = validate_index_definition(index_def, "coll", "idx")
         assert not is_valid

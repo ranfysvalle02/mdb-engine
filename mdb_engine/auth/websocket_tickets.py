@@ -92,8 +92,7 @@ class WebSocketTicketStore:
         self._tickets[ticket_id] = ticket_data
 
         logger.debug(
-            f"Created WebSocket ticket for user '{user_id}' "
-            f"(app: {app_slug}, expires in {self._ticket_ttl}s)"
+            f"Created WebSocket ticket for user '{user_id}' " f"(app: {app_slug}, expires in {self._ticket_ttl}s)"
         )
 
         return ticket_id
@@ -121,10 +120,7 @@ class WebSocketTicketStore:
 
             # Check expiration
             if time.time() > ticket_data["exp"]:
-                logger.warning(
-                    f"WebSocket ticket expired: {ticket_id[:16]}... "
-                    f"(expired: {ticket_data['exp']})"
-                )
+                logger.warning(f"WebSocket ticket expired: {ticket_id[:16]}... " f"(expired: {ticket_data['exp']})")
                 # Remove expired ticket
                 del self._tickets[ticket_id]
                 return None
@@ -138,10 +134,7 @@ class WebSocketTicketStore:
             # Remove ticket before returning (single-use)
             del self._tickets[ticket_id]
 
-            logger.debug(
-                f"Validated and consumed WebSocket ticket for user '{user_id}' "
-                f"(app: {app_slug})"
-            )
+            logger.debug(f"Validated and consumed WebSocket ticket for user '{user_id}' " f"(app: {app_slug})")
 
             return {
                 "user_id": user_id,
@@ -159,9 +152,7 @@ class WebSocketTicketStore:
         async with self._lock:
             now = time.time()
             expired_tickets = [
-                ticket_id
-                for ticket_id, ticket_data in self._tickets.items()
-                if ticket_data["exp"] < now
+                ticket_id for ticket_id, ticket_data in self._tickets.items() if ticket_data["exp"] < now
             ]
 
             for ticket_id in expired_tickets:

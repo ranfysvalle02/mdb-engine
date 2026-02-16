@@ -7,7 +7,7 @@ This module is part of MDB_ENGINE - MongoDB Engine.
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from ..config import ACCESS_TOKEN_TTL as CONFIG_ACCESS_TTL
@@ -39,9 +39,7 @@ def get_token_expiry_time(token: str, secret_key: str) -> datetime | None:
         return None
 
 
-def is_token_expiring_soon(
-    token: str, secret_key: str, threshold_seconds: int | None = None
-) -> bool:
+def is_token_expiring_soon(token: str, secret_key: str, threshold_seconds: int | None = None) -> bool:
     """
     Check if a token is expiring soon.
 
@@ -61,7 +59,7 @@ def is_token_expiring_soon(
         if expiry_time is None:
             return False
 
-        time_until_expiry = (expiry_time - datetime.utcnow()).total_seconds()
+        time_until_expiry = (expiry_time - datetime.now(timezone.utc)).total_seconds()
         return time_until_expiry <= threshold_seconds
     except (ValueError, TypeError, AttributeError, KeyError) as e:
         logger.debug(f"Error checking if token expiring soon: {e}")
@@ -88,7 +86,7 @@ def should_refresh_token(token: str, secret_key: str, refresh_threshold: int | N
         if expiry_time is None:
             return False
 
-        time_until_expiry = (expiry_time - datetime.utcnow()).total_seconds()
+        time_until_expiry = (expiry_time - datetime.now(timezone.utc)).total_seconds()
         return time_until_expiry <= refresh_threshold
     except (ValueError, TypeError, AttributeError, KeyError) as e:
         logger.debug(f"Error determining if token should refresh: {e}")
@@ -112,7 +110,7 @@ def get_token_age(token: str, secret_key: str) -> float | None:
             iat_timestamp = metadata["iat"]
             if isinstance(iat_timestamp, int | float):
                 issued_at = datetime.utcfromtimestamp(iat_timestamp)
-                age = (datetime.utcnow() - issued_at).total_seconds()
+                age = (datetime.now(timezone.utc) - issued_at).total_seconds()
                 return age
         return None
     except (ValueError, TypeError, AttributeError, KeyError) as e:
@@ -136,16 +134,14 @@ def get_time_until_expiry(token: str, secret_key: str) -> float | None:
         if expiry_time is None:
             return None
 
-        time_until = (expiry_time - datetime.utcnow()).total_seconds()
+        time_until = (expiry_time - datetime.now(timezone.utc)).total_seconds()
         return time_until
     except (ValueError, TypeError, AttributeError, KeyError) as e:
         logger.debug(f"Error getting time until expiry: {e}")
         return None
 
 
-def validate_token_version(
-    token: str, secret_key: str, required_version: str | None = None
-) -> bool:
+def validate_token_version(token: str, secret_key: str, required_version: str | None = None) -> bool:
     """
     Validate token version compatibility.
 

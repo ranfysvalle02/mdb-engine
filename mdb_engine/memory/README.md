@@ -1,34 +1,25 @@
 # Memory Service Module
 
-Native MongoDB Atlas Vector Search integration for intelligent memory management in MDB_ENGINE applications. Provides semantic memory storage, retrieval, and inference capabilities with full control over the stack.
+Native MongoDB Atlas Vector Search integration for intelligent memory management in MDB-Engine applications. Provides semantic memory storage, retrieval, and inference capabilities with full control over the stack.
 
-## 🎉 Features
+## Features
 
 ### Core Capabilities
 
-- **🏗️ BaseMemoryService**: Abstract base class defining the memory service interface
-- **🔌 Provider Extensibility**: Easy to add new memory providers
-- **✅ Multiple Implementations**: CustomMemoryService (basic) and CognitiveMemoryService (advanced)
-- **📝 Type Safety**: Better IDE support and type checking with abstract base class
-- **🎯 Consistent API**: All memory providers implement the same interface
+- **BaseMemoryService**: Abstract base class defining the memory service interface
+- **CognitiveMemoryService**: The default (and only) memory service — configurable from basic to advanced
+- **Provider Extensibility**: Easy to add new memory providers via the base class
+- **Type Safety**: Full type hints and abstract base class for IDE support
 
-### CustomMemoryService (Default)
+### CognitiveMemoryService
 
-- **Native MongoDB Atlas Vector Search**: Direct integration with MongoDB
-- **Intelligent Fact Extraction**: Uses LLM to extract atomic facts from conversations
-- **Embedding Service Integration**: Uses mdb_engine.embeddings for vector generation
-- **Metadata Support**: Full support for bucket_id, bucket_type, and custom metadata
-- **Automatic Re-embedding**: Updates trigger automatic re-embedding
-
-### CognitiveMemoryService (Advanced)
-
+- **Perfect Recall**: All memories are permanently accessible, ranked by importance + access frequency
 - **Importance Scoring**: AI evaluates memory significance (0.1-1.0 scale)
-- **Memory Reinforcement**: Similar memories strengthen existing memories
-- **Memory Decay**: Less relevant memories fade over time
-- **Memory Merging**: Related memories are combined intelligently
-- **Memory Pruning**: Least important memories removed when capacity exceeded
-- **Access Tracking**: Tracks how often memories are accessed
-- **Effective Importance**: Combines raw importance with access frequency
+- **Memory Reinforcement**: Similar memories strengthen existing memories (similarity 0.85-0.90)
+- **Memory Merging**: Related memories are combined intelligently (similarity 0.70-0.85)
+- **Duplicate Detection**: Prevents semantically identical memories (similarity >= 0.90)
+- **Access Tracking**: Tracks how often memories are accessed (affects ranking)
+- **Knowledge Graph Integration**: Automatically extracts entities/relationships to `GraphService` when `memory_config.graph.enabled` is set
 
 ### Cognitive Architecture
 
@@ -37,34 +28,21 @@ Native MongoDB Atlas Vector Search integration for intelligent memory management
 - **CognitiveEngine**: Orchestrates STM + LTM for complete RAG pipeline
 - **Auto-Summarization**: Automatically summarizes long sessions
 
-## Installation
+### Perfect Brain Features
 
-The memory module requires:
-
-```bash
-pip install pymongo openai
-```
+- **Multi-Tier Memory Architecture**: Working, Episodic, Semantic, Procedural, Reflective, Predictive layers
+- **Memory Consolidator**: Reflection loop that distills episodic memories into semantic facts
+- **CognitiveMemory**: Multi-tier memory system controller
+- **Shared/Group Memory**: Privacy-safe promotion of facts within groups
+- **Reflective Memory**: Meta-cognitive insights about system behavior and patterns
+- **Predictive Memory**: Counterfactuals, simulations, and future scenarios with validation
+- **Memory Vetoes**: User-controlled "never share" flags for sensitive memories
+- **Query-Aware Recall**: Policy-driven memory retrieval based on task type, risk tolerance, and latency budget
+- **Memory Versioning**: Track belief evolution and historical states over time
+- **Timeline Service**: Multiverse support for counterfactual reasoning and parallel timelines
+- **Bucket Filtering**: All memory types support bucket filtering for contextual isolation
 
 ## Configuration
-
-### Environment Variables
-
-The service auto-detects the provider from environment variables:
-
-#### OpenAI
-
-```bash
-export OPENAI_API_KEY="sk-..."
-```
-
-#### Azure OpenAI
-
-```bash
-export AZURE_OPENAI_API_KEY="..."
-export AZURE_OPENAI_ENDPOINT="https://your-resource.openai.azure.com/"
-export AZURE_OPENAI_API_VERSION="2024-02-01"  # Optional
-export AZURE_OPENAI_DEPLOYMENT_NAME="gpt-4o"  # Optional, for LLM
-```
 
 ### Manifest Configuration
 
@@ -75,48 +53,40 @@ Enable memory service in your `manifest.json`:
   "slug": "my_app",
   "llm_config": {
     "enabled": true,
-    "default_model": "gemini/gemini-3-flash-preview"
+    "default_model": "openai/gpt-4o"
   },
   "memory_config": {
     "enabled": true,
     "collection_name": "memories",
     "embedding_model": "text-embedding-3-small",
     "embedding_dims": 1536,
-    "chat_model": "gpt-4o",
-    "memory_llm_model": "gemini/gemini-3-flash-preview",  // Inherits from llm_config.default_model if not set
-    "temperature": 0,
-    "infer": true
+    "infer": true,
+
+    "graph": {
+      "enabled": true,
+      "auto_extract": true
+    }
+  },
+  "graph_config": {
+    "enabled": true,
+    "collection_name": "kg",
+    "auto_extract": true,
+    "default_max_depth": 2,
+    "node_types": ["person", "interest", "event", "location", "organization", "product", "concept"]
   }
 }
 ```
 
-**LLM Model Inheritance**: The memory service automatically inherits the LLM model from `llm_config.default_model`. If `memory_config.memory_llm_model` is not explicitly set, it will use the app's default LLM model. This ensures consistent LLM usage across all services (memory, graph, entity extraction, etc.).
+**LLM Model Inheritance**: The memory service automatically inherits the LLM model from `llm_config.default_model` if `memory_config.memory_llm_model` is not explicitly set.
 
-**Service-Specific Override**: You can override the model for memory operations only by setting `memory_config.memory_llm_model` explicitly.
+### Graph Integration
 
-### Temperature Configuration
+Graph extraction is controlled by two config sections working together:
 
-Temperature controls the randomness of LLM responses in memory operations (fact extraction, importance assessment, memory merging). 
+1. **`graph_config`** (top-level) — initializes the standalone `GraphService` with MongoDB `$graphLookup` traversal.
+2. **`memory_config.graph`** — controls whether the memory service calls `GraphService.extract_graph_from_text()` when new memories are added.
 
-- **Default**: `0` (deterministic output)
-- **Range**: `0.0` to `2.0`
-- **Configuration**: Can be set via:
-  1. **Manifest**: `"temperature": 0` in `memory_config`
-  2. **Environment Variable**: `MEMORY_LLM_TEMPERATURE=0`
-
-```bash
-# Via environment variable
-export MEMORY_LLM_TEMPERATURE=0
-```
-
-```json
-// Via manifest.json
-{
-  "memory_config": {
-    "temperature": 0
-  }
-}
-```
+Both must be enabled for automatic graph extraction during `add()`. Graph extraction is non-blocking — failures never prevent memory storage.
 
 ### Cognitive Memory Configuration
 
@@ -124,14 +94,11 @@ For advanced cognitive features:
 
 ```json
 {
-  "slug": "my_app",
   "memory_config": {
     "enabled": true,
     "provider": "cognitive",
-    "max_depth": 50,
     "similarity_threshold": 0.7,
     "reinforcement_factor": 1.1,
-    "decay_factor": 0.99,
     "merge_threshold_low": 0.7,
     "merge_threshold_high": 0.85
   }
@@ -145,55 +112,20 @@ For advanced cognitive features:
 ```python
 from mdb_engine import MongoDBEngine
 
-# Initialize engine
 engine = MongoDBEngine(mongo_uri="...", db_name="...")
 await engine.initialize()
 
-# Get memory service (automatically configured from manifest)
 memory_service = engine.get_memory_service("my_app")
 
-# Add memory
+# Add memory (extracts facts, assesses importance, deduplicates)
 memories = memory_service.add(
     messages=[{"role": "user", "content": "I love Python programming"}],
     user_id="user123"
 )
 
-# Search memories
-results = memory_service.search(
+# Search memories (ranked by similarity * effective_importance)
+results = await memory_service.search(
     query="What does the user like?",
-    user_id="user123",
-    limit=5
-)
-
-# Get all memories for user
-all_memories = memory_service.get_all(user_id="user123")
-```
-
-### Cognitive Memory Service
-
-```python
-from mdb_engine.memory import CognitiveMemoryService
-
-# Initialize with cognitive features
-memory_service = CognitiveMemoryService(
-    mongo_uri="mongodb://localhost:27017",
-    db_name="my_database",
-    app_slug="my_app",
-    config={
-        "max_depth": 50,
-        "similarity_threshold": 0.7,
-    }
-)
-
-# Add memory (automatic importance assessment, reinforcement, merging)
-memories = memory_service.add(
-    messages="User prefers dark mode",
-    user_id="user123"
-)
-
-# Search (ranked by effective importance)
-results = memory_service.search(
-    query="user preferences",
     user_id="user123",
     limit=5
 )
@@ -203,97 +135,69 @@ results = memory_service.search(
 
 ```python
 from mdb_engine.memory import CognitiveEngine
-from openai import OpenAI
 
-# Initialize
 engine = CognitiveEngine(
     mongo_uri="...",
     db_name="...",
     app_slug="my_app",
-    llm_client=OpenAI(api_key="..."),
+    llm_service=llm_service,
 )
 
-# Chat with automatic STM + LTM orchestration
 result = engine.chat(
     user_id="user_123",
     session_id="conversation:55",
     user_query="What's my favorite color?",
 )
-
-print(result["response"])  # AI response
-print(result["ltm_memories"])  # Relevant facts retrieved
-print(result["stm_context"])  # Chat history used
 ```
 
 ## API Reference
 
 ### BaseMemoryService Methods
 
-All memory services implement these methods:
+All memory services implement:
 
-- `add()` - Add memories with automatic fact extraction
-- `inject()` - Direct injection bypassing LLM
-- `search()` - Semantic search with filtering
-- `get()` - Retrieve single memory by ID
-- `get_all()` - Retrieve all memories with filtering
-- `update()` - Update memory with automatic re-embedding
-- `delete()` - Delete single memory
-- `delete_all()` - Delete all memories for a user
+- `add()` — Add memories with automatic fact extraction
+- `inject()` — Direct injection bypassing LLM
+- `search()` — Semantic search with filtering
+- `get()` — Retrieve single memory by ID
+- `get_all()` — Retrieve all memories with filtering
+- `update()` — Update memory with automatic re-embedding
+- `delete()` — Delete single memory
+- `delete_all()` — Delete all memories for a user
 
-## MongoDB Atlas Vector Search Setup
+## Available Modules
 
-**✅ Automatic Index Management**: The memory service **automatically creates and manages its own vector search index**. You do NOT need to manually create the index in MongoDB Atlas.
+### Core Services
+- `BaseMemoryService` — Abstract base class
+- `CognitiveMemoryService` — The memory service (configurable)
+- `get_memory_service()` — Factory function
 
-When you enable the memory service in your manifest, it will:
+### Multi-Tier System
+- `CognitiveMemory` — Multi-tier memory system controller
+- `MemoryConsolidator` — Reflection loop for memory consolidation
 
-1. **Auto-create the vector search index** on startup with:
-   - Vector field: `embedding` (with dimensions from `embedding_model_dims`)
-   - Filter field: `user_id` (required for user-scoped vector search queries)
-   - Similarity: `cosine`
-2. **Auto-generate the index name** as `{collection_name}_vector_index` (e.g., `my_app_memories_vector_index`)
-3. **Auto-update existing indexes** if they're missing the `user_id` filter
-4. **Wait for the index to be queryable** before allowing searches
+### Perfect Brain Features
+- `ReflectiveMemory` — Meta-cognitive insights
+- `PredictiveMemory` — Counterfactuals and simulations
+- `SharedMemory` — Privacy-safe group memory
+- `MemoryVeto` — User-controlled sharing restrictions
+- `QueryAwareRecall` — Policy-driven memory retrieval
+- `MemoryVersioning` — Belief evolution tracking
+- `TimelineService` — Multiverse support
+- `ProspectiveMemory` — Intention-based triggers
 
-**⚠️ Important**: Do NOT manually define memory collection indexes in `managed_indexes`. The engine will raise an error if you try to manually manage memory indexes, as the memory service needs full control over its indexes.
+### Orchestration
+- `CognitiveEngine` — STM + LTM orchestrator
+- `ChatHistoryService` — Short-term memory management
+- `ReflectionService` — Memory consolidation service
 
-**Why `user_id` filter?**: MongoDB Atlas Vector Search requires filter fields to be explicitly defined in the index. The `user_id` filter enables efficient user-scoped queries, which is essential for memory isolation and privacy.
-
-**Manual Index Creation (Not Recommended)**
-
-If you need to manually create the index (not recommended), the configuration would be:
-
-```json
-{
-  "fields": [
-    {
-      "numDimensions": 1536,
-      "path": "embedding",
-      "similarity": "cosine",
-      "type": "vector"
-    },
-    {
-      "path": "user_id",
-      "type": "filter"
-    },
-    {
-      "path": "metadata.bucket_id",
-      "type": "filter"
-    },
-    {
-      "path": "metadata.bucket_type",
-      "type": "filter"
-    }
-  ]
-}
-```
+### Procedural Memory
+- `ProceduralMemory` — Executable skills and workflows
+- `retrieve_procedural_memory()` — Retrieve procedural knowledge
 
 ## Documentation
 
-- [Cognitive Architecture](../../docs/COGNITIVE_ARCHITECTURE.md)
-- [Cognitive Memory Service](../../docs/COGNITIVE_MEMORY.md)
-- [Base Memory Service API](base.py)
-
-## See Also
-
-- [Embedding Service](../embeddings/README.md)
-- [MongoDB Engine Core](../core/README.md)
+- [Memory Service Guide](../../docs/MEMORY_SERVICE.md)
+- [Memory System Complete Reference](../../docs/MEMORY_SYSTEM_COMPLETE.md)
+- [Graph Service](../../docs/GRAPH_SERVICE.md)
+- [Files and Buckets Guide](../../docs/guides/FILES_AND_BUCKETS.md)

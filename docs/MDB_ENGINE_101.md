@@ -22,7 +22,6 @@ This guide is designed to help Large Language Models understand and generate cod
 
 | Feature | Activate When... | How to Enable |
 |---------|-----------------|---------------|
-| **Ray** | CPU-heavy tasks, distributed workers, isolated processing | `MongoDBEngine(..., enable_ray=True)` |
 | **Multi-site** | Apps need cross-app data access | `"read_scopes": ["app1", "app2"]` in manifest |
 | **App Secrets** | Production, need encrypted tokens | Set `MDB_ENGINE_MASTER_KEY` env var |
 | **Casbin** | Simple RBAC (admin/user roles) | `"provider": "casbin"` in auth config |
@@ -96,7 +95,7 @@ pip install mdb-engine[test]
 **Environment Setup:**
 ```bash
 # Required for JWT security
-export FLASK_SECRET_KEY=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')
+export MDB_ENGINE_JWT_SECRET=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')
 
 # MongoDB connection (if not using defaults)
 export MONGO_URI="mongodb://localhost:27017"
@@ -851,7 +850,7 @@ embeddings = await embedding_service.embed(["Text 1", "Text 2"])
 
 **Purpose**: Intelligent memory management for AI applications - stores and retrieves user memories with semantic search capabilities.
 
-**Architecture**: Uses an abstract base class pattern (`BaseMemoryService`) for extensibility. `CognitiveMemoryService` is the default implementation (accessible via `CustomMemoryService` alias for backwards compatibility). The architecture supports future memory providers.
+**Architecture**: Uses an abstract base class pattern (`BaseMemoryService`) with a mixin-based implementation. `MemoryService` (a.k.a. `CognitiveMemoryService`) is the default implementation, composed of six specialized mixins (Storage, Extraction, Scoring, Reinforcement, Merging, Embedding). All methods are fully async.
 
 **Core Features**: 
 - **Native MongoDB Atlas Vector Search**: Direct integration with MongoDB for semantic search
@@ -911,7 +910,7 @@ embeddings = await embedding_service.embed(["Text 1", "Text 2"])
 
 If you try to manually define vector search indexes for memory collections in `managed_indexes`, the engine will raise an error to prevent conflicts.
 
-See [Memory Service Guide](./MEMORY_SERVICE.md) and [Cognitive Memory Guide](./COGNITIVE_MEMORY.md) for complete documentation.
+See [Memory Service Guide](./MEMORY_SERVICE.md) for complete documentation.
 
 **Environment Variables:**
 ```bash
@@ -1284,68 +1283,6 @@ async def get_items():
     db = engine.get_scoped_db("my_app")
     return await db.items.find({}).to_list(10)
 ```
-
----
-
-## Optional Ray Support
-
-Ray integration enables distributed processing with isolated app environments. Ray is **optional** - the engine works perfectly without it.
-
-### Enable Ray
-
-```python
-from mdb_engine import MongoDBEngine
-
-# Enable Ray (only activates if Ray is installed)
-engine = MongoDBEngine(
-    mongo_uri="mongodb://localhost:27017",
-    db_name="my_database",
-    enable_ray=True,
-    ray_namespace="my_namespace"
-)
-
-await engine.initialize()
-
-# Check if Ray is available
-if engine.has_ray:
-    print(f"Ray initialized in namespace: {engine.ray_namespace}")
-else:
-    print("Ray not available - running in standard mode")
-```
-
-### Ray with FastAPI
-
-```python
-from mdb_engine import MongoDBEngine
-from pathlib import Path
-
-engine = MongoDBEngine(
-    mongo_uri="mongodb://localhost:27017",
-    db_name="my_database",
-    enable_ray=True
-)
-
-app = engine.create_app(slug="my_app", manifest=Path("manifest.json"))
-
-@app.get("/status")
-async def status():
-    return {
-        "app": "my_app",
-        "ray_enabled": engine.has_ray,
-        "ray_namespace": engine.ray_namespace if engine.has_ray else None
-    }
-```
-
-### Install Ray (Optional)
-
-```bash
-pip install ray
-```
-
-Ray features:
-- **Isolated environments**: Each app can run in its own Ray actor
-- **Distributed processing**: Offload heavy computations
-- **Graceful degradation**: Works without Ray installed
 
 ---
 

@@ -1,8 +1,8 @@
 {
   "schema_version": "2.0",
   "slug": "ai-chat",
-  "name": "AI Chat - AI Chat with Memory",
-  "description": "Beautiful AI chat application with persistent memory using Mem0. SSO-enabled version of ChitChat demonstrating shared authentication across multi-app deployments.",
+  "name": "AI Chat - True Perfect Recall",
+  "description": "AI chat with True Perfect Recall, emotion-weighted recall, prospective memory triggers, GraphRAG, and the full power of mdb-engine's cognitive memory system.",
   "status": "active",
   "developer_id": "developer@example.com",
   "auth": {
@@ -35,11 +35,19 @@
       "collection_name": "user_memories",
       "embedding_model_dims": 1536,
       "embedding_model": "text-embedding-3-small",
-      "chat_model": "gemini/gemini-3-flash-preview",
-      "memory_llm_model": "gemini/gemini-3-flash-preview",
+      "chat_model": "gemini/gemini-2.5-flash-lite",
+      "memory_llm_model": "gemini/gemini-2.5-flash-lite",
+      "extraction_provider": "extraction",
       "infer": true,
       "enable_cognitive": true,
       "max_depth": 1000,
+      "emotion_weight": 0.5,
+      "recency_weight": 0.3,
+      "recency_half_life_hours": 168,
+      "spreading_activation": true,
+      "activation_discount": 0.7,
+      "salience_gate": true,
+      "salience_threshold": 0.3,
       "persona": {
         "enabled": true,
         "default_role": "Orby - AI Assistant",
@@ -52,19 +60,8 @@
           "creativity": 0.5
         }
       },
-      "perceptions": {
-        "enabled": true,
-        "auto_analyze": true,
-        "update_frequency": "per_interaction"
-      },
       "cognitive": {
       "enabled": true,
-      "decay": {
-        "enabled": true,
-        "default_stability_hours": 72,
-        "min_stability": 0.1,
-        "use_server_side_pipeline": true
-      },
       "emotion": {
         "enabled": true,
         "flashbulb_threshold": 0.7,
@@ -73,28 +70,6 @@
       "conflict_resolution": {
         "enabled": true,
         "similarity_threshold": 0.85
-      },
-      "pruning": {
-        "enabled": true,
-        "max_capacity": 1000,
-        "prune_percentage": 0.1,
-        "strategy": "soft_delete"
-      },
-      "cold_storage": {
-        "enabled": true,
-        "retention_days": 730
-      }
-    },
-    "redaction": {
-      "enabled": true,
-      "replacement": "[REDACTED]",
-      "patterns": {
-        "ssn": true,
-        "credit_card": true,
-        "password": true,
-        "api_key": true,
-        "phone": false,
-        "email": false
       }
     },
     "categories": {
@@ -113,9 +88,9 @@
       "min_salience_to_keep": 0.3,
       "store_reflections": true
     },
-    "graph": {
+    "verification": {
       "enabled": true,
-      "auto_extract": true
+      "max_file_size_kb": 500
     }
   },
   "graph_config": {
@@ -124,8 +99,23 @@
     "auto_extract": true,
     "default_max_depth": 2,
     "node_types": [
-      "person",
+      "family_member",
       "interest",
+      "food",
+      "allergy",
+      "medication",
+      "medical_condition",
+      "vaccination",
+      "appointment",
+      "routine",
+      "meal_plan",
+      "emergency_contact",
+      "pet",
+      "grocery_item",
+      "chore",
+      "homework",
+      "budget_entry",
+      "device_location",
       "event",
       "location",
       "organization",
@@ -135,16 +125,38 @@
       "project"
     ]
   },
+  "graphrag_config": {
+    "enabled": true,
+    "community_detection": {
+      "enabled": true,
+      "rebuild_threshold": 100,
+      "rebuild_interval_hours": 24,
+      "min_community_size": 2,
+      "max_community_size": 1000
+    },
+    "community_summaries": {
+      "enabled": true,
+      "generate_on_detection": true,
+      "regenerate_on_rebuild": true
+    },
+    "query_classification": {
+      "enabled": true,
+      "use_llm": true,
+      "cache_results": true
+    },
+    "search_methods": {
+      "local_enabled": true,
+      "global_enabled": true,
+      "drift_enabled": true,
+      "basic_fallback": true
+    }
+  },
   "llm_config": {
     "enabled": true,
-    "default_model": "gemini/gemini-3-flash-preview",
-    "temperature": 1.0,
-    "fallbacks": [
-      "gpt-4o-mini"
-    ],
-    "tools": [
-      {"google_search": {}}
-    ],
+    "providers": {
+      "chat": "gemini/gemini-2.5-flash-lite",
+      "extraction": "gemini/gemini-2.5-flash-lite"
+    },
     "litellm_config": {
       "num_retries": 2,
       "request_timeout": 60
@@ -263,5 +275,27 @@
       "Authorization",
       "X-CSRF-Token"
     ]
+  },
+  "profile_config": {
+    "enabled": true,
+    "user_profiles": {
+      "enabled": true,
+      "rebuild_interval_hours": 24,
+      "incremental_on_memory_add": true,
+      "collection_name": "user_profiles"
+    },
+    "community_profile": {
+      "enabled": true,
+      "min_users_for_aggregation": 2,
+      "collection_name": "community_profile"
+    }
+  },
+  "osi_config": {
+    "enabled": true,
+    "models_path": "semantic_models/",
+    "entity_resolution": true,
+    "metric_routing": true,
+    "export_enabled": true,
+    "sync_interval_minutes": 60
   }
 }

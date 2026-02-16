@@ -1,0 +1,49 @@
+{
+  "schema_version": "2.0",
+  "slug": "oauth-demo",
+  "name": "OAuth Demo - Login with Google & GitHub",
+  "description": "Demonstrates OAuth 2.0 / OIDC login via external identity providers using MDB-Engine's built-in OAuth support.",
+  "status": "active",
+  "auth": {
+    "mode": "app",
+    "users": {
+      "enabled": true,
+      "strategy": "app_users",
+      "collection_name": "users",
+      "allow_registration": false
+    },
+    "oauth": {
+      "session_secret": "${OAUTH_SESSION_SECRET}",
+      "providers": {
+        "google": {
+          "client_id": "${GOOGLE_CLIENT_ID}",
+          "client_secret": "${GOOGLE_CLIENT_SECRET}",
+          "server_metadata_url": "https://accounts.google.com/.well-known/openid-configuration",
+          "scopes": ["openid", "email", "profile"]
+        },
+        "github": {
+          "client_id": "${GITHUB_CLIENT_ID}",
+          "client_secret": "${GITHUB_CLIENT_SECRET}",
+          "authorize_url": "https://github.com/login/oauth/authorize",
+          "access_token_url": "https://github.com/login/oauth/access_token",
+          "userinfo_url": "https://api.github.com/user",
+          "scopes": ["user:email"]
+        }
+      },
+      "user_strategy": "link_or_create",
+      "default_role": "user",
+      "redirect_after_login": "/",
+      "redirect_after_logout": "/"
+    }
+  },
+  "managed_indexes": {
+    "users": [
+      {
+        "type": "regular",
+        "keys": {"email": 1},
+        "name": "email_idx",
+        "options": {"unique": true, "background": true}
+      }
+    ]
+  }
+}

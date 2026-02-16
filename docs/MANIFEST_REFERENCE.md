@@ -18,6 +18,7 @@ This document provides a comprehensive guide to every field available in `manife
   - [Embedding Service](#embedding-service)
   - [Memory Service](#memory-service)
   - [Graph Service](#graph-service)
+- [OSI (Open Semantic Interchange)](#osi-open-semantic-interchange)
 - [WebSockets](#websockets)
 - [CORS](#cors)
 - [Observability](#observability)
@@ -404,6 +405,7 @@ Enhanced token management with refresh tokens, sessions, and security:
 
 ### Memory Service
 
+**Basic Configuration:**
 ```json
 {
   "memory_config": {
@@ -412,9 +414,60 @@ Enhanced token management with refresh tokens, sessions, and security:
     "embedding_model_dims": 1536,
     "infer": true,
     "embedding_model": "text-embedding-3-small",
-    "chat_model": "gpt-4o",
+    "memory_llm_model": "gemini/gemini-3-flash-preview",
     "temperature": 0.0,
     "async_mode": true
+  }
+}
+```
+
+**Advanced Configuration with Perfect Brain Features:**
+```json
+{
+  "memory_config": {
+    "enabled": true,
+    "collection_name": "user_memories",
+    "embedding_model": "text-embedding-3-small",
+    "embedding_model_dims": 1536,
+    "memory_llm_model": "gemini/gemini-3-flash-preview",
+    "temperature": 0.0,
+    "infer": true,
+    "async_mode": true,
+    "enable_cognitive": true,
+    "max_depth": 1000,
+    "similarity_threshold": 0.7,
+    "duplicate_threshold": 0.90,
+    "merge_threshold_low": 0.70,
+    "merge_threshold_high": 0.85,
+    "reinforcement_factor": 1.1,
+    "decay_factor": 0.99,
+    "cognitive": {
+      "enabled": true,
+      "decay": {
+        "enabled": true,
+        "default_stability_hours": 24,
+        "use_server_side_pipeline": true
+      },
+      "emotion": {
+        "enabled": true,
+        "flashbulb_threshold": 0.7,
+        "max_stability_multiplier": 100
+      },
+      "conflict_resolution": {
+        "enabled": true,
+        "similarity_threshold": 0.85
+      },
+      "pruning": {
+        "enabled": true,
+        "max_capacity": 1000,
+        "strategy": "soft_delete"
+      },
+      "cold_storage": {
+        "enabled": true,
+        "retention_days": 365
+      }
+    },
+    "encrypted": false
   }
 }
 ```
@@ -426,11 +479,46 @@ Enhanced token management with refresh tokens, sessions, and security:
 | `embedding_model_dims` | `integer` | `1536` | Embedding vector dimensions (128-4096) |
 | `infer` | `boolean` | `true` | Infer memories from conversations |
 | `async_mode` | `boolean` | `true` | Process memories asynchronously |
+| `memory_llm_model` | `string` | (inherits from `llm_config.default_model`) | LLM model for memory operations. If not set, automatically uses the app's default LLM model from `llm_config.default_model` |
 | `encrypted` | `boolean` | `false` | Enable Client-Side Field Level Encryption (CSFLE) for memory content |
 | `encryption` | `object` | - | Advanced encryption settings (see CSFLE guide) |
 | `embedding_model` | `string` | `"text-embedding-3-small"` | Embedding model name |
-| `chat_model` | `string` | `"gpt-4o"` | LLM model for fact extraction |
+| `temperature` | `number` | `0.0` | Temperature for LLM operations (0.0-2.0) |
 | `index_name` | `string` | `"{collection_name}_vector_index"` | Vector search index name (auto-generated if not provided) |
+| `enable_cognitive` | `boolean` | `true` | Enable cognitive features (decay, emotion, conflict resolution) |
+| `max_depth` | `integer\|null` | `100` | Max memories per user (null = unlimited) |
+| `similarity_threshold` | `number` | `0.7` | General similarity threshold |
+| `duplicate_threshold` | `number` | `0.90` | Threshold for duplicate detection |
+| `merge_threshold_low` | `number` | `0.70` | Lower bound for memory merging |
+| `merge_threshold_high` | `number` | `0.85` | Upper bound for reinforcement |
+| `reinforcement_factor` | `number` | `1.1` | Importance boost factor when reinforced |
+| `decay_factor` | `number` | `0.99` | Decay rate for unused memories |
+| `cognitive` | `object` | - | Cognitive features configuration (see below) |
+
+**Cognitive Configuration:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `cognitive.enabled` | `boolean` | `true` | Enable cognitive features |
+| `cognitive.decay.enabled` | `boolean` | `true` | Enable Ebbinghaus decay |
+| `cognitive.decay.default_stability_hours` | `number` | `24` | Default half-life in hours |
+| `cognitive.decay.use_server_side_pipeline` | `boolean` | `true` | Use MongoDB aggregation for decay |
+| `cognitive.emotion.enabled` | `boolean` | `true` | Enable emotion extraction |
+| `cognitive.emotion.flashbulb_threshold` | `number` | `0.7` | High-emotion threshold |
+| `cognitive.emotion.max_stability_multiplier` | `number` | `100` | Max stability boost for high emotion |
+| `cognitive.conflict_resolution.enabled` | `boolean` | `true` | Enable conflict detection |
+| `cognitive.conflict_resolution.similarity_threshold` | `number` | `0.85` | Similarity threshold for conflict detection |
+| `cognitive.pruning.enabled` | `boolean` | `true` | Enable memory pruning |
+| `cognitive.pruning.max_capacity` | `integer` | `1000` | Max active memories per user |
+| `cognitive.pruning.strategy` | `string` | `"soft_delete"` | Pruning strategy: `"soft_delete"` or `"hard_delete"` |
+| `cognitive.cold_storage.enabled` | `boolean` | `true` | Enable cold storage for pruned memories |
+| `cognitive.cold_storage.retention_days` | `integer` | `365` | Days to retain pruned memories |
+
+**Perfect Brain Features:**
+
+Perfect Brain features (Memory Consolidator, Timeline Service, Reflective Memory, Predictive Memory, Shared Memory, etc.) are available via the Python API and do not require manifest configuration. They are enabled when you import and use the respective modules.
+
+See [Memory Service Guide](./MEMORY_SERVICE.md) for complete documentation.
 
 **Note**: For GraphRAG (knowledge graph) functionality, use the top-level `graph_config` section. The Graph Service is now standalone and can be used independently or with the Memory Service.
 
@@ -504,13 +592,206 @@ If you try to manually define vector search indexes for memory collections in `m
 
 **Note**: The memory service uses environment variables for LLM/embedding configuration. Set `OPENAI_API_KEY` or `AZURE_OPENAI_API_KEY`/`AZURE_OPENAI_ENDPOINT` in your `.env` file.
 
-**Memory Service Operations** (v0.7.5+):
+**Memory Service Operations** (v0.7.5+, all methods fully async as of v0.7.7):
 - `add()` - Store memories with LLM inference (extracts facts from conversations)
 - `inject()` - Manually inject memories without LLM inference (for facts, preferences, structured data)
 - `search()` - Semantic search across memories
 - `get()` / `get_all()` - Retrieve memories
 - `update()` - Update memory content and/or metadata
 - `delete()` / `delete_all()` - Delete memories
+
+---
+
+## OSI (Open Semantic Interchange)
+
+Configure OSI integration to teach MDB-Engine your organization's domain vocabulary. OSI models define datasets (entity types), fields, synonyms, relationships, and governed metrics. The engine uses these for post-extraction entity resolution, metric-aware query routing, and semantic discovery.
+
+Models are persisted in a MongoDB collection (`{slug}_osi_models`) with SHA-256 hash-based seeding -- YAML changes propagate on restart, API mutations take effect immediately without restarts.
+
+### Three Tiers
+
+**Tier 1 (one-liner)**: Add `osi_models_path` to `graph_config`:
+```json
+{
+  "graph_config": {
+    "osi_models_path": "semantic_models/"
+  }
+}
+```
+
+**Tier 2 (config section)**: Full `osi_config` with feature flags:
+```json
+{
+  "osi_config": {
+    "enabled": true,
+    "models_path": "semantic_models/",
+    "entity_resolution": true,
+    "metric_routing": true,
+    "export_enabled": true
+  }
+}
+```
+
+**Tier 3 (inline models)**: Define semantic models directly in the manifest:
+```json
+{
+  "osi_config": {
+    "enabled": true,
+    "entity_resolution": true,
+    "metric_routing": true,
+    "export_enabled": true,
+    "semantic_models": [
+      {
+        "name": "my_domain",
+        "datasets": [
+          {
+            "name": "customer",
+            "fields": [
+              {"name": "customer_name", "ai_context": {"synonyms": ["client", "account"]}}
+            ],
+            "ai_context": {"synonyms": ["client", "account", "buyer"]}
+          }
+        ],
+        "metrics": [
+          {
+            "name": "total_revenue",
+            "expression": {"dialects": [{"dialect": "ANSI_SQL", "expression": "SUM(order.amount)"}]},
+            "ai_context": {"synonyms": ["revenue", "sales", "income"]}
+          }
+        ],
+        "relationships": [
+          {"name": "order_to_customer", "from": "order", "to": "customer", "from_columns": ["customer_id"], "to_columns": ["customer_id"]}
+        ]
+      }
+    ]
+  }
+}
+```
+
+### osi_config Fields
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | boolean | `false` | Master switch for OSI integration |
+| `models_path` | string | - | Path to directory of OSI YAML files |
+| `models` | string[] | - | Specific YAML file paths to load |
+| `entity_resolution` | boolean | `true` | Remap extracted node types to OSI datasets via synonyms |
+| `metric_routing` | boolean | `false` | Detect governed metrics in user queries |
+| `export_enabled` | boolean | `false` | Enable `/api/osi/export` endpoint |
+| `sync_interval_minutes` | integer | `60` | Polling interval for YAML file changes (0 = disabled) |
+| `semantic_models` | object[] | - | Inline OSI model definitions |
+
+### How It Works
+
+1. **Startup**: Models seeded from config into `{slug}_osi_models` MongoDB collection (hash-checked).
+2. **Extraction**: LLM extracts nodes using the base prompt + OSI dataset names in the type list.
+3. **Resolution**: Post-extraction, `resolve_entities()` remaps types (e.g., `person:timmy` -> `family_member:timmy`) using OSI synonyms.
+4. **Query routing**: `QueryClassifier` checks queries against metric synonyms. "What was our revenue?" -> `osi_metric` classification.
+5. **API mutations**: `POST /api/osi/models/import` and concept approval write to MongoDB. Changes are live immediately.
+
+### API Endpoints (when export_enabled=true)
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/osi/models` | GET | List loaded semantic models |
+| `/api/osi/metrics` | GET | List governed metrics |
+| `/api/osi/models/import` | POST | Import YAML (live immediately) |
+| `/api/osi/concepts` | GET | List discovered concept definitions |
+| `/api/osi/concepts/{id}/approve` | POST | Promote concept to governed |
+| `/api/osi/concepts/{id}/reject` | POST | Reject a concept |
+| `/api/osi/export` | POST | Export knowledge graph as OSI YAML |
+| `/api/osi/discovery-report` | GET | Gap analysis: graph entities not in OSI |
+| `/api/osi/reload` | POST | Force reload from MongoDB store |
+
+### Example: Family Management Model
+
+See `examples/advanced/sso-multi-app/apps/sso-app-3/manifest.json` for a production example with:
+- 10 datasets (family_member, allergy, medication, medical_condition, vaccination, appointment, routine, meal_plan, emergency_contact, pet)
+- 12 relationships
+- 6 governed metrics (active_medications, upcoming_appointments, high_severity_allergies, etc.)
+- 515 synonyms for natural language recognition
+
+---
+
+## Prompt Safety
+
+Configure how prompt injection detection and content filtering behaves. By default, injection patterns are detected and logged but never block execution. The `prompt_safety` block lets you escalate to blocking mode, add custom patterns, and enforce input length limits.
+
+```json
+{
+  "prompt_safety": {
+    "injection_mode": "block_high_confidence",
+    "max_input_length": 10000,
+    "custom_blocked_patterns": [
+      "reveal\\s+api\\s+key",
+      "extract\\s+database",
+      "dump\\s+schema"
+    ],
+    "allow_patterns": [
+      "^test_safe:"
+    ]
+  }
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `injection_mode` | `string` | `"log"` | `"log"` = warn only (default). `"block"` = raise `PromptInjectionError` on any match. `"block_high_confidence"` = block ChatML/Llama markers, log the rest. |
+| `max_input_length` | `integer` | `0` | Maximum character length for user input. `0` = no limit. Raises `ValueError` when exceeded. |
+| `custom_blocked_patterns` | `array<string>` | `[]` | Additional regex patterns (IGNORECASE) to treat as injection. Invalid regexes are logged and skipped. |
+| `allow_patterns` | `array<string>` | `[]` | Regex patterns that whitelist input. If any pattern matches, injection detection is skipped entirely. |
+
+**Built-in patterns** (11 total): The engine ships with patterns for "ignore previous instructions", "disregard prior context", role overrides ("you are now a..."), ChatML tokens (`<|im_start|>`), Llama markers (`<<SYS>>`, `[INST]`), DAN jailbreaks, and more. These cannot be removed but can be supplemented with `custom_blocked_patterns`.
+
+**High-confidence patterns** (used by `block_high_confidence` mode):
+- `<|im_start|>` / `<|im_end|>` (ChatML special tokens)
+- `<<SYS>>` / `<</SYS>>` (Llama system markers)
+- `[INST]` / `[/INST]` (Llama instruction markers)
+
+These are almost never legitimate user input and are safe to block without false positives.
+
+---
+
+## Resilience
+
+Configure retry, backoff, and circuit breaker policies for each AI service. Each of `llm_config`, `embedding_config`, and `graph_config` accepts an optional `resilience` block. When omitted, sensible per-service defaults apply.
+
+```json
+{
+  "llm_config": {
+    "default_model": "openai/gpt-4o",
+    "resilience": {
+      "max_retries": 3,
+      "timeout": 60,
+      "circuit_failure_threshold": 5,
+      "circuit_recovery_window": 30
+    }
+  },
+  "embedding_config": {
+    "resilience": {
+      "max_retries": 3,
+      "timeout": 30
+    }
+  },
+  "graph_config": {
+    "resilience": {
+      "max_retries": 2,
+      "timeout": 45
+    }
+  }
+}
+```
+
+| Field | Type | LLM Default | Embeddings Default | Graph Default | Description |
+|-------|------|-------------|-------------------|---------------|-------------|
+| `max_retries` | `integer` | `3` | `3` | `2` | Maximum retry attempts on transient failures |
+| `backoff_base` | `number` | `1.0` | `0.5` | `1.0` | Base delay (seconds) for exponential backoff |
+| `backoff_max` | `number` | `30.0` | `15.0` | `15.0` | Maximum backoff delay in seconds |
+| `timeout` | `number\|null` | `60` | `30` | `45` | Per-call timeout in seconds (`null` = no timeout) |
+| `circuit_failure_threshold` | `integer` | `5` | `5` | `5` | Consecutive failures before circuit breaker opens |
+| `circuit_recovery_window` | `number` | `30.0` | `30.0` | `30.0` | Seconds before an open circuit transitions to half-open |
+
+**How it works**: Each service wraps its key async methods with the `@resilient` decorator from `mdb_engine.core.resilience`. On transient failures (network errors, 5xx, rate limits) the call is retried with exponential backoff and jitter. If a `RateLimitError` carries a `retry_after` value, the backoff honours it. After `circuit_failure_threshold` consecutive failures the circuit breaker opens and rejects further calls until `circuit_recovery_window` elapses.
 
 ---
 

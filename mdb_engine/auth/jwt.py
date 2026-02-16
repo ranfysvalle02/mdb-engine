@@ -9,7 +9,7 @@ This module is part of MDB_ENGINE - MongoDB Engine.
 
 import logging
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import jwt
@@ -60,9 +60,7 @@ def decode_jwt_token(token: Any, secret_key: str) -> dict[str, Any]:
     except jwt.InvalidTokenError as e:
         # If string format fails with "must be bytes" error, try bytes format
         error_msg = str(e)
-        if "must be a <class 'bytes'>" in error_msg or (
-            "bytes" in error_msg.lower() and "token" in error_msg.lower()
-        ):
+        if "must be a <class 'bytes'>" in error_msg or ("bytes" in error_msg.lower() and "token" in error_msg.lower()):
             logger.debug(f"JWT decode: Retrying with bytes format (error: {e})")
             # Convert to bytes and try again
             token_bytes = token_str.encode("utf-8")
@@ -73,9 +71,7 @@ def decode_jwt_token(token: Any, secret_key: str) -> dict[str, Any]:
             raise
 
 
-def encode_jwt_token(
-    payload: dict[str, Any], secret_key: str, expires_in: int | None = None
-) -> str:
+def encode_jwt_token(payload: dict[str, Any], secret_key: str, expires_in: int | None = None) -> str:
     """
     Encode a JWT token with enhanced claims.
 
@@ -96,7 +92,7 @@ def encode_jwt_token(
         secret_key_str = str(secret_key)
 
     # Create enhanced payload with standard claims
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     enhanced_payload = {
         **payload,
         "iat": now,  # Issued at
@@ -154,7 +150,7 @@ def generate_token_pair(
     else:
         device_id = str(uuid.uuid4())
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     # Generate access token
     access_jti = str(uuid.uuid4())

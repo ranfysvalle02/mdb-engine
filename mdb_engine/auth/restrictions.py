@@ -187,8 +187,7 @@ async def require_non_demo_user(
     # Check if user is demo
     if user and is_demo_user(user):
         logger.info(
-            f"Demo user '{user.get('email')}' blocked from accessing "
-            f"restricted endpoint: {request.url.path}"
+            f"Demo user '{user.get('email')}' blocked from accessing " f"restricted endpoint: {request.url.path}"
         )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -197,9 +196,7 @@ async def require_non_demo_user(
 
     # If no user found, raise unauthorized
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required"
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
 
     return user
 

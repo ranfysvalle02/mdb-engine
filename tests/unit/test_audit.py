@@ -6,7 +6,7 @@ Tests the audit logging functionality for authentication events.
 This module is part of MDB_ENGINE - MongoDB Engine.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -183,7 +183,7 @@ class TestAuthAuditLogEvents:
         assert "timestamp" in call_args
 
         # Expiry should be ~90 days from now
-        expected_expiry = datetime.utcnow() + timedelta(days=90)
+        expected_expiry = datetime.now(timezone.utc) + timedelta(days=90)
         actual_expiry = call_args["expires_at"]
         assert abs((expected_expiry - actual_expiry).total_seconds()) < 5
 

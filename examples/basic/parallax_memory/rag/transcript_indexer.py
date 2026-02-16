@@ -161,7 +161,7 @@ class TranscriptIndexer:
                         }
                     )
                 except Exception:
-                    pass
+                    logger.debug("Progress callback failed during indexing", exc_info=True)
             
             logger.debug(f"Indexed call: {call_id}")
         

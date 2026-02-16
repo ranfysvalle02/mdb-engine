@@ -22,9 +22,8 @@ from pymongo.errors import (
     ServerSelectionTimeoutError,
 )
 
-from ..database import ScopedMongoWrapper
 from ..observability import get_logger as get_contextual_logger
-from .protocols import GraphServiceProtocol, MemoryServiceProtocol
+from .protocols import GraphServiceProtocol, MemoryServiceProtocol, ProceduralMemoryProtocol
 
 logger = logging.getLogger(__name__)
 contextual_logger = get_contextual_logger(__name__)
@@ -37,6 +36,25 @@ except ImportError:
 
 class ServiceInitializer:
     """Service initializer for MDB-Engine optional services."""
+
+    @staticmethod
+    def _build_vector_index_definition(
+        filter_paths: list[str],
+        embedding_dims: int,
+        vector_path: str = "embedding",
+        similarity: str = "cosine",
+    ) -> dict[str, Any]:
+        """Build a vector search index definition with shared fields."""
+        fields = [{"type": "filter", "path": path} for path in filter_paths]
+        fields.append(
+            {
+                "type": "vector",
+                "path": vector_path,
+                "numDimensions": embedding_dims,
+                "similarity": similarity,
+            }
+        )
+        return {"fields": fields}
 
     async def _ensure_memory_vector_index(
         self,
@@ -79,40 +97,29 @@ class ServiceInitializer:
             index_manager = AsyncAtlasIndexManager(motor_collection)
 
             # Build vector search index definition
-            # Note: We don't add app_id filter here because memory collections
-            # are already scoped by app_id through the collection name prefix
-            # However, we MUST include user_id as a filter for vector search queries
-            index_definition = {
-                "fields": [
-                    {
-                        "type": "filter",
-                        "path": "user_id",
-                    },
-                    {
-                        "type": "filter",
-                        "path": "is_active",
-                    },
-                    {
-                        "type": "filter",
-                        "path": "metadata.associated_bucket_id",
-                    },
-                    {
-                        "type": "vector",
-                        "path": "embedding",
-                        "numDimensions": embedding_dims,
-                        "similarity": "cosine",
-                    },
-                ]
-            }
+            # Note: app_id MUST be included as a filter when using ScopedCollectionWrapper,
+            # as the scoped wrapper automatically injects app_id filtering into all queries.
+            # MongoDB Atlas requires all filter fields to be explicitly defined in the index.
+            # We also include user_id, is_active, and metadata.associated_bucket_id filters
+            # for user-scoped queries, soft-delete filtering, and bucket-aware searches.
+            index_definition = self._build_vector_index_definition(
+                filter_paths=[
+                    "app_id",  # Required for ScopedCollectionWrapper
+                    "user_id",
+                    "is_active",
+                    "metadata.associated_bucket_id",
+                    "metadata.timeline_id",  # Required for timeline-aware searches
+                    "metadata.confidence",  # Required for confidence filtering
+                ],
+                embedding_dims=embedding_dims,
+            )
 
             # Check if index already exists
             existing_index = await index_manager.get_search_index(index_name)
 
             if existing_index:
                 # Check if index definition matches (including user_id filter)
-                current_def = existing_index.get(
-                    "latestDefinition", existing_index.get("definition", {})
-                )
+                current_def = existing_index.get("latestDefinition", existing_index.get("definition", {}))
 
                 # Normalize definitions for comparison
                 try:
@@ -129,14 +136,13 @@ class ServiceInitializer:
                     # Index definition matches - check if queryable
                     if existing_index.get("queryable"):
                         contextual_logger.info(
-                            f"✅ Vector search index '{index_name}' already exists and "
-                            f"is queryable",
+                            f"Vector search index '{index_name}' already exists and " f"is queryable",
                             extra={"app_slug": slug, "index_name": index_name},
                         )
                         return
                     else:
                         contextual_logger.info(
-                            f"⏳ Vector search index '{index_name}' exists but not queryable yet. "
+                            f"Vector search index '{index_name}' exists but not queryable yet. "
                             f"Waiting for it to become ready...",
                             extra={"app_slug": slug, "index_name": index_name},
                         )
@@ -144,13 +150,13 @@ class ServiceInitializer:
                             index_name, index_manager.DEFAULT_SEARCH_TIMEOUT
                         )
                         contextual_logger.info(
-                            f"✅ Vector search index '{index_name}' is now ready",
+                            f"Vector search index '{index_name}' is now ready",
                             extra={"app_slug": slug, "index_name": index_name},
                         )
                         return
                 elif existing_index.get("status") == "FAILED":
                     contextual_logger.error(
-                        f"❌ Vector search index '{index_name}' exists but is in FAILED state. "
+                        f"Vector search index '{index_name}' exists but is in FAILED state. "
                         f"Manual intervention in Atlas UI may be required.",
                         extra={"app_slug": slug, "index_name": index_name},
                     )
@@ -159,10 +165,11 @@ class ServiceInitializer:
                     # Index exists but definition doesn't match (missing required filters)
                     # - update it
                     contextual_logger.warning(
-                        f"⚠️ Vector search index '{index_name}' exists but is missing "
-                        f"required filters. Updating index to include user_id, is_active, "
-                        f"and metadata.associated_bucket_id filters "
-                        f"(required for vector search queries)...",
+                        f"Vector search index '{index_name}' exists but is missing "
+                        f"required filters. Updating index to include app_id, user_id, "
+                        f"is_active, metadata.associated_bucket_id, metadata.timeline_id, "
+                        f"and metadata.confidence filters (required for vector search queries "
+                        f"with ScopedCollectionWrapper)...",
                         extra={"app_slug": slug, "index_name": index_name},
                     )
                     await index_manager.update_search_index(
@@ -171,8 +178,7 @@ class ServiceInitializer:
                         wait_for_ready=True,
                     )
                     contextual_logger.info(
-                        f"✅ Successfully updated vector search index '{index_name}' "
-                        f"with required filters",
+                        f"Successfully updated vector search index '{index_name}' " f"with required filters",
                         extra={"app_slug": slug, "index_name": index_name},
                     )
                     return
@@ -189,35 +195,6 @@ class ServiceInitializer:
                 },
             )
 
-            # Build vector search index definition
-            # Note: We don't add app_id filter here because memory collections
-            # are already scoped by app_id through the collection name prefix
-            # However, we MUST include user_id as a filter for vector search queries
-            # We also include is_active to support cognitive memory soft-delete filtering
-            # We also include metadata.associated_bucket_id for bucket-aware searches
-            index_definition = {
-                "fields": [
-                    {
-                        "type": "filter",
-                        "path": "user_id",
-                    },
-                    {
-                        "type": "filter",
-                        "path": "is_active",
-                    },
-                    {
-                        "type": "filter",
-                        "path": "metadata.associated_bucket_id",
-                    },
-                    {
-                        "type": "vector",
-                        "path": "embedding",
-                        "numDimensions": embedding_dims,
-                        "similarity": "cosine",
-                    },
-                ]
-            }
-
             # Create the index
             await index_manager.create_search_index(
                 name=index_name,
@@ -227,7 +204,7 @@ class ServiceInitializer:
             )
 
             contextual_logger.info(
-                f"✅ Successfully created vector search index '{index_name}' "
+                f"Successfully created vector search index '{index_name}' "
                 f"for memory collection '{collection_name}'",
                 extra={
                     "app_slug": slug,
@@ -240,7 +217,7 @@ class ServiceInitializer:
             # Don't fail memory service initialization if index creation fails
             # The index might already exist or there might be permission issues
             contextual_logger.warning(
-                f"⚠️ Could not automatically create vector search index '{index_name}': {e}. "
+                f"Could not automatically create vector search index '{index_name}': {e}. "
                 f"Memory service will still work, but vector search may fail until the "
                 f"index is created. You can create it manually in MongoDB Atlas or add "
                 f"it to 'managed_indexes' in manifest.json",
@@ -284,8 +261,7 @@ class ServiceInitializer:
                     background=True,
                 )
                 contextual_logger.info(
-                    f"✅ Created TTL index for episodic memory "
-                    f"(retention: {episodic_retention_days} days)",
+                    f"Created TTL index for episodic memory " f"(retention: {episodic_retention_days} days)",
                     extra={"app_slug": slug, "collection_name": collection_name},
                 )
             except (PyMongoError, AttributeError, TypeError) as e:
@@ -297,7 +273,7 @@ class ServiceInitializer:
 
         except (PyMongoError, AttributeError, TypeError, ValueError) as e:
             contextual_logger.warning(
-                f"⚠️ Failed to create TTL indexes: {e}",
+                f"Failed to create TTL indexes: {e}",
                 extra={"app_slug": slug},
             )
 
@@ -305,7 +281,7 @@ class ServiceInitializer:
         self,
         mongo_uri: str,
         db_name: str,
-        get_scoped_db_fn: Callable[[str], ScopedMongoWrapper],
+        get_scoped_db_fn: Callable[[str], Any],  # async fn returning ScopedMongoWrapper
         connection_manager: Any | None = None,
     ) -> None:
         """
@@ -326,7 +302,11 @@ class ServiceInitializer:
         # Protocol typing allows mocking and swapping implementations
         self._graph_services: dict[str, GraphServiceProtocol] = {}
         self._memory_services: dict[str, MemoryServiceProtocol] = {}
+        self._procedural_services: dict[str, ProceduralMemoryProtocol] = {}
+        self._profile_services: dict[str, Any] = {}  # str -> ProfileService
         self._websocket_configs: dict[str, dict[str, Any]] = {}
+        # OSI registries (one per app)
+        self._osi_registries: dict[str, Any] = {}  # str -> OsiModelRegistry
 
     async def _ensure_graph_vector_index(
         self,
@@ -362,25 +342,11 @@ class ServiceInitializer:
             index_manager = AsyncAtlasIndexManager(motor_collection)
 
             # Build vector search index definition for graph nodes
-            # Include app_slug and user_id as filters
-            index_definition = {
-                "fields": [
-                    {
-                        "type": "filter",
-                        "path": "app_slug",
-                    },
-                    {
-                        "type": "filter",
-                        "path": "user_id",
-                    },
-                    {
-                        "type": "vector",
-                        "path": "embedding",
-                        "numDimensions": embedding_dims,
-                        "similarity": "cosine",
-                    },
-                ]
-            }
+            # Include app_id (injected by ScopedCollectionWrapper), app_slug and user_id as filters
+            index_definition = self._build_vector_index_definition(
+                filter_paths=["app_id", "app_slug", "user_id"],
+                embedding_dims=embedding_dims,
+            )
 
             # Check if index already exists
             existing_index = await index_manager.get_search_index(index_name)
@@ -388,19 +354,19 @@ class ServiceInitializer:
             if existing_index:
                 if existing_index.get("queryable"):
                     contextual_logger.info(
-                        f"✅ Graph vector index '{index_name}' already exists and is queryable",
+                        f"Graph vector index '{index_name}' already exists and is queryable",
                         extra={"app_slug": slug, "index_name": index_name},
                     )
                     return
                 elif existing_index.get("status") == "FAILED":
                     contextual_logger.error(
-                        f"❌ Graph vector search index '{index_name}' is in FAILED state.",
+                        f"Graph vector search index '{index_name}' is in FAILED state.",
                         extra={"app_slug": slug, "index_name": index_name},
                     )
                     return
                 else:
                     contextual_logger.info(
-                        f"⏳ Graph vector search index '{index_name}' exists but not queryable. "
+                        f"Graph vector search index '{index_name}' exists but not queryable. "
                         f"Waiting for it to become ready...",
                         extra={"app_slug": slug, "index_name": index_name},
                     )
@@ -428,16 +394,95 @@ class ServiceInitializer:
             )
 
             contextual_logger.info(
-                f"✅ Successfully created graph vector search index '{index_name}'",
+                f"Successfully created graph vector search index '{index_name}'",
                 extra={"app_slug": slug, "index_name": index_name},
             )
 
         except (RuntimeError, ValueError, KeyError, AttributeError) as e:
             contextual_logger.warning(
-                f"⚠️ Could not create graph vector search index '{index_name}': {e}. "
+                f"Could not create graph vector search index '{index_name}': {e}. "
                 f"Hybrid search may not work until the index is created.",
                 extra={"app_slug": slug, "index_name": index_name, "error": str(e)},
             )
+
+    async def initialize_osi_service(
+        self,
+        slug: str,
+        osi_config: dict[str, Any] | None,
+    ) -> None:
+        """Initialize OSI registry for an app.
+
+        Called BEFORE graph service initialization so the graph service
+        can use OSI context for extraction prompts and entity resolution.
+
+        If a connection manager is available, creates a MongoDB-backed store
+        (``{slug}_osi_models`` collection) for persistence. Otherwise falls
+        back to in-memory only.
+
+        Args:
+            slug: App slug
+            osi_config: OSI configuration from manifest (``osi_config`` section).
+                Can be None or empty dict to skip initialization.
+        """
+        if not osi_config or not osi_config.get("enabled", False):
+            return
+
+        try:
+            from ..osi.registry import OsiModelRegistry
+
+            # Try to create a MongoDB-backed store for persistence
+            store = None
+            if self._connection_manager and self._connection_manager.initialized:
+                try:
+                    from ..osi.store import OsiModelStore
+
+                    motor_client = self._connection_manager.mongo_client
+                    db = motor_client[self.db_name]
+                    collection_name = f"{slug}_osi_models"
+                    osi_collection = db[collection_name]
+                    store = OsiModelStore(collection=osi_collection, app_slug=slug)
+                    contextual_logger.info(
+                        f"OSI store created: collection '{collection_name}'",
+                        extra={"app_slug": slug, "collection_name": collection_name},
+                    )
+                except (ImportError, AttributeError, RuntimeError) as e:
+                    contextual_logger.warning(
+                        f"Could not create OSI store for '{slug}': {e}. " f"Using in-memory registry only.",
+                        extra={"app_slug": slug, "error": str(e)},
+                    )
+
+            registry = OsiModelRegistry(app_slug=slug, config=osi_config, store=store)
+            await registry.load()
+
+            self._osi_registries[slug] = registry
+            contextual_logger.info(
+                f"OSI registry initialized for '{slug}': "
+                f"{len(registry.models)} model(s) loaded"
+                f"{' (MongoDB-backed)' if store else ' (in-memory)'}",
+                extra={"app_slug": slug, "model_count": len(registry.models)},
+            )
+        except ImportError as e:
+            contextual_logger.warning(
+                f"OSI configuration found for app '{slug}' but dependencies "
+                f"are not available: {e}. OSI support will be disabled.",
+                extra={"app_slug": slug, "error": str(e)},
+            )
+        except (ValueError, TypeError, RuntimeError) as e:
+            contextual_logger.exception(
+                f"Failed to initialize OSI registry for app '{slug}': {e}",
+                extra={"app_slug": slug, "error": str(e)},
+            )
+
+    def get_osi_registry(self, slug: str) -> Any | None:
+        """Get OSI model registry for an app.
+
+        Args:
+            slug: App slug
+
+        Returns:
+            OsiModelRegistry instance if OSI is enabled for this app, None otherwise.
+        """
+        return self._osi_registries.get(slug)
 
     async def initialize_graph_service(
         self,
@@ -481,52 +526,61 @@ class ServiceInitializer:
             f"Initializing graph service for app '{slug}'",
             extra={
                 "app_slug": slug,
-                "collection_name": graph_config.get("collection_name", f"{slug}__kg"),
+                "collection_name": graph_config.get("collection_name", "kg"),
                 "auto_extract": graph_config.get("auto_extract", True),
             },
         )
 
         try:
-            # Get PyMongo collection from MDB-Engine connection manager
+            # Use Motor async collections directly - forward-facing DI
             if not self._connection_manager or not self._connection_manager.initialized:
                 contextual_logger.error(
-                    "❌ Connection manager not available or not initialized. "
+                    "Connection manager not available or not initialized. "
                     "Graph service REQUIRES MDB-Engine connection pool.",
                     extra={"app_slug": slug},
                 )
                 return
 
             try:
-                motor_client = self._connection_manager.mongo_client
-                pymongo_client = motor_client.delegate
+                # Use MDB Engine's scoped collections for proper app_id filtering and scoping
+                scoped_db = await self.get_scoped_db_fn(slug)
+                base_collection_name = graph_config.get("collection_name", "kg")
+                # Normalize legacy "__kg" to "kg" (private attributes are blocked by ScopedMongoWrapper)
+                if base_collection_name == "__kg":
+                    base_collection_name = "kg"
+                # Get prefixed collection name for index management (indexes need full name)
+                if base_collection_name.startswith(f"{slug}_"):
+                    prefixed_collection_name = base_collection_name
+                    base_collection_name = base_collection_name[len(f"{slug}_") :]
+                else:
+                    prefixed_collection_name = f"{slug}_{base_collection_name}"
 
-                pymongo_db = pymongo_client[self.db_name]
-                collection_name = graph_config.get("collection_name", "__kg")
-                # Ensure collection name is prefixed with app slug
-                if not collection_name.startswith(f"{slug}_"):
-                    collection_name = f"{slug}_{collection_name}"
-                collection = pymongo_db[collection_name]
+                # Get scoped collection (base name - scoped wrapper handles prefixing)
+                collection = getattr(scoped_db, base_collection_name)  # ScopedCollectionWrapper
 
                 contextual_logger.info(
-                    f"✅ Using MDB-Engine connection pool for graph service: {collection_name}",
-                    extra={"app_slug": slug, "collection_name": collection_name},
+                    f"Using MDB-Engine scoped collection for graph service: "
+                    f"{base_collection_name} (app: {slug}, prefixed: {prefixed_collection_name})",
+                    extra={
+                        "app_slug": slug,
+                        "collection_name": base_collection_name,
+                        "prefixed_name": prefixed_collection_name,
+                    },
                 )
 
-                # Automatically ensure vector search index exists
-                index_name = graph_config.get(
-                    "vector_index_name", f"{collection_name}_vector_index"
-                )
+                # Automatically ensure vector search index exists (use prefixed name for index ops)
+                index_name = graph_config.get("vector_index_name", f"{prefixed_collection_name}_vector_index")
                 embedding_dims = graph_config.get("embedding_dims", 1536)
                 await self._ensure_graph_vector_index(
                     slug=slug,
-                    collection_name=collection_name,
+                    collection_name=prefixed_collection_name,
                     index_name=index_name,
                     embedding_dims=embedding_dims,
                 )
 
             except (AttributeError, RuntimeError, KeyError) as e:
                 contextual_logger.exception(
-                    f"❌ Could not get collection from MDB-Engine connection manager: {e}",
+                    f"Could not get collection from MDB-Engine connection manager: {e}",
                     extra={"app_slug": slug, "error": str(e)},
                 )
                 return
@@ -549,7 +603,7 @@ class ServiceInitializer:
                     graph_llm_config = llm_config.copy()
                     model = llm_config.get("default_model")
                     contextual_logger.info(
-                        f"✅ Graph service inheriting LLM model from app's " f"llm_config: {model}",
+                        f"Graph service inheriting LLM model from app's " f"llm_config: {model}",
                         extra={"app_slug": slug},
                     )
                 llm_service = get_llm_service(config=graph_llm_config if graph_llm_config else None)
@@ -563,9 +617,7 @@ class ServiceInitializer:
                 from ..embeddings.service import get_embedding_service
 
                 embedding_config = graph_config.get("embedding_config", {})
-                embedding_service = get_embedding_service(
-                    config=embedding_config if embedding_config else None
-                )
+                embedding_service = get_embedding_service(config=embedding_config if embedding_config else None)
             except (ImportError, RuntimeError, ValueError) as e:
                 contextual_logger.warning(
                     f"Embedding service not available for graph hybrid search: {e}",
@@ -574,17 +626,36 @@ class ServiceInitializer:
 
             # Update config with collection name for the service
             service_config = graph_config.copy()
-            service_config["collection_name"] = collection_name
+            service_config["collection_name"] = prefixed_collection_name
             service_config["vector_index_name"] = index_name
+
+            # Inject OSI registry if available (initialized before graph)
+            osi_registry = self._osi_registries.get(slug)
+            if osi_registry:
+                service_config["_osi_registry"] = osi_registry
+                contextual_logger.info(
+                    f"Graph service for '{slug}' will use OSI registry",
+                    extra={"app_slug": slug},
+                )
 
             # Get the default model from LLM service to pass to GraphStore
             # This must be done AFTER service_config is created
             if llm_service and "llm_model" not in service_config:
-                default_llm_model = llm_service.llm_provider.default_model
+                # Try to get "chat" provider first, fallback to first available provider
+                chat_provider = llm_service.providers.get("chat")
+                if chat_provider:
+                    default_llm_model = chat_provider.default_model
+                elif llm_service.providers:
+                    # Use first available provider
+                    first_provider = next(iter(llm_service.providers.values()))
+                    default_llm_model = first_provider.default_model
+                else:
+                    default_llm_model = None
+
                 if default_llm_model:
                     service_config["llm_model"] = default_llm_model
                     contextual_logger.info(
-                        f"✅ Graph service using LLM model: {default_llm_model}",
+                        f"Graph service using LLM model: {default_llm_model}",
                         extra={"app_slug": slug, "llm_model": default_llm_model},
                     )
 
@@ -599,16 +670,19 @@ class ServiceInitializer:
             self._graph_services[slug] = graph_service
 
             contextual_logger.info(
-                f"✅ Graph service initialized for app '{slug}'",
+                f"Graph service initialized for app '{slug}'",
                 extra={
                     "app_slug": slug,
-                    "collection_name": collection_name,
+                    "collection_name": prefixed_collection_name,
                     "llm_available": llm_service is not None,
                     "embedding_available": embedding_service is not None,
                 },
             )
 
         except (ImportError, AttributeError, TypeError, ValueError, RuntimeError) as e:
+            # Remove graph service from dict if it was partially initialized
+            if slug in self._graph_services:
+                del self._graph_services[slug]
             contextual_logger.error(
                 f"Failed to initialize graph service for app '{slug}': {e}",
                 extra={"app_slug": slug, "error": str(e)},
@@ -678,34 +752,15 @@ class ServiceInitializer:
         )
 
         try:
-            # Extract memory config (exclude 'enabled' and 'provider')
-            # Include cognitive-specific config fields
-            allowed_config_keys = [
-                "collection_name",
-                "index_name",  # Vector search index name
-                "embedding_model_dims",
-                "embedding_dims",  # Alias for embedding_model_dims
-                "infer",
-                "async_mode",
-                "embedding_model",
-                "chat_model",
-                "temperature",
-                # Cognitive-specific fields
-                "max_depth",
-                "similarity_threshold",
-                "reinforcement_factor",
-                "decay_factor",
-                "merge_threshold_low",
-                "merge_threshold_high",
-                # Nested configurations
-                "graph",
-            ]
+            # Extract memory config (exclude only 'enabled' and 'provider')
+            # Pass through ALL other keys so the builder can use them.
+            # Previously this used a restrictive allowlist that silently
+            # dropped critical keys like enable_cognitive, categories,
+            # cognitive, persona, memory_llm_model, extraction_provider,
+            # reflection, emotion_weight, etc.
+            _excluded_keys = {"enabled", "provider"}
 
-            service_config = {
-                k: v
-                for k, v in memory_config.items()
-                if k != "enabled" and k != "provider" and k in allowed_config_keys
-            }
+            service_config = {k: v for k, v in memory_config.items() if k not in _excluded_keys}
 
             # Normalize embedding_dims -> embedding_model_dims
             if "embedding_dims" in service_config and "embedding_model_dims" not in service_config:
@@ -745,10 +800,10 @@ class ServiceInitializer:
                     },
                 )
 
-            # Get PyMongo collection from MDB-Engine connection manager - REQUIRED
+            # Use Motor async collections directly - forward-facing DI
             if not self._connection_manager or not self._connection_manager.initialized:
                 contextual_logger.error(
-                    "❌ Connection manager not available or not initialized. "
+                    "Connection manager not available or not initialized. "
                     "Memory service REQUIRES MDB-Engine connection pool.",
                     extra={"app_slug": slug},
                 )
@@ -758,27 +813,35 @@ class ServiceInitializer:
                 )
 
             try:
-                # Get the underlying PyMongo client from Motor's AsyncIOMotorClient
-                # Motor wraps PyMongo's MongoClient, accessible via .delegate
-                motor_client = self._connection_manager.mongo_client
-                pymongo_client = motor_client.delegate  # Get underlying PyMongo client
+                # Use MDB Engine's scoped collections for proper app_id filtering and scoping
+                scoped_db = await self.get_scoped_db_fn(slug)
+                base_collection_name = service_config.get("collection_name", "user_memories")
+                # Get prefixed collection name for index management (indexes need full name)
+                if base_collection_name.startswith(f"{slug}_"):
+                    prefixed_collection_name = base_collection_name
+                    base_collection_name = base_collection_name[len(f"{slug}_") :]
+                else:
+                    prefixed_collection_name = f"{slug}_{base_collection_name}"
 
-                # Get the database and collection
-                pymongo_db = pymongo_client[self.db_name]
-                collection_name = service_config.get("collection_name", f"{slug}_memories")
-                collection = pymongo_db[collection_name]
+                # Get scoped collection (base name - scoped wrapper handles prefixing)
+                collection = getattr(scoped_db, base_collection_name)  # ScopedCollectionWrapper
 
                 contextual_logger.info(
-                    f"✅ Using MDB-Engine connection pool for memory service: {collection_name}",
-                    extra={"app_slug": slug, "collection_name": collection_name},
+                    f"Using MDB-Engine scoped collection for memory service: "
+                    f"{base_collection_name} (app: {slug}, prefixed: {prefixed_collection_name})",
+                    extra={
+                        "app_slug": slug,
+                        "collection_name": base_collection_name,
+                        "prefixed_name": prefixed_collection_name,
+                    },
                 )
 
-                # Automatically ensure vector search index exists
-                index_name = service_config.get("index_name", f"{collection_name}_vector_index")
+                # Automatically ensure vector search index exists (use prefixed name for index ops)
+                index_name = service_config.get("index_name", f"{prefixed_collection_name}_vector_index")
                 embedding_dims = service_config.get("embedding_model_dims", 1536)
                 await self._ensure_memory_vector_index(
                     slug=slug,
-                    collection_name=collection_name,
+                    collection_name=prefixed_collection_name,
                     index_name=index_name,
                     embedding_dims=embedding_dims,
                 )
@@ -788,15 +851,13 @@ class ServiceInitializer:
                 if memory_types_config.get("enabled", True):
                     await self._ensure_memory_ttl_indexes(
                         slug=slug,
-                        collection_name=collection_name,
-                        episodic_retention_days=memory_types_config.get(
-                            "episodic_retention_days", 730
-                        ),
+                        collection_name=prefixed_collection_name,
+                        episodic_retention_days=memory_types_config.get("episodic_retention_days", 730),
                         working_ttl_hours=memory_types_config.get("working_ttl_hours", 24),
                     )
             except (AttributeError, RuntimeError, KeyError) as e:
                 contextual_logger.exception(
-                    f"❌ Could not get collection from MDB-Engine connection manager: {e}. "
+                    f"Could not get collection from MDB-Engine connection manager: {e}. "
                     f"Memory service REQUIRES MDB-Engine connection pool.",
                     extra={"app_slug": slug, "error": str(e)},
                 )
@@ -807,6 +868,18 @@ class ServiceInitializer:
 
             # Get graph service if available (for GraphRAG integration)
             graph_service = self._graph_services.get(slug)
+            if graph_service:
+                contextual_logger.info(
+                    "Graph service available for memory service integration (GraphRAG enabled)",
+                    extra={"app_slug": slug},
+                )
+            else:
+                available_graph_services = list(self._graph_services.keys())
+                contextual_logger.warning(
+                    f"Graph service not available for memory service (GraphRAG disabled). "
+                    f"Available graph services: {available_graph_services}",
+                    extra={"app_slug": slug, "available_services": available_graph_services},
+                )
 
             # Inherit LLM model from app's llm_config if not explicitly set in memory_config
             if llm_config and "memory_llm_model" not in service_config:
@@ -814,8 +887,7 @@ class ServiceInitializer:
                 if default_model:
                     service_config["memory_llm_model"] = default_model
                     contextual_logger.info(
-                        f"✅ Memory service inheriting LLM model from app's "
-                        f"llm_config: {default_model}",
+                        f"Memory service inheriting LLM model from app's " f"llm_config: {default_model}",
                         extra={"app_slug": slug, "llm_model": default_model},
                     )
 
@@ -842,8 +914,7 @@ class ServiceInitializer:
             )
         except OpenAIError as e:
             contextual_logger.warning(
-                f"Memory service initialization skipped for app '{slug}': "
-                f"OpenAI API error. {e}",
+                f"Memory service initialization skipped for app '{slug}': " f"OpenAI API error. {e}",
                 extra={"app_slug": slug, "error": str(e)},
             )
         except (
@@ -875,6 +946,260 @@ class ServiceInitializer:
                     extra={"app_slug": slug, "error": str(e)},
                     exc_info=True,
                 )
+
+    async def initialize_procedural_service(
+        self,
+        slug: str,
+        skills_config: dict[str, Any] | None,
+    ) -> None:
+        """
+        Initialize procedural memory (skills) service for an app.
+
+        Must be called AFTER memory service is initialized (needs the
+        embedding service from the memory service).
+
+        Args:
+            slug: App slug
+            skills_config: Skills configuration from ``memory_config.skills``.
+                Can be None or empty dict to skip initialization.
+        """
+        if not skills_config or not skills_config.get("enabled", False):
+            return
+
+        contextual_logger.info(
+            f"Initializing procedural memory (skills) for app '{slug}'",
+            extra={"app_slug": slug},
+        )
+
+        try:
+            from ..memory.procedural import ProceduralMemory
+
+            # Get the embedding service from the memory service
+            memory_service = self._memory_services.get(slug)
+            embedding_service = None
+            if memory_service:
+                embedding_service = getattr(memory_service, "embedding_provider", None)
+
+            if not embedding_service:
+                contextual_logger.warning(
+                    f"Procedural memory initialization skipped for app '{slug}': "
+                    f"no embedding service available. "
+                    f"Ensure memory service is initialized first.",
+                    extra={"app_slug": slug},
+                )
+                return
+
+            # Get scoped collection
+            scoped_db = await self.get_scoped_db_fn(slug)
+            collection_name = skills_config.get("collection_name", "skills")
+            # Prefix with slug for multi-app isolation
+            prefixed_name = f"{slug}_{collection_name}"
+            skills_collection = getattr(scoped_db, prefixed_name)
+
+            # Create ProceduralMemory instance
+            embed_model = skills_config.get(
+                "embed_model",
+                getattr(memory_service, "embed_model", "text-embedding-3-small"),
+            )
+
+            procedural_memory = ProceduralMemory(
+                collection=skills_collection,
+                embedding_service=embedding_service,
+                embed_model=embed_model,
+            )
+
+            self._procedural_services[slug] = procedural_memory
+
+            contextual_logger.info(
+                f"Procedural memory (skills) initialized for app '{slug}' " f"(collection: {prefixed_name})",
+                extra={"app_slug": slug, "collection": prefixed_name},
+            )
+
+        except (ImportError, AttributeError, TypeError, ValueError, RuntimeError) as e:
+            if slug in self._procedural_services:
+                del self._procedural_services[slug]
+            contextual_logger.error(
+                f"Failed to initialize procedural memory for app '{slug}': {e}",
+                extra={"app_slug": slug, "error": str(e)},
+                exc_info=True,
+            )
+
+    async def initialize_profile_service(
+        self,
+        slug: str,
+        profile_config: dict[str, Any] | None,
+        llm_config: dict[str, Any] | None = None,
+    ) -> None:
+        """Initialize profile service for an app.
+
+        Profile service materializes user profiles and community profiles
+        from memory + graph data for instant AI context injection.
+
+        Must be called AFTER memory and graph services are initialized.
+
+        Args:
+            slug: App slug
+            profile_config: Profile configuration from manifest.
+            llm_config: Optional LLM configuration from manifest.
+        """
+        if not profile_config or not profile_config.get("enabled", False):
+            return
+
+        try:
+            from ..profile.service import ProfileService
+        except ImportError as e:
+            contextual_logger.warning(
+                f"Profile configuration found for app '{slug}' but " f"dependencies are not available: {e}.",
+                extra={"app_slug": slug, "error": str(e)},
+            )
+            return
+
+        contextual_logger.info(
+            f"Initializing profile service for app '{slug}'",
+            extra={"app_slug": slug},
+        )
+
+        try:
+            if not self._connection_manager or not self._connection_manager.initialized:
+                contextual_logger.warning(
+                    "Connection manager not available for profile service.",
+                    extra={"app_slug": slug},
+                )
+                return
+
+            # Get scoped database for collection access
+            scoped_db = await self.get_scoped_db_fn(slug)
+
+            # User profile collection
+            user_cfg = profile_config.get("user_profiles", {})
+            user_collection_name = user_cfg.get("collection_name", "user_profiles")
+            user_profile_collection = getattr(scoped_db, user_collection_name)
+
+            # Community profile collection (optional)
+            community_cfg = profile_config.get("community_profile", {})
+            community_profile_collection = None
+            memory_collection = None
+            graph_collection = None
+
+            if community_cfg.get("enabled", False):
+                comm_collection_name = community_cfg.get("collection_name", "community_profile")
+                community_profile_collection = getattr(scoped_db, comm_collection_name)
+
+                # For community aggregation, we also need raw access to
+                # memory and graph collections (for MongoDB aggregation pipelines).
+                # These bypass the scoped wrapper's user_id filtering.
+                motor_client = self._connection_manager.mongo_client
+                db = motor_client[self.db_name]
+
+                # Get memory collection name from memory service
+                memory_svc = self._memory_services.get(slug)
+                if memory_svc and hasattr(memory_svc, "collection"):
+                    memory_collection = memory_svc.collection
+                else:
+                    # Fallback: construct from convention
+                    memory_collection = db[f"{slug}_user_memories"]
+
+                # Get graph collection
+                graph_svc = self._graph_services.get(slug)
+                if graph_svc and hasattr(graph_svc, "collection"):
+                    graph_collection = graph_svc.collection
+                else:
+                    graph_collection = db[f"{slug}_kg"]
+
+            # Get services for profile building
+            memory_service = self._memory_services.get(slug)
+            graph_service = self._graph_services.get(slug)
+
+            # Get LLM service
+            llm_service = None
+            try:
+                from ..llm.service import get_llm_service
+
+                profile_llm_config = llm_config.copy() if llm_config else {}
+                llm_service = get_llm_service(config=profile_llm_config if profile_llm_config else None)
+            except (ImportError, RuntimeError, ValueError) as e:
+                contextual_logger.warning(
+                    f"LLM service not available for profile synthesis: {e}",
+                    extra={"app_slug": slug},
+                )
+
+            # Determine LLM model
+            service_config = profile_config.copy()
+            if llm_service and "llm_model" not in service_config:
+                try:
+                    chat_provider = llm_service.providers.get("chat")
+                    if chat_provider:
+                        service_config["llm_model"] = chat_provider.default_model
+                except (AttributeError, KeyError):
+                    pass
+
+            # Create profile service
+            profile_service = ProfileService(
+                app_slug=slug,
+                user_profile_collection=user_profile_collection,
+                community_profile_collection=community_profile_collection,
+                memory_service=memory_service,
+                memory_collection=memory_collection,
+                graph_service=graph_service,
+                graph_collection=graph_collection,
+                llm_service=llm_service,
+                config=service_config,
+            )
+
+            self._profile_services[slug] = profile_service
+
+            # Inject profile service into memory service for incremental updates
+            if memory_service and hasattr(memory_service, "set_profile_service"):
+                memory_service.set_profile_service(profile_service)
+                contextual_logger.info(
+                    f"Profile service injected into memory service for '{slug}'",
+                    extra={"app_slug": slug},
+                )
+
+            contextual_logger.info(
+                f"Profile service initialized for app '{slug}'",
+                extra={
+                    "app_slug": slug,
+                    "user_profiles": user_cfg.get("enabled", True),
+                    "community_profile": community_cfg.get("enabled", False),
+                    "llm_available": llm_service is not None,
+                    "memory_available": memory_service is not None,
+                    "graph_available": graph_service is not None,
+                },
+            )
+
+        except (ImportError, AttributeError, TypeError, ValueError, RuntimeError) as e:
+            if slug in self._profile_services:
+                del self._profile_services[slug]
+            contextual_logger.error(
+                f"Failed to initialize profile service for app '{slug}': {e}",
+                extra={"app_slug": slug, "error": str(e)},
+                exc_info=True,
+            )
+
+    def get_profile_service(self, slug: str) -> Any | None:
+        """Get profile service for an app.
+
+        Args:
+            slug: App slug
+
+        Returns:
+            ProfileService instance if profile is enabled for this app, None otherwise.
+        """
+        try:
+            service = self._profile_services.get(slug)
+            if service is not None:
+                return service
+
+            # Try case-insensitive lookup
+            slug_lower = slug.lower()
+            for stored_slug, stored_service in self._profile_services.items():
+                if stored_slug.lower() == slug_lower:
+                    return stored_service
+
+            return None
+        except (KeyError, AttributeError, TypeError):
+            return None
 
     async def register_websockets(self, slug: str, websockets_config: dict[str, Any]) -> None:
         """
@@ -919,9 +1244,7 @@ class ServiceInitializer:
                 extra={"app_slug": slug, "endpoint": endpoint_name, "path": path},
             )
 
-    async def seed_initial_data(
-        self, slug: str, initial_data: dict[str, list[dict[str, Any]]]
-    ) -> None:
+    async def seed_initial_data(self, slug: str, initial_data: dict[str, list[dict[str, Any]]]) -> None:
         """
         Seed initial data into collections for an app.
 
@@ -932,7 +1255,7 @@ class ServiceInitializer:
         try:
             from .seeding import seed_initial_data
 
-            db = self.get_scoped_db_fn(slug)
+            db = await self.get_scoped_db_fn(slug)
             results = await seed_initial_data(db, slug, initial_data)
 
             total_inserted = sum(results.values())
@@ -947,8 +1270,7 @@ class ServiceInitializer:
                 )
             else:
                 contextual_logger.debug(
-                    f"No initial data seeded for app '{slug}' "
-                    f"(collections already had data or were empty)",
+                    f"No initial data seeded for app '{slug}' " f"(collections already had data or were empty)",
                     extra={"app_slug": slug},
                 )
         except (
@@ -968,7 +1290,13 @@ class ServiceInitializer:
         self, slug: str, manifest: dict[str, Any], observability_config: dict[str, Any]
     ) -> None:
         """
-        Set up observability features (health checks, metrics, logging) from manifest.
+        Set up observability features (health checks, metrics, logging, tracing) from manifest.
+
+        Enforces the configuration rather than just logging it:
+        - Sets Python logging level and format from ``logging.level`` / ``logging.format``
+        - Registers Prometheus ``/metrics`` endpoint if ``metrics.export_prometheus``
+        - Configures OpenTelemetry metrics bridge if ``metrics.export_otlp``
+        - Initialises distributed tracing if ``tracing.enabled``
 
         Args:
             slug: App slug
@@ -995,18 +1323,41 @@ class ServiceInitializer:
                     f"Metrics collection configured for {slug}",
                     extra={
                         "operation_metrics": metrics_config.get("collect_operation_metrics", True),
-                        "performance_metrics": metrics_config.get(
-                            "collect_performance_metrics", True
-                        ),
+                        "performance_metrics": metrics_config.get("collect_performance_metrics", True),
                         "custom_metrics": metrics_config.get("custom_metrics", []),
                     },
                 )
 
-            # Set up logging
+                # Prometheus export
+                if metrics_config.get("export_prometheus", False):
+                    from ..observability.exporters import create_prometheus_endpoint
+
+                    app = self._get_app_for_slug(slug)
+                    if app:
+                        create_prometheus_endpoint(app)
+
+                # OTel metrics bridge
+                if metrics_config.get("export_otlp", False):
+                    from ..observability.exporters import setup_otel_metrics_bridge
+
+                    setup_otel_metrics_bridge(service_name=slug)
+
+            # Set up logging — enforce level and format
             logging_config = observability_config.get("logging", {})
             if logging_config:
+                import logging as stdlib_logging
+
                 log_level = logging_config.get("level", "INFO")
                 log_format = logging_config.get("format", "json")
+
+                # Apply logging level to the mdb_engine logger hierarchy
+                engine_logger = stdlib_logging.getLogger("mdb_engine")
+                engine_logger.setLevel(getattr(stdlib_logging, log_level, stdlib_logging.INFO))
+
+                # Apply JSON formatter if requested and not already set
+                if log_format == "json":
+                    self._apply_json_formatter(engine_logger)
+
                 contextual_logger.info(
                     f"Logging configured for {slug}",
                     extra={
@@ -1016,10 +1367,76 @@ class ServiceInitializer:
                     },
                 )
 
+            # Set up OpenTelemetry tracing (opt-in)
+            tracing_config = observability_config.get("tracing", {})
+            if tracing_config.get("enabled", False):
+                from ..observability.tracing import init_tracer_provider, otel_available
+
+                if otel_available():
+                    init_tracer_provider(
+                        service_name=tracing_config.get("service_name") or slug,
+                        endpoint=tracing_config.get("endpoint", "http://localhost:4317"),
+                        exporter=tracing_config.get("exporter", "otlp"),
+                        sample_rate=tracing_config.get("sample_rate", 1.0),
+                    )
+                    contextual_logger.info(
+                        f"OpenTelemetry tracing configured for {slug}",
+                        extra={
+                            "exporter": tracing_config.get("exporter", "otlp"),
+                            "endpoint": tracing_config.get("endpoint", "http://localhost:4317"),
+                            "sample_rate": tracing_config.get("sample_rate", 1.0),
+                        },
+                    )
+                else:
+                    contextual_logger.warning(
+                        f"Tracing enabled in manifest for {slug} but OpenTelemetry SDK not installed. "
+                        "Install with: pip install mdb-engine[otel]"
+                    )
+
         except (ImportError, AttributeError, TypeError, ValueError, KeyError) as e:
-            contextual_logger.warning(
-                f"Could not set up observability for {slug}: {e}", exc_info=True
-            )
+            contextual_logger.warning(f"Could not set up observability for {slug}: {e}", exc_info=True)
+
+    # ------------------------------------------------------------------
+    # Observability helpers
+    # ------------------------------------------------------------------
+
+    def _get_app_for_slug(self, slug: str) -> Any | None:
+        """Retrieve the FastAPI app instance for *slug* (if registered)."""
+        try:
+            return getattr(self, "_apps", {}).get(slug)
+        except (AttributeError, TypeError):
+            return None
+
+    @staticmethod
+    def _apply_json_formatter(target_logger: Any) -> None:
+        """Apply a JSON log formatter to *target_logger*'s handlers."""
+        import json as _json
+        import logging as stdlib_logging
+
+        class _JsonFormatter(stdlib_logging.Formatter):
+            def format(self, record: stdlib_logging.LogRecord) -> str:
+                log_entry: dict[str, Any] = {
+                    "timestamp": self.formatTime(record, self.datefmt),
+                    "level": record.levelname,
+                    "logger": record.name,
+                    "message": record.getMessage(),
+                }
+                if record.exc_info and record.exc_info[1]:
+                    log_entry["exception"] = self.formatException(record.exc_info)
+                # Include extra fields added by ContextualLoggerAdapter
+                for key in ("correlation_id", "app_slug", "trace_id", "span_id"):
+                    value = getattr(record, key, None)
+                    if value is not None:
+                        log_entry[key] = value
+                return _json.dumps(log_entry)
+
+        json_formatter = _JsonFormatter()
+        for handler in target_logger.handlers:
+            handler.setFormatter(json_formatter)
+        if not target_logger.handlers:
+            handler = stdlib_logging.StreamHandler()
+            handler.setFormatter(json_formatter)
+            target_logger.addHandler(handler)
 
     def get_websocket_config(self, slug: str) -> dict[str, Any] | None:
         """
@@ -1126,8 +1543,47 @@ class ServiceInitializer:
             )
             return None
 
+    def get_procedural_service(self, slug: str) -> ProceduralMemoryProtocol | None:
+        """
+        Get procedural memory (skills) service for an app.
+
+        Args:
+            slug: App slug
+
+        Returns:
+            ProceduralMemoryProtocol instance if skills are enabled for this app,
+            None otherwise.
+        """
+        try:
+            service = self._procedural_services.get(slug)
+            if service is not None:
+                return service
+
+            # Try case-insensitive lookup
+            slug_lower = slug.lower()
+            for stored_slug, stored_service in self._procedural_services.items():
+                if stored_slug.lower() == slug_lower:
+                    contextual_logger.warning(
+                        f"Procedural service found with case mismatch: '{stored_slug}' != '{slug}'. "
+                        f"Using '{stored_slug}'. Consider normalizing slug casing.",
+                        extra={"requested_slug": slug, "found_slug": stored_slug},
+                    )
+                    return stored_service
+
+            return None
+        except (KeyError, AttributeError, TypeError) as e:
+            contextual_logger.error(
+                f"Error retrieving procedural service for '{slug}': {e}",
+                exc_info=True,
+                extra={"app_slug": slug, "error": str(e)},
+            )
+            return None
+
     def clear_services(self) -> None:
         """Clear all service state."""
         self._graph_services.clear()
         self._memory_services.clear()
+        self._procedural_services.clear()
+        self._profile_services.clear()
         self._websocket_configs.clear()
+        self._osi_registries.clear()

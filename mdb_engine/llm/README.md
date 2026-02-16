@@ -205,7 +205,7 @@ cognitive_engine = CognitiveEngine(
     app_slug="my-app",
     memory_service=memory_service,
     chat_history_collection=chat_history_collection,
-    llm_provider=llm_service.llm_provider  # Pass the provider
+    llm_service=llm_service,
 )
 ```
 
@@ -274,9 +274,9 @@ Main service class for LLM operations.
   - `temperature`: Sampling temperature (0.0-2.0)
   - `max_tokens`: Maximum tokens to generate
 
-### LLMProvider
+### Internal: _LLMProvider
 
-Provider wrapper that auto-detects from environment variables or uses configured LiteLLM model string.
+Internal provider wrapper (not part of public API). Auto-detects from environment variables or uses configured LiteLLM model string. Use `LLMService` instead.
 
 ## Advanced Features
 

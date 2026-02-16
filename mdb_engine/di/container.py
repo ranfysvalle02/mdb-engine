@@ -5,6 +5,7 @@ A lightweight, FastAPI-native DI container with proper service lifetimes.
 """
 
 import logging
+import threading
 from collections.abc import Callable
 from typing import Any, Optional, TypeVar
 
@@ -47,6 +48,7 @@ class Container:
     """
 
     _global_instance: Optional["Container"] = None
+    _global_lock = threading.Lock()
 
     def __init__(self):
         self._providers: dict[type, Provider] = {}
@@ -54,10 +56,13 @@ class Container:
 
     @classmethod
     def get_global(cls) -> "Container":
-        """Get the global container instance."""
-        if cls._global_instance is None:
-            cls._global_instance = Container()
-        return cls._global_instance
+        """Get the global container instance (thread-safe)."""
+        if cls._global_instance is not None:  # Fast path
+            return cls._global_instance
+        with cls._global_lock:  # Double-check
+            if cls._global_instance is None:
+                cls._global_instance = Container()
+            return cls._global_instance
 
     @classmethod
     def set_global(cls, container: "Container") -> None:

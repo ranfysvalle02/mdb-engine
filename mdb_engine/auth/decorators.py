@@ -7,6 +7,7 @@ This module is part of MDB_ENGINE - MongoDB Engine.
 """
 
 import logging
+import os
 import time
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
@@ -69,8 +70,6 @@ def require_auth(redirect_to: str = "/login"):
 
 def _is_production_environment() -> bool:
     """Check if running in production environment."""
-    import os
-
     return os.getenv("G_NOME_ENV") == "production" or os.getenv("ENVIRONMENT") == "production"
 
 
@@ -192,17 +191,13 @@ def rate_limit_auth(
                 max_attempts_val = max_attempts
 
             if window_seconds is None:
-                window_seconds_val = (
-                    rate_limit_config.get("window_seconds") if rate_limit_config else 300
-                )
+                window_seconds_val = rate_limit_config.get("window_seconds") if rate_limit_config else 300
             else:
                 window_seconds_val = window_seconds
 
             # Get identifier (IP + email if available)
             ip_address = request.client.host if request.client else "unknown"
-            email = kwargs.get("email") or (
-                await request.form() if request.method == "POST" else {}
-            ).get("email", "")
+            email = kwargs.get("email") or (await request.form() if request.method == "POST" else {}).get("email", "")
 
             identifier = f"{endpoint}:{ip_address}:{email}"
             current_time = time.time()
@@ -212,9 +207,7 @@ def rate_limit_auth(
                 attempts = _rate_limit_storage[identifier]
                 # Remove old attempts outside window
                 _rate_limit_storage[identifier] = {
-                    ts: count
-                    for ts, count in attempts.items()
-                    if current_time - ts < window_seconds_val
+                    ts: count for ts, count in attempts.items() if current_time - ts < window_seconds_val
                 }
 
             # Count attempts in window
@@ -222,8 +215,7 @@ def rate_limit_auth(
 
             if attempts_in_window >= max_attempts_val:
                 logger.warning(
-                    f"Rate limit exceeded for {identifier}: "
-                    f"{attempts_in_window} attempts in {window_seconds_val}s"
+                    f"Rate limit exceeded for {identifier}: " f"{attempts_in_window} attempts in {window_seconds_val}s"
                 )
                 raise HTTPException(
                     status_code=status.HTTP_429_TOO_MANY_REQUESTS,

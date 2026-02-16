@@ -31,9 +31,10 @@ class LLMServiceProtocol(Protocol):
     """
     Protocol for LLM services.
 
-    Implementations: LLMService, LLMProvider
+    Implementation: LLMService
 
     Required for:
+    - CognitiveEngine (chat generation, summarization)
     - GraphService (entity extraction)
     - CognitiveMemoryService (fact extraction, importance assessment)
 
@@ -43,6 +44,7 @@ class LLMServiceProtocol(Protocol):
     async def chat_completion(
         self,
         messages: list[dict[str, Any]],
+        provider_name: str | None = None,
         model: str | None = None,
         temperature: float | None = None,
         **kwargs: Any,
@@ -52,27 +54,8 @@ class LLMServiceProtocol(Protocol):
 
         Args:
             messages: List of message dicts with 'role' and 'content'
-            model: Optional model override
-            temperature: Optional temperature override
-            **kwargs: Additional provider-specific options
-
-        Returns:
-            Generated text response
-        """
-        ...
-
-    def chat_completion_sync(
-        self,
-        messages: list[dict[str, Any]],
-        model: str | None = None,
-        temperature: float | None = None,
-        **kwargs: Any,
-    ) -> str:
-        """
-        Synchronous version of chat_completion.
-
-        Args:
-            messages: List of message dicts with 'role' and 'content'
+            provider_name: Named provider (e.g. "chat", "extraction").
+                          Defaults to the service's default provider.
             model: Optional model override
             temperature: Optional temperature override
             **kwargs: Additional provider-specific options
@@ -260,6 +243,99 @@ class GraphServiceProtocol(Protocol):
 
 
 # =============================================================================
+# Procedural Memory Protocol
+# =============================================================================
+
+
+@runtime_checkable
+class ProceduralMemoryProtocol(Protocol):
+    """
+    Protocol for procedural memory services (skills, tools, workflows).
+
+    Implementations: ProceduralMemory
+
+    Required for:
+    - Skill retrieval during CognitiveEngine.chat()
+    - Storing executable procedures extracted from episodes
+    - Tracking skill success rates for self-improvement
+
+    Standalone: Yes - requires MongoDB collection and EmbeddingService
+    """
+
+    async def store_procedure(
+        self,
+        name: str,
+        task_type: str,
+        steps: list[str] | None = None,
+        code_snippet: str | None = None,
+        tool_schema: dict[str, Any] | None = None,
+        success_rate: float = 1.0,
+        metadata: dict[str, Any] | None = None,
+        is_successful_procedure: bool = True,
+    ) -> dict[str, Any]:
+        """
+        Store a procedural memory (skill/tool/workflow).
+
+        Args:
+            name: Name/identifier of the procedure
+            task_type: Type of task (e.g., "deployment", "debugging")
+            steps: List of step descriptions
+            code_snippet: Executable code snippet
+            tool_schema: JSON Schema for tool definition
+            success_rate: Success rate (0.0 to 1.0)
+            metadata: Optional metadata dictionary
+            is_successful_procedure: Mark as successful procedure
+
+        Returns:
+            Created procedure document
+        """
+        ...
+
+    async def search_procedures(
+        self,
+        task_description: str,
+        task_type: str | None = None,
+        min_success_rate: float = 0.7,
+        limit: int = 5,
+    ) -> list[dict[str, Any]]:
+        """
+        Search for procedures using vector similarity.
+
+        Args:
+            task_description: Description of the task
+            task_type: Optional filter by task type
+            min_success_rate: Minimum success rate threshold
+            limit: Maximum number of results
+
+        Returns:
+            List of matching procedure documents
+        """
+        ...
+
+    async def get_procedure(self, name: str) -> dict[str, Any] | None:
+        """
+        Retrieve a procedure by name.
+
+        Args:
+            name: Procedure name
+
+        Returns:
+            Procedure document or None if not found
+        """
+        ...
+
+    async def mark_procedure_used(self, name: str, success: bool = True) -> None:
+        """
+        Mark a procedure as used and update success rate.
+
+        Args:
+            name: Procedure name
+            success: Whether the usage was successful
+        """
+        ...
+
+
+# =============================================================================
 # Memory Service Protocol
 # =============================================================================
 
@@ -280,93 +356,119 @@ class MemoryServiceProtocol(Protocol):
     Optional: LLMService (for fact extraction), GraphService (for GraphRAG)
     """
 
-    def add(
+    async def add(
         self,
-        messages: str | list[dict[str, Any]],
-        user_id: str,
+        messages: str | list[dict[str, str]],
+        user_id: str | None = None,
         metadata: dict[str, Any] | None = None,
-    ) -> list[str]:
+        **kwargs: Any,
+    ) -> list[dict[str, Any]]:
         """
         Add memories from messages with LLM fact extraction.
 
         Args:
             messages: Raw text or list of message dicts
-            user_id: User ID for scoping
+            user_id: User ID for scoping (optional but recommended)
             metadata: Optional metadata
+            **kwargs: Additional provider-specific arguments
 
         Returns:
-            List of created memory IDs
+            List of created memory objects with their IDs and metadata
         """
         ...
 
-    def inject(
+    async def inject(
         self,
-        memories: list[str] | list[dict[str, Any]],
-        user_id: str,
+        memory: str | dict[str, Any],
+        user_id: str | None = None,
         metadata: dict[str, Any] | None = None,
-    ) -> list[str]:
+        **kwargs: Any,
+    ) -> dict[str, Any]:
         """
-        Inject memories directly without LLM extraction.
+        Inject a memory directly without LLM extraction.
 
         Args:
-            memories: List of memory strings or dicts
-            user_id: User ID for scoping
+            memory: Memory content as a string or dict
+            user_id: User ID for scoping (optional but recommended)
             metadata: Optional metadata
+            **kwargs: Additional provider-specific arguments
 
         Returns:
-            List of created memory IDs
+            Created memory object with ID and metadata
         """
         ...
 
-    def search(
+    async def search(
         self,
         query: str,
-        user_id: str,
-        limit: int = 10,
+        user_id: str | None = None,
+        limit: int = 5,
+        filters: dict[str, Any] | None = None,
+        **kwargs: Any,
     ) -> list[dict[str, Any]]:
         """
         Search memories by semantic similarity.
 
         Args:
             query: Search query
-            user_id: User ID for scoping
+            user_id: User ID for scoping (optional)
             limit: Maximum results
+            filters: Optional metadata filters
+            **kwargs: Additional provider-specific arguments
 
         Returns:
             List of matching memories
         """
         ...
 
-    def get_all(
+    async def get_all(
         self,
-        user_id: str,
+        user_id: str | None = None,
         limit: int = 100,
+        filters: dict[str, Any] | None = None,
+        **kwargs: Any,
     ) -> list[dict[str, Any]]:
         """
         Get all memories for a user.
 
         Args:
-            user_id: User ID
+            user_id: User ID (optional)
             limit: Maximum results
+            filters: Optional metadata filters
+            **kwargs: Additional provider-specific arguments
 
         Returns:
             List of memories
         """
         ...
 
-    def delete(self, memory_id: str, user_id: str | None = None) -> bool:
+    async def delete(self, memory_id: str, user_id: str | None = None, **kwargs: Any) -> bool:
         """
         Delete a memory.
 
         Args:
             memory_id: Memory ID to delete
             user_id: Optional user ID for security scoping
+            **kwargs: Additional provider-specific arguments
 
         Returns:
             True if deleted
         """
         ...
 
+
+# =============================================================================
+# Memory Strategy Protocols (re-exported for public API convenience)
+# =============================================================================
+
+from mdb_engine.memory.strategies import (  # noqa: E402
+    DecayStrategy,
+    ExtractionStrategy,
+    ImportanceStrategy,
+    PersonaStrategy,
+    ReflectionStrategy,
+    ScoringStrategy,
+)
 
 # =============================================================================
 # Convenience type aliases
@@ -377,3 +479,10 @@ AnyLLMService = LLMServiceProtocol
 AnyEmbeddingService = EmbeddingServiceProtocol
 AnyGraphService = GraphServiceProtocol
 AnyMemoryService = MemoryServiceProtocol
+AnyProceduralMemory = ProceduralMemoryProtocol
+AnyScoringStrategy = ScoringStrategy
+AnyDecayStrategy = DecayStrategy
+AnyExtractionStrategy = ExtractionStrategy
+AnyImportanceStrategy = ImportanceStrategy
+AnyPersonaStrategy = PersonaStrategy
+AnyReflectionStrategy = ReflectionStrategy

@@ -68,9 +68,7 @@ class TestEncryptionPerformance:
 
         start = time.perf_counter()
         with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-            futures = [
-                executor.submit(encryption_service.encrypt_secret, secret) for secret in secrets
-            ]
+            futures = [executor.submit(encryption_service.encrypt_secret, secret) for secret in secrets]
             results = [future.result() for future in concurrent.futures.as_completed(futures)]
         elapsed = (time.perf_counter() - start) * 1000
 

@@ -10,7 +10,7 @@ import logging
 import os
 import uuid
 from collections.abc import Mapping
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import jwt
@@ -42,11 +42,7 @@ def _get_secret_key() -> str:
     if _SECRET_KEY_CACHE is not None:
         return _SECRET_KEY_CACHE
 
-    secret_key = (
-        os.environ.get("FLASK_SECRET_KEY")
-        or os.environ.get("SECRET_KEY")
-        or os.environ.get("APP_SECRET_KEY")
-    )
+    secret_key = os.environ.get("FLASK_SECRET_KEY") or os.environ.get("SECRET_KEY") or os.environ.get("APP_SECRET_KEY")
 
     if not secret_key:
         raise ConfigurationError(
@@ -106,8 +102,7 @@ def _validate_next_url(next_url: str | None) -> str:
         return next_url
 
     logger.warning(
-        f"Blocked potentially unsafe redirect attempt. "
-        f"Original 'next' URL: '{next_url}'. Sanitized to '/'."
+        f"Blocked potentially unsafe redirect attempt. " f"Original 'next' URL: '{next_url}'. Sanitized to '/'."
     )
     return "/"
 
@@ -120,7 +115,7 @@ async def get_authz_provider(request: Request) -> AuthorizationProvider:
     # This key 'authz_provider' will be set in main.py's lifespan
     provider = getattr(request.app.state, "authz_provider", None)
     if not provider:
-        logger.critical("❌ get_authz_provider: AuthZ provider not found on app.state!")
+        logger.critical("get_authz_provider: AuthZ provider not found on app.state!")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Server configuration error: Authorization engine not loaded.",
@@ -191,10 +186,7 @@ async def get_current_user(
             logger.warning(f"get_current_user: Invalid token type '{token_type}' for access token")
             return None
 
-        logger.debug(
-            f"get_current_user: Token successfully decoded for user "
-            f"'{payload.get('email', 'N/A')}'."
-        )
+        logger.debug(f"get_current_user: Token successfully decoded for user " f"'{payload.get('email', 'N/A')}'.")
         return payload
     except jwt.ExpiredSignatureError:
         logger.info("get_current_user: Authentication token has expired.")
@@ -240,9 +232,7 @@ async def get_current_user_from_request(request: Request) -> dict[str, Any] | No
             if blacklist:
                 is_revoked = await blacklist.is_revoked(jti)
                 if is_revoked:
-                    logger.info(
-                        f"get_current_user_from_request: Token {jti} is blacklisted (revoked)"
-                    )
+                    logger.info(f"get_current_user_from_request: Token {jti} is blacklisted (revoked)")
                     return None
 
                 # Also check user-level revocation
@@ -250,10 +240,7 @@ async def get_current_user_from_request(request: Request) -> dict[str, Any] | No
                 if user_id:
                     user_revoked = await blacklist.is_user_revoked(user_id)
                     if user_revoked:
-                        logger.info(
-                            f"get_current_user_from_request: All tokens for user "
-                            f"{user_id} are revoked"
-                        )
+                        logger.info(f"get_current_user_from_request: All tokens for user " f"{user_id} are revoked")
                         return None
 
         payload = decode_jwt_token(token, str(SECRET_KEY))
@@ -261,14 +248,11 @@ async def get_current_user_from_request(request: Request) -> dict[str, Any] | No
         # Verify token type (should be access token for backward compatibility, or no type)
         token_type = payload.get("type")
         if token_type and token_type not in ("access", None):
-            logger.warning(
-                f"get_current_user_from_request: Invalid token type '{token_type}' for access token"
-            )
+            logger.warning(f"get_current_user_from_request: Invalid token type '{token_type}' for access token")
             return None
 
         logger.debug(
-            f"get_current_user_from_request: Token successfully decoded for user "
-            f"'{payload.get('email', 'N/A')}'."
+            f"get_current_user_from_request: Token successfully decoded for user " f"'{payload.get('email', 'N/A')}'."
         )
         return payload
     except jwt.ExpiredSignatureError:
@@ -328,9 +312,7 @@ async def get_refresh_token(
         # Verify token type
         token_type = payload.get("type")
         if token_type != "refresh":
-            logger.warning(
-                f"get_refresh_token: Invalid token type '{token_type}' for refresh token"
-            )
+            logger.warning(f"get_refresh_token: Invalid token type '{token_type}' for refresh token")
             return None
 
         # Check session if available
@@ -338,18 +320,14 @@ async def get_refresh_token(
         if session_mgr and jti:
             session = await session_mgr.get_session_by_refresh_token(jti)
             if not session or not session.get("active"):
-                logger.info(
-                    f"get_refresh_token: Session not found or inactive for refresh token {jti}"
-                )
+                logger.info(f"get_refresh_token: Session not found or inactive for refresh token {jti}")
                 return None
 
             # Validate session fingerprint if enabled
             from .config_helpers import get_session_fingerprinting_config
 
             fingerprinting_config = get_session_fingerprinting_config(request)
-            if fingerprinting_config.get("enabled", True) and fingerprinting_config.get(
-                "validate_on_refresh", True
-            ):
+            if fingerprinting_config.get("enabled", True) and fingerprinting_config.get("validate_on_refresh", True):
                 stored_fingerprint = session.get("session_fingerprint")
                 if stored_fingerprint:
                     from .utils import generate_session_fingerprint
@@ -359,14 +337,11 @@ async def get_refresh_token(
                         current_fingerprint = generate_session_fingerprint(request, device_id)
                         if current_fingerprint != stored_fingerprint:
                             logger.warning(
-                                f"get_refresh_token: Session fingerprint mismatch "
-                                f"for refresh token {jti}"
+                                f"get_refresh_token: Session fingerprint mismatch " f"for refresh token {jti}"
                             )
                             return None
 
-        logger.debug(
-            f"get_refresh_token: Refresh token validated for user '{payload.get('email', 'N/A')}'"
-        )
+        logger.debug(f"get_refresh_token: Refresh token validated for user '{payload.get('email', 'N/A')}'")
         return payload
     except jwt.ExpiredSignatureError:
         logger.info("get_refresh_token: Refresh token has expired.")
@@ -406,17 +381,14 @@ async def require_admin(
         )
 
     if not has_perm:
-        logger.warning(
-            f"require_admin: Admin access DENIED for {user_identifier}. Failed provider check."
-        )
+        logger.warning(f"require_admin: Admin access DENIED for {user_identifier}. Failed provider check.")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Administrator privileges are required to access this resource.",
         )
 
     logger.debug(
-        f"require_admin: Admin access GRANTED for user '{user.get('email')}' "
-        f"via {authz.__class__.__name__}."
+        f"require_admin: Admin access GRANTED for user '{user.get('email')}' " f"via {authz.__class__.__name__}."
     )
     return dict(user)
 
@@ -451,9 +423,7 @@ async def require_admin_or_developer(
     )
 
     if is_admin:
-        logger.debug(
-            f"require_admin_or_developer: Admin '{user_email}' granted access to upload apps"
-        )
+        logger.debug(f"require_admin_or_developer: Admin '{user_email}' granted access to upload apps")
         return dict(user)
 
     # Check if user is a developer (has apps:manage_own permission)
@@ -465,16 +435,12 @@ async def require_admin_or_developer(
     )
 
     if is_developer:
-        logger.debug(
-            f"require_admin_or_developer: Developer '{user_email}' granted "
-            f"access to upload experiments"
-        )
+        logger.debug(f"require_admin_or_developer: Developer '{user_email}' granted " f"access to upload experiments")
         return dict(user)
 
     # Neither admin nor developer
     logger.warning(
-        f"require_admin_or_developer: Access DENIED for '{user_email}'. "
-        f"User is not an admin or developer."
+        f"require_admin_or_developer: Access DENIED for '{user_email}'. " f"User is not an admin or developer."
     )
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
@@ -507,9 +473,7 @@ async def get_current_user_or_redirect(
                 detail="Not authenticated. Redirecting to login.",
             )
         except (ValueError, KeyError, AttributeError) as e:
-            logger.exception(
-                f"Failed to generate login redirect URL for route '{login_route_name}'"
-            )
+            logger.exception(f"Failed to generate login redirect URL for route '{login_route_name}'")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Authentication required, but redirect failed.",
@@ -546,9 +510,7 @@ def require_permission(obj: str, act: str, force_login: bool = True):
 
         if not user_email:
             # This should be unreachable if 'anonymous' is the fallback
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated."
-            )
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated.")
 
         # 6. Use the generic, async interface method
         has_perm = await authz.check(
@@ -559,9 +521,7 @@ def require_permission(obj: str, act: str, force_login: bool = True):
         )
 
         if not has_perm:
-            logger.warning(
-                f"require_permission: Access DENIED for user '{user_email}' to ('{obj}', '{act}')."
-            )
+            logger.warning(f"require_permission: Access DENIED for user '{user_email}' to ('{obj}', '{act}').")
 
             # 7. Handle the failure
             if not user:
@@ -575,15 +535,10 @@ def require_permission(obj: str, act: str, force_login: bool = True):
                 # User is logged in but lacks permission
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
-                    detail=(
-                        f"You do not have permission to perform '{act}' "
-                        f"on the resource '{obj}'."
-                    ),
+                    detail=(f"You do not have permission to perform '{act}' " f"on the resource '{obj}'."),
                 )
 
-        logger.debug(
-            f"require_permission: Access GRANTED for user '{user_email}' to ('{obj}', '{act}')."
-        )
+        logger.debug(f"require_permission: Access GRANTED for user '{user_email}' to ('{obj}', '{act}').")
         return user  # Returns the user dict or None
 
     return _check_permission
@@ -635,18 +590,14 @@ async def refresh_access_token(
         if session_mgr:
             session = await session_mgr.get_session_by_refresh_token(old_refresh_jti)
             if not session or not session.get("active"):
-                logger.warning(
-                    f"refresh_access_token: Session not found or inactive for {old_refresh_jti}"
-                )
+                logger.warning(f"refresh_access_token: Session not found or inactive for {old_refresh_jti}")
                 return None
 
             # Validate session fingerprint if enabled
             from .config_helpers import get_session_fingerprinting_config
 
             fingerprinting_config = get_session_fingerprinting_config(request)
-            if fingerprinting_config.get("enabled", True) and fingerprinting_config.get(
-                "validate_on_refresh", True
-            ):
+            if fingerprinting_config.get("enabled", True) and fingerprinting_config.get("validate_on_refresh", True):
                 stored_fingerprint = session.get("session_fingerprint")
                 if stored_fingerprint:
                     from .utils import generate_session_fingerprint
@@ -655,10 +606,7 @@ async def refresh_access_token(
                     if device_id:
                         current_fingerprint = generate_session_fingerprint(request, device_id)
                         if current_fingerprint != stored_fingerprint:
-                            logger.warning(
-                                f"refresh_access_token: Session fingerprint mismatch "
-                                f"for user {user_id}"
-                            )
+                            logger.warning(f"refresh_access_token: Session fingerprint mismatch " f"for user {user_id}")
                             return None
 
         # Prepare user data for new tokens
@@ -688,7 +636,7 @@ async def refresh_access_token(
                 # Get expiry from old token
                 from ..config import REFRESH_TOKEN_TTL
 
-                expires_at = datetime.utcnow() + timedelta(seconds=REFRESH_TOKEN_TTL)
+                expires_at = datetime.now(timezone.utc) + timedelta(seconds=REFRESH_TOKEN_TTL)
                 await blacklist.revoke_token(
                     old_refresh_jti,
                     user_id=user_id,
@@ -707,21 +655,17 @@ async def refresh_access_token(
 
             from .utils import generate_session_fingerprint
 
-            new_fingerprint = (
-                generate_session_fingerprint(request, device_id) if device_id else None
-            )
+            new_fingerprint = generate_session_fingerprint(request, device_id) if device_id else None
 
             if old_refresh_jti and TOKEN_ROTATION_ENABLED:
                 update_data = {
                     "refresh_jti": new_refresh_jti,
-                    "last_seen": datetime.utcnow(),
+                    "last_seen": datetime.now(timezone.utc),
                     "ip_address": ip_address,
                 }
                 if new_fingerprint:
                     update_data["session_fingerprint"] = new_fingerprint
-                await session_mgr.collection.update_one(
-                    {"refresh_jti": old_refresh_jti}, {"$set": update_data}
-                )
+                await session_mgr.collection.update_one({"refresh_jti": old_refresh_jti}, {"$set": update_data})
             else:
                 await session_mgr.create_session(
                     user_id=user_id,

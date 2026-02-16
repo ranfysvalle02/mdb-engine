@@ -30,9 +30,7 @@ class TestSeedInitialData:
         # Mock metadata collection to return no existing seeding
         mock_mongo_collection.find_one = AsyncMock(return_value=None)
         mock_mongo_collection.count_documents = AsyncMock(return_value=0)
-        mock_mongo_collection.insert_many = AsyncMock(
-            return_value=MagicMock(inserted_ids=["id1", "id2"])
-        )
+        mock_mongo_collection.insert_many = AsyncMock(return_value=MagicMock(inserted_ids=["id1", "id2"]))
         mock_mongo_collection.insert_one = AsyncMock(return_value=MagicMock(inserted_id="meta_id"))
 
         initial_data = {
@@ -253,9 +251,7 @@ class TestSeedInitialData:
         assert results["test_collection"] == 1  # Should still return results
 
         # Test ConnectionFailure
-        mock_mongo_collection.update_one = AsyncMock(
-            side_effect=ConnectionFailure("Connection failed")
-        )
+        mock_mongo_collection.update_one = AsyncMock(side_effect=ConnectionFailure("Connection failed"))
         results = await seed_initial_data(mock_db, "test_app", initial_data)
         assert results["test_collection"] == 1
 
