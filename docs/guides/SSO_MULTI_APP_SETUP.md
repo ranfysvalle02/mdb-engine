@@ -1003,8 +1003,8 @@ ws.onopen = () => {
 - ✅ **Secure-by-Default** - Single authentication method, no confusion
 
 **For comprehensive security documentation, see:**
-- [WebSocket Security Guide](./WEBSOCKET_SECURITY_MULTI_APP_SSO.md) - Complete security guide
-- [WebSocket + SSO Multi-App Guide](./WEBSOCKET_SSO_MULTI_APP.md) - Detailed setup guide
+- [WebSocket Security Guide](WEBSOCKET_SECURITY_ELEGANT_SOLUTION.md) - Complete security guide
+- [WebSocket + SSO Multi-App Guide](SSO_MULTI_APP_SETUP.md) - Detailed setup guide
 - [WebSocket Troubleshooting](./WEBSOCKET_TROUBLESHOOTING.md) - Common issues and fixes
 
 ---
@@ -1022,10 +1022,10 @@ ws.onopen = () => {
 
 ## Resources
 
-- [MDB-Engine Documentation](../../README.md)
-- [Manifest Reference](../../MANIFEST_REFERENCE.md)
-- [Architecture Guide](../../ARCHITECTURE.md)
-- [SSO Multi-App Example](../../../examples/advanced/sso-multi-app/README.md)
+- [MDB-Engine Documentation](https://github.com/ranfysvalle02/mdb-engine/blob/main/README.md)
+- [Manifest Reference](../MANIFEST_REFERENCE.md)
+- [Architecture Guide](../ARCHITECTURE.md)
+- [SSO Multi-App Example](https://github.com/ranfysvalle02/mdb-engine/blob/main/examples/advanced/sso-multi-app/README.md)
 
 ---
 
@@ -1033,7 +1033,7 @@ ws.onopen = () => {
 
 For issues or questions:
 - Check [Troubleshooting](#troubleshooting) section
-- Review [MDB-Engine FAQ](../../FAQ.md)
+- Review [MDB-Engine FAQ](../FAQ.md)
 - Open an issue on GitHub
 
 ---

@@ -396,7 +396,7 @@ Access the app at http://localhost:8000/ai-chat (multi-app) or http://localhost:
 
 ### See the Example
 
-- **Full Documentation**: [sso-app-3 README](../../examples/advanced/sso-multi-app/apps/sso-app-3/README.md)
+- **Full Documentation**: [sso-app-3 README](https://github.com/ranfysvalle02/mdb-engine/blob/main/examples/advanced/sso-multi-app/apps/sso-app-3/README.md)
 - **Source Code**: `examples/advanced/sso-multi-app/apps/sso-app-3/web.py`
 - **Manifest**: `examples/advanced/sso-multi-app/apps/sso-app-3/manifest.json`
 - **UI Template**: `examples/advanced/sso-multi-app/apps/sso-app-3/templates/conversation.html`

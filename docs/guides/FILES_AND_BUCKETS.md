@@ -949,13 +949,13 @@ The key to file memory is the **dual-bucket pattern**:
 - All memory types (entities, reflections, predictions) support bucket filtering
 - Vector search intelligently combines scope, group_id, and bucket filters
 
-For a complete implementation example, see the [sso-app-3 example](../../examples/advanced/sso-multi-app/apps/sso-app-3/). The example demonstrates:
+For a complete implementation example, see the [sso-app-3 example](https://github.com/ranfysvalle02/mdb-engine/blob/main/examples/advanced/sso-multi-app/apps/sso-app-3/). The example demonstrates:
 
 - **File Memory**: Document processing with bucket association
 - **Shared Memory**: Team/family memory promotion with bucket filtering (`POST /api/memories/shared/promote`, `GET /api/memories/shared`)
 - **Bucket Filtering**: All Perfect Brain features support bucket filtering
 - **Query-Aware Recall**: Policy-driven memory search with bucket filters (`GET /api/memories/search`)
 
-See the [sso-app-3 README](../../examples/advanced/sso-multi-app/apps/sso-app-3/README.md) for complete API documentation.
+See the [sso-app-3 README](https://github.com/ranfysvalle02/mdb-engine/blob/main/examples/advanced/sso-multi-app/apps/sso-app-3/README.md) for complete API documentation.
 
 For comprehensive documentation on shared memory and perfect brain features, see [MEMORY_SERVICE.md](../MEMORY_SERVICE.md).

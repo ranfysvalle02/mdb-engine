@@ -289,4 +289,4 @@ When data is missing but you can provide defaults:
 ## References
 
 - [Miguel Grinberg's Ultimate Guide to Error Handling in Python](https://miguelgrinberg.com/post/the-ultimate-guide-to-error-handling-in-python)
-- [CONTRIBUTING.md](../../CONTRIBUTING.md) - Project-specific exception handling rules
+- [CONTRIBUTING.md](https://github.com/ranfysvalle02/mdb-engine/blob/main/CONTRIBUTING.md) - Project-specific exception handling rules

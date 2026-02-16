@@ -782,10 +782,11 @@ class EmbeddingService:
                 "metadata": Dict[str, Any]
             }
 
-        Example:
+        Example::
+
             results = await service.process_text("Long document...")
             for result in results:
-                print(f"Chunk {result['chunk_index']}: {result['text'][:50]}...")
+                print(f"Chunk {result['chunk_index']}: {result['text']}")
         """
         # Chunk the text
         chunks = await self.chunk_text(text_content, max_tokens=max_tokens, tokenizer_model=tokenizer_model)

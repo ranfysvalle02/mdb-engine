@@ -14,7 +14,7 @@
 6. [Manifest.json Deep Dive](#manifestjson-deep-dive)
 7. [Scoped Indexes and Data Access](#scoped-indexes-and-data-access)
 8. [Authorization (AuthZ) Out of the Box](#authorization-authz-out-of-the-box)
-9. [Before & After Examples](#before--after-examples)
+9. [Before & After Examples](#before-after-examples)
 10. [Common Migration Patterns](#common-migration-patterns)
 11. [Troubleshooting](#troubleshooting)
 12. [Appendix: Shared Authentication (SSO)](#appendix-shared-authentication-sso)

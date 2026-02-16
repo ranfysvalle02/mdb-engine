@@ -11,7 +11,7 @@
 3. [Core Components Deep Dive](#core-components-deep-dive)
 4. [Data Scoping and Isolation](#data-scoping-and-isolation)
 5. [Manifest System](#manifest-system)
-6. [Authentication & Authorization](#authentication--authorization)
+6. [Authentication & Authorization](#authentication-authorization)
 7. [Index Management](#index-management)
 8. [Memory Service Architecture](#memory-service-architecture)
 9. [Service Initialization](#service-initialization)
@@ -21,8 +21,8 @@
 13. [Multi-App Architecture](#multi-app-architecture)
 14. [Security Architecture](#security-architecture)
 15. [Performance Optimizations](#performance-optimizations)
-16. [Error Handling & Observability](#error-handling--observability)
-17. [Examples & Use Cases](#examples--use-cases)
+16. [Error Handling & Observability](#error-handling-observability)
+17. [Examples & Use Cases](#examples-use-cases)
 18. [Appendix](#appendix)
 
 ---

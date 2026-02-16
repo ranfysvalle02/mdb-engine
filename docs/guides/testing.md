@@ -445,15 +445,15 @@ isort mdb_engine tests scripts
 
 ## Additional Resources
 
-- [tests/README.md](../../tests/README.md) - Test structure and examples
-- [CONTRIBUTING.md](../../CONTRIBUTING.md#testing) - Testing guidelines for contributors
-- [SETUP.md](../../SETUP.md#testing) - Development setup and testing
+- [tests/README.md](https://github.com/ranfysvalle02/mdb-engine/blob/main/tests/README.md) - Test structure and examples
+- [CONTRIBUTING.md](https://github.com/ranfysvalle02/mdb-engine/blob/main/CONTRIBUTING.md#testing) - Testing guidelines for contributors
+- [SETUP.md](https://github.com/ranfysvalle02/mdb-engine/blob/main/SETUP.md#testing) - Development setup and testing
 - [pytest Documentation](https://docs.pytest.org/) - Official pytest docs
 
 ## Questions?
 
 If you have questions about testing:
 1. Check existing test examples in `tests/unit/` and `tests/integration/`
-2. Review [CONTRIBUTING.md](../../CONTRIBUTING.md) for guidelines
+2. Review [CONTRIBUTING.md](https://github.com/ranfysvalle02/mdb-engine/blob/main/CONTRIBUTING.md) for guidelines
 3. Open an issue for discussion
 4. Reach out to maintainers

@@ -14,7 +14,7 @@ Complete guide to diagnosing and fixing CORS (Cross-Origin Resource Sharing) iss
 ## Table of Contents
 
 - [Common CORS Errors](#common-cors-errors)
-- [Wildcard + Credentials Issue](#wildcard--credentials-issue)
+- [Wildcard + Credentials Issue](#wildcard-credentials-issue)
 - [Origin Mismatch Issues](#origin-mismatch-issues)
 - [WebSocket CORS Issues](#websocket-cors-issues)
 - [Multi-App CORS Configuration](#multi-app-cors-configuration)

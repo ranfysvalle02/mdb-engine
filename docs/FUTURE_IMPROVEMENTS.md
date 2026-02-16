@@ -11,21 +11,21 @@
 ## Table of Contents
 
 ### Core Engine Improvements
-1. [Core Engine & Architecture](#core-engine--architecture-improvements)
+1. [Core Engine & Architecture](#core-engine-architecture-improvements)
 2. [Manifest System](#manifest-system-improvements)
-3. [Data Scoping & Isolation](#data-scoping--isolation-improvements)
+3. [Data Scoping & Isolation](#data-scoping-isolation-improvements)
 4. [Index Management](#index-management-improvements)
 5. [Connection Management](#connection-management-improvements)
 6. [Service Initialization](#service-initialization-improvements)
 
 ### Security & Authentication
-7. [Authentication & Authorization](#authentication--authorization-improvements)
+7. [Authentication & Authorization](#authentication-authorization-improvements)
 8. [Security Enhancements](#security-enhancements)
 
 ### Developer Experience
 9. [Developer Experience](#developer-experience-improvements)
-10. [CLI & Tooling](#cli--tooling-improvements)
-11. [Testing & Quality](#testing--quality-improvements)
+10. [CLI & Tooling](#cli-tooling-improvements)
+11. [Testing & Quality](#testing-quality-improvements)
 12. [Documentation](#documentation-improvements)
 
 ### Performance & Scalability
@@ -35,16 +35,16 @@
 ### Advanced Features
 15. [Multi-App Architecture](#multi-app-architecture-improvements)
 16. [WebSocket Enhancements](#websocket-enhancements)
-17. [Observability & Monitoring](#observability--monitoring-improvements)
+17. [Observability & Monitoring](#observability-monitoring-improvements)
 
 ### Memory System (Existing)
-18. [Memory System: Cost & Performance](#memory-system-cost--performance-improvements)
-19. [Memory System: Accuracy & Quality](#memory-system-accuracy--quality-enhancements)
-20. [Memory System: Capacity & Scaling](#memory-system-capacity--scaling-ideas)
-21. [Memory System: Advanced Features](#memory-system-advanced-feature-concepts)
-22. [Memory System: Research & Innovation](#memory-system-research--innovation-areas)
-23. [Memory System: Biological Inspiration](#memory-system-biological-inspiration-ideas)
-24. [Memory System: User Experience](#memory-system-user-experience-enhancements)
+18. [Memory System: Cost & Performance](#memory-system-cost-performance-improvements)
+19. [Memory System: Accuracy & Quality](#accuracy-quality-enhancements)
+20. [Memory System: Capacity & Scaling](#capacity-scaling-ideas)
+21. [Memory System: Advanced Features](#advanced-feature-concepts)
+22. [Memory System: Research & Innovation](#research-innovation-areas)
+23. [Memory System: Biological Inspiration](#biological-inspiration-ideas)
+24. [Memory System: User Experience](#user-experience-enhancements)
 
 ---
 

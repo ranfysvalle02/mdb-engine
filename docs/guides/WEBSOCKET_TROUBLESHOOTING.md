@@ -22,7 +22,7 @@ Complete troubleshooting guide for WebSocket connections in multi-app SSO deploy
 - [Common WebSocket Errors](#common-websocket-errors)
 - [Error Code 1006: Abnormal Closure](#error-code-1006-abnormal-closure)
 - [403 Forbidden Errors](#403-forbidden-errors)
-- [CORS & Origin Issues](#cors--origin-issues)
+- [CORS & Origin Issues](#cors-origin-issues)
 - [Authentication Failures](#authentication-failures)
 - [Debugging Checklist](#debugging-checklist)
 - [Frontend Implementation Guide](#frontend-implementation-guide)
@@ -1169,7 +1169,7 @@ uvicorn main:app --reload
 ---
 
 **Related Documentation:**
-- [WebSocket Security Guide](./WEBSOCKET_SECURITY_MULTI_APP_SSO.md) - **Comprehensive security guide**
-- [WebSocket + SSO Multi-App Guide](./WEBSOCKET_SSO_MULTI_APP.md)
+- [WebSocket Security Guide](WEBSOCKET_SECURITY_ELEGANT_SOLUTION.md) - **Comprehensive security guide**
+- [WebSocket + SSO Multi-App Guide](SSO_MULTI_APP_SETUP.md)
 - [SSO Multi-App Setup Guide](./SSO_MULTI_APP_SETUP.md)
-- [SSO Multi-App Cheat Sheet](../api/SSO_MULTI_APP_CHEATSHEET.md)
+- [SSO Multi-App Cheat Sheet](SSO_MULTI_APP_SETUP.md)

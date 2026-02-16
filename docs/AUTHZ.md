@@ -1043,7 +1043,7 @@ async def require_admin_or_developer(...) -> Dict[str, Any]
 
 ## Related Documentation
 
-- [Authentication & Authorization README](../mdb_engine/auth/README.md) - Detailed auth module documentation
+- [Authentication & Authorization README](https://github.com/ranfysvalle02/mdb-engine/blob/main/mdb_engine/auth/README.md) - Detailed auth module documentation
 - [Quick Start Guide](QUICK_START.md) - Getting started with MDB_ENGINE
 
 ## Examples

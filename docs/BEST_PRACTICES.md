@@ -21,7 +21,7 @@ This guide covers best practices for building applications with `mdb-engine`, fo
 1. [Dependency Injection](#dependency-injection)
 2. [Database Access](#database-access)
 3. [AI/ML Services](#aiml-services)
-4. [Authentication & Authorization](#authentication--authorization)
+4. [Authentication & Authorization](#authentication-authorization)
 5. [Common Patterns](#common-patterns)
 6. [Anti-Patterns to Avoid](#anti-patterns-to-avoid)
 7. [Migration from Old Patterns](#migration-from-old-patterns)

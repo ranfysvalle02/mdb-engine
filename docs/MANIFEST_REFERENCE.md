@@ -12,7 +12,7 @@ This document provides a comprehensive guide to every field available in `manife
 - [App Identity](#app-identity)
 - [Data Access](#data-access)
 - [Index Management](#index-management)
-- [Authentication & Authorization](#authentication--authorization)
+- [Authentication & Authorization](#authentication-authorization)
 - [Token Management](#token-management)
 - [AI Services](#ai-services)
   - [Embedding Service](#embedding-service)
@@ -869,8 +869,8 @@ const ws = new WebSocket(`wss://api.example.com/app1/ws?ticket=${ticket}`);
 - ✅ Elegant multi-app support (parent app manages security, configurable per-endpoint)
 
 **See Also:**
-- [WebSocket Security Guide](../guides/WEBSOCKET_SECURITY_MULTI_APP_SSO.md) - Comprehensive security documentation
-- [WebSocket + SSO Multi-App Guide](../guides/WEBSOCKET_SSO_MULTI_APP.md) - Multi-app setup guide
+- [WebSocket Security Guide](guides/WEBSOCKET_SECURITY_ELEGANT_SOLUTION.md) - Comprehensive security documentation
+- [WebSocket + SSO Multi-App Guide](guides/SSO_MULTI_APP_SETUP.md) - Multi-app setup guide
 
 ---
 
@@ -934,8 +934,8 @@ Browsers **reject** the combination of `allow_origins: ["*"]` with `allow_creden
 MDB Engine validates this configuration and will raise a `ValueError` during app initialization if detected.
 
 **See Also:**
-- [CORS Troubleshooting Guide](../guides/CORS_TROUBLESHOOTING.md) - Comprehensive CORS troubleshooting
-- [WebSocket Troubleshooting Guide](../guides/WEBSOCKET_TROUBLESHOOTING.md) - WebSocket-specific CORS issues
+- [CORS Troubleshooting Guide](guides/CORS_TROUBLESHOOTING.md) - Comprehensive CORS troubleshooting
+- [WebSocket Troubleshooting Guide](guides/WEBSOCKET_TROUBLESHOOTING.md) - WebSocket-specific CORS issues
 
 ---
 

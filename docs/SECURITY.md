@@ -1181,8 +1181,8 @@ This helps detect:
 7. **Test Configuration** - Verify CORS works before deploying
 
 **See Also:**
-- [CORS Troubleshooting Guide](../guides/CORS_TROUBLESHOOTING.md) - Comprehensive CORS troubleshooting
-- [Manifest Reference](../MANIFEST_REFERENCE.md#cors) - CORS configuration reference
+- [CORS Troubleshooting Guide](guides/CORS_TROUBLESHOOTING.md) - Comprehensive CORS troubleshooting
+- [Manifest Reference](MANIFEST_REFERENCE.md#cors) - CORS configuration reference
 
 ## Security Best Practices
 
@@ -2022,7 +2022,7 @@ export_file = await engine.export_user_data_portable(
 
 If you're interested in contributing to security enhancements, please:
 
-1. Review the [Contributing Guide](../CONTRIBUTING.md)
+1. Review the [Contributing Guide](https://github.com/ranfysvalle02/mdb-engine/blob/main/CONTRIBUTING.md)
 2. Check existing issues and pull requests
 3. Discuss your proposal in an issue before starting work
 4. Follow security best practices in your implementation
@@ -2035,7 +2035,7 @@ The MongoDB Engine provides comprehensive security features designed to protect 
 For questions or security concerns, please:
 - Open an issue on GitHub
 - Contact the security team
-- Review the [Security Policy](../SECURITY.md)
+- Review the [Security Policy](SECURITY.md)
 
 ## Appendix A: Security Testing
 

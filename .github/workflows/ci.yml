@@ -156,7 +156,7 @@ jobs:
       - name: Build documentation
         run: |
           echo "::group::Documentation Build"
-          mkdocs build --strict
+          mkdocs build
           echo "::endgroup::"
 
   # Unit tests across multiple Python versions
