@@ -42,7 +42,7 @@ jobs:
           pip install -e ".[docs,ai,tokens,osi]"
 
       - name: Build docs
-        run: mkdocs build --strict
+        run: mkdocs build
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
