@@ -25,7 +25,12 @@ if TYPE_CHECKING:
 try:
     from openai import OpenAIError
 except ImportError:
-    OpenAIError = RuntimeError
+
+    class OpenAIError(Exception):  # type: ignore[no-redef]
+        """Placeholder when openai is not installed — will never match engine errors."""
+
+        pass
+
 
 logger = logging.getLogger(__name__)
 

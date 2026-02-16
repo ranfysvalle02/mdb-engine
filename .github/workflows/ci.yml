@@ -316,7 +316,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip setuptools wheel
-          pip install -e ".[test,dev]"
+          pip install -e ".[test,dev,ai]"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3

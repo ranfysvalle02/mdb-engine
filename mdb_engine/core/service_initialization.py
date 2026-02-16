@@ -31,7 +31,11 @@ contextual_logger = get_contextual_logger(__name__)
 try:
     from openai import OpenAIError
 except ImportError:
-    OpenAIError = RuntimeError
+
+    class OpenAIError(Exception):  # type: ignore[no-redef]
+        """Placeholder when openai is not installed — will never match engine errors."""
+
+        pass
 
 
 class ServiceInitializer:
