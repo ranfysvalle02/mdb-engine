@@ -35,8 +35,6 @@ except ImportError:
     class OpenAIError(Exception):  # type: ignore[no-redef]
         """Placeholder when openai is not installed — will never match engine errors."""
 
-        pass
-
 
 class ServiceInitializer:
     """Service initializer for MDB-Engine optional services."""
