@@ -284,6 +284,10 @@ class TestGetLLMClient:
     """Tests for get_llm_client dependency."""
 
     @pytest.mark.asyncio
+    @pytest.mark.skipif(
+        not __import__("importlib").util.find_spec("openai"),
+        reason="openai package not installed",
+    )
     async def test_get_llm_client_azure(self, mock_request):
         """Test Azure OpenAI client creation."""
         with patch.dict(
@@ -303,6 +307,10 @@ class TestGetLLMClient:
                 mock_azure.assert_called_once()
 
     @pytest.mark.asyncio
+    @pytest.mark.skipif(
+        not __import__("importlib").util.find_spec("openai"),
+        reason="openai package not installed",
+    )
     async def test_get_llm_client_openai(self, mock_request):
         """Test standard OpenAI client creation."""
         with patch.dict(
