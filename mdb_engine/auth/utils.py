@@ -1,0 +1,804 @@
+"""
+Authentication Utility Functions
+
+High-level utility functions for common authentication flows.
+
+This module is part of MDB_ENGINE - MongoDB Engine.
+"""
+
+import hashlib
+import logging
+import os
+import re
+import uuid
+from datetime import datetime, timezone
+from typing import Any
+
+import bcrypt
+from fastapi import Request, Response
+from fastapi.responses import JSONResponse, RedirectResponse
+
+from .cookie_utils import clear_auth_cookies, set_auth_cookies
+from .dependencies import SECRET_KEY, get_session_manager, get_token_blacklist
+from .jwt import generate_token_pair
+
+logger = logging.getLogger(__name__)
+
+
+def _detect_browser(user_agent: str) -> str:
+    """Detect browser from user agent string."""
+    if not user_agent:
+        return "unknown"
+
+    ua_lower = user_agent.lower()
+    if "chrome" in ua_lower and "edg" not in ua_lower:
+        return "chrome"
+    if "firefox" in ua_lower:
+        return "firefox"
+    if "safari" in ua_lower and "chrome" not in ua_lower:
+        return "safari"
+    if "edg" in ua_lower:
+        return "edge"
+    if "opera" in ua_lower:
+        return "opera"
+    return "unknown"
+
+
+def _detect_os_and_device_type(user_agent: str) -> tuple[str, str]:
+    """Detect OS and device type from user agent string."""
+    if not user_agent:
+        return "unknown", "desktop"
+
+    ua_lower = user_agent.lower()
+    if "windows" in ua_lower:
+        return "windows", "desktop"
+    if "mac" in ua_lower or "darwin" in ua_lower:
+        return "macos", "desktop"
+    if "linux" in ua_lower:
+        return "linux", "desktop"
+    if "android" in ua_lower:
+        return "android", "mobile"
+    if "iphone" in ua_lower:
+        return "ios", "mobile"
+    if "ipad" in ua_lower:
+        return "ios", "tablet"
+    return "unknown", "desktop"
+
+
+def get_device_info(request: Request) -> dict[str, Any]:
+    """
+    Extract device information from request.
+
+    Args:
+        request: FastAPI Request object
+
+    Returns:
+        Dictionary with device_id, user_agent, browser, OS, IP, device_type
+    """
+    user_agent = request.headers.get("user-agent", "")
+    ip_address = request.client.host if request.client else None
+
+    # Generate or get device ID from cookie
+    device_id = request.cookies.get("device_id")
+    if not device_id:
+        device_id = str(uuid.uuid4())
+
+    browser = _detect_browser(user_agent)
+    os, device_type = _detect_os_and_device_type(user_agent)
+
+    return {
+        "device_id": device_id,
+        "user_agent": user_agent,
+        "browser": browser,
+        "os": os,
+        "ip_address": ip_address,
+        "device_type": device_type,
+    }
+
+
+def calculate_password_entropy(password: str) -> float:
+    """
+    Calculate the entropy of a password in bits.
+
+    Entropy measures password randomness/unpredictability.
+    Higher entropy = more secure password.
+
+    Character set sizes:
+    - Lowercase: 26
+    - Uppercase: 26
+    - Digits: 10
+    - Special: ~32
+
+    Formula: entropy = length * log2(character_set_size)
+
+    Args:
+        password: Password to calculate entropy for
+
+    Returns:
+        Entropy in bits (float)
+    """
+    import math
+
+    if not password:
+        return 0.0
+
+    # Determine character set size based on what's used
+    char_set_size = 0
+
+    if re.search(r"[a-z]", password):
+        char_set_size += 26
+    if re.search(r"[A-Z]", password):
+        char_set_size += 26
+    if re.search(r"\d", password):
+        char_set_size += 10
+    if re.search(r'[!@#$%^&*(),.?":{}|<>\[\]\\;\'`~_+=\-/]', password):
+        char_set_size += 32
+    if re.search(r"\s", password):
+        char_set_size += 1
+
+    if char_set_size == 0:
+        # Fallback for Unicode or other characters
+        char_set_size = 94  # Printable ASCII assumption
+
+    # Entropy = length * log2(char_set_size)
+    entropy = len(password) * math.log2(char_set_size)
+
+    return round(entropy, 2)
+
+
+def is_common_password(password: str) -> bool:
+    """
+    Check if password is in the common passwords list.
+
+    Uses a bundled list of the top 10,000 most common passwords.
+    Falls back gracefully if the file is not available.
+
+    Args:
+        password: Password to check
+
+    Returns:
+        True if password is common, False otherwise
+    """
+    try:
+        # Get the path to the common passwords file
+        resources_dir = os.path.join(os.path.dirname(__file__), "resources")
+        common_passwords_path = os.path.join(resources_dir, "common_passwords.txt")
+
+        if not os.path.exists(common_passwords_path):
+            logger.debug("Common passwords file not found, skipping check")
+            return False
+
+        # Read and check (case-insensitive)
+        password_lower = password.lower()
+        with open(common_passwords_path, encoding="utf-8") as f:
+            for line in f:
+                if line.strip().lower() == password_lower:
+                    return True
+
+        return False
+    except OSError as e:
+        logger.warning(f"Error checking common passwords: {e}")
+        return False
+
+
+async def check_password_breach(password: str) -> bool:
+    """
+    Check if password has been exposed in known data breaches.
+
+    Uses the HaveIBeenPwned API with k-anonymity (only sends first 5 chars of hash).
+    This is privacy-preserving - the full password hash is never sent.
+
+    Requires network access. Returns False (not breached) if check fails.
+
+    Args:
+        password: Password to check
+
+    Returns:
+        True if password was found in breaches, False otherwise
+    """
+    try:
+        import hashlib
+
+        import httpx
+
+        # Hash the password
+        sha1_hash = hashlib.sha1(password.encode()).hexdigest().upper()
+        prefix = sha1_hash[:5]
+        suffix = sha1_hash[5:]
+
+        # Query HIBP API (k-anonymity: only send first 5 chars)
+        url = f"https://api.pwnedpasswords.com/range/{prefix}"
+
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+
+        # Check if our suffix is in the response
+        for line in response.text.splitlines():
+            hash_suffix, count = line.split(":")
+            if hash_suffix == suffix:
+                logger.debug(f"Password found in {count} breaches")
+                return True
+
+        return False
+
+    except ImportError:
+        logger.debug("httpx not available, skipping breach check")
+        return False
+    except httpx.HTTPError as e:
+        logger.warning(f"Error checking password breaches: {e}")
+        return False
+    except (TimeoutError, ConnectionError, OSError) as e:
+        logger.warning(f"Error checking password breaches: {e}")
+        return False
+
+
+def validate_password_strength(
+    password: str,
+    min_length: int | None = None,
+    require_uppercase: bool | None = None,
+    require_lowercase: bool | None = None,
+    require_numbers: bool | None = None,
+    require_special: bool | None = None,
+    min_entropy_bits: int | None = None,
+    check_common_passwords: bool | None = None,
+    config: dict[str, Any] | None = None,
+) -> tuple[bool, list[str]]:
+    """
+    Validate password strength with configurable rules.
+
+    Args:
+        password: Password to validate
+        min_length: Minimum password length (default: from config or 8)
+        require_uppercase: Require uppercase letters (default: from config or True)
+        require_lowercase: Require lowercase letters (default: from config or True)
+        require_numbers: Require numbers (default: from config or True)
+        require_special: Require special characters (default: from config or False)
+        min_entropy_bits: Minimum entropy in bits (default: from config or 0)
+        check_common_passwords: Check against common passwords (default: from config or False)
+        config: Optional password_policy config dict from manifest
+
+    Returns:
+        Tuple of (is_valid, list_of_errors)
+    """
+    errors = []
+
+    if not password:
+        return False, ["Password is required"]
+
+    if config:
+        min_length = min_length if min_length is not None else config.get("min_length", 8)
+        require_uppercase = (
+            require_uppercase if require_uppercase is not None else config.get("require_uppercase", True)
+        )
+        require_lowercase = (
+            require_lowercase if require_lowercase is not None else config.get("require_lowercase", True)
+        )
+        require_numbers = require_numbers if require_numbers is not None else config.get("require_numbers", True)
+        require_special = require_special if require_special is not None else config.get("require_special", False)
+        min_entropy_bits = min_entropy_bits if min_entropy_bits is not None else config.get("min_entropy_bits", 0)
+        check_common_passwords = (
+            check_common_passwords
+            if check_common_passwords is not None
+            else config.get("check_common_passwords", False)
+        )
+    else:
+        min_length = min_length if min_length is not None else 8
+        require_uppercase = require_uppercase if require_uppercase is not None else True
+        require_lowercase = require_lowercase if require_lowercase is not None else True
+        require_numbers = require_numbers if require_numbers is not None else True
+        require_special = require_special if require_special is not None else False
+        min_entropy_bits = min_entropy_bits if min_entropy_bits is not None else 0
+        check_common_passwords = check_common_passwords if check_common_passwords is not None else False
+
+    if len(password) < min_length:
+        errors.append(f"Password must be at least {min_length} characters long")
+
+    if require_uppercase and not re.search(r"[A-Z]", password):
+        errors.append("Password must contain at least one uppercase letter")
+
+    if require_lowercase and not re.search(r"[a-z]", password):
+        errors.append("Password must contain at least one lowercase letter")
+
+    if require_numbers and not re.search(r"\d", password):
+        errors.append("Password must contain at least one number")
+
+    if require_special and not re.search(r'[!@#$%^&*(),.?":{}|<>]', password):
+        errors.append("Password must contain at least one special character")
+
+    # Entropy check
+    if min_entropy_bits and min_entropy_bits > 0:
+        entropy = calculate_password_entropy(password)
+        if entropy < min_entropy_bits:
+            errors.append(f"Password is too weak (entropy: {entropy:.0f} bits, " f"required: {min_entropy_bits} bits)")
+
+    # Common password check
+    if check_common_passwords:
+        if is_common_password(password):
+            errors.append("Password is too common - please choose a unique password")
+
+    return len(errors) == 0, errors
+
+
+async def validate_password_strength_async(
+    password: str,
+    config: dict[str, Any] | None = None,
+    check_breaches: bool | None = None,
+) -> tuple[bool, list[str]]:
+    """
+    Async version of validate_password_strength with breach checking.
+
+    This performs all synchronous checks, plus an optional async breach
+    check against HaveIBeenPwned.
+
+    Args:
+        password: Password to validate
+        config: Optional password_policy config dict from manifest
+        check_breaches: Check against HIBP breach database (default: from config or False)
+
+    Returns:
+        Tuple of (is_valid, list_of_errors)
+    """
+    # First, run sync validation
+    is_valid, errors = validate_password_strength(password, config=config)
+
+    # Determine if we should check breaches
+    if check_breaches is None and config:
+        check_breaches = config.get("check_breaches", False)
+    elif check_breaches is None:
+        check_breaches = False
+
+    # Async breach check
+    if check_breaches:
+        if await check_password_breach(password):
+            errors.append("Password has been exposed in a data breach - " "please choose a different password")
+            is_valid = False
+
+    return is_valid, errors
+
+
+def generate_session_fingerprint(request: Request, device_id: str) -> str:
+    """
+    Generate a session fingerprint from request characteristics.
+
+    Fingerprint is a hash of user-agent, IP address, device ID, and accept-language.
+    Used to detect session hijacking and unauthorized access.
+
+    Args:
+        request: FastAPI Request object
+        device_id: Device identifier
+
+    Returns:
+        SHA256 hash of fingerprint components as hex string
+    """
+    components = [
+        request.headers.get("user-agent", ""),
+        request.client.host if request.client else "",
+        device_id,
+        request.headers.get("accept-language", ""),
+    ]
+    fingerprint_string = "|".join(components)
+    return hashlib.sha256(fingerprint_string.encode()).hexdigest()
+
+
+async def login_user(
+    request: Request,
+    email: str,
+    password: str,
+    db,
+    config: dict[str, Any] | None = None,
+    remember_me: bool = False,
+    redirect_url: str | None = None,
+) -> dict[str, Any]:
+    """
+    Handle user login with automatic token generation and cookie setting.
+
+    Args:
+        request: FastAPI Request object
+        email: User email
+        password: User password
+        db: Database instance (top-level or app-specific)
+        config: Optional token_management config from manifest
+        remember_me: If True, extends token TTL (default: False)
+        redirect_url: Optional redirect URL after login (default: "/dashboard")
+
+    Returns:
+        Dictionary with:
+        - success: bool
+        - user: user dict if successful
+        - response: Response object with cookies set (if successful)
+        - error: error message (if failed)
+    """
+    try:
+        # Validate email format
+        if not email or "@" not in email:
+            return {"success": False, "error": "Invalid email format"}
+
+        # Find user by email
+        user = await db.users.find_one({"email": email})
+
+        if not user:
+            return {"success": False, "error": "Invalid email or password"}
+
+        # Verify password
+        password_hash = user.get("password_hash") or user.get("password")
+        if not password_hash:
+            return {"success": False, "error": "Invalid email or password"}
+
+        # Check password (bcrypt only - plain text support removed for security)
+        password_valid = False
+        if isinstance(password_hash, bytes) or (isinstance(password_hash, str) and password_hash.startswith("$2b$")):
+            # Bcrypt hash
+            if isinstance(password_hash, str):
+                password_hash = password_hash.encode("utf-8")
+            if isinstance(password, str):
+                password_bytes = password.encode("utf-8")
+            else:
+                password_bytes = password
+
+            try:
+                password_valid = bcrypt.checkpw(password_bytes, password_hash)
+            except (ValueError, TypeError, AttributeError) as e:
+                logger.debug(f"Bcrypt check failed: {e}")
+                password_valid = False
+        else:
+            # Password is not bcrypt hashed - reject for security
+            logger.warning(f"User {email} has non-bcrypt password hash - password verification rejected")
+            password_valid = False
+
+        if not password_valid:
+            return {"success": False, "error": "Invalid email or password"}
+
+        # Get device info
+        device_info = get_device_info(request)
+
+        # Prepare user data for token
+        user_data = {
+            "user_id": str(user["_id"]),
+            "email": user["email"],
+        }
+
+        # Add role if present
+        if "role" in user:
+            user_data["role"] = user["role"]
+
+        # Get token TTLs from config
+        access_token_ttl = None
+        refresh_token_ttl = None
+        if config:
+            access_token_ttl = config.get("access_token_ttl")
+            refresh_token_ttl = config.get("refresh_token_ttl")
+            if remember_me:
+                # Extend refresh token TTL for remember me
+                refresh_token_ttl = refresh_token_ttl * 2 if refresh_token_ttl else None
+
+        # Generate token pair
+        access_token, refresh_token, token_metadata = generate_token_pair(
+            user_data,
+            str(SECRET_KEY),
+            device_info=device_info,
+            access_token_ttl=access_token_ttl,
+            refresh_token_ttl=refresh_token_ttl,
+        )
+
+        # Create session if session manager available
+        session_mgr = await get_session_manager(request)
+        if session_mgr:
+            await session_mgr.create_session(
+                user_id=user_data["email"],
+                device_id=device_info["device_id"],
+                refresh_jti=token_metadata.get("refresh_jti"),
+                device_info=device_info,
+                ip_address=device_info.get("ip_address"),
+            )
+
+        # Generate WebSocket session key if WebSocket session manager available
+        websocket_session_key = None
+        try:
+            # Try to get WebSocket session manager from app state
+            app = getattr(request, "app", None)
+            if app:
+                websocket_session_manager = getattr(app.state, "websocket_session_manager", None)
+                if websocket_session_manager:
+                    # Get app slug from request state if available
+                    app_slug = getattr(request.state, "app_slug", None)
+                    websocket_session_key = await websocket_session_manager.create_session(
+                        user_id=str(user["_id"]),
+                        user_email=user["email"],
+                        app_slug=app_slug,
+                    )
+                    logger.debug(f"Generated WebSocket session key for user '{user['email']}' " f"(app: {app_slug})")
+        except (ValueError, TypeError, AttributeError, RuntimeError) as e:
+            # Log but don't fail login if WebSocket session generation fails
+            logger.warning(f"Failed to generate WebSocket session key during login: {e}")
+
+        # Create response
+        response_data = {
+            "success": True,
+            "user": {"email": user["email"], "user_id": str(user["_id"])},
+        }
+        if websocket_session_key:
+            response_data["websocket_session_key"] = websocket_session_key
+
+        if redirect_url:
+            response = RedirectResponse(url=redirect_url, status_code=302)
+        else:
+            response = JSONResponse(response_data)
+
+        # Set cookies
+        set_auth_cookies(
+            response,
+            access_token,
+            refresh_token,
+            request=request,
+            config=config,
+            access_token_ttl=access_token_ttl,
+            refresh_token_ttl=refresh_token_ttl,
+        )
+
+        # Set device_id cookie
+        response.set_cookie(
+            key="device_id",
+            value=device_info["device_id"],
+            max_age=31536000,  # 1 year
+            httponly=False,  # Allow JS access for device tracking
+            secure=request.url.scheme == "https" if request else False,
+            samesite="lax",
+        )
+
+        return {
+            "success": True,
+            "user": user,
+            "response": response,
+            "token_metadata": token_metadata,
+        }
+
+    except (
+        ValueError,
+        TypeError,
+        AttributeError,
+        KeyError,
+        RuntimeError,
+        ConnectionError,
+    ) as e:
+        logger.error(f"Error in login_user: {e}", exc_info=True)
+        return {"success": False, "error": "Login failed. Please try again."}
+
+
+def _validate_email_format(email: str) -> bool:
+    """Validate basic email format."""
+    return bool(email and "@" in email and "." in email)
+
+
+def _get_password_policy_from_config(request: Request, config: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Get password policy from config or request."""
+    if config:
+        security = config.get("security", {})
+        return security.get("password_policy")
+    if hasattr(request, "app"):
+        from .config_helpers import get_password_policy
+
+        return get_password_policy(request)
+    return None
+
+
+async def _create_user_document(email: str, password: str, extra_data: dict[str, Any] | None) -> dict[str, Any]:
+    """Create user document with hashed password."""
+    password_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt())
+    user_doc = {
+        "email": email,
+        "password_hash": password_hash,
+        "role": "user",
+        "date_created": datetime.now(timezone.utc),
+    }
+    if extra_data:
+        user_doc.update(extra_data)
+    return user_doc
+
+
+def _create_registration_response(user_doc: dict[str, Any], redirect_url: str | None) -> Response:
+    """Create response for registration."""
+    if redirect_url:
+        return RedirectResponse(url=redirect_url, status_code=302)
+    return JSONResponse(
+        {
+            "success": True,
+            "user": {
+                "email": user_doc["email"],
+                "user_id": str(user_doc["_id"]),
+            },
+        }
+    )
+
+
+async def register_user(
+    request: Request,
+    email: str,
+    password: str,
+    db,
+    config: dict[str, Any] | None = None,
+    extra_data: dict[str, Any] | None = None,
+    redirect_url: str | None = None,
+) -> dict[str, Any]:
+    """
+    Handle user registration with automatic token generation.
+
+    Args:
+        request: FastAPI Request object
+        email: User email
+        password: User password
+        db: Database instance
+        config: Optional token_management config from manifest
+        extra_data: Optional extra user data to store
+        redirect_url: Optional redirect URL after registration
+
+    Returns:
+        Dictionary with success, user, response, or error
+    """
+    try:
+        if not _validate_email_format(email):
+            return {"success": False, "error": "Invalid email format"}
+
+        password_policy = _get_password_policy_from_config(request, config)
+        is_valid, errors = validate_password_strength(password, config=password_policy)
+        if not is_valid:
+            return {"success": False, "error": "; ".join(errors)}
+
+        existing = await db.users.find_one({"email": email})
+        if existing:
+            return {"success": False, "error": "User with this email already exists"}
+
+        user_doc = await _create_user_document(email, password, extra_data)
+        result = await db.users.insert_one(user_doc)
+        user_doc["_id"] = result.inserted_id
+
+        device_info = get_device_info(request)
+        user_data = {
+            "user_id": str(user_doc["_id"]),
+            "email": user_doc["email"],
+            "role": user_doc.get("role", "user"),
+        }
+
+        access_token, refresh_token, token_metadata = generate_token_pair(
+            user_data, str(SECRET_KEY), device_info=device_info
+        )
+
+        session_mgr = await get_session_manager(request)
+        if session_mgr:
+            await session_mgr.create_session(
+                user_id=user_data["email"],
+                device_id=device_info["device_id"],
+                refresh_jti=token_metadata.get("refresh_jti"),
+                device_info=device_info,
+                ip_address=device_info.get("ip_address"),
+            )
+
+        response = _create_registration_response(user_doc, redirect_url)
+        set_auth_cookies(response, access_token, refresh_token, request=request, config=config)
+
+        response.set_cookie(
+            key="device_id",
+            value=device_info["device_id"],
+            max_age=31536000,
+            httponly=False,
+            secure=request.url.scheme == "https" if request else False,
+            samesite="lax",
+        )
+
+        return {
+            "success": True,
+            "user": user_doc,
+            "response": response,
+            "token_metadata": token_metadata,
+        }
+
+    except (
+        ValueError,
+        TypeError,
+        AttributeError,
+        KeyError,
+        RuntimeError,
+        ConnectionError,
+    ) as e:
+        logger.error(f"Error in register_user: {e}", exc_info=True)
+        return {"success": False, "error": "Registration failed. Please try again."}
+
+
+async def _get_user_id_from_request(request: Request, user_id: str | None) -> str | None:
+    """Extract user_id from request if not provided."""
+    if user_id:
+        return user_id
+
+    from .dependencies import get_current_user_from_request
+
+    user = await get_current_user_from_request(request)
+    if user:
+        return user.get("email") or user.get("user_id")
+    return None
+
+
+async def _revoke_token_from_cookie(
+    request: Request,
+    cookie_name: str,
+    blacklist: Any,
+    user_id: str,
+    reason: str = "logout",
+) -> None:
+    """Revoke a token from a cookie if present."""
+    token = request.cookies.get(cookie_name)
+    if not token:
+        return
+
+    from .jwt import extract_token_metadata
+
+    metadata = extract_token_metadata(token, str(SECRET_KEY))
+    if metadata:
+        jti = metadata.get("jti")
+        if jti:
+            await blacklist.revoke_token(jti, user_id=user_id, reason=reason)
+
+
+async def _revoke_all_tokens(request: Request, user_id: str) -> None:
+    """Revoke all tokens (access and refresh) for a user."""
+    blacklist = await get_token_blacklist(request)
+    if not blacklist:
+        return
+
+    await _revoke_token_from_cookie(request, "token", blacklist, user_id)
+    await _revoke_token_from_cookie(request, "refresh_token", blacklist, user_id)
+
+
+async def _revoke_session(request: Request) -> None:
+    """Revoke session using refresh token."""
+    session_mgr = await get_session_manager(request)
+    if not session_mgr:
+        return
+
+    refresh_token = request.cookies.get("refresh_token")
+    if not refresh_token:
+        return
+
+    from .jwt import extract_token_metadata
+
+    metadata = extract_token_metadata(refresh_token, str(SECRET_KEY))
+    if metadata:
+        refresh_jti = metadata.get("jti")
+        if refresh_jti:
+            await session_mgr.revoke_session_by_refresh_token(refresh_jti)
+
+
+async def logout_user(request: Request, response: Response, user_id: str | None = None) -> Response:
+    """
+    Handle user logout with token revocation and cookie clearing.
+
+    Args:
+        request: FastAPI Request object
+        response: Response object to modify
+        user_id: Optional user ID (extracted from token if not provided)
+
+    Returns:
+        Response with cleared cookies
+    """
+    try:
+        user_id = await _get_user_id_from_request(request, user_id)
+
+        if user_id:
+            await _revoke_all_tokens(request, user_id)
+
+        await _revoke_session(request)
+        clear_auth_cookies(response, request)
+
+        return response
+
+    except (
+        ValueError,
+        TypeError,
+        AttributeError,
+        KeyError,
+        RuntimeError,
+        ConnectionError,
+    ) as e:
+        logger.error(f"Error in logout_user: {e}", exc_info=True)
+        # Still clear cookies even if revocation fails
+        clear_auth_cookies(response, request)
+        return response

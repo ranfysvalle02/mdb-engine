@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+
+{% block title %}Register - GDPR Demo{% endblock %}
+
+{% block content %}
+<div style="max-width: 400px; margin: 60px auto;">
+    <div class="card">
+        <h2 style="margin-bottom: 10px;">Register</h2>
+        <p style="opacity: 0.8; margin-bottom: 20px; font-size: 14px;">
+            Create a new account
+        </p>
+
+        <form method="POST" action="/register">
+            <div class="form-group">
+                <label for="name">Name</label>
+                <input type="text" id="name" name="name" required>
+            </div>
+
+            <div class="form-group">
+                <label for="email">Email</label>
+                <input type="email" id="email" name="email" required>
+            </div>
+
+            <div class="form-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password" required minlength="8">
+            </div>
+
+            <button type="submit" class="btn" style="width: 100%;">Register</button>
+        </form>
+
+        <div style="margin-top: 20px; text-align: center; padding-top: 20px; border-top: 1px solid var(--mongodb-border);">
+            <p style="font-size: 14px; opacity: 0.8;">Already have an account?</p>
+            <a href="/login" class="btn btn-secondary" style="margin-top: 10px; display: inline-block;">Login</a>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+
+{% block title %}Login - SSO Auth Hub{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>Login to SSO Auth Hub</h2>
+    <p style="color: var(--muted); margin-bottom: 1.5rem;">Login here to access all SSO apps via SSO</p>
+    
+    <div id="msg"></div>
+    
+    <form id="loginForm" onsubmit="login(event)">
+        <div class="form-group">
+            <label for="email">Email</label>
+            <input type="email" id="email" name="email" required>
+        </div>
+        
+        <div class="form-group">
+            <label for="password">Password</label>
+            <input type="password" id="password" name="password" required>
+        </div>
+        
+        <button type="submit" class="btn btn-primary">Login</button>
+    </form>
+    
+    <p style="margin-top: 1rem; color: var(--muted);">
+        Don't have an account? <a href="{{ base_path }}/register" style="color: var(--accent);">Register here</a>
+    </p>
+</div>
+
+<div class="card">
+    <h3>SSO Apps</h3>
+    <p style="color: var(--muted); margin-bottom: 1rem;">After logging in, you can access:</p>
+    <ul style="list-style: none; padding: 0;">
+        {% for app_slug in sso_apps %}
+        <li style="padding: 0.5rem 0;"><i class="fas fa-link" style="color: var(--accent);"></i> <a href="/{{ app_slug }}" style="color: var(--accent);">{{ app_slug }}</a></li>
+        {% endfor %}
+    </ul>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+async function login(event) {
+    event.preventDefault();
+    show('Logging in...', 'info');
+    
+    const form = event.target;
+    const formData = new FormData(form);
+    
+    // Check if there's a redirect_to parameter
+    const urlParams = new URLSearchParams(window.location.search);
+    const redirectTo = urlParams.get('redirect_to');
+    if (redirectTo) {
+        formData.append('redirect_to', redirectTo);
+    }
+    
+    const res = await fetch(BASE + '/login?' + (redirectTo ? 'redirect_to=' + encodeURIComponent(redirectTo) : ''), {
+        method: 'POST',
+        body: formData,
+        headers: { 'X-CSRF-Token': getCookie('csrf_token') }
+    });
+    
+    // Check if it's a redirect response
+    if (res.redirected || res.status === 302) {
+        window.location.href = res.url;
+        return;
+    }
+    
+    const data = await res.json();
+    
+    if (data.success) {
+        // If we have a token and redirect_to, exchange with SSO apps
+        if (data.token && data.redirect_to) {
+            window.location.href = data.redirect_to + '?token=' + encodeURIComponent(data.token);
+        } else {
+            show('Login successful! Redirecting...', 'success');
+            setTimeout(() => {
+                const dest = data.redirect || '/dashboard';
+                window.location.href = dest.startsWith('/') && !dest.startsWith(BASE) ? BASE + dest : dest;
+            }, 1000);
+        }
+    } else {
+        show(data.detail || 'Login failed', 'error');
+    }
+}
+
+function show(text, type) {
+    const msgDiv = document.getElementById('msg');
+    msgDiv.innerHTML = `<div class="alert alert-${type}">${text}</div>`;
+    if (type !== 'info') {
+        setTimeout(() => msgDiv.innerHTML = '', 3000);
+    }
+}
+</script>
+{% endblock %}

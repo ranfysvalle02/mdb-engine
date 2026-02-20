@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - SSO Auth Hub{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>Welcome, {{ user.email }}!</h2>
+    <p style="color: var(--muted);">SSO authentication hub dashboard</p>
+    
+    <div style="margin-top: 1rem; padding: 1rem; background: rgba(6, 182, 212, 0.1); border-radius: 8px; border: 1px solid var(--accent);">
+        <strong style="color: var(--accent);">SSO Active</strong><br>
+        <span style="color: var(--muted);">You're logged in across all apps. Access SSO apps:</span>
+        <ul style="margin-top: 0.5rem; list-style: none; padding: 0;">
+            {% for app_slug in sso_apps %}
+            <li><a href="/{{ app_slug }}" style="color: var(--accent);">{{ app_slug }}</a></li>
+            {% endfor %}
+        </ul>
+    </div>
+</div>
+
+<div class="card">
+    <h3>Your Roles</h3>
+    <table>
+        <tr>
+            <th>App</th>
+            <th>Roles</th>
+        </tr>
+        {% for app_slug, roles in user.app_roles.items() %}
+        <tr>
+            <td><strong>{{ app_slug }}</strong></td>
+            <td>
+                {% for role in roles %}
+                <span class="badge {{ role }}">{{ role }}</span>
+                {% endfor %}
+            </td>
+        </tr>
+        {% endfor %}
+    </table>
+</div>
+
+{% if is_admin %}
+<div class="card">
+    <h3>User Management (Admin Only)</h3>
+    <div id="msg"></div>
+    
+    <table>
+        <tr>
+            <th>Email</th>
+            <th>Roles</th>
+            <th>Actions</th>
+        </tr>
+        {% for u in all_users %}
+        <tr>
+            <td><strong>{{ u.email }}</strong></td>
+            <td>
+                {% for app_slug, roles in u.app_roles.items() %}
+                    <div style="margin-bottom: 0.25rem;">
+                        <span style="color: var(--muted); font-size: 0.75rem;">{{ app_slug }}:</span>
+                        {% for role in roles %}
+                        <span class="badge {{ role }}">{{ role }}</span>
+                        {% endfor %}
+                    </div>
+                {% endfor %}
+            </td>
+            <td>
+                {% for app_slug in sso_apps %}
+                <button class="btn btn-secondary" style="margin: 2px; font-size: 0.75rem; padding: 0.4rem 0.8rem;" onclick="grantAccess('{{ u.email }}', '{{ app_slug }}')">Grant {{ app_slug }}</button>
+                {% endfor %}
+            </td>
+        </tr>
+        {% endfor %}
+    </table>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+async function grantAccess(email, appSlug) {
+    show(`Granting access to ${appSlug}...`, 'info');
+    
+    const res = await fetch(`${BASE}/api/users/${email}/grant-access/${appSlug}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': getCookie('csrf_token')
+        }
+    });
+    
+    const data = await res.json();
+    
+    if (data.success) {
+        show(data.message || 'Access granted!', 'success');
+        setTimeout(() => location.reload(), 1000);
+    } else {
+        show('Failed to grant access', 'error');
+    }
+}
+
+function show(text, type) {
+    const msgDiv = document.getElementById('msg');
+    if (!msgDiv) return;
+    msgDiv.innerHTML = `<div class="alert alert-${type}">${text}</div>`;
+    if (type !== 'info') {
+        setTimeout(() => msgDiv.innerHTML = '', 3000);
+    }
+}
+</script>
+{% endblock %}

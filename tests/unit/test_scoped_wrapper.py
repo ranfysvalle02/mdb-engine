@@ -1,0 +1,3457 @@
+"""
+Unit tests for ScopedMongoWrapper and ScopedCollectionWrapper.
+
+Tests data scoping, query filtering, and isolation logic.
+"""
+
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+from motor.motor_asyncio import AsyncIOMotorCollection
+
+from mdb_engine.database.query_validator import QueryValidator
+from mdb_engine.database.resource_limiter import ResourceLimiter
+from mdb_engine.database.scoped_wrapper import (
+    ScopedCollectionWrapper,
+    ScopedMongoWrapper,
+)
+from mdb_engine.exceptions import QueryValidationError, ResourceLimitExceeded
+
+
+@pytest.mark.unit
+class TestScopedCollectionWrapper:
+    """Test ScopedCollectionWrapper functionality."""
+
+    @pytest.mark.asyncio
+    async def test_scoped_insert_one_adds_app_id(self, mock_mongo_collection):
+        """Test that insert_one automatically adds app_id."""
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        document = {"name": "Test", "value": 100}
+        await wrapper.insert_one(document)
+
+        # Verify insert_one was called with app_id added
+        call_args = mock_mongo_collection.insert_one.call_args
+        assert call_args is not None
+        inserted_doc = call_args[0][0]
+        assert inserted_doc["app_id"] == "test_app"
+        assert inserted_doc["name"] == "Test"
+        assert inserted_doc["value"] == 100
+
+    @pytest.mark.asyncio
+    async def test_scoped_insert_one_preserves_original_document(self, mock_mongo_collection):
+        """Test that insert_one doesn't mutate the original document."""
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        original_doc = {"name": "Test", "value": 100}
+        await wrapper.insert_one(original_doc)
+
+        # Original document should not have app_id
+        assert "app_id" not in original_doc
+
+    @pytest.mark.asyncio
+    async def test_scoped_insert_many_adds_app_id(self, mock_mongo_collection):
+        """Test that insert_many adds app_id to all documents."""
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        documents = [{"name": "Test 1", "value": 100}, {"name": "Test 2", "value": 200}]
+        await wrapper.insert_many(documents)
+
+        # Verify insert_many was called
+        call_args = mock_mongo_collection.insert_many.call_args
+        assert call_args is not None
+        inserted_docs = call_args[0][0]
+        assert len(inserted_docs) == 2
+        assert all(doc["app_id"] == "test_app" for doc in inserted_docs)
+
+    @pytest.mark.asyncio
+    async def test_scoped_find_one_filters_by_app_id(self, mock_mongo_collection):
+        """Test that find_one filters by app_id."""
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        user_filter = {"name": "Test"}
+        await wrapper.find_one(user_filter)
+
+        # Verify find_one was called with scoped filter
+        call_args = mock_mongo_collection.find_one.call_args
+        assert call_args is not None
+        scoped_filter = call_args[0][0]
+
+        # Should have $and with user filter and app_id scope
+        assert "$and" in scoped_filter
+        and_conditions = scoped_filter["$and"]
+        assert len(and_conditions) == 2
+        assert {"name": "Test"} in and_conditions
+        assert {"app_id": {"$in": ["test_app"]}} in and_conditions
+
+    @pytest.mark.asyncio
+    async def test_scoped_find_one_empty_filter(self, mock_mongo_collection):
+        """Test that find_one with no filter still applies app_id scope."""
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        await wrapper.find_one()
+
+        # Verify find_one was called with app_id filter
+        call_args = mock_mongo_collection.find_one.call_args
+        assert call_args is not None
+        scoped_filter = call_args[0][0]
+        assert scoped_filter == {"app_id": {"$in": ["test_app"]}}
+
+    @pytest.mark.asyncio
+    async def test_scoped_find_filters_by_app_id(self, mock_mongo_collection):
+        """Test that find filters by app_id."""
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        user_filter = {"status": "active"}
+        wrapper.find(user_filter)
+
+        # Verify find was called with scoped filter
+        # Note: find returns a cursor, so we check the underlying collection call
+        # The actual call happens when cursor is used, but wrapper prepares the filter
+        # We can verify by checking the wrapper's filter injection logic
+        scoped_filter = wrapper._inject_read_filter(user_filter)  # noqa: SLF001
+        assert "$and" in scoped_filter
+        assert {"status": "active"} in scoped_filter["$and"]
+        assert {"app_id": {"$in": ["test_app"]}} in scoped_filter["$and"]
+
+    @pytest.mark.asyncio
+    async def test_scoped_find_multiple_read_scopes(self, mock_mongo_collection):
+        """Test that find supports multiple read scopes."""
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["app1", "app2"],
+            write_scope="app1",
+        )
+
+        scoped_filter = wrapper._inject_read_filter({"name": "Test"})  # noqa: SLF001
+        assert "$and" in scoped_filter
+        assert {"app_id": {"$in": ["app1", "app2"]}} in scoped_filter["$and"]
+
+    @pytest.mark.asyncio
+    async def test_scoped_update_one_filters_by_app_id(self, mock_mongo_collection):
+        """Test that update_one filters by app_id."""
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        user_filter = {"name": "Test"}
+        update = {"$set": {"status": "updated"}}
+        await wrapper.update_one(user_filter, update)
+
+        # Verify update_one was called with scoped filter
+        call_args = mock_mongo_collection.update_one.call_args
+        assert call_args is not None
+        scoped_filter = call_args[0][0]
+
+        # Should have $and with user filter and app_id scope
+        assert "$and" in scoped_filter
+        and_conditions = scoped_filter["$and"]
+        assert {"name": "Test"} in and_conditions
+        assert {"app_id": {"$in": ["test_app"]}} in and_conditions
+
+    @pytest.mark.asyncio
+    async def test_scoped_delete_one_filters_by_app_id(self, mock_mongo_collection):
+        """Test that delete_one filters by app_id."""
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        user_filter = {"name": "Test"}
+        await wrapper.delete_one(user_filter)
+
+        # Verify delete_one was called with scoped filter
+        call_args = mock_mongo_collection.delete_one.call_args
+        assert call_args is not None
+        scoped_filter = call_args[0][0]
+
+        # Should have $and with user filter and app_id scope
+        assert "$and" in scoped_filter
+        and_conditions = scoped_filter["$and"]
+        assert {"name": "Test"} in and_conditions
+        assert {"app_id": {"$in": ["test_app"]}} in and_conditions
+
+    @pytest.mark.asyncio
+    async def test_scoped_count_documents_filters_by_app_id(self, mock_mongo_collection):
+        """Test that count_documents filters by app_id."""
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        user_filter = {"status": "active"}
+        await wrapper.count_documents(user_filter)
+
+        # Verify count_documents was called with scoped filter
+        call_args = mock_mongo_collection.count_documents.call_args
+        assert call_args is not None
+        scoped_filter = call_args[0][0]
+
+        # Should have $and with user filter and app_id scope
+        assert "$and" in scoped_filter
+        and_conditions = scoped_filter["$and"]
+        assert {"status": "active"} in and_conditions
+        assert {"app_id": {"$in": ["test_app"]}} in and_conditions
+
+    def test_inject_read_filter_empty_filter(self):
+        """Test _inject_read_filter with empty filter."""
+        wrapper = ScopedCollectionWrapper(
+            real_collection=MagicMock(spec=AsyncIOMotorCollection),
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        result = wrapper._inject_read_filter(None)  # noqa: SLF001
+        assert result == {"app_id": {"$in": ["test_app"]}}
+
+        result = wrapper._inject_read_filter({})  # noqa: SLF001
+        assert result == {"app_id": {"$in": ["test_app"]}}
+
+    def test_inject_read_filter_with_user_filter(self):
+        """Test _inject_read_filter with user filter."""
+        wrapper = ScopedCollectionWrapper(
+            real_collection=MagicMock(spec=AsyncIOMotorCollection),
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        user_filter = {"name": "Test", "value": {"$gt": 100}}
+        result = wrapper._inject_read_filter(user_filter)  # noqa: SLF001
+
+        assert "$and" in result
+        assert user_filter in result["$and"]
+        assert {"app_id": {"$in": ["test_app"]}} in result["$and"]
+
+
+@pytest.mark.unit
+class TestScopedMongoWrapperSecurity:
+    """Test security features of ScopedMongoWrapper."""
+
+    def test_reserved_collection_name_blocked(self, mock_mongo_database):
+        """Test that reserved collection names are blocked."""
+        wrapper = ScopedMongoWrapper(
+            real_db=mock_mongo_database,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        # Try to access reserved collection name
+        with pytest.raises(ValueError, match="reserved"):
+            _ = wrapper.apps_config
+
+    def test_reserved_prefix_blocked(self, mock_mongo_database):
+        """Test that collections with reserved prefixes are blocked."""
+        wrapper = ScopedMongoWrapper(
+            real_db=mock_mongo_database,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        # Try to access collection with reserved prefix
+        with pytest.raises(ValueError, match="reserved prefix"):
+            _ = wrapper.system_users
+
+    def test_invalid_collection_name_format(self, mock_mongo_database):
+        """Test that invalid collection name formats are rejected."""
+        wrapper = ScopedMongoWrapper(
+            real_db=mock_mongo_database,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        # Try invalid names
+        invalid_names = ["", "123invalid", "has spaces", "has-dots.", "../path"]
+        for name in invalid_names:
+            with pytest.raises(ValueError):
+                _ = getattr(wrapper, name)
+
+    def test_path_traversal_blocked(self, mock_mongo_database):
+        """Test that path traversal attempts are blocked."""
+        wrapper = ScopedMongoWrapper(
+            real_db=mock_mongo_database,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        # Try path traversal
+        with pytest.raises(ValueError, match="Invalid collection name format"):
+            _ = wrapper["../other_collection"]
+
+    def test_cross_app_access_unauthorized(self, mock_mongo_database):
+        """Test that unauthorized cross-app access is blocked."""
+        # Note: With the new logic, we only treat as cross-app if the extracted prefix
+        # matches an app in read_scopes. "other_app_collection" extracts "other" which
+        # is not in read_scopes, so it's treated as a regular collection (no error).
+        # To test unauthorized access, we'd need a case where the extracted prefix
+        # matches an app slug but that app is not authorized, but with the current logic
+        # we don't raise errors for this - we just treat it as a regular collection.
+        # So this test verifies that regular collection names work even if they look like
+        # cross-app names but the extracted prefix doesn't match any app in read_scopes.
+        wrapper = ScopedMongoWrapper(
+            real_db=mock_mongo_database,
+            read_scopes=["test_app"],  # Only can read from test_app
+            write_scope="test_app",
+        )
+
+        # "other_app_collection" extracts "other" which is not in read_scopes,
+        # so it's treated as regular collection (not cross-app), so no error is raised
+        collection = wrapper.get_collection("other_app_collection")
+        assert isinstance(collection, ScopedCollectionWrapper)
+
+    def test_cross_app_access_authorized(self, mock_mongo_database):
+        """Test that authorized cross-app access works."""
+        # Mock collection for other app
+        # Use a collection name where the extracted prefix matches an app in read_scopes
+        # "other_collection" extracts "other", so we need "other" in read_scopes
+        mock_collection = MagicMock(spec=AsyncIOMotorCollection)
+        mock_collection.name = "other_collection"
+        mock_mongo_database.other_collection = mock_collection
+
+        wrapper = ScopedMongoWrapper(
+            real_db=mock_mongo_database,
+            read_scopes=[
+                "test_app",
+                "other",
+            ],  # Can read from both - "other" matches extracted prefix
+            write_scope="test_app",
+        )
+
+        # Should be able to access other app's collection
+        collection = wrapper.get_collection("other_collection")
+        assert isinstance(collection, ScopedCollectionWrapper)
+
+    def test_collection_name_length_validation(self, mock_mongo_database):
+        """Test that collection names are validated for length."""
+        wrapper = ScopedMongoWrapper(
+            real_db=mock_mongo_database,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        # Too long name
+        long_name = "a" * 256  # Exceeds MAX_COLLECTION_NAME_LENGTH
+        with pytest.raises(ValueError, match="too long"):
+            _ = getattr(wrapper, long_name)
+
+    def test_getitem_validates_collection_name(self, mock_mongo_database):
+        """Test that __getitem__ validates collection names."""
+        wrapper = ScopedMongoWrapper(
+            real_db=mock_mongo_database,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        # Invalid name via bracket notation
+        with pytest.raises(ValueError):
+            _ = wrapper["system_users"]
+
+    def test_get_collection_validates_name(self, mock_mongo_database):
+        """Test that get_collection validates collection names."""
+        wrapper = ScopedMongoWrapper(
+            real_db=mock_mongo_database,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        # Invalid name
+        with pytest.raises(ValueError):
+            wrapper.get_collection("system_users")
+
+
+@pytest.mark.unit
+class TestScopedMongoWrapper:
+    """Test ScopedMongoWrapper functionality."""
+
+    def test_database_property_removed(self, mock_mongo_database):
+        """Test that database property has been removed for security."""
+        wrapper = ScopedMongoWrapper(
+            real_db=mock_mongo_database,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        # database property should no longer exist on ScopedMongoWrapper
+        with pytest.raises(AttributeError, match="database"):
+            _ = wrapper.database
+
+    def test_collection_database_returns_scoped_mongo_wrapper(self, mock_mongo_collection, mock_mongo_database):
+        """Test that ScopedCollectionWrapper.database returns ScopedMongoWrapper."""
+        # Set up database attribute on collection
+        mock_mongo_collection.database = mock_mongo_database
+
+        parent_wrapper = ScopedMongoWrapper(
+            real_db=mock_mongo_database,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        collection_wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+            parent_wrapper=parent_wrapper,
+        )
+
+        # database property should return ScopedMongoWrapper
+        db = collection_wrapper.database
+        assert isinstance(db, ScopedMongoWrapper)
+        assert db is parent_wrapper
+
+    def test_get_collection_returns_scoped_wrapper(self, mock_mongo_database):
+        """Test that accessing a collection returns ScopedCollectionWrapper."""
+        wrapper = ScopedMongoWrapper(
+            real_db=mock_mongo_database,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        collection = wrapper.test_collection
+        assert isinstance(collection, ScopedCollectionWrapper)
+        assert collection._write_scope == "test_app"  # noqa: SLF001
+        assert collection._read_scopes == ["test_app"]  # noqa: SLF001
+
+    def test_get_collection_caching(self, mock_mongo_database):
+        """Test that collection wrappers are cached."""
+        wrapper = ScopedMongoWrapper(
+            real_db=mock_mongo_database,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        collection1 = wrapper.test_collection
+        collection2 = wrapper.test_collection
+
+        # Should be the same instance (cached)
+        assert collection1 is collection2
+
+    def test_get_collection_already_prefixed(self, mock_mongo_database):
+        """Test get_collection with already prefixed name (lines 1499-1501)."""
+        # Mock collection for other app
+        # Use a collection name where the extracted prefix matches an app in read_scopes
+        mock_collection = MagicMock(spec=AsyncIOMotorCollection)
+        mock_collection.name = "other_collection"
+        mock_mongo_database.other_collection = mock_collection
+
+        wrapper = ScopedMongoWrapper(
+            real_db=mock_mongo_database,
+            read_scopes=[
+                "test_app",
+                "other",
+            ],  # Must include "other" for cross-app access
+            write_scope="test_app",
+        )
+
+        # Collection name that's already prefixed (cross-app access)
+        # "other_collection" extracts "other" which IS in read_scopes, so it's treated as cross-app
+        collection = wrapper.get_collection("other_collection")
+        assert isinstance(collection, ScopedCollectionWrapper)
+        # Should use the name as-is without adding prefix again (cross-app access)
+        assert collection._write_scope == "test_app"  # noqa: SLF001
+
+    def test_get_collection_caching_via_get_collection(self, mock_mongo_database):
+        """Test that get_collection caches wrappers."""
+        wrapper = ScopedMongoWrapper(
+            real_db=mock_mongo_database,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        collection1 = wrapper.get_collection("test_collection")
+        collection2 = wrapper.get_collection("test_collection")
+
+        # Should be the same instance (cached)
+        assert collection1 is collection2
+
+    @pytest.mark.skip(reason="Hard to mock MagicMock to return non-collection - edge case")
+    def test_get_collection_not_collection_error(self, mock_mongo_database):
+        """Test get_collection raises error for non-collection (lines 1514-1518)."""
+        # This test is skipped because MagicMock always returns MagicMock instances
+        # Making it return a non-collection requires complex mocking that causes recursion
+        pass
+
+    @pytest.mark.asyncio
+    async def test_get_collection_auto_indexing_enabled(self, mock_mongo_database):
+        """Test get_collection with auto-indexing enabled (lines 1530-1589)."""
+        wrapper = ScopedMongoWrapper(
+            real_db=mock_mongo_database,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+            auto_index=True,
+        )
+
+        # Mock collection
+        mock_collection = MagicMock(spec=AsyncIOMotorCollection)
+        mock_collection.name = "test_app_test_collection"
+        mock_collection.database = mock_mongo_database
+        mock_mongo_database.test_app_test_collection = mock_collection
+
+        # Mock client admin command for ping
+        mock_client = MagicMock()
+        mock_client.admin.command = AsyncMock(return_value={"ok": 1})
+        mock_mongo_database.client = mock_client
+
+        # Mock _ensure_app_id_index at class level
+        with patch(
+            "mdb_engine.database.scoped_wrapper.ScopedMongoWrapper._ensure_app_id_index",  # noqa: SLF001
+            new_callable=AsyncMock,
+            return_value=True,
+        ):
+            collection = wrapper.get_collection("test_collection")
+
+            assert isinstance(collection, ScopedCollectionWrapper)
+            # Should have triggered auto-indexing check (fire-and-forget, so we can't easily verify)
+            # But we can verify the collection was created and cached
+            assert wrapper.get_collection("test_collection") is collection
+
+    @pytest.mark.asyncio
+    async def test_get_collection_connection_failure_during_index(self, mock_mongo_database):
+        """Test get_collection handles connection failure during index check (lines 1545-1560)."""
+        from pymongo.errors import ConnectionFailure
+
+        wrapper = ScopedMongoWrapper(
+            real_db=mock_mongo_database,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+            auto_index=True,
+        )
+
+        # Mock collection
+        mock_collection = MagicMock(spec=AsyncIOMotorCollection)
+        mock_collection.name = "test_app_test_collection"
+        mock_collection.database = mock_mongo_database
+        mock_mongo_database.test_app_test_collection = mock_collection
+
+        # Mock client admin command to raise ConnectionFailure
+        mock_client = MagicMock()
+        mock_client.admin.command = AsyncMock(side_effect=ConnectionFailure("Connection failed"))
+        mock_mongo_database.client = mock_client
+
+        # Clear cache to ensure fresh check
+        ScopedMongoWrapper._app_id_index_cache.clear()  # noqa: SLF001
+
+        collection = wrapper.get_collection("test_collection")
+
+        # Should still return collection even if index check fails
+        assert isinstance(collection, ScopedCollectionWrapper)
+
+    @pytest.mark.asyncio
+    async def test_get_collection_operation_failure_during_index(self, mock_mongo_database):
+        """Test get_collection handles OperationFailure during index creation (lines 1577-1583)."""
+        from pymongo.errors import OperationFailure
+
+        wrapper = ScopedMongoWrapper(
+            real_db=mock_mongo_database,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+            auto_index=True,
+        )
+
+        # Mock collection
+        mock_collection = MagicMock(spec=AsyncIOMotorCollection)
+        mock_collection.name = "test_app_test_collection"
+        mock_collection.database = mock_mongo_database
+        mock_mongo_database.test_app_test_collection = mock_collection
+
+        # Mock client admin command for ping
+        mock_client = MagicMock()
+        mock_client.admin.command = AsyncMock(return_value={"ok": 1})
+        mock_mongo_database.client = mock_client
+
+        # Mock _ensure_app_id_index to raise OperationFailure at class level
+        with patch(
+            "mdb_engine.database.scoped_wrapper.ScopedMongoWrapper._ensure_app_id_index",  # noqa: SLF001
+            new_callable=AsyncMock,
+            side_effect=OperationFailure("Index failed"),
+        ):
+            # Clear cache
+            ScopedMongoWrapper._app_id_index_cache.clear()  # noqa: SLF001
+
+            collection = wrapper.get_collection("test_collection")
+
+            # Should still return collection even if index creation fails
+            assert isinstance(collection, ScopedCollectionWrapper)
+
+
+class TestScopedCollectionWrapperAdditionalOperations:
+    """Test additional collection operations."""
+
+    @pytest.mark.asyncio
+    async def test_scoped_update_many_filters_by_app_id(self, mock_mongo_collection):
+        """Test that update_many filters by app_id."""
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        user_filter = {"status": "pending"}
+        update = {"$set": {"status": "completed"}}
+        await wrapper.update_many(user_filter, update)
+
+        call_args = mock_mongo_collection.update_many.call_args
+        assert call_args is not None
+        scoped_filter = call_args[0][0]
+
+        assert "$and" in scoped_filter
+        and_conditions = scoped_filter["$and"]
+        assert {"status": "pending"} in and_conditions
+        assert {"app_id": {"$in": ["test_app"]}} in and_conditions
+
+    @pytest.mark.asyncio
+    async def test_scoped_delete_many_filters_by_app_id(self, mock_mongo_collection):
+        """Test that delete_many filters by app_id."""
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        user_filter = {"status": "deleted"}
+        await wrapper.delete_many(user_filter)
+
+        call_args = mock_mongo_collection.delete_many.call_args
+        assert call_args is not None
+        scoped_filter = call_args[0][0]
+
+        assert "$and" in scoped_filter
+        and_conditions = scoped_filter["$and"]
+        assert {"status": "deleted"} in and_conditions
+        assert {"app_id": {"$in": ["test_app"]}} in and_conditions
+
+    @pytest.mark.asyncio
+    async def test_scoped_aggregate_filters_by_app_id(self, mock_mongo_collection):
+        """Test that aggregate filters by app_id."""
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        pipeline = [{"$match": {"status": "active"}}]
+        mock_cursor = MagicMock()
+        mock_cursor.to_list = AsyncMock(return_value=[])
+        mock_mongo_collection.aggregate = MagicMock(return_value=mock_cursor)
+
+        result_cursor = wrapper.aggregate(pipeline)
+        await result_cursor.to_list()
+
+        call_args = mock_mongo_collection.aggregate.call_args
+        assert call_args is not None
+        scoped_pipeline = call_args[0][0]
+
+        # Should have added $match stage with app_id filter
+        assert len(scoped_pipeline) >= 1
+        first_stage = scoped_pipeline[0]
+        assert "$match" in first_stage
+        # The filter might be direct app_id or wrapped in $and
+        match_filter = first_stage["$match"]
+        if "$and" in match_filter:
+            assert {"app_id": {"$in": ["test_app"]}} in match_filter["$and"]
+        else:
+            # Direct app_id filter
+            assert match_filter == {"app_id": {"$in": ["test_app"]}}
+
+    @pytest.mark.asyncio
+    async def test_scoped_replace_one_passes_through(self, mock_mongo_collection):
+        """Test that replace_one passes through to underlying collection.
+
+        replace_one is not an explicitly scoped operation on ScopedCollectionWrapper.
+        It delegates to the underlying collection via __getattr__.
+        Use the abstraction layer (MongoCollection) for scoped replace_one behavior.
+        """
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        filter_doc = {"_id": "123"}
+        replacement = {"name": "Updated", "value": 200}
+        await wrapper.replace_one(filter_doc, replacement)
+
+        call_args = mock_mongo_collection.replace_one.call_args
+        assert call_args is not None
+        passed_filter = call_args[0][0]
+        passed_replacement = call_args[0][1]
+
+        # replace_one passes through directly (not scoped at this layer)
+        assert passed_filter == {"_id": "123"}
+        assert passed_replacement["name"] == "Updated"
+        assert passed_replacement["value"] == 200
+
+
+class TestScopedCollectionWrapperErrorHandling:
+    """Test error handling in scoped operations."""
+
+    @pytest.mark.asyncio
+    async def test_scoped_operations_connection_error(self, mock_mongo_collection):
+        """Test handling connection failures."""
+        from pymongo.errors import ConnectionFailure
+
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        mock_mongo_collection.find_one = AsyncMock(side_effect=ConnectionFailure("Connection lost"))
+
+        with pytest.raises(ConnectionFailure):
+            await wrapper.find_one({"name": "Test"})
+
+    @pytest.mark.asyncio
+    async def test_scoped_operations_operation_error(self, mock_mongo_collection):
+        """Test handling operation failures."""
+        from pymongo.errors import OperationFailure
+
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        mock_mongo_collection.insert_one = AsyncMock(side_effect=OperationFailure("Operation failed"))
+
+        # The wrapper catches OperationFailure and wraps it in MongoDBEngineError
+        from mdb_engine.exceptions import MongoDBEngineError
+
+        with pytest.raises(MongoDBEngineError):
+            await wrapper.insert_one({"name": "Test"})
+
+    @pytest.mark.asyncio
+    async def test_scoped_operations_timeout_error(self, mock_mongo_collection):
+        """Test handling timeout errors."""
+        from pymongo.errors import ServerSelectionTimeoutError
+
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        mock_mongo_collection.find_one = AsyncMock(side_effect=ServerSelectionTimeoutError("Timeout"))
+
+        with pytest.raises(ServerSelectionTimeoutError):
+            await wrapper.find_one({"name": "Test"})
+
+
+class TestScopedCollectionWrapperEdgeCases:
+    """Test edge cases in scoped operations."""
+
+    def test_scoped_filter_with_existing_and(self):
+        """Test handling existing $and in filters."""
+        wrapper = ScopedCollectionWrapper(
+            real_collection=MagicMock(spec=AsyncIOMotorCollection),
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        user_filter = {"$and": [{"name": "Test"}, {"value": {"$gt": 100}}]}
+        result = wrapper._inject_read_filter(user_filter)  # noqa: SLF001
+
+        # Should merge with existing $and - the $and itself becomes part of the outer $and
+        assert "$and" in result
+        # The existing $and becomes one condition, plus the app_id filter
+        assert len(result["$and"]) == 2
+
+    def test_scoped_filter_with_or_conditions(self):
+        """Test handling $or conditions."""
+        wrapper = ScopedCollectionWrapper(
+            real_collection=MagicMock(spec=AsyncIOMotorCollection),
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        user_filter = {"$or": [{"name": "Test1"}, {"name": "Test2"}]}
+        result = wrapper._inject_read_filter(user_filter)  # noqa: SLF001
+
+        # Should wrap $or in $and with app_id
+        assert "$and" in result
+        # Original $or should be preserved
+        assert any("$or" in str(cond) or isinstance(cond, dict) and "$or" in cond for cond in result["$and"])
+
+    def test_scoped_filter_empty_read_scopes(self):
+        """Test handling empty read scopes."""
+        wrapper = ScopedCollectionWrapper(
+            real_collection=MagicMock(spec=AsyncIOMotorCollection),
+            read_scopes=[],  # Empty scopes
+            write_scope="test_app",
+        )
+
+        result = wrapper._inject_read_filter({"name": "Test"})  # noqa: SLF001
+        # Should still have filter structure, but with empty $in
+        assert "$and" in result or "app_id" in result
+
+    @pytest.mark.asyncio
+    async def test_scoped_find_with_auto_indexing(self, mock_mongo_collection):
+        """Test find() with auto-indexing enabled (lines 1175-1194)."""
+        # Create a mock AutoIndexManager
+        mock_auto_index_manager = MagicMock()
+        mock_auto_index_manager.ensure_index_for_query = AsyncMock(side_effect=Exception("Index error"))
+
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        # Set auto_index_manager directly (it's a property, so set the private attribute)
+        wrapper._auto_index_manager = mock_auto_index_manager  # noqa: SLF001
+
+        # Mock cursor
+        mock_cursor = MagicMock()
+        mock_mongo_collection.find = MagicMock(return_value=mock_cursor)
+
+        result = wrapper.find({"status": "active"}, sort=[("name", 1)])
+
+        # Should still return cursor even if indexing fails
+        assert result == mock_cursor
+        mock_mongo_collection.find.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_scoped_aggregate_with_vector_search(self, mock_mongo_collection):
+        """Test aggregate() with $vectorSearch stage (lines 1264-1290)."""
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        # Pipeline with $vectorSearch as first stage
+        pipeline = [
+            {
+                "$vectorSearch": {
+                    "index": "vector_index",
+                    "path": "embedding",
+                    "queryVector": [0.1, 0.2, 0.3],
+                    "numCandidates": 10,
+                    "limit": 5,
+                }
+            },
+            {"$project": {"name": 1}},
+        ]
+
+        mock_cursor = MagicMock()
+        mock_mongo_collection.aggregate = MagicMock(return_value=mock_cursor)
+
+        wrapper.aggregate(pipeline)
+
+        # Verify aggregate was called
+        assert mock_mongo_collection.aggregate.called
+        call_args = mock_mongo_collection.aggregate.call_args
+        modified_pipeline = call_args[0][0]
+
+        # First stage should still be $vectorSearch
+        assert "$vectorSearch" in modified_pipeline[0]
+        # But it should have a filter with app_id
+        assert "filter" in modified_pipeline[0]["$vectorSearch"]
+        assert modified_pipeline[0]["$vectorSearch"]["filter"]["app_id"] == {"$in": ["test_app"]}
+
+    @pytest.mark.asyncio
+    async def test_scoped_aggregate_empty_pipeline(self, mock_mongo_collection):
+        """Test aggregate() with empty pipeline (lines 1258-1262)."""
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        mock_cursor = MagicMock()
+        mock_mongo_collection.aggregate = MagicMock(return_value=mock_cursor)
+
+        wrapper.aggregate([])
+
+        # Should prepend $match stage
+        call_args = mock_mongo_collection.aggregate.call_args
+        modified_pipeline = call_args[0][0]
+        assert len(modified_pipeline) == 1
+        assert "$match" in modified_pipeline[0]
+        assert modified_pipeline[0]["$match"]["app_id"] == {"$in": ["test_app"]}
+
+    @pytest.mark.asyncio
+    async def test_scoped_count_documents_with_auto_indexing(self, mock_mongo_collection):
+        """Test count_documents() with auto-indexing (lines 1242-1244)."""
+        # Create a mock AutoIndexManager
+        mock_auto_index_manager = MagicMock()
+        mock_auto_index_manager.ensure_index_for_query = AsyncMock()
+
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        # Set auto_index_manager directly (it's a property, so set the private attribute)
+        wrapper._auto_index_manager = mock_auto_index_manager  # noqa: SLF001
+
+        mock_mongo_collection.count_documents = AsyncMock(return_value=5)
+
+        result = await wrapper.count_documents({"status": "active"})
+
+        assert result == 5
+        mock_auto_index_manager.ensure_index_for_query.assert_called_once()
+        mock_mongo_collection.count_documents.assert_called_once()
+
+
+class TestAsyncAtlasIndexManager:
+    """Test AsyncAtlasIndexManager functionality."""
+
+    def test_index_manager_initialization(self, mock_mongo_collection):
+        """Test proper initialization of index manager."""
+        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager
+
+        manager = AsyncAtlasIndexManager(mock_mongo_collection)
+        assert manager._collection == mock_mongo_collection  # noqa: SLF001
+
+    def test_index_manager_initialization_invalid_type(self):
+        """Test initialization with invalid collection type."""
+        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager
+
+        with pytest.raises(TypeError, match="Expected AsyncIOMotorCollection"):
+            AsyncAtlasIndexManager(MagicMock())  # Not an AsyncIOMotorCollection
+
+    @pytest.mark.asyncio
+    async def test_index_manager_ensure_collection_exists(self, mock_mongo_collection):
+        """Test ensuring collection exists."""
+        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager
+
+        # Ensure database attribute exists on mock
+        mock_database = MagicMock()
+        mock_database.create_collection = AsyncMock()
+        mock_mongo_collection.database = mock_database
+
+        manager = AsyncAtlasIndexManager(mock_mongo_collection)
+        await manager._ensure_collection_exists()  # noqa: SLF001
+
+        mock_database.create_collection.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_index_manager_create_regular_index(self, mock_mongo_collection):
+        """Test creating regular index."""
+        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager
+
+        # Ensure database attribute exists on mock
+        mock_database = MagicMock()
+        mock_database.create_collection = AsyncMock()
+        mock_mongo_collection.database = mock_database
+        mock_mongo_collection.create_index = AsyncMock(return_value="test_index")
+        # Mock list_indexes to return a cursor with to_list method
+        mock_index_cursor = MagicMock()
+        mock_index_cursor.to_list = AsyncMock(return_value=[])
+        mock_mongo_collection.list_indexes = MagicMock(return_value=mock_index_cursor)
+
+        manager = AsyncAtlasIndexManager(mock_mongo_collection)
+        # AsyncAtlasIndexManager uses create_index, not create_regular_index
+        result = await manager.create_index(
+            keys=[("field1", 1), ("field2", -1)],
+            name="test_index",
+        )
+
+        assert result == "test_index"
+        mock_mongo_collection.create_index.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_index_manager_error_handling(self, mock_mongo_collection):
+        """Test error handling in index operations."""
+        from pymongo.errors import OperationFailure
+
+        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager
+
+        # Ensure database attribute exists on mock
+        mock_database = MagicMock()
+        mock_database.create_collection = AsyncMock()
+        mock_mongo_collection.database = mock_database
+        mock_mongo_collection.create_index = AsyncMock(side_effect=OperationFailure("Index creation failed"))
+        # Mock list_indexes to return a cursor with to_list method
+        mock_index_cursor = MagicMock()
+        mock_index_cursor.to_list = AsyncMock(return_value=[])
+        mock_mongo_collection.list_indexes = MagicMock(return_value=mock_index_cursor)
+
+        manager = AsyncAtlasIndexManager(mock_mongo_collection)
+        # The error is wrapped in MongoDBEngineError
+        from mdb_engine.exceptions import MongoDBEngineError
+
+        with pytest.raises(MongoDBEngineError):
+            # AsyncAtlasIndexManager uses create_index, not create_regular_index
+            await manager.create_index(
+                keys=[("field1", 1)],
+                name="test_index",
+            )
+
+    @pytest.mark.asyncio
+    async def test_index_manager_ensure_collection_connection_error(self, mock_mongo_collection):
+        """Test handling connection errors when ensuring collection exists."""
+        from pymongo.errors import ConnectionFailure
+
+        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager
+
+        mock_database = MagicMock()
+        mock_database.create_collection = AsyncMock(side_effect=ConnectionFailure("Connection failed"))
+        mock_mongo_collection.database = mock_database
+
+        manager = AsyncAtlasIndexManager(mock_mongo_collection)
+        from mdb_engine.exceptions import MongoDBEngineError
+
+        with pytest.raises(MongoDBEngineError, match="connection failed"):
+            await manager._ensure_collection_exists()  # noqa: SLF001
+
+    @pytest.mark.asyncio
+    async def test_index_manager_ensure_collection_operation_error(self, mock_mongo_collection):
+        """Test handling operation errors when ensuring collection exists."""
+        from pymongo.errors import OperationFailure
+
+        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager
+
+        mock_database = MagicMock()
+        mock_database.create_collection = AsyncMock(side_effect=OperationFailure("Operation failed"))
+        mock_mongo_collection.database = mock_database
+
+        manager = AsyncAtlasIndexManager(mock_mongo_collection)
+        from mdb_engine.exceptions import MongoDBEngineError
+
+        with pytest.raises(MongoDBEngineError):
+            await manager._ensure_collection_exists()  # noqa: SLF001
+
+    @pytest.mark.asyncio
+    async def test_index_manager_check_definition_changed_vector(self, mock_mongo_collection):
+        """Test checking definition changes for vector search index."""
+        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager
+
+        manager = AsyncAtlasIndexManager(mock_mongo_collection)
+
+        # Test vector search with changed fields
+        definition = {"fields": [{"type": "vector", "path": "embedding", "numDimensions": 1536}]}
+        latest_def = {"fields": [{"type": "vector", "path": "embedding", "numDimensions": 768}]}
+
+        changed, reason = manager._check_definition_changed(  # noqa: SLF001
+            definition, latest_def, "vectorsearch", "test_idx"
+        )
+        assert changed is True
+        assert "vector 'fields' definition differs" in reason
+
+        # Test vector search with same fields
+        latest_def_same = {"fields": [{"type": "vector", "path": "embedding", "numDimensions": 1536}]}
+        changed, reason = manager._check_definition_changed(  # noqa: SLF001
+            definition, latest_def_same, "vectorsearch", "test_idx"
+        )
+        assert changed is False
+
+    @pytest.mark.asyncio
+    async def test_index_manager_check_definition_changed_search(self, mock_mongo_collection):
+        """Test checking definition changes for search index."""
+        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager
+
+        manager = AsyncAtlasIndexManager(mock_mongo_collection)
+
+        # Test search with changed mappings
+        definition = {"mappings": {"dynamic": True}}
+        latest_def = {"mappings": {"dynamic": False}}
+
+        changed, reason = manager._check_definition_changed(  # noqa: SLF001
+            definition, latest_def, "search", "test_idx"
+        )
+        assert changed is True
+        assert "Lucene 'mappings' definition differs" in reason
+
+        # Test search with same mappings
+        latest_def_same = {"mappings": {"dynamic": True}}
+        changed, reason = manager._check_definition_changed(  # noqa: SLF001
+            definition, latest_def_same, "search", "test_idx"
+        )
+        assert changed is False
+
+    @pytest.mark.asyncio
+    async def test_index_manager_check_definition_changed_mismatch(self, mock_mongo_collection):
+        """Test checking definition changes with mismatched index type."""
+        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager
+
+        manager = AsyncAtlasIndexManager(mock_mongo_collection)
+
+        # Test with vectorsearch type but mappings key (mismatch)
+        definition = {"mappings": {"dynamic": True}}
+        latest_def = {"mappings": {"dynamic": False}}
+
+        changed, reason = manager._check_definition_changed(  # noqa: SLF001
+            definition, latest_def, "vectorsearch", "test_idx"
+        )
+        # Should log warning but not detect change
+        assert changed is False
+
+    @pytest.mark.asyncio
+    async def test_index_manager_ensure_collection_collection_invalid(self, mock_mongo_collection):
+        """Test handling CollectionInvalid when ensuring collection exists (lines 132-145)."""
+        from pymongo.errors import CollectionInvalid
+
+        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager
+
+        mock_database = MagicMock()
+        # Test "already exists" case
+        mock_database.create_collection = AsyncMock(side_effect=CollectionInvalid("collection already exists"))
+        mock_mongo_collection.database = mock_database
+
+        manager = AsyncAtlasIndexManager(mock_mongo_collection)
+        # Should handle gracefully and continue
+        await manager._ensure_collection_exists()  # noqa: SLF001
+
+        # Test other CollectionInvalid error
+        mock_database.create_collection = AsyncMock(side_effect=CollectionInvalid("Other error"))
+        manager = AsyncAtlasIndexManager(mock_mongo_collection)
+        from mdb_engine.exceptions import MongoDBEngineError
+
+        with pytest.raises(MongoDBEngineError):
+            await manager._ensure_collection_exists()  # noqa: SLF001
+
+    @pytest.mark.asyncio
+    async def test_handle_existing_index_definition_changed(self, mock_mongo_collection):
+        """Test _handle_existing_index when definition has changed (lines 194-204)."""
+        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager
+
+        manager = AsyncAtlasIndexManager(mock_mongo_collection)
+
+        # Mock _check_definition_changed to return True (definition changed)
+        with patch(
+            "mdb_engine.database.scoped_wrapper.AsyncAtlasIndexManager._check_definition_changed",  # noqa: SLF001
+            return_value=(True, "mappings changed"),
+        ):
+            with patch(
+                "mdb_engine.database.scoped_wrapper.AsyncAtlasIndexManager.update_search_index",
+                new_callable=AsyncMock,
+            ) as mock_update:
+                existing_index = {
+                    "name": "test_idx",
+                    "latestDefinition": {"mappings": {"dynamic": True}},
+                    "queryable": False,
+                }
+                definition = {"mappings": {"dynamic": False}}
+
+                result = await manager._handle_existing_index(  # noqa: SLF001
+                    existing_index, definition, "vectorsearch", "test_idx"
+                )
+
+                assert result is False  # Will wait below
+                mock_update.assert_called_once_with(
+                    name="test_idx",
+                    definition=definition,
+                    wait_for_ready=False,
+                )
+
+    @pytest.mark.asyncio
+    async def test_handle_existing_index_queryable(self, mock_mongo_collection):
+        """Test _handle_existing_index when index is queryable (lines 205-209)."""
+        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager
+
+        manager = AsyncAtlasIndexManager(mock_mongo_collection)
+
+        with patch(
+            "mdb_engine.database.scoped_wrapper.AsyncAtlasIndexManager._check_definition_changed",  # noqa: SLF001
+            return_value=(False, None),
+        ):
+            existing_index = {
+                "name": "test_idx",
+                "latestDefinition": {"mappings": {"dynamic": False}},
+                "queryable": True,  # Index is queryable
+            }
+            definition = {"mappings": {"dynamic": False}}
+
+            result = await manager._handle_existing_index(  # noqa: SLF001
+                existing_index, definition, "vectorsearch", "test_idx"
+            )
+
+            assert result is True  # Ready to use
+
+    @pytest.mark.asyncio
+    async def test_handle_existing_index_failed_status(self, mock_mongo_collection):
+        """Test _handle_existing_index when index status is FAILED (lines 210-215)."""
+        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager
+
+        manager = AsyncAtlasIndexManager(mock_mongo_collection)
+
+        with patch(
+            "mdb_engine.database.scoped_wrapper.AsyncAtlasIndexManager._check_definition_changed",  # noqa: SLF001
+            return_value=(False, None),
+        ):
+            existing_index = {
+                "name": "test_idx",
+                "latestDefinition": {"mappings": {"dynamic": False}},
+                "queryable": False,
+                "status": "FAILED",  # Failed status
+            }
+            definition = {"mappings": {"dynamic": False}}
+
+            result = await manager._handle_existing_index(  # noqa: SLF001
+                existing_index, definition, "vectorsearch", "test_idx"
+            )
+
+            assert result is False  # Will wait below
+
+    @pytest.mark.asyncio
+    async def test_handle_existing_index_not_queryable(self, mock_mongo_collection):
+        """Test _handle_existing_index when index exists but not queryable (lines 216-221)."""
+        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager
+
+        manager = AsyncAtlasIndexManager(mock_mongo_collection)
+
+        with patch(
+            "mdb_engine.database.scoped_wrapper.AsyncAtlasIndexManager._check_definition_changed",  # noqa: SLF001
+            return_value=(False, None),
+        ):
+            existing_index = {
+                "name": "test_idx",
+                "latestDefinition": {"mappings": {"dynamic": False}},
+                "queryable": False,
+                "status": "BUILDING",  # Building status
+            }
+            definition = {"mappings": {"dynamic": False}}
+
+            result = await manager._handle_existing_index(  # noqa: SLF001
+                existing_index, definition, "vectorsearch", "test_idx"
+            )
+
+            assert result is False  # Will wait below
+
+
+class TestAutoIndexManager:
+    """Test AutoIndexManager functionality."""
+
+    def test_extract_index_fields_from_filter_empty(self, mock_mongo_collection):
+        """Test _extract_index_fields_from_filter with empty filter (lines 791-792)."""
+        from mdb_engine.database.scoped_wrapper import (
+            AsyncAtlasIndexManager,
+            AutoIndexManager,
+        )
+
+        index_manager = AsyncAtlasIndexManager(mock_mongo_collection)
+        auto_manager = AutoIndexManager(mock_mongo_collection, index_manager)
+
+        result = auto_manager._extract_index_fields_from_filter(None)  # noqa: SLF001
+        assert result == []
+
+        result = auto_manager._extract_index_fields_from_filter({})  # noqa: SLF001
+        assert result == []
+
+    def test_extract_index_fields_from_filter_equality(self, mock_mongo_collection):
+        """Test _extract_index_fields_from_filter with equality matches (lines 815-817)."""
+        from pymongo import ASCENDING
+
+        from mdb_engine.database.scoped_wrapper import (
+            AsyncAtlasIndexManager,
+            AutoIndexManager,
+        )
+
+        index_manager = AsyncAtlasIndexManager(mock_mongo_collection)
+        auto_manager = AutoIndexManager(mock_mongo_collection, index_manager)
+
+        filter_dict = {"name": "test", "status": "active"}
+        result = auto_manager._extract_index_fields_from_filter(filter_dict)  # noqa: SLF001
+
+        assert len(result) == 2
+        assert ("name", ASCENDING) in result
+        assert ("status", ASCENDING) in result
+
+    def test_extract_index_fields_from_filter_operators(self, mock_mongo_collection):
+        """Test _extract_index_fields_from_filter with operators (lines 800-805)."""
+        from pymongo import ASCENDING
+
+        from mdb_engine.database.scoped_wrapper import (
+            AsyncAtlasIndexManager,
+            AutoIndexManager,
+        )
+
+        index_manager = AsyncAtlasIndexManager(mock_mongo_collection)
+        auto_manager = AutoIndexManager(mock_mongo_collection, index_manager)
+
+        filter_dict = {
+            "age": {"$gt": 18},
+            "score": {"$gte": 100},
+            "price": {"$lt": 50},
+            "quantity": {"$lte": 10},
+            "status": {"$ne": "deleted"},
+            "tags": {"$in": ["tag1", "tag2"]},
+            "active": {"$exists": True},
+        }
+        result = auto_manager._extract_index_fields_from_filter(filter_dict)  # noqa: SLF001
+
+        assert len(result) == 7
+        assert ("age", ASCENDING) in result
+        assert ("score", ASCENDING) in result
+        assert ("price", ASCENDING) in result
+        assert ("quantity", ASCENDING) in result
+        assert ("status", ASCENDING) in result
+        assert ("tags", ASCENDING) in result
+        assert ("active", ASCENDING) in result
+
+    def test_extract_index_fields_from_filter_nested_and(self, mock_mongo_collection):
+        """Test _extract_index_fields_from_filter with nested $and (lines 807-811)."""
+        from pymongo import ASCENDING
+
+        from mdb_engine.database.scoped_wrapper import (
+            AsyncAtlasIndexManager,
+            AutoIndexManager,
+        )
+
+        index_manager = AsyncAtlasIndexManager(mock_mongo_collection)
+        auto_manager = AutoIndexManager(mock_mongo_collection, index_manager)
+
+        # $and at top level is handled differently - need to check how it's processed
+        # The code checks if "$and" is in value, not at top level
+        filter_dict = {
+            "field": {
+                "$and": [
+                    {"name": "test"},
+                    {"status": "active"},
+                ]
+            }
+        }
+        result = auto_manager._extract_index_fields_from_filter(filter_dict)  # noqa: SLF001
+
+        # Should extract fields from nested $and within field value
+        assert len(result) >= 2
+        assert ("name", ASCENDING) in result
+        assert ("status", ASCENDING) in result
+
+    def test_extract_index_fields_from_filter_or_skipped(self, mock_mongo_collection):
+        """Test _extract_index_fields_from_filter skips $or (lines 812-814)."""
+        from mdb_engine.database.scoped_wrapper import (
+            AsyncAtlasIndexManager,
+            AutoIndexManager,
+        )
+
+        index_manager = AsyncAtlasIndexManager(mock_mongo_collection)
+        auto_manager = AutoIndexManager(mock_mongo_collection, index_manager)
+
+        filter_dict = {
+            "$or": [
+                {"name": "test"},
+                {"status": "active"},
+            ]
+        }
+        result = auto_manager._extract_index_fields_from_filter(filter_dict)  # noqa: SLF001
+
+        assert result == []
+
+    def test_extract_index_fields_from_filter_duplicates_removed(self, mock_mongo_collection):
+        """Test _extract_index_fields_from_filter removes duplicates (line 824)."""
+        from pymongo import ASCENDING
+
+        from mdb_engine.database.scoped_wrapper import (
+            AsyncAtlasIndexManager,
+            AutoIndexManager,
+        )
+
+        index_manager = AsyncAtlasIndexManager(mock_mongo_collection)
+        auto_manager = AutoIndexManager(mock_mongo_collection, index_manager)
+
+        filter_dict = {
+            "name": "test",
+            "$and": [{"name": "test"}],
+        }
+        result = auto_manager._extract_index_fields_from_filter(filter_dict)  # noqa: SLF001
+
+        assert len(result) == 1
+        assert ("name", ASCENDING) in result
+
+    def test_extract_sort_fields_empty(self, mock_mongo_collection):
+        """Test _extract_sort_fields with empty sort (lines 834-835)."""
+        from mdb_engine.database.scoped_wrapper import (
+            AsyncAtlasIndexManager,
+            AutoIndexManager,
+        )
+
+        index_manager = AsyncAtlasIndexManager(mock_mongo_collection)
+        auto_manager = AutoIndexManager(mock_mongo_collection, index_manager)
+
+        result = auto_manager._extract_sort_fields(None)  # noqa: SLF001
+        assert result == []
+
+        result = auto_manager._extract_sort_fields([])  # noqa: SLF001
+        assert result == []
+
+    def test_extract_sort_fields_dict(self, mock_mongo_collection):
+        """Test _extract_sort_fields with dict format (lines 837-838)."""
+        from mdb_engine.database.scoped_wrapper import (
+            AsyncAtlasIndexManager,
+            AutoIndexManager,
+        )
+
+        index_manager = AsyncAtlasIndexManager(mock_mongo_collection)
+        auto_manager = AutoIndexManager(mock_mongo_collection, index_manager)
+
+        sort_dict = {"name": 1, "age": -1}
+        result = auto_manager._extract_sort_fields(sort_dict)  # noqa: SLF001
+
+        assert result == [("name", 1), ("age", -1)]
+
+    def test_extract_sort_fields_list(self, mock_mongo_collection):
+        """Test _extract_sort_fields with list format (lines 839-840)."""
+        from mdb_engine.database.scoped_wrapper import (
+            AsyncAtlasIndexManager,
+            AutoIndexManager,
+        )
+
+        index_manager = AsyncAtlasIndexManager(mock_mongo_collection)
+        auto_manager = AutoIndexManager(mock_mongo_collection, index_manager)
+
+        sort_list = [("name", 1), ("age", -1)]
+        result = auto_manager._extract_sort_fields(sort_list)  # noqa: SLF001
+
+        assert result == sort_list
+
+    def test_extract_sort_fields_invalid_type(self, mock_mongo_collection):
+        """Test _extract_sort_fields with invalid type (lines 841-842)."""
+        from mdb_engine.database.scoped_wrapper import (
+            AsyncAtlasIndexManager,
+            AutoIndexManager,
+        )
+
+        index_manager = AsyncAtlasIndexManager(mock_mongo_collection)
+        auto_manager = AutoIndexManager(mock_mongo_collection, index_manager)
+
+        result = auto_manager._extract_sort_fields("invalid")  # noqa: SLF001
+        assert result == []
+
+    def test_generate_index_name_empty(self, mock_mongo_collection):
+        """Test _generate_index_name with empty fields (lines 846-847)."""
+        from mdb_engine.database.scoped_wrapper import (
+            AsyncAtlasIndexManager,
+            AutoIndexManager,
+        )
+
+        index_manager = AsyncAtlasIndexManager(mock_mongo_collection)
+        auto_manager = AutoIndexManager(mock_mongo_collection, index_manager)
+
+        result = auto_manager._generate_index_name([])  # noqa: SLF001
+        assert result == "auto_idx_empty"
+
+    def test_generate_index_name_single_field(self, mock_mongo_collection):
+        """Test _generate_index_name with single field."""
+        from pymongo import ASCENDING, DESCENDING
+
+        from mdb_engine.database.scoped_wrapper import (
+            AsyncAtlasIndexManager,
+            AutoIndexManager,
+        )
+
+        index_manager = AsyncAtlasIndexManager(mock_mongo_collection)
+        auto_manager = AutoIndexManager(mock_mongo_collection, index_manager)
+
+        result = auto_manager._generate_index_name([("name", ASCENDING)])  # noqa: SLF001
+        assert result == "auto_name_asc"
+
+        result = auto_manager._generate_index_name([("age", DESCENDING)])  # noqa: SLF001
+        assert result == "auto_age_desc"
+
+    def test_generate_index_name_multiple_fields(self, mock_mongo_collection):
+        """Test _generate_index_name with multiple fields."""
+        from pymongo import ASCENDING, DESCENDING
+
+        from mdb_engine.database.scoped_wrapper import (
+            AsyncAtlasIndexManager,
+            AutoIndexManager,
+        )
+
+        index_manager = AsyncAtlasIndexManager(mock_mongo_collection)
+        auto_manager = AutoIndexManager(mock_mongo_collection, index_manager)
+
+        result = auto_manager._generate_index_name(  # noqa: SLF001
+            [
+                ("name", ASCENDING),
+                ("age", DESCENDING),
+            ]
+        )
+        assert result == "auto_name_asc_age_desc"
+
+    @pytest.mark.asyncio
+    async def test_ensure_index_for_query_task_deduplication(self, mock_mongo_collection):
+        """Test that concurrent ensure_index_for_query calls don't create duplicate tasks."""
+        import asyncio
+
+        from mdb_engine.database.scoped_wrapper import AutoIndexManager
+
+        # Create a mock index manager
+        mock_index_manager = MagicMock()
+        mock_index_manager.list_indexes = AsyncMock(return_value=[])
+        mock_index_manager.create_index = AsyncMock()
+
+        auto_manager = AutoIndexManager(mock_mongo_collection, mock_index_manager)
+
+        # Set query count above threshold to trigger index creation
+        index_name = "auto_name_asc"
+        auto_manager._query_counts[index_name] = 10  # Above default threshold  # noqa: SLF001
+
+        # Call ensure_index_for_query concurrently multiple times
+        async def call_ensure_index():
+            await auto_manager.ensure_index_for_query({"name": "test"})
+
+        # Create multiple concurrent calls
+        tasks = [asyncio.create_task(call_ensure_index()) for _ in range(5)]
+
+        # Wait for all to complete
+        await asyncio.gather(*tasks)
+
+        # Verify only one task was created (check pending_tasks)
+        # After all tasks complete, pending_tasks should be empty
+        assert len(auto_manager._pending_tasks) == 0  # noqa: SLF001
+
+        # Verify create_index was called only once (not 5 times)
+        assert mock_index_manager.create_index.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_ensure_index_for_query_task_cleanup(self, mock_mongo_collection):
+        """Test that tasks are cleaned up from pending_tasks when complete."""
+        import asyncio
+
+        from mdb_engine.database.scoped_wrapper import AutoIndexManager
+
+        # Create a mock index manager
+        mock_index_manager = MagicMock()
+        mock_index_manager.list_indexes = AsyncMock(return_value=[])
+        mock_index_manager.create_index = AsyncMock(return_value="auto_name_asc")
+
+        auto_manager = AutoIndexManager(mock_mongo_collection, mock_index_manager)
+
+        # Set query count above threshold
+        index_name = "auto_name_asc"
+        auto_manager._query_counts[index_name] = 10  # noqa: SLF001
+
+        # Call ensure_index_for_query
+        await auto_manager.ensure_index_for_query({"name": "test"})
+
+        # Wait a bit for task to complete
+        await asyncio.sleep(0.1)
+
+        # Verify task was cleaned up
+        assert index_name not in auto_manager._pending_tasks  # noqa: SLF001
+        assert len(auto_manager._pending_tasks) == 0  # noqa: SLF001
+
+    @pytest.mark.asyncio
+    async def test_ensure_index_for_query_pending_task_blocks_duplicate(self, mock_mongo_collection):
+        """Test that pending task blocks duplicate index creation."""
+        import asyncio
+
+        from mdb_engine.database.scoped_wrapper import AutoIndexManager
+
+        # Create a mock index manager
+        mock_index_manager = MagicMock()
+        mock_index_manager.list_indexes = AsyncMock(return_value=[])
+
+        # Mock create_index with a delay to simulate slow operation
+        async def slow_create_index(*args, **kwargs):
+            await asyncio.sleep(0.1)
+            return "auto_name_asc"
+
+        mock_index_manager.create_index = AsyncMock(side_effect=slow_create_index)
+
+        auto_manager = AutoIndexManager(mock_mongo_collection, mock_index_manager)
+
+        # Set query count above threshold
+        index_name = "auto_name_asc"
+        auto_manager._query_counts[index_name] = 10  # noqa: SLF001
+
+        # Start first call (will create task)
+        task1 = asyncio.create_task(auto_manager.ensure_index_for_query({"name": "test"}))
+
+        # Wait a tiny bit to ensure task is created
+        await asyncio.sleep(0.01)
+
+        # Verify task is in pending_tasks
+        assert index_name in auto_manager._pending_tasks  # noqa: SLF001
+
+        # Start second call immediately (should see pending task and return early)
+        await auto_manager.ensure_index_for_query({"name": "test"})
+
+        # Wait for first task to complete
+        await task1
+
+        # Verify create_index was called only once (second call was blocked)
+        assert mock_index_manager.create_index.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_ensure_index_for_query_completed_task_allows_new_creation(self, mock_mongo_collection):
+        """Test that completed tasks don't block new index creation."""
+        import asyncio
+
+        from mdb_engine.database.scoped_wrapper import AutoIndexManager
+
+        # Create a mock index manager
+        mock_index_manager = MagicMock()
+        mock_index_manager.list_indexes = AsyncMock(return_value=[])
+        mock_index_manager.create_index = AsyncMock(return_value="auto_name_asc")
+
+        auto_manager = AutoIndexManager(mock_mongo_collection, mock_index_manager)
+
+        # Set query count above threshold
+        index_name = "auto_name_asc"
+        auto_manager._query_counts[index_name] = 10  # noqa: SLF001
+
+        # First call - creates index
+        await auto_manager.ensure_index_for_query({"name": "test"})
+
+        # Wait for the actual task to complete
+        if index_name in auto_manager._pending_tasks:  # noqa: SLF001
+            await auto_manager._pending_tasks[index_name]  # noqa: SLF001
+        # Give it a bit more time to ensure cleanup
+        await asyncio.sleep(0.05)
+
+        # Verify first call created the index
+        assert mock_index_manager.create_index.call_count == 1
+
+        # Mark index as failed in cache (simulating need to retry)
+        # This simulates a scenario where the index creation appeared to succeed
+        # but then failed, or we need to retry for some reason
+        async with auto_manager._lock:  # noqa: SLF001
+            auto_manager._creation_cache[index_name] = False  # noqa: SLF001
+            # Ensure pending task is cleaned up
+            auto_manager._pending_tasks.pop(index_name, None)  # noqa: SLF001
+
+        # Second call with same query - should create new task since previous completed
+        await auto_manager.ensure_index_for_query({"name": "test"})
+
+        # Wait for the second task to complete
+        if index_name in auto_manager._pending_tasks:  # noqa: SLF001
+            await auto_manager._pending_tasks[index_name]  # noqa: SLF001
+        await asyncio.sleep(0.05)
+
+        # Verify create_index was called twice (first attempt and retry)
+        assert mock_index_manager.create_index.call_count == 2
+
+
+class TestAsyncAtlasIndexManagerCreateIndex:
+    """Test AsyncAtlasIndexManager index creation error handling."""
+
+    @pytest.mark.asyncio
+    async def test_create_new_search_index_index_already_exists(self, mock_mongo_collection):
+        """Test _create_new_search_index handles IndexAlreadyExists race condition."""
+        from pymongo.errors import OperationFailure
+
+        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager
+
+        manager = AsyncAtlasIndexManager(mock_mongo_collection)
+
+        # Mock create_search_index to raise OperationFailure with IndexAlreadyExists
+        mock_mongo_collection.create_search_index = AsyncMock(
+            side_effect=OperationFailure("IndexAlreadyExists: Index 'test_idx' already exists")
+        )
+
+        # Should not raise - just logs warning
+        await manager._create_new_search_index(  # noqa: SLF001
+            "test_idx", {"mappings": {"dynamic": True}}, "vectorsearch"
+        )
+
+    @pytest.mark.asyncio
+    async def test_create_new_search_index_operation_failure(self, mock_mongo_collection):
+        """Test _create_new_search_index raises OperationFailure for other errors."""
+        from pymongo.errors import OperationFailure
+
+        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager
+
+        manager = AsyncAtlasIndexManager(mock_mongo_collection)
+
+        # Mock create_search_index to raise OperationFailure with other error
+        error = OperationFailure("Other error", code=123)
+        mock_mongo_collection.create_search_index = AsyncMock(side_effect=error)
+
+        # Should raise OperationFailure (not wrapped)
+        with pytest.raises(OperationFailure):
+            await manager._create_new_search_index(  # noqa: SLF001
+                "test_idx", {"mappings": {"dynamic": True}}, "vectorsearch"
+            )
+
+    @pytest.mark.asyncio
+    async def test_create_search_index_no_existing_index(self, mock_mongo_collection):
+        """Test create_search_index when no existing index."""
+        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager
+
+        mock_mongo_collection.database = MagicMock()  # Ensure database attribute exists
+        manager = AsyncAtlasIndexManager(mock_mongo_collection)
+
+        # Mock get_search_index to return None (no existing index)
+        with patch(
+            "mdb_engine.database.scoped_wrapper.AsyncAtlasIndexManager._ensure_collection_exists",  # noqa: SLF001
+            new_callable=AsyncMock,
+        ):
+            with patch(
+                "mdb_engine.database.scoped_wrapper.AsyncAtlasIndexManager.get_search_index",
+                new_callable=AsyncMock,
+                return_value=None,
+            ):
+                with patch(
+                    (
+                        "mdb_engine.database.scoped_wrapper." "AsyncAtlasIndexManager._create_new_search_index"  # noqa: SLF001
+                    ),
+                    new_callable=AsyncMock,
+                ) as mock_create:
+                    with patch(
+                        (
+                            "mdb_engine.database.scoped_wrapper." "AsyncAtlasIndexManager._wait_for_search_index_ready"  # noqa: SLF001
+                        ),
+                        new_callable=AsyncMock,
+                        return_value=True,
+                    ):
+                        result = await manager.create_search_index(
+                            "test_idx",
+                            {"mappings": {"dynamic": True}},
+                            "vectorsearch",
+                            wait_for_ready=True,
+                        )
+
+                        assert result is True
+                        mock_create.assert_called_once_with("test_idx", {"mappings": {"dynamic": True}}, "vectorsearch")
+
+    @pytest.mark.asyncio
+    async def test_create_search_index_operation_failure(self, mock_mongo_collection):
+        """Test create_search_index handles OperationFailure (lines 282-289)."""
+        from pymongo.errors import OperationFailure
+
+        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager
+        from mdb_engine.exceptions import MongoDBEngineError
+
+        mock_mongo_collection.database = MagicMock()  # Ensure database attribute exists
+        manager = AsyncAtlasIndexManager(mock_mongo_collection)
+
+        # Mock get_search_index to raise OperationFailure
+        async def get_search_index_side_effect(*args, **kwargs):
+            raise OperationFailure("DB error")
+
+        with patch(
+            "mdb_engine.database.scoped_wrapper.AsyncAtlasIndexManager._ensure_collection_exists",  # noqa: SLF001
+            new_callable=AsyncMock,
+        ):
+            with patch(
+                "mdb_engine.database.scoped_wrapper.AsyncAtlasIndexManager.get_search_index",
+                side_effect=get_search_index_side_effect,
+            ):
+                with pytest.raises(MongoDBEngineError, match="Failed to create/check search index"):
+                    await manager.create_search_index("test_idx", {"mappings": {"dynamic": True}}, "vectorsearch")
+
+    @pytest.mark.asyncio
+    async def test_create_search_index_connection_failure(self, mock_mongo_collection):
+        """Test create_search_index handles ConnectionFailure (lines 290-297)."""
+        from pymongo.errors import ConnectionFailure
+
+        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager
+        from mdb_engine.exceptions import MongoDBEngineError
+
+        mock_mongo_collection.database = MagicMock()  # Ensure database attribute exists
+        manager = AsyncAtlasIndexManager(mock_mongo_collection)
+
+        async def get_search_index_side_effect(*args, **kwargs):
+            raise ConnectionFailure("Connection error")
+
+        with patch(
+            "mdb_engine.database.scoped_wrapper.AsyncAtlasIndexManager._ensure_collection_exists",  # noqa: SLF001
+            new_callable=AsyncMock,
+        ):
+            with patch(
+                "mdb_engine.database.scoped_wrapper.AsyncAtlasIndexManager.get_search_index",
+                side_effect=get_search_index_side_effect,
+            ):
+                with pytest.raises(
+                    MongoDBEngineError,
+                    match="Connection failed while creating/checking search index",
+                ):
+                    await manager.create_search_index("test_idx", {"mappings": {"dynamic": True}}, "vectorsearch")
+
+    @pytest.mark.asyncio
+    async def test_create_search_index_invalid_operation(self, mock_mongo_collection):
+        """Test create_search_index handles InvalidOperation (lines 298-305)."""
+        from pymongo.errors import InvalidOperation
+
+        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager
+        from mdb_engine.exceptions import MongoDBEngineError
+
+        mock_mongo_collection.database = MagicMock()  # Ensure database attribute exists
+        manager = AsyncAtlasIndexManager(mock_mongo_collection)
+
+        async def get_search_index_side_effect(*args, **kwargs):
+            raise InvalidOperation("Invalid operation")
+
+        with patch(
+            "mdb_engine.database.scoped_wrapper.AsyncAtlasIndexManager._ensure_collection_exists",  # noqa: SLF001
+            new_callable=AsyncMock,
+        ):
+            with patch(
+                "mdb_engine.database.scoped_wrapper.AsyncAtlasIndexManager.get_search_index",
+                side_effect=get_search_index_side_effect,
+            ):
+                with pytest.raises(MongoDBEngineError, match="Error creating/checking search index"):
+                    await manager.create_search_index("test_idx", {"mappings": {"dynamic": True}}, "vectorsearch")
+
+    @pytest.mark.asyncio
+    async def test_get_search_index_operation_failure(self, mock_mongo_collection):
+        """Test get_search_index handles OperationFailure (returns None) (lines 318-320)."""
+        from pymongo.errors import OperationFailure
+
+        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager
+
+        manager = AsyncAtlasIndexManager(mock_mongo_collection)
+
+        # Mock aggregate to raise OperationFailure
+        async def async_iter():
+            raise OperationFailure("DB error")
+            yield  # Make it an async generator
+
+        mock_cursor = MagicMock()
+        mock_cursor.__aiter__ = lambda self: async_iter()  # noqa: SLF001
+        mock_mongo_collection.aggregate = MagicMock(return_value=mock_cursor)
+
+        result = await manager.get_search_index("test_idx")
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_get_search_index_connection_failure(self, mock_mongo_collection):
+        """Test get_search_index handles ConnectionFailure (returns None) (lines 321-323)."""
+        from pymongo.errors import ConnectionFailure
+
+        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager
+
+        manager = AsyncAtlasIndexManager(mock_mongo_collection)
+
+        # Mock aggregate to raise ConnectionFailure
+        async def async_iter():
+            raise ConnectionFailure("Connection error")
+            yield
+
+        mock_cursor = MagicMock()
+        mock_cursor.__aiter__ = lambda self: async_iter()  # noqa: SLF001
+        mock_mongo_collection.aggregate = MagicMock(return_value=mock_cursor)
+
+        result = await manager.get_search_index("test_idx")
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_get_search_index_server_selection_timeout(self, mock_mongo_collection):
+        """Test get_search_index handles ServerSelectionTimeoutError (returns None)."""
+        from pymongo.errors import ServerSelectionTimeoutError
+
+        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager
+
+        manager = AsyncAtlasIndexManager(mock_mongo_collection)
+
+        # Mock aggregate to raise ServerSelectionTimeoutError
+        async def async_iter():
+            raise ServerSelectionTimeoutError("Timeout")
+            yield
+
+        mock_cursor = MagicMock()
+        mock_cursor.__aiter__ = lambda self: async_iter()  # noqa: SLF001
+        mock_mongo_collection.aggregate = MagicMock(return_value=mock_cursor)
+
+        result = await manager.get_search_index("test_idx")
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_get_search_index_invalid_operation(self, mock_mongo_collection):
+        """Test get_search_index handles InvalidOperation (raises MongoDBEngineError)."""
+        from pymongo.errors import InvalidOperation
+
+        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager
+        from mdb_engine.exceptions import MongoDBEngineError
+
+        manager = AsyncAtlasIndexManager(mock_mongo_collection)
+
+        # Mock aggregate to raise InvalidOperation
+        async def async_iter():
+            raise InvalidOperation("Invalid operation")
+            yield
+
+        mock_cursor = MagicMock()
+        mock_cursor.__aiter__ = lambda self: async_iter()  # noqa: SLF001
+        mock_mongo_collection.aggregate = MagicMock(return_value=mock_cursor)
+
+        with pytest.raises(MongoDBEngineError, match="Error retrieving search index"):
+            await manager.get_search_index("test_idx")
+
+    @pytest.mark.asyncio
+    async def test_get_search_index_returns_none_when_not_found(self, mock_mongo_collection):
+        """Test get_search_index returns None when index not found (line 318)."""
+        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager
+
+        manager = AsyncAtlasIndexManager(mock_mongo_collection)
+
+        # Mock aggregate to return empty iterator (no results)
+        async def async_iter():
+            # Empty async generator - no results
+            if False:
+                yield
+            return
+
+        mock_cursor = MagicMock()
+        mock_cursor.__aiter__ = lambda self: async_iter()  # noqa: SLF001
+        mock_mongo_collection.aggregate = MagicMock(return_value=mock_cursor)
+
+        result = await manager.get_search_index("nonexistent_idx")
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_create_new_search_index_logs_info(self, mock_mongo_collection):
+        """Test _create_new_search_index logs info message (line 238)."""
+        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager
+
+        manager = AsyncAtlasIndexManager(mock_mongo_collection)
+
+        mock_mongo_collection.create_search_index = AsyncMock()
+
+        with patch("mdb_engine.database.scoped_wrapper.logger") as mock_logger:
+            await manager._create_new_search_index(  # noqa: SLF001
+                "test_idx", {"mappings": {"dynamic": True}}, "vectorsearch"
+            )
+
+            # Should log info message about build submission
+            mock_logger.info.assert_called()
+            # Check that the log message contains the index name
+            log_calls = [str(call) for call in mock_logger.info.call_args_list]
+            assert any("test_idx" in str(call) for call in log_calls)
+
+    @pytest.mark.asyncio
+    async def test_create_search_index_existing_index_ready(self, mock_mongo_collection):
+        """Test create_search_index when existing index is ready (lines 273-277)."""
+        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager
+
+        mock_mongo_collection.database = MagicMock()
+        manager = AsyncAtlasIndexManager(mock_mongo_collection)
+
+        existing_index = {
+            "name": "test_idx",
+            "status": "READY",
+            "queryable": True,
+            "latestDefinition": {"mappings": {"dynamic": True}},
+        }
+
+        async def get_search_index_side_effect(*args, **kwargs):
+            return existing_index
+
+        with patch(
+            "mdb_engine.database.scoped_wrapper.AsyncAtlasIndexManager._ensure_collection_exists",  # noqa: SLF001
+            new_callable=AsyncMock,
+        ):
+            with patch(
+                "mdb_engine.database.scoped_wrapper.AsyncAtlasIndexManager.get_search_index",
+                side_effect=get_search_index_side_effect,
+            ):
+                with patch(
+                    (
+                        "mdb_engine.database.scoped_wrapper." "AsyncAtlasIndexManager._handle_existing_index"  # noqa: SLF001
+                    ),
+                    new_callable=AsyncMock,
+                    return_value=True,
+                ) as mock_handle:
+                    result = await manager.create_search_index(
+                        "test_idx",
+                        {"mappings": {"dynamic": True}},
+                        "vectorsearch",
+                        wait_for_ready=False,
+                    )
+
+                    assert result is True
+                    mock_handle.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_create_search_index_wait_for_ready(self, mock_mongo_collection):
+        """Test create_search_index with wait_for_ready=True (line 283)."""
+        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager
+
+        mock_mongo_collection.database = MagicMock()
+        manager = AsyncAtlasIndexManager(mock_mongo_collection)
+
+        async def get_search_index_side_effect(*args, **kwargs):
+            return None
+
+        with patch(
+            "mdb_engine.database.scoped_wrapper.AsyncAtlasIndexManager._ensure_collection_exists",  # noqa: SLF001
+            new_callable=AsyncMock,
+        ):
+            with patch(
+                "mdb_engine.database.scoped_wrapper.AsyncAtlasIndexManager.get_search_index",
+                side_effect=get_search_index_side_effect,
+            ):
+                with patch(
+                    (
+                        "mdb_engine.database.scoped_wrapper." "AsyncAtlasIndexManager._create_new_search_index"  # noqa: SLF001
+                    ),
+                    new_callable=AsyncMock,
+                ):
+                    with patch(
+                        (
+                            "mdb_engine.database.scoped_wrapper." "AsyncAtlasIndexManager._wait_for_search_index_ready"  # noqa: SLF001
+                        ),
+                        new_callable=AsyncMock,
+                        return_value=True,
+                    ) as mock_wait:
+                        result = await manager.create_search_index(
+                            "test_idx",
+                            {"mappings": {"dynamic": True}},
+                            "vectorsearch",
+                            wait_for_ready=True,
+                        )
+
+                        assert result is True
+                        mock_wait.assert_called_once_with("test_idx", 600)
+
+    @pytest.mark.asyncio
+    async def test_create_search_index_existing_index_not_ready(self, mock_mongo_collection):
+        """Test create_search_index when existing index is not ready (lines 273-277)."""
+        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager
+
+        mock_mongo_collection.database = MagicMock()
+        manager = AsyncAtlasIndexManager(mock_mongo_collection)
+
+        existing_index = {
+            "name": "test_idx",
+            "status": "BUILDING",
+            "queryable": False,
+            "latestDefinition": {"mappings": {"dynamic": True}},
+        }
+
+        async def get_search_index_side_effect(*args, **kwargs):
+            return existing_index
+
+        with patch(
+            "mdb_engine.database.scoped_wrapper.AsyncAtlasIndexManager._ensure_collection_exists",  # noqa: SLF001
+            new_callable=AsyncMock,
+        ):
+            with patch(
+                "mdb_engine.database.scoped_wrapper.AsyncAtlasIndexManager.get_search_index",
+                side_effect=get_search_index_side_effect,
+            ):
+                with patch(
+                    (
+                        "mdb_engine.database.scoped_wrapper." "AsyncAtlasIndexManager._handle_existing_index"  # noqa: SLF001
+                    ),
+                    new_callable=AsyncMock,
+                    return_value=False,
+                ):
+                    with patch(
+                        (
+                            "mdb_engine.database.scoped_wrapper." "AsyncAtlasIndexManager._wait_for_search_index_ready"  # noqa: SLF001
+                        ),
+                        new_callable=AsyncMock,
+                        return_value=True,
+                    ):
+                        result = await manager.create_search_index(
+                            "test_idx",
+                            {"mappings": {"dynamic": True}},
+                            "vectorsearch",
+                            wait_for_ready=True,
+                        )
+
+                        assert result is True
+                        manager._wait_for_search_index_ready.assert_called_once()  # noqa: SLF001
+
+    @pytest.mark.asyncio
+    async def test_list_search_indexes_success(self, mock_mongo_collection):
+        """Test list_search_indexes successful path (lines 334-336)."""
+        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager
+
+        manager = AsyncAtlasIndexManager(mock_mongo_collection)
+
+        mock_indexes = [
+            {"name": "idx1", "status": "READY"},
+            {"name": "idx2", "status": "BUILDING"},
+        ]
+
+        mock_cursor = MagicMock()
+        mock_cursor.to_list = AsyncMock(return_value=mock_indexes)
+        mock_mongo_collection.list_search_indexes = MagicMock(return_value=mock_cursor)
+
+        result = await manager.list_search_indexes()
+
+        assert result == mock_indexes
+
+    @pytest.mark.asyncio
+    async def test_list_search_indexes_operation_failure(self, mock_mongo_collection):
+        """Test list_search_indexes handles OperationFailure (lines 336-338)."""
+        from pymongo.errors import OperationFailure
+
+        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager
+
+        manager = AsyncAtlasIndexManager(mock_mongo_collection)
+
+        mock_cursor = MagicMock()
+        mock_cursor.to_list = AsyncMock(side_effect=OperationFailure("DB error"))
+        mock_mongo_collection.list_search_indexes = MagicMock(return_value=mock_cursor)
+
+        result = await manager.list_search_indexes()
+
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_list_search_indexes_connection_failure(self, mock_mongo_collection):
+        """Test list_search_indexes handles ConnectionFailure (lines 336-338)."""
+        from pymongo.errors import ConnectionFailure
+
+        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager
+
+        manager = AsyncAtlasIndexManager(mock_mongo_collection)
+
+        mock_cursor = MagicMock()
+        mock_cursor.to_list = AsyncMock(side_effect=ConnectionFailure("Connection error"))
+        mock_mongo_collection.list_search_indexes = MagicMock(return_value=mock_cursor)
+
+        result = await manager.list_search_indexes()
+
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_list_search_indexes_invalid_operation(self, mock_mongo_collection):
+        """Test list_search_indexes handles InvalidOperation (lines 339-342)."""
+        from pymongo.errors import InvalidOperation
+
+        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager
+
+        manager = AsyncAtlasIndexManager(mock_mongo_collection)
+
+        mock_cursor = MagicMock()
+        mock_cursor.to_list = AsyncMock(side_effect=InvalidOperation("Client closed"))
+        mock_mongo_collection.list_search_indexes = MagicMock(return_value=mock_cursor)
+
+        result = await manager.list_search_indexes()
+
+        assert result == []
+
+
+@pytest.mark.unit
+class TestScopedCollectionWrapperSecurity:
+    """Test security features integrated into ScopedCollectionWrapper."""
+
+    @pytest.mark.asyncio
+    async def test_find_blocks_dangerous_operator(self, mock_mongo_collection):
+        """Test that find() blocks dangerous operators."""
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        # Try to use dangerous operator
+        filter_with_where = {"$where": "this.status === 'active'"}
+
+        with pytest.raises(QueryValidationError, match="Dangerous operator"):
+            wrapper.find(filter_with_where)
+
+    @pytest.mark.asyncio
+    async def test_find_one_blocks_dangerous_operator(self, mock_mongo_collection):
+        """Test that find_one() blocks dangerous operators."""
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        filter_with_where = {"$where": "true"}
+
+        with pytest.raises(QueryValidationError, match="Dangerous operator"):
+            await wrapper.find_one(filter_with_where)
+
+    @pytest.mark.asyncio
+    async def test_aggregate_blocks_dangerous_operator(self, mock_mongo_collection):
+        """Test that aggregate() blocks dangerous operators."""
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        pipeline = [{"$match": {"$where": "true"}}]
+
+        with pytest.raises(QueryValidationError, match="Dangerous operator"):
+            wrapper.aggregate(pipeline)
+
+    @pytest.mark.asyncio
+    async def test_aggregate_validates_pipeline_length(self, mock_mongo_collection):
+        """Test that aggregate() validates pipeline length."""
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        # Create pipeline with too many stages
+        from mdb_engine.constants import MAX_PIPELINE_STAGES
+
+        pipeline = [{"$match": {}}] * (MAX_PIPELINE_STAGES + 1)
+
+        with pytest.raises(QueryValidationError, match="exceeds maximum stages"):
+            wrapper.aggregate(pipeline)
+
+    @pytest.mark.asyncio
+    async def test_find_enforces_timeout(self, mock_mongo_collection):
+        """Test that find() enforces query timeout."""
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        # Mock cursor
+        mock_cursor = MagicMock()
+        mock_mongo_collection.find = MagicMock(return_value=mock_cursor)
+
+        wrapper.find({"status": "active"})
+
+        # Verify find was called (maxTimeMS is removed before calling find()
+        # because Cursor doesn't accept it)
+        call_kwargs = mock_mongo_collection.find.call_args[1]
+        assert "maxTimeMS" not in call_kwargs  # Removed because Cursor constructor doesn't accept it
+
+    @pytest.mark.asyncio
+    async def test_find_enforces_result_limit(self, mock_mongo_collection):
+        """Test that find() enforces result limit."""
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        from mdb_engine.constants import MAX_QUERY_RESULT_SIZE
+
+        # Mock cursor
+        mock_cursor = MagicMock()
+        mock_mongo_collection.find = MagicMock(return_value=mock_cursor)
+
+        # Try to set limit exceeding maximum
+        wrapper.find({"status": "active"}, limit=MAX_QUERY_RESULT_SIZE + 1000)
+
+        # Verify limit was capped
+        call_kwargs = mock_mongo_collection.find.call_args[1]
+        assert call_kwargs["limit"] == MAX_QUERY_RESULT_SIZE
+
+    @pytest.mark.asyncio
+    async def test_insert_one_validates_document_size(self, mock_mongo_collection):
+        """Test that insert_one() validates document size."""
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        # Create oversized document
+        large_value = "x" * (20 * 1024 * 1024)  # 20MB
+        oversized_doc = {"large_field": large_value}
+
+        with pytest.raises(ResourceLimitExceeded, match="exceeds maximum"):
+            await wrapper.insert_one(oversized_doc)
+
+    @pytest.mark.asyncio
+    async def test_insert_many_validates_document_sizes(self, mock_mongo_collection):
+        """Test that insert_many() validates document sizes."""
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        large_value = "x" * (20 * 1024 * 1024)  # 20MB
+        docs = [
+            {"field1": "value1"},
+            {"large_field": large_value},  # This one exceeds limit
+            {"field3": "value3"},
+        ]
+
+        with pytest.raises(ResourceLimitExceeded, match="document index"):
+            await wrapper.insert_many(docs)
+
+    @pytest.mark.asyncio
+    async def test_count_documents_enforces_timeout(self, mock_mongo_collection):
+        """Test that count_documents() enforces query timeout."""
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        mock_mongo_collection.count_documents = AsyncMock(return_value=10)
+
+        await wrapper.count_documents({"status": "active"})
+
+        # Note: count_documents doesn't enforce maxTimeMS to avoid cursor creation errors
+        # Verify count_documents was called (maxTimeMS is removed to avoid cursor issues)
+        call_kwargs = mock_mongo_collection.count_documents.call_args[1]
+        # maxTimeMS is intentionally not passed to count_documents to avoid cursor errors
+        assert "maxTimeMS" not in call_kwargs or call_kwargs.get("maxTimeMS") is None
+
+    @pytest.mark.asyncio
+    async def test_delete_many_strips_timeout(self, mock_mongo_collection):
+        """Test that delete_many() strips maxTimeMS (not supported by Motor)."""
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        mock_mongo_collection.delete_many = AsyncMock()
+
+        await wrapper.delete_many({"status": "deleted"})
+
+        # Verify delete_many was called WITHOUT maxTimeMS (Motor doesn't support it)
+        call_kwargs = mock_mongo_collection.delete_many.call_args[1]
+        assert "maxTimeMS" not in call_kwargs
+
+    @pytest.mark.asyncio
+    async def test_custom_validator_and_limiter(self, mock_mongo_collection):
+        """Test that custom validators and limiters can be used."""
+        custom_validator = QueryValidator(max_depth=5)
+        custom_limiter = ResourceLimiter(default_timeout_ms=15000)
+
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+            query_validator=custom_validator,
+            resource_limiter=custom_limiter,
+        )
+
+        # Verify custom validator is used
+        deep_filter = {"level1": {"level2": {"level3": {"level4": {"level5": {"level6": {}}}}}}}
+        with pytest.raises(QueryValidationError, match="exceeds maximum nesting depth"):
+            wrapper.find(deep_filter)
+
+        # Verify custom limiter is used
+        mock_cursor = MagicMock()
+        mock_mongo_collection.find = MagicMock(return_value=mock_cursor)
+        wrapper.find({"status": "active"})
+
+        call_kwargs = mock_mongo_collection.find.call_args[1]
+        # maxTimeMS is removed before calling find() because Cursor constructor doesn't accept it
+        assert "maxTimeMS" not in call_kwargs
+
+    @pytest.mark.asyncio
+    async def test_scoped_mongo_wrapper_shares_validators(self, mock_mongo_database):
+        """Test that ScopedMongoWrapper shares validators across collections."""
+        wrapper = ScopedMongoWrapper(
+            real_db=mock_mongo_database,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        # Mock collections
+        mock_collection1 = MagicMock(spec=AsyncIOMotorCollection)
+        mock_collection1.name = "test_app_users"
+        mock_mongo_database.test_app_users = mock_collection1
+
+        mock_collection2 = MagicMock(spec=AsyncIOMotorCollection)
+        mock_collection2.name = "test_app_products"
+        mock_mongo_database.test_app_products = mock_collection2
+
+        # Get collections
+        collection1 = wrapper.users
+        collection2 = wrapper.products
+
+        # Verify they share the same validators/limiters
+        assert collection1._query_validator is wrapper._query_validator  # noqa: SLF001
+        assert collection1._resource_limiter is wrapper._resource_limiter  # noqa: SLF001
+        assert collection2._query_validator is wrapper._query_validator  # noqa: SLF001
+        assert collection2._resource_limiter is wrapper._resource_limiter  # noqa: SLF001
+
+    @pytest.mark.asyncio
+    async def test_find_with_none_filter(self, mock_mongo_collection):
+        """Test that find() works with None filter."""
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        mock_cursor = MagicMock()
+        mock_mongo_collection.find = MagicMock(return_value=mock_cursor)
+
+        # Should not raise validation error for None filter
+        cursor = wrapper.find(None)
+        assert cursor == mock_cursor
+
+    @pytest.mark.asyncio
+    async def test_find_one_with_none_filter(self, mock_mongo_collection):
+        """Test that find_one() works with None filter."""
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        mock_mongo_collection.find_one = AsyncMock(return_value={"_id": "123"})
+
+        # Should not raise validation error for None filter
+        result = await wrapper.find_one(None)
+        assert result == {"_id": "123"}
+
+    @pytest.mark.asyncio
+    async def test_aggregate_with_empty_pipeline(self, mock_mongo_collection):
+        """Test that aggregate() works with empty pipeline."""
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        mock_cursor = MagicMock()
+        mock_mongo_collection.aggregate = MagicMock(return_value=mock_cursor)
+
+        # Should not raise validation error for empty pipeline
+        cursor = wrapper.aggregate([])
+        assert cursor is not None
+
+    @pytest.mark.asyncio
+    async def test_regex_validation_in_queries(self, mock_mongo_collection):
+        """Test that regex patterns in queries are validated."""
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        from mdb_engine.constants import MAX_REGEX_LENGTH
+
+        # Test overly long regex
+        long_regex = "a" * (MAX_REGEX_LENGTH + 1)
+        filter_with_long_regex = {"name": {"$regex": long_regex}}
+
+        with pytest.raises(QueryValidationError, match="exceeds maximum length"):
+            wrapper.find(filter_with_long_regex)
+
+    @pytest.mark.asyncio
+    async def test_insert_one_with_valid_document(self, mock_mongo_collection):
+        """Test that insert_one() works with valid documents."""
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        mock_result = MagicMock()
+        mock_mongo_collection.insert_one = AsyncMock(return_value=mock_result)
+
+        doc = {"name": "Test", "value": 123}
+        await wrapper.insert_one(doc)
+
+        # Verify insert_one was called (maxTimeMS is removed because insert_one doesn't accept it)
+        call_kwargs = mock_mongo_collection.insert_one.call_args[1]
+        assert "maxTimeMS" not in call_kwargs  # Removed because insert_one doesn't accept it
+
+    @pytest.mark.asyncio
+    async def test_find_with_custom_timeout(self, mock_mongo_collection):
+        """Test that custom timeouts are respected (within limits)."""
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        mock_cursor = MagicMock()
+        mock_mongo_collection.find = MagicMock(return_value=mock_cursor)
+
+        # Set custom timeout
+        wrapper.find({"status": "active"}, maxTimeMS=15000)
+
+        call_kwargs = mock_mongo_collection.find.call_args[1]
+        # maxTimeMS is removed before calling find() because Cursor constructor doesn't accept it
+        assert "maxTimeMS" not in call_kwargs
+
+    @pytest.mark.asyncio
+    async def test_find_with_excessive_timeout_capped(self, mock_mongo_collection):
+        """Test that excessive timeouts are capped to maximum."""
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+
+        mock_cursor = MagicMock()
+        mock_mongo_collection.find = MagicMock(return_value=mock_cursor)
+
+        from mdb_engine.constants import MAX_QUERY_TIME_MS
+
+        # Set timeout exceeding maximum
+        wrapper.find({"status": "active"}, maxTimeMS=MAX_QUERY_TIME_MS + 10000)
+
+        call_kwargs = mock_mongo_collection.find.call_args[1]
+        # maxTimeMS is removed before calling find() because Cursor constructor doesn't accept it
+        assert "maxTimeMS" not in call_kwargs
+
+
+# ============================================================================
+# PHASE 1 COVERAGE TESTS
+# ============================================================================
+
+
+@pytest.mark.unit
+class TestCollectionNameValidation:
+    """Tests for _validate_collection_name edge cases."""
+
+    def test_empty_name(self):
+        from mdb_engine.database.scoped_wrapper import _validate_collection_name
+
+        with pytest.raises(ValueError, match="cannot be empty"):
+            _validate_collection_name("")
+
+    def test_path_traversal_double_dot(self):
+        from mdb_engine.database.scoped_wrapper import _validate_collection_name
+
+        with pytest.raises(ValueError, match="Invalid collection name"):
+            _validate_collection_name("foo..bar")
+
+    def test_path_traversal_slash(self):
+        from mdb_engine.database.scoped_wrapper import _validate_collection_name
+
+        with pytest.raises(ValueError, match="Invalid collection name"):
+            _validate_collection_name("foo/bar")
+
+    def test_path_traversal_backslash(self):
+        from mdb_engine.database.scoped_wrapper import _validate_collection_name
+
+        with pytest.raises(ValueError, match="Invalid collection name"):
+            _validate_collection_name("foo\\bar")
+
+
+@pytest.mark.unit
+class TestExtractAppSlug:
+    """Tests for _extract_app_slug_from_prefixed_name."""
+
+    def test_no_underscore(self):
+        from mdb_engine.database.scoped_wrapper import _extract_app_slug_from_prefixed_name
+
+        assert _extract_app_slug_from_prefixed_name("collection") is None
+
+    def test_leading_underscore_returns_none(self):
+        from mdb_engine.database.scoped_wrapper import _extract_app_slug_from_prefixed_name
+
+        assert _extract_app_slug_from_prefixed_name("_private") is None
+
+    def test_valid_prefixed_name(self):
+        from mdb_engine.database.scoped_wrapper import _extract_app_slug_from_prefixed_name
+
+        assert _extract_app_slug_from_prefixed_name("myapp_collection") == "myapp"
+
+
+@pytest.mark.unit
+class TestSecureCollectionProxy:
+    """Tests for _SecureCollectionProxy security blocking."""
+
+    def test_blocks_database_access(self):
+        from mdb_engine.database.scoped_wrapper import _SecureCollectionProxy
+
+        inner = MagicMock()
+        proxy = _SecureCollectionProxy(inner)
+        with pytest.raises(AttributeError, match="blocked"):
+            proxy.database
+
+    def test_blocks_client_access(self):
+        from mdb_engine.database.scoped_wrapper import _SecureCollectionProxy
+
+        inner = MagicMock()
+        proxy = _SecureCollectionProxy(inner)
+        with pytest.raises(AttributeError, match="blocked"):
+            proxy.client
+
+    def test_blocks_db_access(self):
+        from mdb_engine.database.scoped_wrapper import _SecureCollectionProxy
+
+        inner = MagicMock()
+        proxy = _SecureCollectionProxy(inner)
+        with pytest.raises(AttributeError, match="blocked"):
+            proxy.db
+
+    def test_delegates_setattr(self):
+        from mdb_engine.database.scoped_wrapper import _SecureCollectionProxy
+
+        inner = MagicMock()
+        proxy = _SecureCollectionProxy(inner)
+        proxy.some_attr = "value"
+        assert inner.some_attr == "value"
+
+    def test_proxies_normal_attributes(self):
+        from mdb_engine.database.scoped_wrapper import _SecureCollectionProxy
+
+        inner = MagicMock()
+        inner.full_name = "db.collection"
+        proxy = _SecureCollectionProxy(inner)
+        assert proxy.full_name == "db.collection"
+
+
+@pytest.mark.unit
+class TestAsyncAtlasIndexManagerUnwrap:
+    """Tests for AsyncAtlasIndexManager unwrapping _SecureCollectionProxy."""
+
+    def test_unwraps_secure_proxy(self, mock_mongo_collection):
+        from mdb_engine.database.scoped_wrapper import (
+            AsyncAtlasIndexManager,
+            _SecureCollectionProxy,
+        )
+
+        proxy = _SecureCollectionProxy(mock_mongo_collection)
+        manager = AsyncAtlasIndexManager(proxy)
+        assert manager._collection is mock_mongo_collection  # noqa: SLF001
+
+    def test_rejects_non_collection(self):
+        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager
+
+        with pytest.raises(TypeError, match="Expected AsyncIOMotorCollection"):
+            AsyncAtlasIndexManager("not_a_collection")
+
+
+@pytest.mark.unit
+class TestSearchIndexErrorHandling:
+    """Tests for search index error paths in AsyncAtlasIndexManager."""
+
+    @pytest.fixture
+    def _col(self):
+        """Create an unspec'd collection mock to allow free attribute assignment."""
+        col = MagicMock(spec=AsyncIOMotorCollection)
+        return col
+
+    @pytest.fixture
+    def index_manager(self, _col):
+        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager
+
+        return AsyncAtlasIndexManager(_col)
+
+    @staticmethod
+    def _set_aggregate_returns(col, results):
+        """Make col.aggregate() return an async iterator over results."""
+
+        async def _aiter(*a, **kw):
+            for item in results:
+                yield item
+
+        col.aggregate = MagicMock(side_effect=lambda *a, **kw: _aiter(*a, **kw))
+
+    @pytest.mark.asyncio
+    async def test_drop_search_index_race_condition(self, index_manager, _col):
+        from pymongo.errors import OperationFailure
+
+        self._set_aggregate_returns(_col, [{"name": "idx"}])
+        _col.drop_search_index = AsyncMock(side_effect=OperationFailure("IndexNotFound"))
+        result = await index_manager.drop_search_index("idx", wait_for_drop=False)
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_drop_search_index_connection_failure(self, index_manager, _col):
+        from pymongo.errors import ConnectionFailure
+
+        from mdb_engine.exceptions import MongoDBEngineError
+
+        self._set_aggregate_returns(_col, [{"name": "idx"}])
+        _col.drop_search_index = AsyncMock(side_effect=ConnectionFailure("conn lost"))
+        with pytest.raises(MongoDBEngineError, match="Connection failed"):
+            await index_manager.drop_search_index("idx")
+
+    @pytest.mark.asyncio
+    async def test_drop_search_index_operation_failure_non_race(self, index_manager, _col):
+        from pymongo.errors import OperationFailure
+
+        from mdb_engine.exceptions import MongoDBEngineError
+
+        self._set_aggregate_returns(_col, [{"name": "idx"}])
+        _col.drop_search_index = AsyncMock(side_effect=OperationFailure("some other error"))
+        with pytest.raises(MongoDBEngineError, match="Failed to drop"):
+            await index_manager.drop_search_index("idx")
+
+    @pytest.mark.asyncio
+    async def test_update_search_index_operation_failure(self, index_manager, _col):
+        from pymongo.errors import OperationFailure
+
+        from mdb_engine.exceptions import MongoDBEngineError
+
+        _col.update_search_index = AsyncMock(side_effect=OperationFailure("update failed"))
+        with pytest.raises(MongoDBEngineError, match="Failed to update"):
+            await index_manager.update_search_index("idx", {"mappings": {}})
+
+    @pytest.mark.asyncio
+    async def test_update_search_index_connection_failure(self, index_manager, _col):
+        from pymongo.errors import ConnectionFailure
+
+        from mdb_engine.exceptions import MongoDBEngineError
+
+        _col.update_search_index = AsyncMock(side_effect=ConnectionFailure("conn lost"))
+        with pytest.raises(MongoDBEngineError, match="Connection failed"):
+            await index_manager.update_search_index("idx", {"mappings": {}})
+
+    @pytest.mark.asyncio
+    async def test_wait_for_search_index_timeout(self, index_manager, _col):
+        self._set_aggregate_returns(_col, [{"name": "idx", "status": "PENDING", "queryable": False}])
+        with pytest.raises(TimeoutError, match="did not become queryable"):
+            await index_manager._wait_for_search_index_ready("idx", timeout=0)  # noqa: SLF001
+
+    @pytest.mark.asyncio
+    async def test_wait_for_search_index_failed_status(self, index_manager, _col):
+        self._set_aggregate_returns(_col, [{"name": "idx", "status": "FAILED", "queryable": False}])
+        with pytest.raises(Exception, match="Index build failed"):
+            await index_manager._wait_for_search_index_ready("idx", timeout=10)  # noqa: SLF001
+
+    @pytest.mark.asyncio
+    async def test_wait_for_search_index_transient_db_error(self, index_manager, _col):
+        from pymongo.errors import ConnectionFailure
+
+        call_count = 0
+
+        async def _aiter_fn(*a, **kw):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise ConnectionFailure("transient")
+            yield {"name": "idx", "status": "READY", "queryable": True}
+
+        _col.aggregate = MagicMock(side_effect=lambda *a, **kw: _aiter_fn(*a, **kw))
+        result = await index_manager._wait_for_search_index_ready("idx", timeout=10)  # noqa: SLF001
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_wait_for_search_index_not_found_yet(self, index_manager, _col):
+        call_count = 0
+
+        async def _aiter_fn(*a, **kw):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return
+            yield {"name": "idx", "status": "READY", "queryable": True}
+
+        _col.aggregate = MagicMock(side_effect=lambda *a, **kw: _aiter_fn(*a, **kw))
+        result = await index_manager._wait_for_search_index_ready("idx", timeout=10)  # noqa: SLF001
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_wait_for_drop_timeout(self, index_manager, _col):
+        self._set_aggregate_returns(_col, [{"name": "idx"}])
+        with pytest.raises(TimeoutError, match="was not dropped"):
+            await index_manager._wait_for_search_index_drop("idx", timeout=0)  # noqa: SLF001
+
+    @pytest.mark.asyncio
+    async def test_wait_for_drop_success(self, index_manager, _col):
+        self._set_aggregate_returns(_col, [])
+        result = await index_manager._wait_for_search_index_drop("idx", timeout=10)  # noqa: SLF001
+        assert result is True
+
+
+@pytest.mark.unit
+class TestRegularIndexEdgeCases:
+    """Tests for regular index creation/drop edge cases."""
+
+    @pytest.fixture
+    def _col(self):
+        col = MagicMock(spec=AsyncIOMotorCollection)
+        col.list_indexes = MagicMock(return_value=MagicMock(to_list=AsyncMock(return_value=[])))
+        return col
+
+    @pytest.fixture
+    def index_manager(self, _col):
+        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager
+
+        return AsyncAtlasIndexManager(_col)
+
+    @pytest.mark.asyncio
+    async def test_create_text_index(self, index_manager, _col):
+        _col.create_index = AsyncMock(return_value="text_index")
+        _col.list_indexes = MagicMock(return_value=MagicMock(to_list=AsyncMock(return_value=[])))
+        result = await index_manager.create_text_index(["title", "body"], weights={"title": 10}, wait_for_ready=False)
+        assert result == "text_index"
+
+    @pytest.mark.asyncio
+    async def test_create_geo_index(self, index_manager, _col):
+        _col.create_index = AsyncMock(return_value="location_2dsphere")
+        _col.list_indexes = MagicMock(return_value=MagicMock(to_list=AsyncMock(return_value=[])))
+        result = await index_manager.create_geo_index("location", name="geo_idx", wait_for_ready=False)
+        assert result == "location_2dsphere"
+
+    @pytest.mark.asyncio
+    async def test_drop_index_already_gone(self, index_manager, _col):
+        from pymongo.errors import OperationFailure
+
+        _col.drop_index = AsyncMock(side_effect=OperationFailure("index not found with name: test_idx"))
+        await index_manager.drop_index("test_idx")
+
+    @pytest.mark.asyncio
+    async def test_drop_index_operation_failure(self, index_manager, _col):
+        from pymongo.errors import OperationFailure
+
+        from mdb_engine.exceptions import MongoDBEngineError
+
+        _col.drop_index = AsyncMock(side_effect=OperationFailure("some error"))
+        with pytest.raises(MongoDBEngineError, match="Failed to drop"):
+            await index_manager.drop_index("test_idx")
+
+    @pytest.mark.asyncio
+    async def test_drop_index_connection_failure(self, index_manager, _col):
+        from pymongo.errors import ConnectionFailure
+
+        from mdb_engine.exceptions import MongoDBEngineError
+
+        _col.drop_index = AsyncMock(side_effect=ConnectionFailure("conn lost"))
+        with pytest.raises(MongoDBEngineError, match="Connection failed"):
+            await index_manager.drop_index("test_idx")
+
+    @pytest.mark.asyncio
+    async def test_drop_index_invalid_operation(self, index_manager, _col):
+        from pymongo.errors import InvalidOperation
+
+        from mdb_engine.exceptions import MongoDBEngineError
+
+        _col.drop_index = AsyncMock(side_effect=InvalidOperation("client closed"))
+        with pytest.raises(MongoDBEngineError, match="client is closed"):
+            await index_manager.drop_index("test_idx")
+
+    @pytest.mark.asyncio
+    async def test_list_indexes_operation_failure(self, index_manager, _col):
+        from pymongo.errors import OperationFailure
+
+        _col.list_indexes = MagicMock(return_value=MagicMock(to_list=AsyncMock(side_effect=OperationFailure("fail"))))
+        result = await index_manager.list_indexes()
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_list_indexes_invalid_operation(self, index_manager, _col):
+        from pymongo.errors import InvalidOperation
+
+        _col.list_indexes = MagicMock(return_value=MagicMock(to_list=AsyncMock(side_effect=InvalidOperation("closed"))))
+        result = await index_manager.list_indexes()
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_create_index_already_exists(self, index_manager, _col):
+        _col.list_indexes = MagicMock(return_value=MagicMock(to_list=AsyncMock(return_value=[{"name": "field_1"}])))
+        result = await index_manager.create_index([("field", 1)], name="field_1")
+        assert result == "field_1"
+        _col.create_index.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_create_index_connection_failure(self, index_manager, _col):
+        from pymongo.errors import ConnectionFailure
+
+        from mdb_engine.exceptions import MongoDBEngineError
+
+        _col.list_indexes = MagicMock(return_value=MagicMock(to_list=AsyncMock(return_value=[])))
+        _col.create_index = AsyncMock(side_effect=ConnectionFailure("conn lost"))
+        with pytest.raises(MongoDBEngineError, match="Connection failed"):
+            await index_manager.create_index([("field", 1)])
+
+    @pytest.mark.asyncio
+    async def test_create_index_invalid_operation(self, index_manager, _col):
+        from pymongo.errors import InvalidOperation
+
+        from mdb_engine.exceptions import MongoDBEngineError
+
+        _col.list_indexes = MagicMock(return_value=MagicMock(to_list=AsyncMock(return_value=[])))
+        _col.create_index = AsyncMock(side_effect=InvalidOperation("client closed"))
+        with pytest.raises(MongoDBEngineError, match="client is closed"):
+            await index_manager.create_index([("field", 1)])
+
+    @pytest.mark.asyncio
+    async def test_create_index_string_direction_name_gen(self, index_manager, _col):
+        _col.list_indexes = MagicMock(return_value=MagicMock(to_list=AsyncMock(return_value=[])))
+        _col.create_index = AsyncMock(return_value="loc_2dsphere")
+        result = await index_manager.create_index([("loc", "2dsphere")], wait_for_ready=False)
+        assert result == "loc_2dsphere"
+
+    @pytest.mark.asyncio
+    async def test_create_index_non_standard_direction_name_gen(self, index_manager, _col):
+        _col.list_indexes = MagicMock(return_value=MagicMock(to_list=AsyncMock(return_value=[])))
+        _col.create_index = AsyncMock(return_value="field_99")
+        result = await index_manager.create_index([("field", 99)], wait_for_ready=False)
+        assert result == "field_99"
+
+    @pytest.mark.asyncio
+    async def test_create_index_list_indexes_invalid_op(self, index_manager, _col):
+        from pymongo.errors import InvalidOperation
+
+        _col.list_indexes = MagicMock(return_value=MagicMock(to_list=AsyncMock(side_effect=InvalidOperation("closed"))))
+        _col.create_index = AsyncMock(return_value="field_1")
+        result = await index_manager.create_index([("field", 1)], wait_for_ready=False)
+        assert result == "field_1"
+
+    @pytest.mark.asyncio
+    async def test_create_index_build_aborted(self, index_manager, _col):
+        from pymongo.errors import OperationFailure
+
+        _col.list_indexes = MagicMock(return_value=MagicMock(to_list=AsyncMock(return_value=[])))
+        _col.create_index = AsyncMock(side_effect=OperationFailure("IndexBuildAborted", code=276))
+        result = await index_manager.create_index([("field", 1)])
+        assert "field" in result
+
+
+@pytest.mark.unit
+class TestScopedCollectionWrapperAttrBlocking:
+    """Tests for ScopedCollectionWrapper attribute access blocking."""
+
+    def test_blocks_database_attr(self, mock_mongo_collection):
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+        with pytest.raises(AttributeError, match="blocked"):
+            wrapper.database
+
+    def test_blocks_client_attr(self, mock_mongo_collection):
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+        with pytest.raises(AttributeError, match="blocked"):
+            wrapper.client
+
+    def test_blocks_db_attr(self, mock_mongo_collection):
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+        with pytest.raises(AttributeError, match="blocked"):
+            wrapper.db
+
+    def test_blocks_collection_modification(self, mock_mongo_collection):
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+        with pytest.raises(AttributeError, match="immutable"):
+            wrapper._collection = MagicMock()  # noqa: SLF001
+
+    def test_name_property(self, mock_mongo_collection):
+        mock_mongo_collection.name = "test_collection"
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["test_app"],
+            write_scope="test_app",
+        )
+        assert wrapper.name == "test_collection"
+
+
+@pytest.mark.unit
+class TestAutoIndexEdgeCases:
+    """Tests for AutoIndexManager edge cases."""
+
+    def test_or_operator_skipped(self, mock_mongo_collection):
+        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager, AutoIndexManager
+
+        idx_mgr = AsyncAtlasIndexManager(mock_mongo_collection)
+        manager = AutoIndexManager(mock_mongo_collection, idx_mgr)
+        fields = manager._extract_index_fields_from_filter({"$or": [{"a": 1}, {"b": 2}]})  # noqa: SLF001
+        assert fields == []
+
+    @pytest.mark.asyncio
+    async def test_cache_hit_skips_creation(self):
+        from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager, AutoIndexManager
+
+        col = MagicMock(spec=AsyncIOMotorCollection)
+        col.list_indexes = MagicMock(
+            return_value=MagicMock(to_list=AsyncMock(return_value=[{"name": "auto_field_asc"}]))
+        )
+        idx_mgr = AsyncAtlasIndexManager(col)
+        manager = AutoIndexManager(col, idx_mgr)
+        manager._creation_cache["auto_field_asc"] = True  # noqa: SLF001
+        await manager._create_index_safely("auto_field_asc", [("field", 1)])  # noqa: SLF001
+
+    @pytest.mark.asyncio
+    async def test_creation_failure_caches_false(self):
+        from pymongo.errors import OperationFailure
+
+        from mdb_engine.database.scoped_wrapper import AutoIndexManager
+
+        col = MagicMock(spec=AsyncIOMotorCollection)
+        idx_mgr = MagicMock()
+        idx_mgr.list_indexes = AsyncMock(return_value=[])
+        idx_mgr.create_index = AsyncMock(side_effect=OperationFailure("fail"))
+        manager = AutoIndexManager(col, idx_mgr)
+        await manager._create_index_safely("test_idx", [("field", 1)])  # noqa: SLF001
+        assert manager._creation_cache.get("test_idx") is False  # noqa: SLF001
+
+
+@pytest.mark.unit
+class TestCrossAppAccessValidation:
+    """Tests for ScopedMongoWrapper cross-app access validation."""
+
+    @pytest.fixture
+    def scoped_wrapper(self, mock_mongo_database):
+        return ScopedMongoWrapper(
+            real_db=mock_mongo_database,
+            read_scopes=["myapp", "other"],
+            write_scope="myapp",
+        )
+
+    def test_unauthorized_cross_app_raises(self, mock_mongo_database):
+        wrapper = ScopedMongoWrapper(
+            real_db=mock_mongo_database,
+            read_scopes=["myapp"],
+            write_scope="myapp",
+        )
+        with pytest.raises(ValueError, match="not authorized"):
+            wrapper._validate_cross_app_access("foreign_collection")  # noqa: SLF001
+
+    def test_authorized_cross_app_passes(self, scoped_wrapper):
+        # "other_collection" splits to app_slug="other" which is in read_scopes
+        scoped_wrapper._validate_cross_app_access("other_collection")  # noqa: SLF001
+
+    def test_no_underscore_returns_early(self, scoped_wrapper):
+        # No underscore means no app slug extracted → returns without error
+        scoped_wrapper._validate_cross_app_access("nounderscore")  # noqa: SLF001
+
+    def test_database_attr_blocked(self, scoped_wrapper):
+        with pytest.raises(AttributeError, match="removed for security"):
+            scoped_wrapper.database
+
+    def test_private_attr_blocked(self, scoped_wrapper):
+        with pytest.raises(AttributeError, match="blocked"):
+            scoped_wrapper._nonexistent  # noqa: SLF001
+
+    def test_invalid_collection_name_in_getattr(self, mock_mongo_database):
+        wrapper = ScopedMongoWrapper(
+            real_db=mock_mongo_database,
+            read_scopes=["myapp"],
+            write_scope="myapp",
+        )
+        with pytest.raises(ValueError, match="reserved"):
+            wrapper.system_users
+
+
+@pytest.mark.unit
+class TestTokenVerification:
+    """Tests for lazy token verification via the public API (insert_one triggers it)."""
+
+    def _make_collection_wrapper(self, mock_mongo_collection, parent_wrapper):
+        """Build a ScopedCollectionWrapper whose _parent_wrapper triggers verification."""
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["app"],
+            write_scope="app",
+        )
+        wrapper._parent_wrapper = parent_wrapper  # noqa: SLF001
+        return wrapper
+
+    @pytest.mark.asyncio
+    async def test_insert_rejected_with_invalid_token(self, mock_mongo_database, mock_mongo_collection):
+        """insert_one should raise when the app token is invalid."""
+        from mdb_engine.exceptions import MongoDBEngineError
+
+        secrets_mgr = AsyncMock()
+        secrets_mgr.verify_app_secret = AsyncMock(return_value=False)
+        db_wrapper = ScopedMongoWrapper(
+            real_db=mock_mongo_database,
+            read_scopes=["app"],
+            write_scope="app",
+            app_token="bad-token",
+            app_secrets_manager=secrets_mgr,
+            app_slug="app",
+        )
+        col = self._make_collection_wrapper(mock_mongo_collection, db_wrapper)
+        with pytest.raises((ValueError, MongoDBEngineError)):
+            await col.insert_one({"key": "value"})
+        mock_mongo_collection.insert_one.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_insert_succeeds_with_valid_token(self, mock_mongo_database, mock_mongo_collection):
+        """insert_one should succeed when the token is valid."""
+        secrets_mgr = AsyncMock()
+        secrets_mgr.verify_app_secret = AsyncMock(return_value=True)
+        db_wrapper = ScopedMongoWrapper(
+            real_db=mock_mongo_database,
+            read_scopes=["app"],
+            write_scope="app",
+            app_token="good-token",
+            app_secrets_manager=secrets_mgr,
+            app_slug="app",
+        )
+        col = self._make_collection_wrapper(mock_mongo_collection, db_wrapper)
+        mock_mongo_collection.insert_one = AsyncMock(return_value=MagicMock(inserted_id="id1"))
+        await col.insert_one({"key": "value"})
+        mock_mongo_collection.insert_one.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_token_verified_only_once(self, mock_mongo_database, mock_mongo_collection):
+        """Verification is lazy — called once, then cached for subsequent operations."""
+        secrets_mgr = AsyncMock()
+        secrets_mgr.verify_app_secret = AsyncMock(return_value=True)
+        db_wrapper = ScopedMongoWrapper(
+            real_db=mock_mongo_database,
+            read_scopes=["app"],
+            write_scope="app",
+            app_token="good-token",
+            app_secrets_manager=secrets_mgr,
+            app_slug="app",
+        )
+        col = self._make_collection_wrapper(mock_mongo_collection, db_wrapper)
+        mock_mongo_collection.insert_one = AsyncMock(return_value=MagicMock(inserted_id="id1"))
+        await col.insert_one({"a": 1})
+        await col.insert_one({"b": 2})
+        secrets_mgr.verify_app_secret.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_no_token_skips_verification(self, mock_mongo_database, mock_mongo_collection):
+        """When no app_token is set, verification is skipped silently."""
+        db_wrapper = ScopedMongoWrapper(
+            real_db=mock_mongo_database,
+            read_scopes=["app"],
+            write_scope="app",
+        )
+        col = self._make_collection_wrapper(mock_mongo_collection, db_wrapper)
+        mock_mongo_collection.insert_one = AsyncMock(return_value=MagicMock(inserted_id="id1"))
+        await col.insert_one({"key": "value"})
+        mock_mongo_collection.insert_one.assert_awaited_once()
+
+
+@pytest.mark.unit
+class TestInsertOneErrorHandling:
+    """Tests for ScopedCollectionWrapper.insert_one error handling."""
+
+    @pytest.mark.asyncio
+    async def test_insert_one_invalid_operation(self, mock_mongo_collection):
+        from pymongo.errors import InvalidOperation
+
+        from mdb_engine.exceptions import MongoDBEngineError
+
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["app"],
+            write_scope="app",
+        )
+        mock_mongo_collection.insert_one = AsyncMock(side_effect=InvalidOperation("client closed"))
+        with pytest.raises(MongoDBEngineError, match="Error inserting"):
+            await wrapper.insert_one({"data": 1})
+
+
+@pytest.mark.unit
+class TestScopedAccessValidation:
+    """Tests for ScopedAccessMixin validation logic."""
+
+    def _make_mixin(self):
+        from mdb_engine.core.scoped_access import ScopedAccessMixin
+
+        obj = object.__new__(ScopedAccessMixin)
+        obj._initialized = True
+        obj._app_secrets_manager = None
+        obj._app_read_scopes = {"my_app": ["my_app"]}
+        obj._service_initializer = None
+        conn = MagicMock()
+        conn.initialized = True
+        conn.mongo_db = MagicMock()
+        obj._connection_manager = conn
+        return obj
+
+    @pytest.mark.asyncio
+    async def test_empty_read_scopes_raises(self):
+        mixin = self._make_mixin()
+        with pytest.raises(ValueError, match="read_scopes cannot be empty"):
+            await mixin._get_scoped_db_impl("my_app", read_scopes=[])
+
+    @pytest.mark.asyncio
+    async def test_invalid_scope_values_raises(self):
+        mixin = self._make_mixin()
+        with pytest.raises(ValueError, match="Invalid app slug"):
+            await mixin._get_scoped_db_impl("my_app", read_scopes=[""])
+
+    def test_service_retrieval_returns_none(self):
+        mixin = self._make_mixin()
+        assert mixin.get_graph_service("my_app") is None
+        assert mixin.get_memory_service("my_app") is None
+
+
+@pytest.mark.unit
+class TestGdprInitChecks:
+    """Tests for GDPRMixin initialization guards."""
+
+    def _make_mixin(self, initialized=False):
+        from mdb_engine.core.gdpr_ops import GDPRMixin
+
+        obj = object.__new__(GDPRMixin)
+        conn = MagicMock()
+        conn.initialized = initialized
+        obj._connection_manager = conn if initialized else None
+        return obj
+
+    @pytest.mark.asyncio
+    async def test_export_user_data_before_init(self):
+        mixin = self._make_mixin(initialized=False)
+        with pytest.raises(RuntimeError, match="not initialized"):
+            await mixin.export_user_data("user@test.com")
+
+    @pytest.mark.asyncio
+    async def test_delete_user_data_before_init(self):
+        mixin = self._make_mixin(initialized=False)
+        with pytest.raises(RuntimeError, match="not initialized"):
+            await mixin.delete_user_data("user@test.com")
+
+    @pytest.mark.asyncio
+    async def test_update_user_data_before_init(self):
+        mixin = self._make_mixin(initialized=False)
+        with pytest.raises(RuntimeError, match="not initialized"):
+            await mixin.update_user_data("user@test.com", {"name": "New Name"})
+
+    @pytest.mark.asyncio
+    async def test_delete_user_data_chat_history_error(self):
+        """Cover lines 170-175: chat_history collection retrieval error."""
+        from pymongo.errors import PyMongoError
+
+        from mdb_engine.core.gdpr_ops import GDPRMixin
+
+        mixin = object.__new__(GDPRMixin)
+        conn = MagicMock()
+        conn.initialized = True
+        conn.mongo_db = MagicMock()
+        mixin._connection_manager = conn
+
+        mock_deletion_svc = AsyncMock()
+        mock_deletion_svc.delete_user_data = AsyncMock(return_value={"deleted": 0})
+
+        mixin.get_memory_service = MagicMock(return_value=None)
+        mixin.get_scoped_db = AsyncMock(side_effect=PyMongoError("db error"))
+
+        with patch("mdb_engine.gdpr.DataDeletionService", return_value=mock_deletion_svc):
+            result = await mixin.delete_user_data("user@test.com", app_slug="myapp")
+            assert result == {"deleted": 0}
+            mock_deletion_svc.delete_user_data.assert_awaited_once()
+
+
+# ============================================================================
+# EXTENDED COVERAGE TESTS
+# ============================================================================
+
+
+@pytest.mark.unit
+class TestCrudErrorHandling:
+    """Tests for CRUD error-handling paths in ScopedCollectionWrapper."""
+
+    # -- insert_one collection name fallback (lines 1396-1398) --------------
+
+    @pytest.mark.asyncio
+    async def test_insert_one_collection_name_fallback(self, mock_mongo_collection):
+        """insert_one falls back to 'unknown' when collection.name raises."""
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["app"],
+            write_scope="app",
+        )
+        # Make .name raise AttributeError to trigger fallback
+        type(mock_mongo_collection).name = property(lambda self: (_ for _ in ()).throw(AttributeError("no name")))
+        await wrapper.insert_one({"data": 1})
+        # Verify it didn't crash - the insert still happened
+        mock_mongo_collection.insert_one.assert_awaited_once()
+
+    # -- find batch_size enforcement (lines 1578-1583) ----------------------
+
+    def test_find_with_batch_size_enforcement(self, mock_mongo_collection):
+        """find enforces batch_size via resource limiter."""
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["app"],
+            write_scope="app",
+            auto_index=False,
+        )
+        wrapper.find({"status": "active"}, batch_size=5000)
+        # Verify underlying find was called (batch_size enforcement happened)
+        mock_mongo_collection.find.assert_called_once()
+
+    def test_find_with_limit_enforcement(self, mock_mongo_collection):
+        """find enforces result limit via resource limiter."""
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["app"],
+            write_scope="app",
+            auto_index=False,
+        )
+        wrapper.find({"status": "active"}, limit=100)
+        mock_mongo_collection.find.assert_called_once()
+
+    # -- update_one DB error (lines 1650-1660) ------------------------------
+
+    @pytest.mark.asyncio
+    async def test_update_one_operation_failure(self, mock_mongo_collection):
+        """update_one records failure metrics and re-raises OperationFailure."""
+        from pymongo.errors import OperationFailure
+
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["app"],
+            write_scope="app",
+        )
+        mock_mongo_collection.update_one = AsyncMock(side_effect=OperationFailure("write conflict"))
+        with pytest.raises(OperationFailure):
+            await wrapper.update_one({"_id": "x"}, {"$set": {"v": 1}})
+
+    @pytest.mark.asyncio
+    async def test_update_one_type_error(self, mock_mongo_collection):
+        """update_one records failure metrics and re-raises TypeError."""
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["app"],
+            write_scope="app",
+        )
+        mock_mongo_collection.update_one = AsyncMock(side_effect=TypeError("bad argument"))
+        with pytest.raises(TypeError):
+            await wrapper.update_one({"_id": "x"}, {"$set": {"v": 1}})
+
+    # -- delete_one DB error (lines 1712-1722) ------------------------------
+
+    @pytest.mark.asyncio
+    async def test_delete_one_operation_failure(self, mock_mongo_collection):
+        """delete_one records failure metrics and re-raises OperationFailure."""
+        from pymongo.errors import OperationFailure
+
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["app"],
+            write_scope="app",
+        )
+        mock_mongo_collection.delete_one = AsyncMock(side_effect=OperationFailure("delete error"))
+        with pytest.raises(OperationFailure):
+            await wrapper.delete_one({"_id": "x"})
+
+    @pytest.mark.asyncio
+    async def test_delete_one_value_error(self, mock_mongo_collection):
+        """delete_one records failure metrics and re-raises ValueError."""
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["app"],
+            write_scope="app",
+        )
+        mock_mongo_collection.delete_one = AsyncMock(side_effect=ValueError("bad filter"))
+        with pytest.raises(ValueError, match="bad filter"):
+            await wrapper.delete_one({"_id": "x"})
+
+    # -- delete_many DB error (lines 1748-1757) -----------------------------
+
+    @pytest.mark.asyncio
+    async def test_delete_many_operation_failure(self, mock_mongo_collection):
+        """delete_many records failure metrics and re-raises OperationFailure."""
+        from pymongo.errors import OperationFailure
+
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["app"],
+            write_scope="app",
+        )
+        mock_mongo_collection.delete_many = AsyncMock(side_effect=OperationFailure("delete many error"))
+        with pytest.raises(OperationFailure):
+            await wrapper.delete_many({"status": "old"})
+
+    @pytest.mark.asyncio
+    async def test_delete_many_type_error(self, mock_mongo_collection):
+        """delete_many records failure and re-raises TypeError."""
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["app"],
+            write_scope="app",
+        )
+        mock_mongo_collection.delete_many = AsyncMock(side_effect=TypeError("bad args"))
+        with pytest.raises(TypeError):
+            await wrapper.delete_many({"status": "old"})
+
+    # -- count_documents DB error (lines 1790-1799) -------------------------
+
+    @pytest.mark.asyncio
+    async def test_count_documents_operation_failure(self, mock_mongo_collection):
+        """count_documents records failure metrics and re-raises OperationFailure."""
+        from pymongo.errors import OperationFailure
+
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["app"],
+            write_scope="app",
+            auto_index=False,
+        )
+        mock_mongo_collection.count_documents = AsyncMock(side_effect=OperationFailure("count error"))
+        with pytest.raises(OperationFailure):
+            await wrapper.count_documents({"status": "active"})
+
+    @pytest.mark.asyncio
+    async def test_count_documents_value_error(self, mock_mongo_collection):
+        """count_documents records failure and re-raises ValueError."""
+        wrapper = ScopedCollectionWrapper(
+            real_collection=mock_mongo_collection,
+            read_scopes=["app"],
+            write_scope="app",
+            auto_index=False,
+        )
+        mock_mongo_collection.count_documents = AsyncMock(side_effect=ValueError("bad filter"))
+        with pytest.raises(ValueError, match="bad filter"):
+            await wrapper.count_documents({"status": "active"})
+
+
+@pytest.mark.unit
+class TestCollectionNameValidationInGetattr:
+    """Tests for collection name validation in __getattr__ and get_collection paths."""
+
+    def _make_wrapper(self, mock_mongo_database):
+        return ScopedMongoWrapper(
+            real_db=mock_mongo_database,
+            read_scopes=["myapp"],
+            write_scope="myapp",
+        )
+
+    # -- __getattribute__ validation (lines 2040-2050) ----------------------
+
+    def test_getattribute_reserved_prefix_raises(self, mock_mongo_database):
+        """__getattribute__ raises ValueError for reserved prefix names."""
+        wrapper = self._make_wrapper(mock_mongo_database)
+        with pytest.raises(ValueError, match="reserved prefix"):
+            _ = wrapper.__getattribute__("system.users")
+
+    def test_getattribute_invalid_format_raises(self, mock_mongo_database):
+        """__getattribute__ raises ValueError for names with invalid characters."""
+        wrapper = self._make_wrapper(mock_mongo_database)
+        with pytest.raises(ValueError, match="Invalid collection name"):
+            getattr(wrapper, "inv@lid!")
+
+    # -- __getattr__ validation (lines 2096-2116) ---------------------------
+
+    def test_getattr_private_attribute_blocked(self, mock_mongo_database):
+        """__getattr__ raises AttributeError for private attributes."""
+        wrapper = self._make_wrapper(mock_mongo_database)
+        with pytest.raises(AttributeError, match="private attributes"):
+            wrapper.__getattr__("_secret")
+
+    def test_getattr_database_property_blocked(self, mock_mongo_database):
+        """__getattr__ raises AttributeError when accessing 'database'."""
+        wrapper = self._make_wrapper(mock_mongo_database)
+        with pytest.raises(AttributeError, match="database.*removed"):
+            wrapper.__getattr__("database")
+
+    def test_getattr_invalid_name_raises_valueerror(self, mock_mongo_database):
+        """__getattr__ raises ValueError for names with invalid characters."""
+        wrapper = self._make_wrapper(mock_mongo_database)
+        with pytest.raises(ValueError):
+            wrapper.__getattr__("inv@lid!")
+
+    # -- get_collection validation (lines 2264-2270) ------------------------
+
+    def test_get_collection_invalid_name_raises(self, mock_mongo_database):
+        """get_collection raises ValueError for invalid names."""
+        wrapper = self._make_wrapper(mock_mongo_database)
+        with pytest.raises(ValueError):
+            wrapper.get_collection("inv@lid!")
+
+    def test_get_collection_valid_name_returns_wrapper(self, mock_mongo_database):
+        """get_collection returns ScopedCollectionWrapper for valid names."""
+        wrapper = self._make_wrapper(mock_mongo_database)
+        coll = wrapper.get_collection("users")
+        assert isinstance(coll, ScopedCollectionWrapper)

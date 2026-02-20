@@ -1,0 +1,33 @@
+{
+  "schema_version": "2.0",
+  "slug": "simple_app",
+  "name": "Simple App Example",
+  "description": "A simple task management app demonstrating the unified MongoDBEngine pattern",
+  "status": "active",
+  "auth": {
+    "policy": {
+      "provider": "casbin",
+      "required": false,
+      "allow_anonymous": true,
+      "authorization": {
+        "model": "rbac",
+        "link_users_roles": true
+      }
+    }
+  },
+  "managed_indexes": {
+    "tasks": [
+      {
+        "type": "regular",
+        "keys": {"created_at": -1},
+        "name": "tasks_created_at_idx"
+      },
+      {
+        "type": "regular",
+        "keys": {"completed": 1},
+        "name": "tasks_completed_idx"
+      }
+    ]
+  }
+}
+

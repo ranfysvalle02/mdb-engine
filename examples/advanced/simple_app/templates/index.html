@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple App - MDB Engine Example</title>
+    <style>
+        :root {
+            --bg-primary: #0a0a0f;
+            --bg-secondary: #12121a;
+            --bg-tertiary: #1a1a24;
+            --accent: #6366f1;
+            --accent-hover: #818cf8;
+            --text-primary: #f1f5f9;
+            --text-secondary: #94a3b8;
+            --border: #2d2d3a;
+            --success: #22c55e;
+            --danger: #ef4444;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            padding: 2rem;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        
+        header {
+            margin-bottom: 2rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid var(--border);
+        }
+        
+        h1 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(135deg, var(--accent), #a855f7);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .subtitle {
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 0.25rem 0.5rem;
+            font-size: 0.75rem;
+            border-radius: 4px;
+            margin-left: 0.5rem;
+        }
+        
+        .add-task-form {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 2rem;
+        }
+        
+        input[type="text"] {
+            flex: 1;
+            padding: 0.75rem 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 0.875rem;
+        }
+        
+        input[type="text"]:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+        }
+        
+        button {
+            padding: 0.75rem 1.5rem;
+            background: var(--accent);
+            border: none;
+            border-radius: 8px;
+            color: white;
+            font-family: inherit;
+            font-size: 0.875rem;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        
+        button:hover {
+            background: var(--accent-hover);
+        }
+        
+        .tasks-list {
+            list-style: none;
+        }
+        
+        .task-item {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            padding: 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            margin-bottom: 0.5rem;
+            transition: border-color 0.2s;
+        }
+        
+        .task-item:hover {
+            border-color: var(--accent);
+        }
+        
+        .task-item.completed {
+            opacity: 0.6;
+        }
+        
+        .task-item.completed .task-title {
+            text-decoration: line-through;
+            color: var(--text-secondary);
+        }
+        
+        .task-checkbox {
+            width: 20px;
+            height: 20px;
+            border: 2px solid var(--border);
+            border-radius: 4px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+        
+        .task-checkbox:hover {
+            border-color: var(--accent);
+        }
+        
+        .task-item.completed .task-checkbox {
+            background: var(--success);
+            border-color: var(--success);
+        }
+        
+        .task-checkbox::after {
+            content: '✓';
+            color: white;
+            font-size: 12px;
+            opacity: 0;
+        }
+        
+        .task-item.completed .task-checkbox::after {
+            opacity: 1;
+        }
+        
+        .task-content {
+            flex: 1;
+        }
+        
+        .task-title {
+            font-weight: 500;
+            margin-bottom: 0.25rem;
+        }
+        
+        .task-meta {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+        
+        .task-delete {
+            padding: 0.5rem;
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            border-radius: 4px;
+            cursor: pointer;
+            opacity: 0;
+            transition: all 0.2s;
+        }
+        
+        .task-item:hover .task-delete {
+            opacity: 1;
+        }
+        
+        .task-delete:hover {
+            background: var(--danger);
+            border-color: var(--danger);
+            color: white;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 3rem;
+            color: var(--text-secondary);
+        }
+        
+        .code-block {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1rem;
+            margin-top: 2rem;
+            font-size: 0.75rem;
+            overflow-x: auto;
+        }
+        
+        .code-block pre {
+            color: var(--text-secondary);
+        }
+        
+        .code-comment {
+            color: #6b7280;
+        }
+        
+        .code-keyword {
+            color: var(--accent);
+        }
+        
+        .code-string {
+            color: #22c55e;
+        }
+        
+        /* Manifest Display Styles */
+        .manifest-section {
+            margin-top: 2rem;
+        }
+        
+        .manifest-toggle {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .manifest-toggle:hover {
+            border-color: var(--accent);
+            background: var(--bg-tertiary);
+        }
+        
+        .manifest-toggle h2 {
+            font-size: 1rem;
+            font-weight: 500;
+            margin: 0;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .manifest-toggle-icon {
+            transition: transform 0.2s;
+        }
+        
+        .manifest-toggle.expanded .manifest-toggle-icon {
+            transform: rotate(180deg);
+        }
+        
+        .manifest-content {
+            display: none;
+            margin-top: 1rem;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1.5rem;
+        }
+        
+        .manifest-toggle.expanded + .manifest-content {
+            display: block;
+        }
+        
+        .manifest-item {
+            margin-bottom: 1.5rem;
+        }
+        
+        .manifest-item:last-child {
+            margin-bottom: 0;
+        }
+        
+        .manifest-label {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-weight: 500;
+            margin-bottom: 0.5rem;
+            color: var(--text-primary);
+        }
+        
+        .manifest-value {
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+            padding-left: 1.5rem;
+        }
+        
+        .manifest-value code {
+            background: var(--bg-secondary);
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            color: var(--accent);
+        }
+        
+        .manifest-nested {
+            margin-left: 1rem;
+            padding-left: 1rem;
+            border-left: 2px solid var(--border);
+        }
+        
+        .tooltip {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            cursor: help;
+        }
+        
+        .tooltip-icon {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: rgba(99, 102, 241, 0.2);
+            color: var(--accent);
+            font-size: 0.7rem;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-left: 0.25rem;
+        }
+        
+        .tooltip:hover .tooltip-text {
+            visibility: visible;
+            opacity: 1;
+        }
+        
+        .tooltip-text {
+            visibility: hidden;
+            opacity: 0;
+            position: absolute;
+            bottom: 125%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #1a1a24;
+            color: var(--text-primary);
+            padding: 0.75rem 1rem;
+            border-radius: 8px;
+            font-size: 0.75rem;
+            white-space: normal;
+            width: 250px;
+            z-index: 1000;
+            transition: opacity 0.3s;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            border: 1px solid var(--border);
+            line-height: 1.4;
+        }
+        
+        .tooltip-text:after {
+            content: "";
+            position: absolute;
+            top: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            border: 6px solid transparent;
+            border-top-color: #1a1a24;
+        }
+        
+        .manifest-badge {
+            display: inline-block;
+            padding: 0.25rem 0.5rem;
+            font-size: 0.7rem;
+            border-radius: 4px;
+            margin-left: 0.5rem;
+        }
+        
+        .badge-active {
+            background: rgba(34, 197, 94, 0.2);
+            color: var(--success);
+            border: 1px solid rgba(34, 197, 94, 0.3);
+        }
+        
+        .badge-version {
+            background: rgba(99, 102, 241, 0.2);
+            color: var(--accent);
+            border: 1px solid rgba(99, 102, 241, 0.3);
+        }
+        
+        .index-list {
+            list-style: none;
+            padding-left: 0;
+        }
+        
+        .index-item {
+            padding: 0.75rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            margin-bottom: 0.5rem;
+        }
+        
+        .index-name {
+            font-weight: 500;
+            color: var(--accent);
+            margin-bottom: 0.25rem;
+        }
+        
+        .index-keys {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Simple App Example</h1>
+            <p class="subtitle">
+                Unified MongoDBEngine Pattern with create_app()
+            </p>
+        </header>
+        
+        <form class="add-task-form" onsubmit="addTask(event)">
+            <input type="text" id="taskTitle" placeholder="Add a new task..." required>
+            <button type="submit">Add Task</button>
+        </form>
+        
+        <ul class="tasks-list" id="tasksList">
+            {% if tasks %}
+                {% for task in tasks %}
+                <li class="task-item {% if task.completed %}completed{% endif %}" data-id="{{ task._id }}">
+                    <div class="task-checkbox" onclick="toggleTask('{{ task._id }}')"></div>
+                    <div class="task-content">
+                        <div class="task-title">{{ task.title }}</div>
+                        <div class="task-meta">
+                            Created: {{ task.created_at.strftime('%Y-%m-%d %H:%M') if task.created_at else 'Unknown' }}
+                        </div>
+                    </div>
+                    <button class="task-delete" onclick="deleteTask('{{ task._id }}')">✕</button>
+                </li>
+                {% endfor %}
+            {% else %}
+                <li class="empty-state">No tasks yet. Add one above!</li>
+            {% endif %}
+        </ul>
+        
+        <div class="code-block">
+            <pre><span class="code-comment"># This example uses the unified MongoDBEngine pattern:</span>
+
+<span class="code-keyword">from</span> mdb_engine <span class="code-keyword">import</span> MongoDBEngine
+
+engine = MongoDBEngine(
+    mongo_uri=<span class="code-string">"mongodb://localhost:27017"</span>,
+    db_name=<span class="code-string">"mdb_runtime"</span>,
+)
+
+<span class="code-comment"># One line - automatic lifecycle management</span>
+app = engine.create_app(
+    slug=<span class="code-string">"simple_app"</span>,
+    manifest=Path(<span class="code-string">"manifest.json"</span>)
+)</pre>
+        </div>
+        
+        <div class="manifest-section">
+            <div class="manifest-toggle" onclick="toggleManifest()">
+                <h2>
+                    📋 Application Manifest
+                    <span class="tooltip">
+                        <span class="tooltip-icon">?</span>
+                        <span class="tooltip-text">The manifest.json file defines your app's configuration, including database indexes, authentication settings, and CORS policies. MDB-Engine reads this file on startup to configure your application automatically.</span>
+                    </span>
+                </h2>
+                <span class="manifest-toggle-icon">▼</span>
+            </div>
+            <div class="manifest-content">
+                {% if manifest %}
+                    <div class="manifest-item">
+                        <div class="manifest-label">
+                            Schema Version
+                            <span class="tooltip">
+                                <span class="tooltip-icon">?</span>
+                                <span class="tooltip-text">The version of the manifest schema format. This ensures compatibility with different versions of MDB-Engine.</span>
+                            </span>
+                        </div>
+                        <div class="manifest-value">
+                            <code>{{ manifest.schema_version }}</code>
+                            <span class="manifest-badge badge-version">v{{ manifest.schema_version }}</span>
+                        </div>
+                    </div>
+                    
+                    <div class="manifest-item">
+                        <div class="manifest-label">
+                            App Slug
+                            <span class="tooltip">
+                                <span class="tooltip-icon">?</span>
+                                <span class="tooltip-text">A unique identifier for your app. Used for data isolation - all database queries are automatically scoped to this slug.</span>
+                            </span>
+                        </div>
+                        <div class="manifest-value">
+                            <code>{{ manifest.slug }}</code>
+                        </div>
+                    </div>
+                    
+                    <div class="manifest-item">
+                        <div class="manifest-label">
+                            Name
+                            <span class="tooltip">
+                                <span class="tooltip-icon">?</span>
+                                <span class="tooltip-text">The human-readable name of your application.</span>
+                            </span>
+                        </div>
+                        <div class="manifest-value">{{ manifest.name }}</div>
+                    </div>
+                    
+                    <div class="manifest-item">
+                        <div class="manifest-label">
+                            Description
+                            <span class="tooltip">
+                                <span class="tooltip-icon">?</span>
+                                <span class="tooltip-text">A brief description of what your application does.</span>
+                            </span>
+                        </div>
+                        <div class="manifest-value">{{ manifest.description }}</div>
+                    </div>
+                    
+                    <div class="manifest-item">
+                        <div class="manifest-label">
+                            Status
+                            <span class="tooltip">
+                                <span class="tooltip-icon">?</span>
+                                <span class="tooltip-text">The current status of your application. 'active' means the app is running and accepting requests.</span>
+                            </span>
+                        </div>
+                        <div class="manifest-value">
+                            <code>{{ manifest.status }}</code>
+                            {% if manifest.status == 'active' %}
+                            <span class="manifest-badge badge-active">Active</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                    
+                    {% if manifest.auth %}
+                    <div class="manifest-item">
+                        <div class="manifest-label">
+                            Authentication Policy
+                            <span class="tooltip">
+                                <span class="tooltip-icon">?</span>
+                                <span class="tooltip-text">Defines how authentication works for your app. This app allows anonymous access, meaning users don't need to log in.</span>
+                            </span>
+                        </div>
+                        <div class="manifest-value manifest-nested">
+                            <div style="margin-bottom: 0.5rem;">
+                                <strong>Provider:</strong> <code>{{ manifest.auth.policy.provider }}</code>
+                            </div>
+                            <div style="margin-bottom: 0.5rem;">
+                                <strong>Required:</strong> <code>{{ manifest.auth.policy.required }}</code>
+                            </div>
+                            <div style="margin-bottom: 0.5rem;">
+                                <strong>Allow Anonymous:</strong> <code>{{ manifest.auth.policy.allow_anonymous }}</code>
+                                <span class="tooltip">
+                                    <span class="tooltip-icon">?</span>
+                                    <span class="tooltip-text">When true, users can access the app without logging in. Set to false to require authentication.</span>
+                                </span>
+                            </div>
+                            {% if manifest.auth.policy.authorization %}
+                            <div>
+                                <strong>Authorization Model:</strong> <code>{{ manifest.auth.policy.authorization.model }}</code>
+                                <span class="tooltip">
+                                    <span class="tooltip-icon">?</span>
+                                    <span class="tooltip-text">The authorization model (e.g., 'rbac' for Role-Based Access Control). Defines how permissions are checked.</span>
+                                </span>
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% endif %}
+                    
+                    {% if manifest.managed_indexes %}
+                    <div class="manifest-item">
+                        <div class="manifest-label">
+                            Managed Indexes
+                            <span class="tooltip">
+                                <span class="tooltip-icon">?</span>
+                                <span class="tooltip-text">Database indexes defined in the manifest are automatically created when the app starts. This ensures fast queries without manual database setup.</span>
+                            </span>
+                        </div>
+                        <div class="manifest-value manifest-nested">
+                            {% for collection, indexes in manifest.managed_indexes.items() %}
+                                <div style="margin-bottom: 1rem;">
+                                    <strong style="color: var(--accent);">Collection: <code>{{ collection }}</code></strong>
+                                    <ul class="index-list">
+                                        {% for index in indexes %}
+                                        <li class="index-item">
+                                            <div class="index-name">{{ index.name }}</div>
+                                            <div class="index-keys">
+                                                <strong>Type:</strong> {{ index.type }} | 
+                                                <strong>Keys:</strong> 
+                                                {% for key, direction in index["keys"].items() %}
+                                                    {{ key }}{% if direction == -1 %} (desc){% else %} (asc){% endif %}{% if not loop.last %}, {% endif %}
+                                                {% endfor %}
+                                            </div>
+                                        </li>
+                                        {% endfor %}
+                                    </ul>
+                                </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endif %}
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Helper to read cookies for CSRF token
+        function getCookie(name) {
+            const value = `; ${document.cookie}`;
+            const parts = value.split(`; ${name}=`);
+            if (parts.length === 2) return parts.pop().split(';').shift();
+            return '';
+        }
+        
+        async function addTask(event) {
+            event.preventDefault();
+            const title = document.getElementById('taskTitle').value;
+            
+            const response = await fetch('/api/tasks', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-Token': getCookie('csrf_token')
+                },
+                body: JSON.stringify({title})
+            });
+            
+            if (response.ok) {
+                window.location.reload();
+            }
+        }
+        
+        async function toggleTask(taskId) {
+            const response = await fetch(`/api/tasks/${taskId}/toggle`, {
+                method: 'POST',
+                headers: { 'X-CSRF-Token': getCookie('csrf_token') }
+            });
+            
+            if (response.ok) {
+                window.location.reload();
+            }
+        }
+        
+        async function deleteTask(taskId) {
+            const response = await fetch(`/api/tasks/${taskId}`, {
+                method: 'DELETE',
+                headers: { 'X-CSRF-Token': getCookie('csrf_token') }
+            });
+            
+            if (response.ok) {
+                window.location.reload();
+            }
+        }
+        
+        function toggleManifest() {
+            const toggle = document.querySelector('.manifest-toggle');
+            toggle.classList.toggle('expanded');
+        }
+    </script>
+</body>
+</html>
+

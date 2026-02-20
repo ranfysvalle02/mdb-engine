@@ -1,0 +1,2490 @@
+"""
+Asynchronous MongoDB Scoped Wrapper
+
+Provides an asynchronous, app-scoped proxy wrapper around Motor's
+`AsyncIOMotorDatabase` and `AsyncIOMotorCollection` objects.
+
+This module is part of MDB_ENGINE - MongoDB Engine.
+
+Core Features:
+- `ScopedMongoWrapper`: Proxies a database. When a collection is
+  accessed (e.g., `db.my_collection`), it returns a `ScopedCollectionWrapper`.
+- `ScopedCollectionWrapper`: Proxies a collection, automatically injecting
+  `app_id` filters into all read operations (find, aggregate, count)
+  and adding the `app_id` to all write operations (insert).
+- `AsyncAtlasIndexManager`: Provides an async-native interface for managing
+  both standard MongoDB indexes and Atlas Search/Vector indexes. This
+  manager is available via `collection_wrapper.index_manager` and
+  operates on the *unscoped* collection for administrative purposes.
+- `AutoIndexManager`: Automatic index management! Automatically
+  creates indexes based on query patterns, making it easy to use collections
+  without manual index configuration. Enabled by default for all apps.
+
+This design ensures data isolation between apps while providing
+a familiar (Motor-like) developer experience with automatic index optimization.
+"""
+
+import asyncio
+import logging
+import re
+import time
+from collections.abc import Coroutine, Mapping
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    ClassVar,
+    Optional,
+)
+
+if TYPE_CHECKING:
+    from ..core.app_secrets import AppSecretsManager
+
+from motor.motor_asyncio import (
+    AsyncIOMotorCollection,
+    AsyncIOMotorCursor,
+    AsyncIOMotorDatabase,
+)
+from pymongo import ASCENDING, DESCENDING, TEXT
+from pymongo.errors import (
+    AutoReconnect,
+    CollectionInvalid,
+    ConnectionFailure,
+    InvalidOperation,
+    OperationFailure,
+    PyMongoError,
+    ServerSelectionTimeoutError,
+)
+from pymongo.operations import SearchIndexModel
+from pymongo.results import (
+    DeleteResult,
+    InsertManyResult,
+    InsertOneResult,
+    UpdateResult,
+)
+
+# Import constants
+from ..constants import (
+    AUTO_INDEX_HINT_THRESHOLD,
+    DEFAULT_DROP_TIMEOUT,
+    DEFAULT_POLL_INTERVAL,
+    DEFAULT_SEARCH_TIMEOUT,
+    MAX_COLLECTION_NAME_LENGTH,
+    MAX_INDEX_FIELDS,
+    MIN_COLLECTION_NAME_LENGTH,
+    RESERVED_COLLECTION_NAMES,
+    RESERVED_COLLECTION_PREFIXES,
+)
+from ..exceptions import MongoDBEngineError
+
+# Import observability
+from ..observability import record_operation
+from ..observability.tracing import create_span
+from .query_validator import QueryValidator
+from .resource_limiter import ResourceLimiter
+
+# --- FIX: Configure logger *before* first use ---
+logger = logging.getLogger(__name__)
+# --- END FIX ---
+
+# --- PyMongo 4.x Compatibility ---
+# PyMongo 4.x removed the GEO2DSPHERE constant.
+# Use the string "2dsphere" directly (this is what PyMongo 4.x expects).
+GEO2DSPHERE = "2dsphere"
+# --- END FIX ---
+
+
+# --- HELPER FUNCTION FOR MANAGED TASK CREATION ---
+
+# Strong references to background tasks so the GC doesn't collect them mid-execution.
+# Tasks remove themselves from this set via a done-callback.
+_background_tasks: set[asyncio.Task] = set()
+
+
+def _create_managed_task(coro: Coroutine[Any, Any, Any], task_name: str | None = None) -> None:
+    """
+    Creates a background task using asyncio.create_task() and holds a strong
+    reference until the task completes.
+
+    Args:
+        coro: Coroutine to run as a background task
+        task_name: Optional name for the task (for monitoring/debugging)
+
+    Note:
+        If no event loop is running, the task creation is skipped silently.
+        This allows the code to work in both async and sync contexts.
+    """
+    try:
+        asyncio.get_running_loop()
+        task = asyncio.create_task(coro, name=task_name)
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
+    except RuntimeError:
+        # No event loop running - skip task creation
+        # This can happen in synchronous contexts (e.g., tests, sync code)
+        logger.debug("Skipping background task '%s' - no event loop running", task_name)
+
+
+# --- END HELPER FUNCTION ---
+
+
+# ##########################################################################
+# SECURITY VALIDATION FUNCTIONS
+# ##########################################################################
+
+# Collection name pattern: alphanumeric, underscore, dot, hyphen
+# Must start with alphanumeric or underscore
+# MongoDB allows: [a-zA-Z0-9_.-] but cannot start with number or special char
+COLLECTION_NAME_PATTERN: re.Pattern = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_.-]*$")
+"""Regex pattern for valid MongoDB collection names."""
+
+
+def _validate_collection_name(name: str, allow_prefixed: bool = False) -> None:
+    """
+    Validate collection name for security.
+
+    Validates that collection names:
+    - Meet MongoDB naming requirements
+    - Are not reserved system names
+    - Do not use reserved prefixes
+    - Are within length limits
+
+    Args:
+        name: Collection name to validate
+        allow_prefixed: If True, allows prefixed names (e.g., "app_collection")
+            for cross-app access validation
+
+    Raises:
+        ValueError: If collection name is invalid, reserved, or uses reserved prefix
+    """
+    if not name:
+        raise ValueError("Collection name cannot be empty")
+
+    # Check length
+    if len(name) < MIN_COLLECTION_NAME_LENGTH:
+        raise ValueError(f"Collection name too short (minimum {MIN_COLLECTION_NAME_LENGTH} character): {name}")
+    if len(name) > MAX_COLLECTION_NAME_LENGTH:
+        raise ValueError(f"Collection name too long (maximum {MAX_COLLECTION_NAME_LENGTH} characters): {name}")
+
+    # Check pattern (MongoDB naming rules)
+    if not COLLECTION_NAME_PATTERN.match(name):
+        raise ValueError(
+            f"Invalid collection name format: '{name}'. "
+            "Collection names must start with a letter or underscore and "
+            "contain only alphanumeric characters, underscores, dots, or hyphens."
+        )
+
+    # MongoDB doesn't allow collection names to end with a dot
+    if name.endswith("."):
+        raise ValueError(f"Invalid collection name format: '{name}'. " "Collection names cannot end with a dot.")
+
+    # Check for path traversal attempts
+    if ".." in name or "/" in name or "\\" in name:
+        raise ValueError(
+            f"Invalid collection name format: '{name}'. "
+            f"Collection names must start with a letter or underscore and contain "
+            f"only alphanumeric characters, underscores, dots, or hyphens."
+        )
+
+    # Check reserved names (exact match)
+    if name in RESERVED_COLLECTION_NAMES:
+        logger.warning(f"Security: Attempted access to reserved collection name: {name}")
+        raise ValueError(f"Collection name '{name}' is reserved and cannot be accessed through scoped database.")
+
+    # Check reserved prefixes
+    name_lower = name.lower()
+    for prefix in RESERVED_COLLECTION_PREFIXES:
+        if name_lower.startswith(prefix):
+            logger.warning(f"Security: Attempted access to collection with reserved prefix '{prefix}': {name}")
+            raise ValueError(f"Collection name '{name}' uses reserved prefix '{prefix}' and cannot be accessed.")
+
+
+def _extract_app_slug_from_prefixed_name(prefixed_name: str) -> str | None:
+    """
+    Extract app slug from a prefixed collection name.
+
+    Args:
+        prefixed_name: Collection name that may be prefixed (e.g., "app_slug_collection")
+
+    Returns:
+        App slug if name is prefixed, None otherwise
+    """
+    if "_" not in prefixed_name:
+        return None
+
+    # Split on first underscore
+    parts = prefixed_name.split("_", 1)
+    if len(parts) != 2:
+        return None
+
+    app_slug = parts[0]
+    # Basic validation - app slug should be non-empty
+    if app_slug:
+        return app_slug
+    return None
+
+
+class _SecureCollectionProxy:
+    """
+    Proxy wrapper that blocks access to dangerous attributes on collections.
+
+    Prevents access to database/client attributes that could be used to bypass scoping.
+    """
+
+    __slots__ = ("_collection",)
+
+    def __init__(self, collection: AsyncIOMotorCollection):
+        self._collection = collection
+
+    def __getattr__(self, name: str) -> Any:
+        """Block access to database/client attributes."""
+        if name in ("database", "client", "db"):
+            logger.warning(
+                f"Security: Attempted access to '{name}' attribute on collection. "
+                "This is blocked to prevent bypassing scoping."
+            )
+            raise AttributeError(
+                f"Access to '{name}' is blocked for security. "
+                "Use collection.index_manager for index operations. "
+                "All data access must go through scoped collections."
+            )
+        return getattr(self._collection, name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        """Allow setting _collection, delegate other attributes to underlying collection."""
+        if name == "_collection":
+            super().__setattr__(name, value)
+        else:
+            # Delegate to underlying collection for other attributes
+            setattr(self._collection, name, value)
+
+
+# ##########################################################################
+# ASYNCHRONOUS ATLAS INDEX MANAGER
+# ##########################################################################
+
+
+class AsyncAtlasIndexManager:
+    """
+    Manages MongoDB Atlas Search indexes (Vector & Lucene) and standard
+    database indexes with an asynchronous (Motor-native) interface.
+
+    This class provides a robust, high-level API for index operations,
+    including 'wait_for_ready' polling logic to handle the asynchronous
+    nature of Atlas index builds.
+    """
+
+    # Use __slots__ for minor performance gain (faster attribute access)
+    __slots__ = ("_collection",)
+
+    # --- Class-level constants for polling and timeouts ---
+    # Use constants from constants module
+    DEFAULT_POLL_INTERVAL: ClassVar[int] = DEFAULT_POLL_INTERVAL
+    DEFAULT_SEARCH_TIMEOUT: ClassVar[int] = DEFAULT_SEARCH_TIMEOUT
+    DEFAULT_DROP_TIMEOUT: ClassVar[int] = DEFAULT_DROP_TIMEOUT
+
+    def __init__(self, real_collection: AsyncIOMotorCollection):
+        """
+        Initializes the manager with a direct reference to a
+        motor.motor_asyncio.AsyncIOMotorCollection.
+        """
+        # Unwrap _SecureCollectionProxy if present to get the real collection
+        if isinstance(real_collection, _SecureCollectionProxy):
+            real_collection = real_collection._collection  # noqa: SLF001
+        if not isinstance(real_collection, AsyncIOMotorCollection):
+            raise TypeError(f"Expected AsyncIOMotorCollection, got {type(real_collection)}")
+        self._collection = real_collection
+
+    async def _ensure_collection_exists(self) -> None:
+        """Ensure the collection exists before creating an index."""
+        try:
+            coll_name = self._collection.name
+            await self._collection.database.create_collection(coll_name)
+            logger.debug(f"Ensured collection '{coll_name}' exists.")
+        except CollectionInvalid as e:
+            if "already exists" in str(e):
+                logger.warning(f"Prerequisite collection '{coll_name}' already exists. " f"Continuing index creation.")
+            else:
+                logger.exception("Failed to ensure collection exists - CollectionInvalid error")
+                raise MongoDBEngineError(
+                    f"Failed to create prerequisite collection '{self._collection.name}'",
+                    context={"collection_name": self._collection.name},
+                ) from e
+        except (ConnectionFailure, ServerSelectionTimeoutError) as e:
+            logger.exception("Failed to ensure collection exists - connection error")
+            raise MongoDBEngineError(
+                f"Failed to create prerequisite collection " f"'{self._collection.name}' - connection failed",
+                context={"collection_name": self._collection.name},
+            ) from e
+        except (OperationFailure, InvalidOperation) as e:
+            logger.exception("Error ensuring collection exists")
+            raise MongoDBEngineError(
+                f"Error creating prerequisite collection '{self._collection.name}'",
+                context={"collection_name": self._collection.name},
+            ) from e
+
+    def _check_definition_changed(
+        self,
+        definition: dict[str, Any],
+        latest_def: dict[str, Any],
+        index_type: str,
+        name: str,
+    ) -> tuple[bool, str]:
+        """Check if index definition has changed."""
+        definition_changed = False
+        change_reason = ""
+        if "fields" in definition and index_type.lower() == "vectorsearch":
+            existing_fields = latest_def.get("fields")
+            if existing_fields != definition["fields"]:
+                definition_changed = True
+                change_reason = "vector 'fields' definition differs."
+        elif "mappings" in definition and index_type.lower() == "search":
+            existing_mappings = latest_def.get("mappings")
+            if existing_mappings != definition["mappings"]:
+                definition_changed = True
+                change_reason = "Lucene 'mappings' definition differs."
+        else:
+            logger.warning(
+                f"Index definition '{name}' has keys that don't match "
+                f"index_type '{index_type}'. Cannot reliably check for changes."
+            )
+        return definition_changed, change_reason
+
+    async def _handle_existing_index(
+        self,
+        existing_index: dict[str, Any],
+        definition: dict[str, Any],
+        index_type: str,
+        name: str,
+    ) -> bool:
+        """Handle existing index - check for changes and update if needed."""
+        logger.info(f"Search index '{name}' already exists.")
+        latest_def = existing_index.get("latestDefinition", {})
+        definition_changed, change_reason = self._check_definition_changed(definition, latest_def, index_type, name)
+
+        if definition_changed:
+            logger.warning(f"Search index '{name}' definition has changed " f"({change_reason}). Triggering update...")
+            await self.update_search_index(
+                name=name,
+                definition=definition,
+                wait_for_ready=False,
+            )
+            return False  # Will wait below
+        elif existing_index.get("queryable"):
+            logger.info(f"Search index '{name}' is already queryable and definition is up-to-date.")
+            return True
+        elif existing_index.get("status") == "FAILED":
+            logger.error(
+                f"Search index '{name}' exists but is in a FAILED state. "
+                f"Manual intervention in Atlas UI may be required."
+            )
+            return False
+        else:
+            logger.info(
+                f"Search index '{name}' exists and is up-to-date, "
+                f"but not queryable (Status: {existing_index.get('status')}). Waiting..."
+            )
+            return False  # Will wait below
+
+    async def _create_new_search_index(self, name: str, definition: dict[str, Any], index_type: str) -> None:
+        """Create a new search index."""
+        try:
+            logger.info(f"Creating new search index '{name}' of type '{index_type}'...")
+            search_index_model = SearchIndexModel(definition=definition, name=name, type=index_type)
+            await self._collection.create_search_index(model=search_index_model)
+            logger.info(f"Search index '{name}' build has been submitted.")
+        except OperationFailure as e:
+            if "IndexAlreadyExists" in str(e) or "DuplicateIndexName" in str(e):
+                logger.warning(f"Race condition: Index '{name}' was created by another process.")
+            else:
+                logger.exception(f"OperationFailure during search index creation " f"for '{name}': {e.details}")
+                raise
+
+    async def create_search_index(
+        self,
+        name: str,
+        definition: dict[str, Any],
+        index_type: str = "search",
+        wait_for_ready: bool = True,
+        timeout: int = DEFAULT_SEARCH_TIMEOUT,
+    ) -> bool:
+        """
+        Creates or updates an Atlas Search index.
+
+        This method is idempotent. It checks if an index with the same name
+        and definition already exists and is queryable. If it exists but the
+        definition has changed, it triggers an update. If it's building,
+        it waits. If it doesn't exist, it creates it.
+        """
+        await self._ensure_collection_exists()
+
+        try:
+            existing_index = await self.get_search_index(name)
+
+            if existing_index:
+                is_ready = await self._handle_existing_index(existing_index, definition, index_type, name)
+                if is_ready:
+                    return True
+            else:
+                await self._create_new_search_index(name, definition, index_type)
+
+            if wait_for_ready:
+                return await self._wait_for_search_index_ready(name, timeout)
+            return True
+
+        except OperationFailure as e:
+            logger.exception(f"OperationFailure during search index creation/check for '{name}'")
+            raise MongoDBEngineError(
+                f"Failed to create/check search index '{name}'",
+                context={"index_name": name, "operation": "create_search_index"},
+            ) from e
+        except (ConnectionFailure, ServerSelectionTimeoutError) as e:
+            logger.exception(f"Connection error during search index creation/check for '{name}'")
+            raise MongoDBEngineError(
+                f"Connection failed while creating/checking search index '{name}'",
+                context={"index_name": name, "operation": "create_search_index"},
+            ) from e
+        except (OperationFailure, InvalidOperation) as e:
+            logger.exception(f"Error during search index creation/check for '{name}'")
+            raise MongoDBEngineError(
+                f"Error creating/checking search index '{name}'",
+                context={"index_name": name, "operation": "create_search_index"},
+            ) from e
+
+    async def get_search_index(self, name: str) -> dict[str, Any] | None:
+        """
+        Retrieves the definition and status of a single search index by name
+        using the $listSearchIndexes aggregation stage.
+        """
+        try:
+            pipeline = [{"$listSearchIndexes": {"name": name}}]
+            async for index_info in self._collection.aggregate(pipeline):
+                # We expect only one or zero results
+                return index_info
+            return None
+        except OperationFailure:
+            logger.exception(f"OperationFailure retrieving search index '{name}'")
+            return None
+        except (ConnectionFailure, ServerSelectionTimeoutError):
+            logger.exception(f"Connection error retrieving search index '{name}'")
+            return None
+        except (OperationFailure, InvalidOperation) as e:
+            logger.exception(f"Error retrieving search index '{name}'")
+            raise MongoDBEngineError(
+                f"Error retrieving search index '{name}'",
+                context={"index_name": name, "operation": "get_search_index"},
+            ) from e
+
+    async def list_search_indexes(self) -> list[dict[str, Any]]:
+        """Lists all Atlas Search indexes for the collection."""
+        try:
+            return await self._collection.list_search_indexes().to_list(None)
+        except (OperationFailure, ConnectionFailure, ServerSelectionTimeoutError):
+            logger.exception("Database error listing search indexes")
+            return []
+        except InvalidOperation:
+            # Client closed - return empty list
+            logger.debug("Cannot list search indexes: MongoDB client is closed")
+            return []
+
+    async def drop_search_index(
+        self, name: str, wait_for_drop: bool = True, timeout: int = DEFAULT_DROP_TIMEOUT
+    ) -> bool:
+        """
+        Drops an Atlas Search index by name.
+        """
+        try:
+            # Check if index exists before trying to drop
+            if not await self.get_search_index(name):
+                logger.info(f"Search index '{name}' does not exist. Nothing to drop.")
+                return True
+
+            await self._collection.drop_search_index(name=name)
+            logger.info(f"Submitted request to drop search index '{name}'.")
+
+            if wait_for_drop:
+                return await self._wait_for_search_index_drop(name, timeout)
+            return True
+        except OperationFailure as e:
+            # Handle race condition where index was already dropped
+            if "IndexNotFound" in str(e):
+                logger.info(f"Search index '{name}' was already deleted (race condition).")
+                return True
+            logger.exception(f"OperationFailure dropping search index '{name}'")
+            raise MongoDBEngineError(
+                f"Failed to drop search index '{name}'",
+                context={"index_name": name, "operation": "drop_search_index"},
+            ) from e
+        except (ConnectionFailure, ServerSelectionTimeoutError) as e:
+            logger.exception(f"Connection error dropping search index '{name}'")
+            raise MongoDBEngineError(
+                f"Connection failed while dropping search index '{name}'",
+                context={"index_name": name, "operation": "drop_search_index"},
+            ) from e
+        except (OperationFailure, InvalidOperation) as e:
+            logger.exception(f"Error dropping search index '{name}'")
+            raise MongoDBEngineError(
+                f"Error dropping search index '{name}'",
+                context={"index_name": name, "operation": "drop_search_index"},
+            ) from e
+
+    async def update_search_index(
+        self,
+        name: str,
+        definition: dict[str, Any],
+        wait_for_ready: bool = True,
+        timeout: int = DEFAULT_SEARCH_TIMEOUT,
+    ) -> bool:
+        """
+        Updates the definition of an existing Atlas Search index.
+        This will trigger a rebuild of the index.
+        """
+        try:
+            logger.info(f"Updating search index '{name}'...")
+            await self._collection.update_search_index(name=name, definition=definition)
+            logger.info(f"Search index '{name}' update submitted. Rebuild initiated.")
+            if wait_for_ready:
+                return await self._wait_for_search_index_ready(name, timeout)
+            return True
+        except OperationFailure as e:
+            logger.exception(f"OperationFailure updating search index '{name}'")
+            raise MongoDBEngineError(
+                f"Failed to update search index '{name}'",
+                context={"index_name": name, "operation": "update_search_index"},
+            ) from e
+        except (ConnectionFailure, ServerSelectionTimeoutError) as e:
+            logger.exception(f"Connection error updating search index '{name}'")
+            raise MongoDBEngineError(
+                f"Connection failed while updating search index '{name}'",
+                context={"index_name": name, "operation": "update_search_index"},
+            ) from e
+        except (OperationFailure, InvalidOperation) as e:
+            logger.exception(f"Error updating search index '{name}'")
+            raise MongoDBEngineError(
+                f"Error updating search index '{name}'",
+                context={"index_name": name, "operation": "update_search_index"},
+            ) from e
+
+    async def _wait_for_search_index_ready(self, name: str, timeout: int) -> bool:
+        """
+        Private helper to poll the index status until it becomes
+        queryable or fails.
+        """
+        start_time = time.time()
+        logger.info(f"Waiting up to {timeout}s for search index '{name}' to become queryable...")
+
+        while True:
+            elapsed = time.time() - start_time
+            if elapsed > timeout:
+                logger.error(f"Timeout: Index '{name}' did not become queryable within {timeout}s.")
+                raise TimeoutError(f"Index '{name}' did not become queryable within {timeout}s.")
+
+            index_info = None
+            try:
+                # Poll for the index status
+                index_info = await self.get_search_index(name)
+            except (
+                OperationFailure,
+                AutoReconnect,
+                ConnectionFailure,
+                ServerSelectionTimeoutError,
+            ) as e:
+                # Handle transient network/DB errors during polling
+                logger.warning(
+                    f"DB Error during polling for index '{name}': " f"{getattr(e, 'details', e)}. Retrying..."
+                )
+                # Continue polling for transient errors
+
+            if index_info:
+                status = index_info.get("status")
+                if status == "FAILED":
+                    # The build failed permanently
+                    logger.error(
+                        f"Search index '{name}' failed to build " f"(Status: FAILED). Check Atlas UI for details."
+                    )
+                    raise Exception(f"Index build failed for '{name}'.")
+
+                queryable = index_info.get("queryable")
+                if queryable:
+                    # Success!
+                    logger.info(f"Search index '{name}' is queryable (Status: {status}).")
+                    return True
+
+                # Not ready yet, log and wait
+                logger.info(
+                    f"Polling for '{name}'. Status: {status}. " f"Queryable: {queryable}. Elapsed: {elapsed:.0f}s"
+                )
+            else:
+                # Index not found yet (can happen right after creation command)
+                logger.info(
+                    f"Polling for '{name}'. Index not found yet " f"(normal during creation). Elapsed: {elapsed:.0f}s"
+                )
+
+            await asyncio.sleep(self.DEFAULT_POLL_INTERVAL)
+
+    async def _wait_for_search_index_drop(self, name: str, timeout: int) -> bool:
+        """
+        Private helper to poll until an index is successfully dropped.
+        """
+        start_time = time.time()
+        logger.info(f"Waiting up to {timeout}s for search index '{name}' to be dropped...")
+        while True:
+            if time.time() - start_time > timeout:
+                logger.error(f"Timeout: Index '{name}' was not dropped within {timeout}s.")
+                raise TimeoutError(f"Index '{name}' was not dropped within {timeout}s.")
+
+            index_info = await self.get_search_index(name)
+            if not index_info:
+                # Success! Index is gone.
+                logger.info(f"Search index '{name}' has been successfully dropped.")
+                return True
+
+            logger.debug(f"Polling for '{name}' drop. Still present. " f"Elapsed: {time.time() - start_time:.0f}s")
+            await asyncio.sleep(self.DEFAULT_POLL_INTERVAL)
+
+    # --- Regular Database Index Methods ---
+    # These methods wrap the standard Motor index commands for a
+    # consistent async API with the search index methods.
+
+    async def create_index(  # noqa: C901
+        self, keys: str | list[tuple[str, int | str]], **kwargs: Any
+    ) -> str:
+        """
+        Creates a standard (non-search) database index.
+        Idempotent: checks if the index already exists first.
+        """
+        if isinstance(keys, str):
+            keys = [(keys, ASCENDING)]
+
+        # Attempt to auto-generate the index name if not provided
+        index_name = kwargs.get("name")
+        if not index_name:
+            # PyMongo 4.x: Generate index name from keys
+            # Use a simple fallback that works across all PyMongo versions
+            # Format: field1_1_field2_-1 (1 for ASCENDING, -1 for DESCENDING, "2dsphere" for geo)
+            name_parts = []
+            for key, direction in keys:
+                if isinstance(direction, str):
+                    # Handle string directions like "2dsphere", "text", etc.
+                    name_parts.append(f"{key}_{direction}")
+                elif direction == ASCENDING:
+                    name_parts.append(f"{key}_1")
+                elif direction == DESCENDING:
+                    name_parts.append(f"{key}_-1")
+                else:
+                    name_parts.append(f"{key}_{direction}")
+            index_name = "_".join(name_parts)
+
+        try:
+            # Check if index already exists
+            try:
+                existing_indexes = await self.list_indexes()
+            except InvalidOperation:
+                # Client is closed (e.g., during shutdown/teardown)
+                logger.debug("Skipping index existence check: MongoDB client is closed. " "Proceeding with creation.")
+                existing_indexes = []
+
+            for index in existing_indexes:
+                if index.get("name") == index_name:
+                    logger.info(f"Regular index '{index_name}' already exists.")
+                    return index_name
+
+            # Extract wait_for_ready from kwargs if present
+            wait_for_ready = kwargs.pop("wait_for_ready", True)
+
+            # Create the index
+            try:
+                name = await self._collection.create_index(keys, **kwargs)
+                logger.info(f"Successfully created regular index '{name}'.")
+            except InvalidOperation as e:
+                # Client is closed (e.g., during shutdown/teardown)
+                logger.debug(
+                    f"Cannot create index '{index_name}': MongoDB client is closed " f"(likely during shutdown)"
+                )
+                raise MongoDBEngineError(
+                    f"Cannot create index '{index_name}': MongoDB client is closed",
+                    context={"index_name": index_name, "operation": "create_index"},
+                ) from e
+
+            # Wait for index to be ready (MongoDB indexes are usually immediate, but we verify)
+            if wait_for_ready:
+                try:
+                    is_ready = await self._wait_for_regular_index_ready(name, timeout=30)
+                    if not is_ready:
+                        logger.warning(
+                            f"Regular index '{name}' may not be fully ready yet, "
+                            f"but creation was initiated successfully."
+                        )
+                except InvalidOperation:
+                    # Client closed during wait - index was already created, so this is fine
+                    logger.debug(
+                        f"Could not verify index ready: MongoDB client is closed. " f"Index '{name}' was created."
+                    )
+
+            return name
+        except OperationFailure as e:
+            # Handle index build aborted (e.g., database being dropped during teardown)
+            if e.code == 276 or "IndexBuildAborted" in str(e) or "dropDatabase" in str(e):
+                logger.debug(
+                    f"Skipping regular index creation '{index_name}': "
+                    f"index build aborted (likely during database drop/teardown): {e}"
+                )
+                # Return the index name anyway since this is a non-critical error during teardown
+                return index_name
+            logger.exception(f"OperationFailure creating regular index '{index_name}'")
+            raise MongoDBEngineError(
+                f"Failed to create regular index '{index_name}'",
+                context={"index_name": index_name, "operation": "create_index"},
+            ) from e
+        except (ConnectionFailure, ServerSelectionTimeoutError) as e:
+            logger.exception(f"Connection error creating regular index '{index_name}'")
+            raise MongoDBEngineError(
+                f"Connection failed while creating regular index '{index_name}'",
+                context={"index_name": index_name, "operation": "create_index"},
+            ) from e
+        except (InvalidOperation, TypeError, ValueError) as e:
+            logger.exception(f"Error creating regular index '{index_name}'")
+            raise MongoDBEngineError(
+                f"Error creating regular index '{index_name}'",
+                context={"index_name": index_name, "operation": "create_index"},
+            ) from e
+
+    async def create_text_index(
+        self,
+        fields: list[str],
+        weights: dict[str, int] | None = None,
+        name: str = "text_index",
+        **kwargs: Any,
+    ) -> str:
+        """Helper to create a standard text index."""
+        keys = [(field, TEXT) for field in fields]
+        if weights:
+            kwargs["weights"] = weights
+        if name:
+            kwargs["name"] = name
+        return await self.create_index(keys, **kwargs)
+
+    async def create_geo_index(self, field: str, name: str | None = None, **kwargs: Any) -> str:
+        """Helper to create a standard 2dsphere index."""
+        keys = [(field, GEO2DSPHERE)]
+        if name:
+            kwargs["name"] = name
+        return await self.create_index(keys, **kwargs)
+
+    async def drop_index(self, name: str):
+        """Drops a standard (non-search) database index by name."""
+        try:
+            await self._collection.drop_index(name)
+            logger.info(f"Successfully dropped regular index '{name}'.")
+        except OperationFailure as e:
+            # Handle case where index is already gone
+            if "index not found" in str(e).lower():
+                logger.info(f"Regular index '{name}' does not exist. Nothing to drop.")
+            else:
+                logger.exception(f"OperationFailure dropping regular index '{name}'")
+                raise MongoDBEngineError(
+                    f"Failed to drop regular index '{name}'",
+                    context={"index_name": name, "operation": "drop_index"},
+                ) from e
+        except (ConnectionFailure, ServerSelectionTimeoutError) as e:
+            logger.exception(f"Connection error dropping regular index '{name}'")
+            raise MongoDBEngineError(
+                f"Connection failed while dropping regular index '{name}'",
+                context={"index_name": name, "operation": "drop_index"},
+            ) from e
+        except InvalidOperation as e:
+            logger.debug(f"Cannot drop regular index '{name}': MongoDB client is closed")
+            raise MongoDBEngineError(
+                f"Cannot drop regular index '{name}': MongoDB client is closed",
+                context={"index_name": name, "operation": "drop_index"},
+            ) from e
+
+    async def list_indexes(self) -> list[dict[str, Any]]:
+        """Lists all standard (non-search) indexes on the collection."""
+        try:
+            return await self._collection.list_indexes().to_list(None)
+        except (OperationFailure, ConnectionFailure, ServerSelectionTimeoutError):
+            logger.exception("Database error listing regular indexes")
+            return []
+        except InvalidOperation:
+            # Client is closed (e.g., during shutdown/teardown)
+            logger.debug("Skipping list_indexes: MongoDB client is closed (likely during shutdown)")
+            return []
+
+    async def get_index(self, name: str) -> dict[str, Any] | None:
+        """Gets a single standard index by name."""
+        indexes = await self.list_indexes()
+        return next((index for index in indexes if index.get("name") == name), None)
+
+    async def _wait_for_regular_index_ready(self, name: str, timeout: int = 30, poll_interval: float = 0.5) -> bool:
+        """
+        Wait for a regular MongoDB index to be ready.
+
+        Regular indexes are usually created synchronously, but we verify they're
+        actually available before returning.
+
+        Args:
+            name: Index name to wait for
+            timeout: Maximum time to wait in seconds
+            poll_interval: Time between checks in seconds
+
+        Returns:
+            True if index is ready, False if timeout
+        """
+        start_time = time.time()
+        logger.debug(f"Waiting for regular index '{name}' to be ready...")
+
+        while time.time() - start_time < timeout:
+            index = await self.get_index(name)
+            if index:
+                logger.debug(f"Regular index '{name}' is ready.")
+                return True
+            await asyncio.sleep(poll_interval)
+
+        logger.warning(
+            f"Timeout waiting for regular index '{name}' to be ready after {timeout}s. " f"Index may still be building."
+        )
+        return False
+
+
+# ##########################################################################
+# AUTOMATIC INDEX MANAGEMENT
+# ##########################################################################
+
+
+class AutoIndexManager:
+    """
+    Magical index manager that automatically creates indexes based on query patterns.
+
+    This class analyzes query filters and automatically creates appropriate indexes
+    for frequently used fields, making it easy for apps to use collections
+    without manually defining indexes.
+
+    Features:
+    - Automatically detects query patterns (equality, range, sorting)
+    - Creates indexes on-demand based on usage
+    - Uses intelligent heuristics to avoid over-indexing
+    - Thread-safe with async locks
+    """
+
+    __slots__ = (
+        "_collection",
+        "_index_manager",
+        "_creation_cache",
+        "_lock",
+        "_query_counts",
+        "_pending_tasks",
+    )
+
+    def __init__(self, collection: AsyncIOMotorCollection, index_manager: AsyncAtlasIndexManager):
+        self._collection = collection
+        self._index_manager = index_manager
+        # Cache of index creation decisions (index_name -> bool)
+        self._creation_cache: dict[str, bool] = {}
+        # Async lock to prevent race conditions during index creation
+        self._lock = asyncio.Lock()
+        # Track query patterns to determine which indexes to create
+        self._query_counts: dict[str, int] = {}
+        # Track in-flight index creation tasks to prevent duplicates
+        self._pending_tasks: dict[str, asyncio.Task] = {}
+
+    def _extract_index_fields_from_filter(self, filter: Mapping[str, Any] | None) -> list[tuple[str, int]]:
+        """
+        Extracts potential index fields from a MongoDB query filter.
+
+        Args:
+            filter: MongoDB query filter dictionary
+
+        Returns:
+            List of (field_name, direction) tuples where:
+            - direction is 1 for ASCENDING, -1 for DESCENDING
+            - Only includes fields that would benefit from indexing
+        """
+        if not filter:
+            return []
+
+        index_fields: list[tuple[str, int]] = []
+
+        def analyze_value(value: Any, field_name: str) -> None:
+            """Recursively analyze filter values to extract index candidates."""
+            if isinstance(value, dict):
+                # Handle operators like $gt, $gte, $lt, $lte, $ne, $in, $exists
+                if any(op in value for op in ["$gt", "$gte", "$lt", "$lte", "$ne", "$in", "$exists"]):
+                    # These operators benefit from indexes
+                    index_fields.append((field_name, ASCENDING))
+                # Handle $and and $or - recursively analyze
+                if "$and" in value:
+                    for sub_filter in value["$and"]:
+                        if isinstance(sub_filter, dict):
+                            for k, v in sub_filter.items():
+                                analyze_value(v, k)
+                if "$or" in value:
+                    # For $or, we can't easily determine index fields, skip for now
+                    pass
+            elif value is not None:
+                # Direct equality match - very common and benefits from index
+                index_fields.append((field_name, ASCENDING))
+
+        # Analyze top-level fields
+        for key, value in filter.items():
+            if not key.startswith("$"):  # Skip operators at top level
+                analyze_value(value, key)
+
+        return list(set(index_fields))  # Remove duplicates
+
+    def _extract_sort_fields(self, sort: list[tuple[str, int]] | dict[str, int] | None) -> list[tuple[str, int]]:
+        """
+        Extracts index fields from sort specification.
+
+        Returns a list of (field_name, direction) tuples.
+        """
+        if not sort:
+            return []
+
+        if isinstance(sort, dict):
+            return [(field, direction) for field, direction in sort.items()]
+        elif isinstance(sort, list):
+            return sort
+        else:
+            return []
+
+    def _generate_index_name(self, fields: list[tuple[str, int]]) -> str:
+        """Generate a human-readable index name from field list."""
+        if not fields:
+            return "auto_idx_empty"
+
+        parts = []
+        for field, direction in fields:
+            dir_str = "asc" if direction == ASCENDING else "desc"
+            parts.append(f"{field}_{dir_str}")
+
+        return f"auto_{'_'.join(parts)}"
+
+    async def _create_index_safely(self, index_name: str, all_fields: list[tuple[str, int]]) -> None:
+        """
+        Safely create an index, handling errors gracefully.
+
+        Args:
+            index_name: Name of the index to create
+            all_fields: List of (field, direction) tuples for the index
+        """
+        try:
+            # Check if index already exists
+            existing_indexes = await self._index_manager.list_indexes()
+            for idx in existing_indexes:
+                if idx.get("name") == index_name:
+                    async with self._lock:
+                        self._creation_cache[index_name] = True
+                    return  # Index already exists
+
+            # Create the index
+            keys = all_fields
+            # MongoDB doesn't allow 'background' option for _id indexes
+            index_options = {"name": index_name}
+            if not (len(keys) == 1 and keys[0][0] == "_id"):
+                index_options["background"] = True
+            await self._index_manager.create_index(keys, **index_options)
+            async with self._lock:
+                self._creation_cache[index_name] = True
+            logger.info(
+                f"✨ Auto-created index '{index_name}' on "
+                f"{self._collection.name} for fields: "
+                f"{[f[0] for f in all_fields]}"
+            )
+
+        except (
+            OperationFailure,
+            ConnectionFailure,
+            ServerSelectionTimeoutError,
+            InvalidOperation,
+        ) as e:
+            # Don't fail the query if index creation fails
+            logger.warning(f"Failed to auto-create index '{index_name}': {e}")
+            async with self._lock:
+                self._creation_cache[index_name] = False
+        finally:
+            # Clean up pending task
+            async with self._lock:
+                self._pending_tasks.pop(index_name, None)
+
+    async def ensure_index_for_query(
+        self,
+        filter: Mapping[str, Any] | None = None,
+        sort: list[tuple[str, int]] | dict[str, int] | None = None,
+        hint_threshold: int = AUTO_INDEX_HINT_THRESHOLD,
+    ) -> None:
+        """
+        Automatically ensure appropriate indexes exist for a given query.
+
+        Args:
+            filter: The query filter to analyze
+            sort: The sort specification to analyze
+            hint_threshold: Number of times a query pattern must be seen before creating index
+
+        This method:
+        1. Extracts potential index fields from filter and sort
+        2. Combines them into a composite index if needed
+        3. Creates the index if it doesn't exist and usage threshold is met
+        4. Uses async lock to prevent race conditions
+        5. Tracks pending tasks to prevent duplicate index creation
+        """
+        # Extract fields from filter and sort
+        filter_fields = self._extract_index_fields_from_filter(filter)
+        sort_fields = self._extract_sort_fields(sort)
+
+        # Combine fields intelligently: filter fields first, then sort fields
+        all_fields = []
+        filter_field_names = {f[0] for f in filter_fields}
+
+        # Add filter fields first
+        for field, direction in filter_fields:
+            all_fields.append((field, direction))
+
+        # Add sort fields that aren't already in filter
+        for field, direction in sort_fields:
+            if field not in filter_field_names:
+                all_fields.append((field, direction))
+
+        if not all_fields:
+            return  # No index needed
+
+        # Limit to MAX_INDEX_FIELDS (MongoDB compound index best practice)
+        all_fields = all_fields[:MAX_INDEX_FIELDS]
+
+        # Generate index name
+        index_name = self._generate_index_name(all_fields)
+
+        # Track query pattern usage
+        pattern_key = index_name
+        self._query_counts[pattern_key] = self._query_counts.get(pattern_key, 0) + 1
+
+        # Only create index if usage threshold is met
+        if self._query_counts[pattern_key] < hint_threshold:
+            return
+
+        # Check cache and pending tasks to avoid redundant creation attempts
+        async with self._lock:
+            # Only skip if index was successfully created (cache value is True)
+            # If cache value is False (failed attempt), allow retry
+            if self._creation_cache.get(index_name) is True:
+                return  # Already created successfully
+
+            # Check if task is already in progress
+            if index_name in self._pending_tasks:
+                task = self._pending_tasks[index_name]
+                if not task.done():
+                    return  # Index creation already in progress
+                # Task is done, clean it up to allow retry if needed
+                self._pending_tasks.pop(index_name, None)
+
+            # Create task and track it
+            # Cleanup happens in _create_index_safely's finally block
+            task = asyncio.create_task(self._create_index_safely(index_name, all_fields))
+            self._pending_tasks[index_name] = task
+
+
+# ##########################################################################
+# SCOPED WRAPPER CLASSES
+# ##########################################################################
+
+
+class ScopedCollectionWrapper:
+    """
+    Wraps an `AsyncIOMotorCollection` to enforce app data scoping.
+
+    This class intercepts all data access methods (find, insert, update, etc.)
+    to automatically inject `app_id` filters and data.
+
+    - Read operations (`find`, `find_one`, `count_documents`, `aggregate`) are
+      filtered to only include documents matching the `read_scopes`.
+    - Write operations (`insert_one`, `insert_many`) automatically add the
+      `write_scope` as the document's `app_id`.
+
+    Administrative methods (e.g., `drop_index`) are not proxied directly
+    but are available via the `.index_manager` property.
+
+    Magical Auto-Indexing:
+    - Automatically creates indexes based on query patterns
+    - Analyzes filter and sort specifications to determine needed indexes
+    - Creates indexes in the background without blocking queries
+    - Enables apps to use collections without manual index configuration
+    - Can be disabled by setting `auto_index=False` in constructor
+    """
+
+    # Use __slots__ for memory and speed optimization
+    __slots__ = (
+        "_collection",
+        "_read_scopes",
+        "_write_scope",
+        "_index_manager",
+        "_auto_index_manager",
+        "_auto_index_enabled",
+        "_query_validator",
+        "_resource_limiter",
+        "_parent_wrapper",
+        "_cached_db_wrapper",
+    )
+
+    def __init__(
+        self,
+        real_collection: AsyncIOMotorCollection,
+        read_scopes: list[str],
+        write_scope: str,
+        auto_index: bool = True,
+        query_validator: QueryValidator | None = None,
+        resource_limiter: ResourceLimiter | None = None,
+        parent_wrapper: Optional["ScopedMongoWrapper"] = None,
+    ):
+        self._collection = real_collection
+        self._read_scopes = read_scopes
+        self._write_scope = write_scope
+        self._auto_index_enabled = auto_index
+        # Lazily instantiated and cached
+        self._index_manager: AsyncAtlasIndexManager | None = None
+        self._auto_index_manager: AutoIndexManager | None = None
+        # Query security and resource limits
+        self._query_validator = query_validator or QueryValidator()
+        self._resource_limiter = resource_limiter or ResourceLimiter()
+        # Reference to parent wrapper for token verification
+        self._parent_wrapper = parent_wrapper
+        # Cache for database wrapper (when parent_wrapper is None)
+        self._cached_db_wrapper: ScopedMongoWrapper | None = None
+
+    @property
+    def index_manager(self) -> AsyncAtlasIndexManager:
+        """
+        Gets the AsyncAtlasIndexManager for this collection.
+
+        It is lazily-instantiated and cached on first access.
+
+        Note: Index operations are administrative and are NOT
+        scoped by 'app_id'. They apply to the
+        entire underlying collection.
+        """
+        if self._index_manager is None:
+            # Create and cache it.
+            # Pass the *real* collection, not 'self', as indexes
+            # are not scoped by app_id.
+            # Access the real collection directly, bypassing the proxy
+            real_collection = super().__getattribute__("_collection")
+            self._index_manager = AsyncAtlasIndexManager(real_collection)
+        return self._index_manager
+
+    @property
+    def auto_index_manager(self) -> AutoIndexManager | None:
+        """
+        Gets the AutoIndexManager for magical automatic index creation.
+
+        Returns None if auto-indexing is disabled.
+        """
+        if not self._auto_index_enabled:
+            return None
+
+        if self._auto_index_manager is None:
+            # Lazily instantiate auto-index manager
+            # Access the real collection directly, bypassing the proxy
+            real_collection = super().__getattribute__("_collection")
+            self._auto_index_manager = AutoIndexManager(
+                real_collection,
+                self.index_manager,  # This will create index_manager if needed
+            )
+        return self._auto_index_manager
+
+    @property
+    def database(self) -> "ScopedMongoWrapper":
+        """
+        Provides access to the database as a ScopedMongoWrapper.
+
+        This property returns a ScopedMongoWrapper with the same scopes as this collection,
+        ensuring all collections accessed through it are automatically scoped. This maintains
+        security and data isolation.
+
+        Returns:
+            ScopedMongoWrapper: A scoped database wrapper with the same read/write scopes
+                as this collection. If this collection was created through a ScopedMongoWrapper,
+                returns that parent wrapper. Otherwise, creates a new ScopedMongoWrapper.
+
+        Example:
+            # Access another collection through the scoped database
+            other_collection = collection.database["other_collection"]
+            # other_collection is automatically scoped with the same app_id filters
+        """
+        parent_wrapper = super().__getattribute__("_parent_wrapper")
+        if parent_wrapper is not None:
+            # Return the parent wrapper directly - it's already a ScopedMongoWrapper
+            return parent_wrapper
+
+        # Fallback: create a new ScopedMongoWrapper if parent_wrapper is None
+        # This should only happen if collection wasn't created through ScopedMongoWrapper
+        cached_wrapper = super().__getattribute__("_cached_db_wrapper")
+        if cached_wrapper is not None:
+            return cached_wrapper
+
+        # Create a new ScopedMongoWrapper with the same scopes
+        real_collection = super().__getattribute__("_collection")
+        real_db = real_collection.database
+        read_scopes = super().__getattribute__("_read_scopes")
+        write_scope = super().__getattribute__("_write_scope")
+        auto_index = super().__getattribute__("_auto_index_enabled")
+        query_validator = super().__getattribute__("_query_validator")
+        resource_limiter = super().__getattribute__("_resource_limiter")
+
+        new_wrapper = ScopedMongoWrapper(
+            real_db=real_db,
+            read_scopes=read_scopes,
+            write_scope=write_scope,
+            auto_index=auto_index,
+            query_validator=query_validator,
+            resource_limiter=resource_limiter,
+        )
+
+        # Cache it for future access
+        object.__setattr__(self, "_cached_db_wrapper", new_wrapper)
+        return new_wrapper
+
+    @property
+    def db(self) -> "ScopedMongoWrapper":
+        """
+        Alias for database property (Motor compatibility).
+
+        Returns the same ScopedMongoWrapper as the database property.
+        This provides compatibility with code that uses `collection.db` instead of
+        `collection.database`.
+
+        Returns:
+            ScopedMongoWrapper: Same as database property
+        """
+        return self.database
+
+    @property
+    def name(self) -> str:
+        """
+        Provides access to the collection name.
+
+        This property allows compatibility with code that expects AsyncIOMotorCollection.name.
+        Returns the name from the underlying collection.
+
+        Returns:
+            str: The collection name
+        """
+        real_collection = super().__getattribute__("_collection")
+        return real_collection.name
+
+    def __getattribute__(self, name: str) -> Any:
+        """
+        Override to prevent access to dangerous attributes on _collection.
+
+        Blocks access to _collection.database and _collection.client to prevent
+        bypassing scoping.
+        """
+        # Allow access to our own attributes
+        if name.startswith("_") and name not in (
+            "_collection",
+            "_read_scopes",
+            "_write_scope",
+            "_index_manager",
+            "_auto_index_manager",
+            "_auto_index_enabled",
+            "_query_validator",
+            "_resource_limiter",
+        ):
+            return super().__getattribute__(name)
+
+        # If accessing _collection, wrap it to block database/client access
+        if name == "_collection":
+            collection = super().__getattribute__(name)
+            # Return a proxy that blocks dangerous attributes
+            return _SecureCollectionProxy(collection)
+
+        return super().__getattribute__(name)
+
+    def __getattr__(self, name: str) -> Any:
+        """
+        Proxy attribute access to underlying collection for methods not explicitly handled.
+
+        This allows access to collection methods like create_index, drop_index, etc.
+        while maintaining security by blocking dangerous attributes (database, client).
+
+        Note: Methods explicitly implemented on ScopedCollectionWrapper (insert_one, insert_many,
+        find, find_one, update_one, update_many, delete_one, delete_many, count_documents,
+        aggregate) are NOT proxied - they use the scoped implementations.
+        """
+        # Block access to dangerous attributes
+        if name in ("database", "client", "db"):
+            logger.warning(
+                f"Security: Attempted access to '{name}' attribute on collection. "
+                "This is blocked to prevent bypassing scoping."
+            )
+            raise AttributeError(
+                f"Access to '{name}' is blocked for security. "
+                "Use collection.database for database access or collection.index_manager for index operations."
+            )
+
+        # Don't proxy methods that are explicitly implemented on ScopedCollectionWrapper
+        # These methods have scoped implementations that must be used
+        explicitly_implemented = {
+            "insert_one",
+            "insert_many",
+            "find",
+            "find_one",
+            "update_one",
+            "update_many",
+            "delete_one",
+            "delete_many",
+            "count_documents",
+            "aggregate",
+            "_collection",  # Internal attribute
+            "_read_scopes",
+            "_write_scope",
+            "_index_manager",
+            "_auto_index_manager",
+            "_auto_index_enabled",
+            "_query_validator",
+            "_resource_limiter",
+            "_parent_wrapper",
+            "_cached_db_wrapper",
+            "database",
+            "db",
+            "name",
+            "index_manager",
+            "auto_index_manager",
+        }
+
+        if name in explicitly_implemented:
+            raise AttributeError(
+                f"'{type(self).__name__}' object has no attribute '{name}'. "
+                f"This method is explicitly implemented and should be accessed directly."
+            )
+
+        # Proxy other attributes to underlying collection
+        real_collection = super().__getattribute__("_collection")
+        return getattr(real_collection, name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        """Override to prevent modification of _collection."""
+        if name == "_collection" and hasattr(self, "_collection"):
+            raise AttributeError(
+                "Cannot modify '_collection' attribute. " "Collection wrappers are immutable for security."
+            )
+        super().__setattr__(name, value)
+
+    def _inject_read_filter(self, filter: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        """
+        Combines the user's filter with our mandatory scope filter.
+
+        Optimization: If the user filter is empty, just return the scope filter.
+        Otherwise, combine them robustly with $and.
+        """
+        scope_filter = {"app_id": {"$in": self._read_scopes}}
+
+        # If filter is None or {}, just return the scope filter
+        if not filter:
+            return scope_filter
+
+        # If filter exists, combine them robustly with $and
+        return {"$and": [filter, scope_filter]}
+
+    async def insert_one(self, document: Mapping[str, Any], *args, **kwargs) -> InsertOneResult:
+        """
+        Injects the app_id before writing.
+
+        Safety: Creates a copy of the document to avoid mutating the caller's data.
+        """
+        start_time = time.time()
+        # Get collection name safely (may not exist for new collections)
+        try:
+            collection_name = self._collection.name
+        except (AttributeError, TypeError):
+            # Fallback if name is not accessible
+            collection_name = "unknown"
+
+        with create_span(
+            "mongodb.insert_one",
+            {
+                "db.system": "mongodb",
+                "db.collection": collection_name,
+                "db.operation": "insert_one",
+                "app.slug": self._write_scope,
+            },
+        ) as span:
+            try:
+                # Verify token if needed (lazy verification for async contexts)
+                if self._parent_wrapper:
+                    await self._parent_wrapper._verify_token_if_needed()  # noqa: SLF001
+
+                # Validate document size before insert
+                self._resource_limiter.validate_document_size(document)
+
+                # Use dictionary spread to create a non-mutating copy
+                doc_to_insert = {**document, "app_id": self._write_scope}
+
+                # Enforce query timeout
+                kwargs = self._resource_limiter.enforce_query_timeout(kwargs)
+                # Remove maxTimeMS - insert_one doesn't accept it
+                kwargs_for_insert = {k: v for k, v in kwargs.items() if k != "maxTimeMS"}
+
+                # Use self._collection.insert_one() - proxy delegates correctly
+                result = await self._collection.insert_one(doc_to_insert, *args, **kwargs_for_insert)
+                duration_ms = (time.time() - start_time) * 1000
+                record_operation(
+                    "database.insert_one",
+                    duration_ms,
+                    success=True,
+                    collection=collection_name,
+                    app_slug=self._write_scope,
+                )
+                return result
+            except (OperationFailure, AutoReconnect) as e:
+                duration_ms = (time.time() - start_time) * 1000
+                record_operation(
+                    "database.insert_one",
+                    duration_ms,
+                    success=False,
+                    collection=collection_name,
+                    app_slug=self._write_scope,
+                )
+                span.set_attribute("error", True)
+                logger.exception("Database operation failed in insert_one")
+                raise MongoDBEngineError(
+                    "Failed to insert document",
+                    context={"operation": "insert_one", "collection": collection_name},
+                ) from e
+            except (InvalidOperation, TypeError, ValueError) as e:
+                # Programming errors or client closed
+                duration_ms = (time.time() - start_time) * 1000
+                record_operation(
+                    "database.insert_one",
+                    duration_ms,
+                    success=False,
+                    collection=collection_name,
+                    app_slug=self._write_scope,
+                )
+                span.set_attribute("error", True)
+                logger.exception("Error in insert_one")
+                raise MongoDBEngineError(
+                    "Error inserting document",
+                    context={"operation": "insert_one", "collection": collection_name},
+                ) from e
+
+    async def insert_many(self, documents: list[Mapping[str, Any]], *args, **kwargs) -> InsertManyResult:
+        """
+        Injects the app_id into all documents before writing.
+
+        Safety: Uses a list comprehension to create copies of all documents,
+        avoiding in-place mutation of the original list.
+        """
+        # Validate all document sizes before insert
+        self._resource_limiter.validate_documents_size(documents)
+
+        # Enforce query timeout
+        kwargs = self._resource_limiter.enforce_query_timeout(kwargs)
+        # Remove maxTimeMS - insert_many doesn't accept it
+        kwargs_for_insert = {k: v for k, v in kwargs.items() if k != "maxTimeMS"}
+
+        docs_to_insert = [{**doc, "app_id": self._write_scope} for doc in documents]
+        # Use self._collection.insert_many() - proxy delegates correctly
+        return await self._collection.insert_many(docs_to_insert, *args, **kwargs_for_insert)
+
+    async def find_one(self, filter: Mapping[str, Any] | None = None, *args, **kwargs) -> dict[str, Any] | None:
+        """
+        Applies the read scope to the filter.
+        Automatically ensures appropriate indexes exist for the query.
+        """
+        start_time = time.time()
+        # Access real collection directly (bypass proxy) for name attribute
+        # Use object.__getattribute__ to bypass our custom __getattribute__ that wraps in proxy
+        real_collection = object.__getattribute__(self, "_collection")
+        collection_name = real_collection.name
+
+        with create_span(
+            "mongodb.find_one",
+            {
+                "db.system": "mongodb",
+                "db.collection": collection_name,
+                "db.operation": "find_one",
+                "app.slug": self._write_scope,
+            },
+        ) as span:
+            try:
+                # Verify token if needed (lazy verification for async contexts)
+                if self._parent_wrapper:
+                    await self._parent_wrapper._verify_token_if_needed()  # noqa: SLF001
+
+                # Validate query filter for security
+                self._query_validator.validate_filter(filter)
+                self._query_validator.validate_sort(kwargs.get("sort"))
+
+                # Enforce query timeout - but remove maxTimeMS for find_one
+                # because Motor's find_one internally creates a cursor and some versions
+                # don't handle maxTimeMS correctly when passed to find_one
+                kwargs = self._resource_limiter.enforce_query_timeout(kwargs)
+                # Remove maxTimeMS to avoid cursor creation errors in find_one
+                kwargs_for_find_one = {k: v for k, v in kwargs.items() if k != "maxTimeMS"}
+
+                # Magical auto-indexing: ensure indexes exist before querying
+                # Note: We analyze the user's filter, not the scoped filter, since
+                # app_id index is always ensured separately
+                if self.auto_index_manager:
+                    sort = kwargs.get("sort")
+                    await self.auto_index_manager.ensure_index_for_query(filter=filter, sort=sort)
+
+                scoped_filter = self._inject_read_filter(filter)
+                result = await self._collection.find_one(scoped_filter, *args, **kwargs_for_find_one)
+                duration_ms = (time.time() - start_time) * 1000
+                record_operation(
+                    "database.find_one",
+                    duration_ms,
+                    success=True,
+                    collection=collection_name,
+                    app_slug=self._write_scope,
+                )
+                return result
+            except (PyMongoError, ValueError, TypeError, KeyError, AttributeError):
+                duration_ms = (time.time() - start_time) * 1000
+                record_operation(
+                    "database.find_one",
+                    duration_ms,
+                    success=False,
+                    collection=collection_name,
+                    app_slug=self._write_scope,
+                )
+                span.set_attribute("error", True)
+                raise
+
+    def find(self, filter: Mapping[str, Any] | None = None, *args, **kwargs) -> AsyncIOMotorCursor:
+        """
+        Applies the read scope to the filter.
+        Returns an async cursor, just like motor.
+        Automatically ensures appropriate indexes exist for the query.
+        """
+        collection_name = getattr(self._collection, "name", "unknown")
+
+        # Record a span for the cursor creation (actual I/O happens on iteration)
+        with create_span(
+            "mongodb.find",
+            {
+                "db.system": "mongodb",
+                "db.collection": collection_name,
+                "db.operation": "find",
+                "app.slug": self._write_scope,
+            },
+        ):
+            # Validate query filter for security
+            self._query_validator.validate_filter(filter)
+            self._query_validator.validate_sort(kwargs.get("sort"))
+
+            # Enforce result limit
+            limit = kwargs.get("limit")
+            if limit is not None:
+                kwargs["limit"] = self._resource_limiter.enforce_result_limit(limit)
+
+            # Enforce batch size
+            batch_size = kwargs.get("batch_size")
+            if batch_size is not None:
+                kwargs["batch_size"] = self._resource_limiter.enforce_batch_size(batch_size)
+
+            # Enforce query timeout - but remove maxTimeMS before passing to find()
+            # because Cursor constructor doesn't accept maxTimeMS
+            kwargs = self._resource_limiter.enforce_query_timeout(kwargs)
+            kwargs_for_find = {k: v for k, v in kwargs.items() if k != "maxTimeMS"}
+
+            # Magical auto-indexing: ensure indexes exist before querying
+            # Note: This is fire-and-forget, doesn't block cursor creation
+            if self.auto_index_manager:
+                sort = kwargs.get("sort")
+
+                # Create a task to ensure index (fire and forget, managed to prevent accumulation)
+                async def _safe_index_task():
+                    try:
+                        await self.auto_index_manager.ensure_index_for_query(filter=filter, sort=sort)
+                    except (
+                        OperationFailure,
+                        ConnectionFailure,
+                        ServerSelectionTimeoutError,
+                        InvalidOperation,
+                    ) as e:
+                        logger.debug(f"Auto-index creation failed for query (non-critical): {e}")
+                    # Let other exceptions bubble up - they are non-recoverable (Type 4)
+
+                _create_managed_task(_safe_index_task(), task_name="auto_index_check")
+
+            scoped_filter = self._inject_read_filter(filter)
+            return self._collection.find(scoped_filter, *args, **kwargs_for_find)
+
+    async def update_one(self, filter: Mapping[str, Any], update: Mapping[str, Any], *args, **kwargs) -> UpdateResult:
+        """
+        Applies the read scope to the filter.
+        Note: This only scopes the *filter*, not the update operation.
+        """
+        # Validate query filter for security
+        self._query_validator.validate_filter(filter)
+
+        # Enforce query timeout
+        kwargs = self._resource_limiter.enforce_query_timeout(kwargs)
+        # Remove maxTimeMS - update_one doesn't accept it
+        kwargs_for_update = {k: v for k, v in kwargs.items() if k != "maxTimeMS"}
+
+        collection_name = self._collection.name
+        start_time = time.time()
+
+        with create_span(
+            "mongodb.update_one",
+            {
+                "db.system": "mongodb",
+                "db.collection": collection_name,
+                "db.operation": "update_one",
+                "app.slug": self._write_scope,
+            },
+        ) as span:
+            try:
+                scoped_filter = self._inject_read_filter(filter)
+                result = await self._collection.update_one(scoped_filter, update, *args, **kwargs_for_update)
+                duration_ms = (time.time() - start_time) * 1000
+                record_operation(
+                    "database.update_one",
+                    duration_ms,
+                    success=True,
+                    collection=collection_name,
+                    app_slug=self._write_scope,
+                )
+                return result
+            except (OperationFailure, AutoReconnect, InvalidOperation, TypeError, ValueError):
+                duration_ms = (time.time() - start_time) * 1000
+                record_operation(
+                    "database.update_one",
+                    duration_ms,
+                    success=False,
+                    collection=collection_name,
+                    app_slug=self._write_scope,
+                )
+                span.set_attribute("error", True)
+                raise
+
+    async def update_many(self, filter: Mapping[str, Any], update: Mapping[str, Any], *args, **kwargs) -> UpdateResult:
+        """
+        Applies the read scope to the filter.
+        Note: This only scopes the *filter*, not the update operation.
+        """
+        # Validate query filter for security
+        self._query_validator.validate_filter(filter)
+
+        # Enforce query timeout
+        kwargs = self._resource_limiter.enforce_query_timeout(kwargs)
+        # Remove maxTimeMS - update_many doesn't accept it
+        kwargs_for_update = {k: v for k, v in kwargs.items() if k != "maxTimeMS"}
+
+        scoped_filter = self._inject_read_filter(filter)
+        return await self._collection.update_many(scoped_filter, update, *args, **kwargs_for_update)
+
+    async def delete_one(self, filter: Mapping[str, Any], *args, **kwargs) -> DeleteResult:
+        """Applies the read scope to the filter."""
+        # Validate query filter for security
+        self._query_validator.validate_filter(filter)
+
+        # Enforce query timeout
+        kwargs = self._resource_limiter.enforce_query_timeout(kwargs)
+        # Remove maxTimeMS - delete_one doesn't accept it
+        kwargs_for_delete = {k: v for k, v in kwargs.items() if k != "maxTimeMS"}
+
+        collection_name = self._collection.name
+        start_time = time.time()
+
+        with create_span(
+            "mongodb.delete_one",
+            {
+                "db.system": "mongodb",
+                "db.collection": collection_name,
+                "db.operation": "delete_one",
+                "app.slug": self._write_scope,
+            },
+        ) as span:
+            try:
+                scoped_filter = self._inject_read_filter(filter)
+                result = await self._collection.delete_one(scoped_filter, *args, **kwargs_for_delete)
+                duration_ms = (time.time() - start_time) * 1000
+                record_operation(
+                    "database.delete_one",
+                    duration_ms,
+                    success=True,
+                    collection=collection_name,
+                    app_slug=self._write_scope,
+                )
+                return result
+            except (OperationFailure, AutoReconnect, InvalidOperation, TypeError, ValueError):
+                duration_ms = (time.time() - start_time) * 1000
+                record_operation(
+                    "database.delete_one",
+                    duration_ms,
+                    success=False,
+                    collection=collection_name,
+                    app_slug=self._write_scope,
+                )
+                span.set_attribute("error", True)
+                raise
+
+    async def delete_many(self, filter: Mapping[str, Any], *args, **kwargs) -> DeleteResult:
+        """Applies the read scope to the filter."""
+        # Validate query filter for security
+        self._query_validator.validate_filter(filter)
+
+        # Enforce query timeout
+        kwargs = self._resource_limiter.enforce_query_timeout(kwargs)
+        # Remove maxTimeMS - delete_many doesn't accept it
+        kwargs_for_delete = {k: v for k, v in kwargs.items() if k != "maxTimeMS"}
+
+        collection_name = self._collection.name
+        start_time = time.time()
+        try:
+            scoped_filter = self._inject_read_filter(filter)
+            result = await self._collection.delete_many(scoped_filter, *args, **kwargs_for_delete)
+            duration_ms = (time.time() - start_time) * 1000
+            record_operation(
+                "database.delete_many",
+                duration_ms,
+                success=True,
+                collection=collection_name,
+                app_slug=self._write_scope,
+            )
+            return result
+        except (OperationFailure, AutoReconnect, InvalidOperation, TypeError, ValueError):
+            duration_ms = (time.time() - start_time) * 1000
+            record_operation(
+                "database.delete_many",
+                duration_ms,
+                success=False,
+                collection=collection_name,
+                app_slug=self._write_scope,
+            )
+            raise
+
+    async def count_documents(self, filter: Mapping[str, Any] | None = None, *args, **kwargs) -> int:
+        """
+        Applies the read scope to the filter for counting.
+        Automatically ensures appropriate indexes exist for the query.
+        """
+        # Validate query filter for security
+        self._query_validator.validate_filter(filter)
+
+        # Note: count_documents doesn't reliably support maxTimeMS in all Motor versions
+        # Remove it to avoid cursor creation errors when auto-indexing triggers list_indexes()
+        kwargs_for_count = {k: v for k, v in kwargs.items() if k != "maxTimeMS"}
+        # Don't enforce timeout for count_documents to avoid issues with cursor operations
+
+        # Magical auto-indexing: ensure indexes exist before querying
+        if self.auto_index_manager:
+            await self.auto_index_manager.ensure_index_for_query(filter=filter)
+
+        collection_name = self._collection.name
+        start_time = time.time()
+        try:
+            scoped_filter = self._inject_read_filter(filter)
+            result = await self._collection.count_documents(scoped_filter, *args, **kwargs_for_count)
+            duration_ms = (time.time() - start_time) * 1000
+            record_operation(
+                "database.count_documents",
+                duration_ms,
+                success=True,
+                collection=collection_name,
+                app_slug=self._write_scope,
+            )
+            return result
+        except (OperationFailure, AutoReconnect, InvalidOperation, TypeError, ValueError):
+            duration_ms = (time.time() - start_time) * 1000
+            record_operation(
+                "database.count_documents",
+                duration_ms,
+                success=False,
+                collection=collection_name,
+                app_slug=self._write_scope,
+            )
+            raise
+
+    def aggregate(self, pipeline: list[dict[str, Any]], *args, **kwargs) -> AsyncIOMotorCursor:
+        """
+        Injects a scope filter into the pipeline. For normal pipelines, we prepend
+        a $match stage. However, if the first stage is $vectorSearch, we embed
+        the read_scope filter into its 'filter' property, because $vectorSearch must
+        remain the very first stage in Atlas.
+        """
+        collection_name = getattr(self._collection, "name", "unknown")
+
+        with create_span(
+            "mongodb.aggregate",
+            {
+                "db.system": "mongodb",
+                "db.collection": collection_name,
+                "db.operation": "aggregate",
+                "db.pipeline_length": len(pipeline) if pipeline else 0,
+                "app.slug": self._write_scope,
+            },
+        ):
+            # Validate aggregation pipeline for security
+            self._query_validator.validate_pipeline(pipeline)
+
+            # Enforce query timeout - Motor's aggregate() accepts maxTimeMS
+            kwargs = self._resource_limiter.enforce_query_timeout(kwargs)
+
+            if not pipeline:
+                # No stages given, just prepend our $match
+                scope_match_stage = {"$match": {"app_id": {"$in": self._read_scopes}}}
+                pipeline = [scope_match_stage]
+                return self._collection.aggregate(pipeline, *args, **kwargs)
+
+            # Identify the first stage
+            first_stage = pipeline[0]
+            first_stage_op = next(iter(first_stage.keys()), None)  # e.g. "$match", "$vectorSearch", etc.
+
+            if first_stage_op == "$vectorSearch":
+                # We must not prepend $match or it breaks the pipeline.
+                # Instead, embed our scope in the 'filter' of $vectorSearch.
+                vs_stage = first_stage["$vectorSearch"]
+                existing_filter = vs_stage.get("filter", {})
+                scope_filter = {"app_id": {"$in": self._read_scopes}}
+
+                if existing_filter:
+                    # Combine the user's existing filter with our scope filter via $and
+                    new_filter = {"$and": [existing_filter, scope_filter]}
+                else:
+                    new_filter = scope_filter
+
+                vs_stage["filter"] = new_filter
+                # Return the pipeline as-is, so that $vectorSearch remains the first stage
+                return self._collection.aggregate(pipeline, *args, **kwargs)
+            else:
+                # Normal case: pipeline doesn't start with $vectorSearch,
+                # so we can safely prepend a $match stage for scoping.
+                scope_match_stage = {"$match": {"app_id": {"$in": self._read_scopes}}}
+                scoped_pipeline = [scope_match_stage] + pipeline
+                return self._collection.aggregate(scoped_pipeline, *args, **kwargs)
+
+
+class ScopedMongoWrapper:
+    """
+    Wraps an `AsyncIOMotorDatabase` to provide scoped collection access.
+
+    When a collection attribute is accessed (e.g., `db.my_collection`),
+    this class returns a `ScopedCollectionWrapper` instance for that
+    collection, configured with the appropriate read/write scopes.
+
+    It caches these `ScopedCollectionWrapper` instances to avoid
+    re-creating them on every access within the same request context.
+
+    Features:
+    - Automatic index management: indexes are created automatically based
+      on query patterns, making it easy to use collections without manual
+      index configuration. This "magical" feature is enabled by default.
+    """
+
+    # Class-level cache for collections that have app_id index checked
+    # Key: collection name, Value: boolean (True if index exists, False if check is pending)
+    _app_id_index_cache: ClassVar[dict[str, bool]] = {}
+    # Lock to prevent race conditions when multiple requests try to create the same index
+    _app_id_index_lock: ClassVar[asyncio.Lock] = asyncio.Lock()
+
+    __slots__ = (
+        "_db",
+        "_read_scopes",
+        "_write_scope",
+        "_wrapper_cache",
+        "_auto_index",
+        "_query_validator",
+        "_resource_limiter",
+        "_app_slug",
+        "_app_token",
+        "_app_secrets_manager",
+        "_token_verified",
+        "_token_verification_lock",
+    )
+
+    def __init__(
+        self,
+        real_db: AsyncIOMotorDatabase,
+        read_scopes: list[str],
+        write_scope: str,
+        auto_index: bool = True,
+        query_validator: QueryValidator | None = None,
+        resource_limiter: ResourceLimiter | None = None,
+        app_slug: str | None = None,
+        app_token: str | None = None,
+        app_secrets_manager: Optional["AppSecretsManager"] = None,
+    ):
+        self._db = real_db
+        self._read_scopes = read_scopes
+        self._write_scope = write_scope
+        self._auto_index = auto_index
+
+        # Query security and resource limits (shared across all collections)
+        self._query_validator = query_validator or QueryValidator()
+        self._resource_limiter = resource_limiter or ResourceLimiter()
+
+        # Token verification for app authentication
+        self._app_slug = app_slug
+        self._app_token = app_token
+        self._app_secrets_manager = app_secrets_manager
+        self._token_verified = False
+        self._token_verification_lock = asyncio.Lock()
+
+        # Cache for created collection wrappers.
+        self._wrapper_cache: dict[str, ScopedCollectionWrapper] = {}
+
+    async def _verify_token_if_needed(self) -> None:
+        """
+        Verify app token lazily on first database operation.
+
+        This method ensures token verification happens even when get_scoped_db()
+        is called from an async context where sync verification was skipped.
+
+        Raises:
+            ValueError: If token verification fails
+        """
+        # If already verified, skip
+        if self._token_verified:
+            return
+
+        # If no token or secrets manager, skip verification
+        if not self._app_token or not self._app_secrets_manager or not self._app_slug:
+            self._token_verified = True
+            return
+
+        # Use lock to prevent race conditions
+        async with self._token_verification_lock:
+            # Double-check after acquiring lock
+            if self._token_verified:
+                return
+
+            # Verify token
+            is_valid = await self._app_secrets_manager.verify_app_secret(self._app_slug, self._app_token)
+
+            if not is_valid:
+                logger.warning(f"Security: Invalid app token for '{self._app_slug}'")
+                raise ValueError("Invalid app token")
+
+            # Mark as verified
+            self._token_verified = True
+            logger.debug(f"Token verified for app '{self._app_slug}'")
+
+    @property
+    def client(self):
+        """
+        Provides access to the underlying MongoDB client.
+
+        This property allows compatibility with code that expects AsyncIOMotorDatabase.client.
+        Returns the client from the underlying database.
+
+        Returns:
+            AsyncIOMotorClient: The MongoDB client
+        """
+        return self._db.client
+
+    @property
+    def name(self) -> str:
+        """
+        Provides access to the database name.
+
+        This property allows compatibility with code that expects AsyncIOMotorDatabase.name.
+        Returns the name from the underlying database.
+
+        Returns:
+            str: The database name
+        """
+        return self._db.name
+
+    def _validate_cross_app_access(self, prefixed_name: str) -> None:
+        """
+        Validate that cross-app collection access is authorized.
+
+        Args:
+            prefixed_name: Prefixed collection name (e.g., "other_app_collection")
+
+        Raises:
+            ValueError: If cross-app access is not authorized
+        """
+        # Extract app slug from prefixed name
+        target_app = _extract_app_slug_from_prefixed_name(prefixed_name)
+        if target_app is None:
+            return  # Same-app access or not a valid prefixed name
+
+        # Check if target app is in read_scopes
+        if target_app not in self._read_scopes:
+            logger.warning(
+                f"Security: Unauthorized cross-app access attempt. "
+                f"Collection: '{prefixed_name}', Target app: '{target_app}', "
+                f"Read scopes: {self._read_scopes}, Write scope: {self._write_scope}"
+            )
+            raise ValueError(
+                f"Access to collection '{prefixed_name}' not authorized. "
+                f"App '{target_app}' is not in read_scopes {self._read_scopes}. "
+                "Cross-app access must be explicitly granted via read_scopes."
+            )
+
+        # Log authorized cross-app access for audit trail
+        logger.info(
+            f"Cross-app access authorized. "
+            f"Collection: '{prefixed_name}', From app: '{self._write_scope}', "
+            f"To app: '{target_app}'"
+        )
+
+    def __getattribute__(self, name: str) -> Any:
+        """
+        Override to validate collection names before attribute access.
+        This ensures validation happens even if MagicMock creates attributes dynamically.
+        """
+        # Handle our own attributes first (use super() to avoid recursion)
+        if name.startswith("_") or name in ("get_collection",):
+            return super().__getattribute__(name)
+
+        # Validate collection name for security BEFORE checking if attribute exists
+        # This ensures ValueError is raised even if MagicMock would create the attribute
+        validation_error = None
+        if not name.startswith("_"):
+            try:
+                _validate_collection_name(name, allow_prefixed=False)
+            except ValueError as e:
+                # Log the warning without accessing object attributes to avoid recursion
+                # The validation error itself is what matters, not the logging details
+                try:
+                    logger.warning(f"Security: Invalid collection name attempted. " f"Name: '{name}', Error: {e}")
+                except (AttributeError, RuntimeError):
+                    # If logging fails due to logger issues, continue -
+                    # validation error is what matters
+                    # Type 2: Recoverable - we can continue without logging
+                    pass
+                # Store the error to raise after checking attribute existence
+                # This ensures we raise ValueError even if MagicMock creates the attribute
+                validation_error = ValueError(str(e))
+
+        # Continue with normal attribute access
+        try:
+            attr = super().__getattribute__(name)
+            # If validation failed, raise ValueError now (even if attribute exists)
+            if validation_error is not None:
+                raise validation_error
+            return attr
+        except AttributeError:
+            # Attribute doesn't exist
+            # If validation failed, raise ValueError (from None: unrelated to AttributeError)
+            if validation_error is not None:
+                raise validation_error from None
+            # Delegate to __getattr__ for collection creation
+            return self.__getattr__(name)
+
+    def __getattr__(self, name: str) -> ScopedCollectionWrapper:
+        """
+        Proxies attribute access to the underlying database.
+
+        If `name` is a collection, returns a `ScopedCollectionWrapper`.
+        """
+
+        # Explicitly block access to 'database' property (removed for security)
+        if name == "database":
+            logger.warning(f"Security: Attempted access to 'database' property. " f"App: {self._write_scope}")
+            raise AttributeError(
+                "'database' property has been removed for security. "
+                "Use collection.index_manager for index operations. "
+                "All data access must go through scoped collections."
+            )
+
+        # Prevent proxying private/special attributes
+        if name.startswith("_"):
+            raise AttributeError(
+                f"'{type(self).__name__}' object has no attribute '{name}'. " "Access to private attributes is blocked."
+            )
+
+        # Note: Validation already happened in __getattribute__, but we validate again
+        # for safety in case __getattr__ is called directly
+        try:
+            _validate_collection_name(name, allow_prefixed=False)
+        except ValueError as e:
+            logger.warning(
+                f"Security: Invalid collection name attempted. " f"Name: '{name}', App: {self._write_scope}, Error: {e}"
+            )
+            raise
+
+        # Construct the prefixed collection name, e.g., "data_imaging_workouts"
+        # `self._write_scope` holds the slug (e.g., "data_imaging")
+        # `name` holds the base name (e.g., "workouts")
+        prefixed_name = f"{self._write_scope}_{name}"
+
+        # Validate prefixed name as well (for reserved names check)
+        try:
+            _validate_collection_name(prefixed_name, allow_prefixed=True)
+        except ValueError as e:
+            logger.warning(
+                f"Security: Invalid prefixed collection name. "
+                f"Base name: '{name}', Prefixed: '{prefixed_name}', "
+                f"App: {self._write_scope}, Error: {e}"
+            )
+            raise
+
+        # Check cache first using the *prefixed_name*
+        if prefixed_name in self._wrapper_cache:
+            return self._wrapper_cache[prefixed_name]
+
+        # Get the real collection from the motor db object using the *prefixed_name*
+        real_collection = getattr(self._db, prefixed_name)
+        # --- END FIX ---
+
+        # Ensure we are actually wrapping a collection object
+        if not isinstance(real_collection, AsyncIOMotorCollection):
+            raise AttributeError(
+                f"'{name}' (prefixed as '{prefixed_name}') is not an AsyncIOMotorCollection. "
+                f"ScopedMongoWrapper can only proxy collections (found {type(real_collection)})."
+            )
+
+        # Create the new wrapper with auto-indexing enabled by default
+        wrapper = ScopedCollectionWrapper(
+            real_collection=real_collection,
+            read_scopes=self._read_scopes,
+            write_scope=self._write_scope,
+            auto_index=self._auto_index,
+            query_validator=self._query_validator,
+            resource_limiter=self._resource_limiter,
+        )
+
+        # Magically ensure app_id index exists (it's always used in queries)
+        # This is fire-and-forget, runs in background
+        # Use class-level cache and lock to avoid race conditions
+        if self._auto_index:
+            collection_name = real_collection.name
+
+            # Thread-safe check: use lock to prevent race conditions
+            async def _safe_app_id_index_check():
+                # Check cache inside lock to prevent duplicate tasks
+                async with ScopedMongoWrapper._app_id_index_lock:
+                    # Double-check pattern: another coroutine may have already added it
+                    if collection_name in ScopedMongoWrapper._app_id_index_cache:
+                        return  # Already checking or checked
+
+                    # Mark as checking to prevent duplicate tasks
+                    ScopedMongoWrapper._app_id_index_cache[collection_name] = False
+
+                # Perform index check outside lock (async operation)
+                try:
+                    # Check if connection is still alive before attempting index creation
+                    try:
+                        # Quick ping to verify connection is still valid
+                        await real_collection.database.client.admin.command("ping")
+                    except (
+                        ConnectionFailure,
+                        OperationFailure,
+                        ServerSelectionTimeoutError,
+                    ):
+                        # Connection is closed, skip index creation
+                        # Type 2: Recoverable - skip index creation if connection fails
+                        logger.debug(
+                            f"Skipping app_id index creation for '{collection_name}': "
+                            f"connection is closed (likely during shutdown)"
+                        )
+                        async with ScopedMongoWrapper._app_id_index_lock:
+                            ScopedMongoWrapper._app_id_index_cache.pop(collection_name, None)
+                        return
+
+                    has_index = await self._ensure_app_id_index(real_collection)
+                    # Update cache with result (inside lock for thread-safety)
+                    async with ScopedMongoWrapper._app_id_index_lock:
+                        ScopedMongoWrapper._app_id_index_cache[collection_name] = has_index
+                except (
+                    ConnectionFailure,
+                    ServerSelectionTimeoutError,
+                    InvalidOperation,
+                ) as e:
+                    # Handle connection errors gracefully (e.g., during shutdown)
+                    logger.debug(
+                        f"Skipping app_id index creation for '{collection_name}': "
+                        f"connection error (likely during shutdown): {e}"
+                    )
+                    # Remove from cache on error so we can retry later
+                    async with ScopedMongoWrapper._app_id_index_lock:
+                        ScopedMongoWrapper._app_id_index_cache.pop(collection_name, None)
+                except OperationFailure as e:
+                    # Index creation failed for other reasons (non-critical)
+                    logger.debug(f"App_id index creation failed (non-critical): {e}")
+                    # Remove from cache on error so we can retry later
+                    async with ScopedMongoWrapper._app_id_index_lock:
+                        ScopedMongoWrapper._app_id_index_cache.pop(collection_name, None)
+                # Let other exceptions bubble up - they are non-recoverable (Type 4)
+
+            # Check cache first (quick check before lock)
+            if collection_name not in ScopedMongoWrapper._app_id_index_cache:
+                # Fire and forget - task will check lock internally
+                # (managed to prevent accumulation)
+                _create_managed_task(_safe_app_id_index_check(), task_name="app_id_index_check")
+
+        # Store it in the cache for this instance using the *prefixed_name*
+        self._wrapper_cache[prefixed_name] = wrapper
+        return wrapper
+
+    def _find_matched_app_for_collection(self, name: str) -> str | None:
+        """
+        Check if collection name matches any app slug in read_scopes (cross-app access).
+
+        Args:
+            name: Collection name to check
+
+        Returns:
+            Matched app slug if found, None otherwise
+        """
+        if "_" not in name:
+            return None
+
+        # Check if any app slug in read_scopes matches the beginning of the name
+        for app_slug in self._read_scopes:
+            if name.startswith(f"{app_slug}_") and app_slug != self._write_scope:
+                return app_slug
+        return None
+
+    def _resolve_prefixed_collection_name(self, name: str, matched_app: str | None) -> str:
+        """
+        Resolve the prefixed collection name based on matched app or write scope.
+
+        Args:
+            name: Collection name (base or prefixed)
+            matched_app: Matched app slug if cross-app access, None otherwise
+
+        Returns:
+            Prefixed collection name
+
+        Raises:
+            ValueError: If prefixed name is invalid
+        """
+        if matched_app:
+            # This is authorized cross-app access
+            prefixed_name = name
+            # Log authorized cross-app access for audit trail
+            logger.info(
+                f"Cross-app access authorized. "
+                f"Collection: '{prefixed_name}', From app: '{self._write_scope}', "
+                f"To app: '{matched_app}'"
+            )
+        else:
+            # Regular collection name - prefix with write_scope
+            prefixed_name = f"{self._write_scope}_{name}"
+            # Validate prefixed name
+            try:
+                _validate_collection_name(prefixed_name, allow_prefixed=True)
+            except ValueError as e:
+                logger.warning(
+                    f"Security: Invalid prefixed collection name in get_collection(). "
+                    f"Base name: '{name}', Prefixed: '{prefixed_name}', "
+                    f"App: {self._write_scope}, Error: {e}"
+                )
+                raise
+        return prefixed_name
+
+    def get_collection(self, name: str) -> ScopedCollectionWrapper:
+        """
+        Get a collection by name (Motor-like API).
+
+        This method allows accessing collections by their fully prefixed name,
+        which is useful for cross-app access. For same-app access,
+        you can use attribute access (e.g., `db.my_collection`) which automatically
+        prefixes the name.
+
+        Args:
+            name: Collection name - can be base name (will be prefixed) or
+                 fully prefixed name (e.g., "click_tracker_clicks")
+
+        Returns:
+            ScopedCollectionWrapper instance
+
+        Raises:
+            ValueError: If collection name is invalid or cross-app access is not authorized
+
+        Example:
+            # Same-app collection (base name)
+            collection = db.get_collection("my_collection")
+
+            # Cross-app collection (fully prefixed)
+            collection = db.get_collection("click_tracker_clicks")
+        """
+        # Validate collection name for security
+        try:
+            _validate_collection_name(name, allow_prefixed=True)
+        except ValueError as e:
+            logger.warning(
+                f"Security: Invalid collection name in get_collection(). "
+                f"Name: '{name}', App: {self._write_scope}, Error: {e}"
+            )
+            raise
+
+        # Check if name is already fully prefixed (cross-app access)
+        matched_app = self._find_matched_app_for_collection(name)
+
+        # Resolve prefixed name based on matched app or write scope
+        prefixed_name = self._resolve_prefixed_collection_name(name, matched_app)
+
+        # Check cache first
+        if prefixed_name in self._wrapper_cache:
+            return self._wrapper_cache[prefixed_name]
+
+        # Get the real collection from the motor db object
+        real_collection = getattr(self._db, prefixed_name)
+
+        # Ensure we are actually wrapping a collection object
+        if not isinstance(real_collection, AsyncIOMotorCollection):
+            raise AttributeError(
+                f"'{name}' (as '{prefixed_name}') is not an AsyncIOMotorCollection. "
+                f"ScopedMongoWrapper can only proxy collections (found {type(real_collection)})."
+            )
+
+        # Create the new wrapper with auto-indexing enabled by default
+        wrapper = ScopedCollectionWrapper(
+            real_collection=real_collection,
+            read_scopes=self._read_scopes,
+            write_scope=self._write_scope,
+            auto_index=self._auto_index,
+            query_validator=self._query_validator,
+            resource_limiter=self._resource_limiter,
+            parent_wrapper=self,
+        )
+
+        # Magically ensure app_id index exists (background task)
+        # Uses same race-condition-safe approach as __getattr__
+        if self._auto_index:
+            collection_name = real_collection.name
+
+            async def _safe_app_id_index_check():
+                # Check cache inside lock to prevent duplicate tasks
+                async with ScopedMongoWrapper._app_id_index_lock:
+                    if collection_name in ScopedMongoWrapper._app_id_index_cache:
+                        return  # Already checking or checked
+                    ScopedMongoWrapper._app_id_index_cache[collection_name] = False
+
+                try:
+                    # Check if connection is still alive before attempting index creation
+                    try:
+                        # Quick ping to verify connection is still valid
+                        await real_collection.database.client.admin.command("ping")
+                    except (
+                        ConnectionFailure,
+                        OperationFailure,
+                        ServerSelectionTimeoutError,
+                    ):
+                        # Connection is closed, skip index creation
+                        # Type 2: Recoverable - skip index creation if connection fails
+                        logger.debug(
+                            f"Skipping app_id index creation for '{collection_name}': "
+                            f"connection is closed (likely during shutdown)"
+                        )
+                        async with ScopedMongoWrapper._app_id_index_lock:
+                            ScopedMongoWrapper._app_id_index_cache.pop(collection_name, None)
+                        return
+
+                    has_index = await self._ensure_app_id_index(real_collection)
+                    async with ScopedMongoWrapper._app_id_index_lock:
+                        ScopedMongoWrapper._app_id_index_cache[collection_name] = has_index
+                except (
+                    ConnectionFailure,
+                    ServerSelectionTimeoutError,
+                    InvalidOperation,
+                ) as e:
+                    # Handle connection errors gracefully (e.g., during shutdown)
+                    logger.debug(
+                        f"Skipping app_id index creation for '{collection_name}': "
+                        f"connection error (likely during shutdown): {e}"
+                    )
+                    async with ScopedMongoWrapper._app_id_index_lock:
+                        ScopedMongoWrapper._app_id_index_cache.pop(collection_name, None)
+                except OperationFailure as e:
+                    # Index creation failed for other reasons (non-critical)
+                    logger.debug(f"App_id index creation failed (non-critical): {e}")
+                    async with ScopedMongoWrapper._app_id_index_lock:
+                        ScopedMongoWrapper._app_id_index_cache.pop(collection_name, None)
+                # Let other exceptions bubble up - they are non-recoverable (Type 4)
+
+            if collection_name not in ScopedMongoWrapper._app_id_index_cache:
+                # Use managed task creation to prevent accumulation
+                _create_managed_task(_safe_app_id_index_check(), task_name="app_id_index_check")
+
+        # Store it in the cache
+        self._wrapper_cache[prefixed_name] = wrapper
+        return wrapper
+
+    def __getitem__(self, name: str) -> ScopedCollectionWrapper:
+        """
+        Support bracket notation for collection access (e.g., db["collection_name"]).
+
+        This allows compatibility with code that uses bracket notation instead of
+        attribute access (e.g., TokenBlacklist, SessionManager).
+
+        Args:
+            name: Collection name (base name, will be prefixed with write_scope)
+
+        Returns:
+            ScopedCollectionWrapper instance
+
+        Raises:
+            ValueError: If collection name is invalid
+
+        Example:
+            collection = db["my_collection"]  # Same as db.my_collection
+        """
+        # Validate collection name for security (get_collection will do additional validation)
+        try:
+            _validate_collection_name(name, allow_prefixed=False)
+        except ValueError as e:
+            logger.warning(
+                f"Security: Invalid collection name in __getitem__(). "
+                f"Name: '{name}', App: {self._write_scope}, Error: {e}"
+            )
+            raise
+
+        return self.get_collection(name)
+
+    async def _ensure_app_id_index(self, collection: AsyncIOMotorCollection) -> bool:
+        """
+        Ensures app_id index exists on collection.
+        This index is always needed since all queries filter by app_id.
+
+        Returns:
+            True if index exists (or was created), False otherwise
+        """
+        try:
+            index_manager = AsyncAtlasIndexManager(collection)
+            existing_indexes = await index_manager.list_indexes()
+
+            # Check if app_id index already exists
+            app_id_index_exists = False
+            for idx in existing_indexes:
+                keys = idx.get("key", {})
+                # Check if app_id is indexed (could be single field or part of compound)
+                if "app_id" in keys:
+                    app_id_index_exists = True
+                    break
+
+            if not app_id_index_exists:
+                # Create app_id index
+                try:
+                    await index_manager.create_index([("app_id", ASCENDING)], name="auto_app_id_asc", background=True)
+                    logger.info(f"Auto-created app_id index on {collection.name}")
+                    return True
+                except OperationFailure as e:
+                    # Handle index build aborted (e.g., database being dropped during teardown)
+                    if e.code == 276 or "IndexBuildAborted" in str(e) or "dropDatabase" in str(e):
+                        logger.debug(
+                            f"Skipping app_id index creation on {collection.name}: "
+                            f"index build aborted (likely during database drop/teardown): {e}"
+                        )
+                        return False
+                    raise
+            return True
+        except OperationFailure as e:
+            # Handle index build aborted (e.g., database being dropped during teardown)
+            if e.code == 276 or "IndexBuildAborted" in str(e) or "dropDatabase" in str(e):
+                logger.debug(
+                    f"Skipping app_id index creation on {collection.name}: "
+                    f"index build aborted (likely during database drop/teardown): {e}"
+                )
+                return False
+            logger.debug(f"OperationFailure ensuring app_id index on {collection.name}: {e}")
+            return False
+        except (ConnectionFailure, ServerSelectionTimeoutError, InvalidOperation) as e:
+            # Handle connection errors gracefully (e.g., during shutdown)
+            logger.debug(
+                f"Skipping app_id index creation on {collection.name}: "
+                f"connection error (likely during shutdown): {e}"
+            )
+            return False
+        except OperationFailure as e:
+            # Index creation failed for other reasons (non-critical)
+            logger.debug(f"Could not ensure app_id index on {collection.name}: {e}")
+            return False

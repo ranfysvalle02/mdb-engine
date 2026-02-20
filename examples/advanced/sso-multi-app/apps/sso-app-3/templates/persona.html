@@ -1,0 +1,432 @@
+{% extends "base.html" %}
+
+{% block title %}Persona | orby{% endblock %}
+
+{% block extra_css %}
+<style>
+    .persona-container {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 40px 20px;
+    }
+
+    .persona-card {
+        background: radial-gradient(circle at center, rgba(26, 27, 47, 0.88) 0%, rgba(26, 27, 47, 0.75) 100%);
+        backdrop-filter: blur(18px) saturate(180%);
+        -webkit-backdrop-filter: blur(18px) saturate(180%);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        border-radius: 24px;
+        padding: 40px;
+        margin-bottom: 30px;
+        box-shadow: 0 15px 40px rgba(0,0,0,0.5), 0 0 40px var(--glow-color) inset;
+    }
+
+    .persona-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 30px;
+    }
+
+    .persona-title {
+        font-size: 32px;
+        font-weight: 700;
+        background: linear-gradient(135deg, #fff 0%, rgba(138, 43, 226, 0.8) 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+    }
+
+    .edit-btn {
+        padding: 12px 24px;
+        background: rgba(138, 43, 226, 0.3);
+        border: 1px solid rgba(138, 43, 226, 0.5);
+        border-radius: 12px;
+        color: #fff;
+        cursor: pointer;
+        transition: all 0.3s;
+        font-size: 14px;
+    }
+
+    .edit-btn:hover {
+        background: rgba(138, 43, 226, 0.5);
+        transform: translateY(-2px);
+    }
+
+    .persona-role {
+        font-size: 24px;
+        color: rgba(255, 255, 255, 0.9);
+        margin-bottom: 20px;
+        font-weight: 600;
+    }
+
+    .persona-description {
+        font-size: 16px;
+        color: rgba(255, 255, 255, 0.7);
+        line-height: 1.6;
+        margin-bottom: 30px;
+    }
+
+    .traits-section {
+        margin-top: 30px;
+    }
+
+    .traits-title {
+        font-size: 20px;
+        color: rgba(255, 255, 255, 0.9);
+        margin-bottom: 20px;
+        font-weight: 600;
+    }
+
+    .trait-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 15px;
+        margin-bottom: 10px;
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .trait-name {
+        font-size: 14px;
+        color: rgba(255, 255, 255, 0.8);
+        text-transform: capitalize;
+    }
+
+    .trait-value {
+        font-size: 14px;
+        color: rgba(255, 255, 255, 0.9);
+        font-weight: 600;
+    }
+
+    .trait-bar {
+        flex: 1;
+        height: 8px;
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 4px;
+        margin: 0 15px;
+        overflow: hidden;
+    }
+
+    .trait-fill {
+        height: 100%;
+        background: linear-gradient(90deg, rgba(138, 43, 226, 0.8) 0%, rgba(138, 43, 226, 0.4) 100%);
+        transition: width 0.5s ease;
+    }
+
+    .radar-chart-container {
+        margin-top: 30px;
+        height: 400px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+    }
+
+    .edit-form {
+        display: none;
+        margin-top: 30px;
+        padding: 30px;
+        background: rgba(0, 0, 0, 0.3);
+        border-radius: 16px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .edit-form.active {
+        display: block;
+    }
+
+    .form-group {
+        margin-bottom: 20px;
+    }
+
+    .form-label {
+        display: block;
+        margin-bottom: 8px;
+        color: rgba(255, 255, 255, 0.8);
+        font-size: 14px;
+    }
+
+    .form-input,
+    .form-textarea {
+        width: 100%;
+        padding: 12px;
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 8px;
+        color: #fff;
+        font-size: 14px;
+    }
+
+    .form-textarea {
+        min-height: 100px;
+        resize: vertical;
+    }
+
+    .form-actions {
+        display: flex;
+        gap: 10px;
+        margin-top: 20px;
+    }
+
+    .btn-primary {
+        padding: 12px 24px;
+        background: rgba(138, 43, 226, 0.5);
+        border: 1px solid rgba(138, 43, 226, 0.7);
+        border-radius: 8px;
+        color: #fff;
+        cursor: pointer;
+        transition: all 0.3s;
+    }
+
+    .btn-primary:hover {
+        background: rgba(138, 43, 226, 0.7);
+    }
+
+    .btn-secondary {
+        padding: 12px 24px;
+        background: rgba(255, 255, 255, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 8px;
+        color: #fff;
+        cursor: pointer;
+        transition: all 0.3s;
+    }
+
+    .btn-secondary:hover {
+        background: rgba(255, 255, 255, 0.2);
+    }
+
+    .loading {
+        text-align: center;
+        padding: 40px;
+        color: rgba(255, 255, 255, 0.6);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="persona-container">
+    <div class="persona-card">
+        <div class="persona-header">
+            <h1 class="persona-title">Persona</h1>
+            <button class="edit-btn" onclick="toggleEditForm()">Edit Persona</button>
+        </div>
+
+        <div id="persona-content">
+            <div class="loading">Loading persona...</div>
+        </div>
+
+        <div id="edit-form" class="edit-form">
+            <h3 style="color: rgba(255, 255, 255, 0.9); margin-bottom: 20px;">Edit Persona</h3>
+            <form id="persona-form">
+                <div class="form-group">
+                    <label class="form-label">Role</label>
+                    <input type="text" id="persona-role" class="form-input" placeholder="e.g., Technical Mentor">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Description</label>
+                    <textarea id="persona-description" class="form-textarea" placeholder="Describe the persona..."></textarea>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Traits (JSON format)</label>
+                    <textarea id="persona-traits" class="form-textarea" placeholder='{"technical_focus": 0.9, "humor": 0.2, "formality": 0.8}'></textarea>
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn-primary">Save Changes</button>
+                    <button type="button" class="btn-secondary" onclick="toggleEditForm()">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+let radarChart = null;
+
+async function loadPersona() {
+    try {
+        const response = await fetch(BASE + '/api/persona');
+        const data = await response.json();
+        
+        if (data.success && data.persona) {
+            renderPersona(data.persona);
+        } else {
+            document.getElementById('persona-content').innerHTML = 
+                '<div class="loading">Persona not configured. Use the Edit button to create one.</div>';
+        }
+    } catch (error) {
+        console.error('Failed to load persona:', error);
+        document.getElementById('persona-content').innerHTML = 
+            '<div class="loading">Failed to load persona. Please try again.</div>';
+    }
+}
+
+function renderPersona(persona) {
+    const content = document.getElementById('persona-content');
+    
+    let html = `
+        <div class="persona-role">${escapeHtml(persona.role || 'Not set')}</div>
+        <div class="persona-description">${escapeHtml(persona.description || 'No description')}</div>
+    `;
+    
+    if (persona.traits) {
+        html += '<div class="traits-section">';
+        html += '<div class="traits-title">Traits</div>';
+        
+        const traits = persona.traits;
+        for (const [key, value] of Object.entries(traits)) {
+            const percentage = Math.round(value * 100);
+            html += `
+                <div class="trait-item">
+                    <span class="trait-name">${escapeHtml(key.replace(/_/g, ' '))}</span>
+                    <div class="trait-bar">
+                        <div class="trait-fill" style="width: ${percentage}%"></div>
+                    </div>
+                    <span class="trait-value">${percentage}%</span>
+                </div>
+            `;
+        }
+        
+        html += '</div>';
+        
+        // Render radar chart
+        html += '<div class="radar-chart-container"><canvas id="radar-chart"></canvas></div>';
+    }
+    
+    content.innerHTML = html;
+    
+    // Render radar chart if traits exist
+    if (persona.traits && Object.keys(persona.traits).length > 0) {
+        renderRadarChart(persona.traits);
+    }
+}
+
+function renderRadarChart(traits) {
+    const ctx = document.getElementById('radar-chart');
+    if (!ctx) return;
+    
+    const labels = Object.keys(traits).map(k => k.replace(/_/g, ' '));
+    const values = Object.values(traits);
+    
+    if (radarChart) {
+        radarChart.destroy();
+    }
+    
+    radarChart = new Chart(ctx, {
+        type: 'radar',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Persona Traits',
+                data: values,
+                backgroundColor: 'rgba(138, 43, 226, 0.2)',
+                borderColor: 'rgba(138, 43, 226, 0.8)',
+                pointBackgroundColor: 'rgba(138, 43, 226, 1)',
+                pointBorderColor: '#fff',
+                pointHoverBackgroundColor: '#fff',
+                pointHoverBorderColor: 'rgba(138, 43, 226, 1)',
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                r: {
+                    beginAtZero: true,
+                    max: 1,
+                    ticks: {
+                        stepSize: 0.2,
+                        color: 'rgba(255, 255, 255, 0.6)'
+                    },
+                    grid: {
+                        color: 'rgba(255, 255, 255, 0.1)'
+                    },
+                    pointLabels: {
+                        color: 'rgba(255, 255, 255, 0.8)'
+                    }
+                }
+            },
+            plugins: {
+                legend: {
+                    display: false
+                }
+            }
+        }
+    });
+}
+
+function toggleEditForm() {
+    const form = document.getElementById('edit-form');
+    form.classList.toggle('active');
+    
+    if (form.classList.contains('active')) {
+        // Load current persona data into form
+        loadPersonaIntoForm();
+    }
+}
+
+async function loadPersonaIntoForm() {
+    try {
+        const response = await fetch(BASE + '/api/persona');
+        const data = await response.json();
+        
+        if (data.success && data.persona) {
+            document.getElementById('persona-role').value = data.persona.role || '';
+            document.getElementById('persona-description').value = data.persona.description || '';
+            document.getElementById('persona-traits').value = JSON.stringify(data.persona.traits || {}, null, 2);
+        }
+    } catch (error) {
+        console.error('Failed to load persona for editing:', error);
+    }
+}
+
+document.getElementById('persona-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const role = document.getElementById('persona-role').value;
+    const description = document.getElementById('persona-description').value;
+    let traits = {};
+    
+    try {
+        traits = JSON.parse(document.getElementById('persona-traits').value);
+    } catch (error) {
+        alert('Invalid JSON in traits field');
+        return;
+    }
+    
+    try {
+        const response = await fetch(BASE + '/api/persona', {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ role, description, traits }),
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            toggleEditForm();
+            loadPersona();
+        } else {
+            alert('Failed to update persona: ' + (data.error || 'Unknown error'));
+        }
+    } catch (error) {
+        console.error('Failed to update persona:', error);
+        alert('Failed to update persona. Please try again.');
+    }
+});
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// Load persona on page load
+loadPersona();
+</script>
+{% endblock %}

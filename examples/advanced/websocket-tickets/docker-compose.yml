@@ -1,0 +1,42 @@
+services:
+  mongodb:
+    image: mongo:7.0
+    container_name: websocket-tickets-mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    environment:
+      MONGO_INITDB_DATABASE: websocket_tickets_example
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build:
+      context: ../../..
+      dockerfile: examples/advanced/websocket-tickets/Dockerfile
+    container_name: websocket-tickets-app
+    ports:
+      - "8000:8000"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    environment:
+      MDB_MONGO_URI: mongodb://mongodb:27017
+      MDB_DB_NAME: websocket_tickets_example
+      MDB_JWT_SECRET: ${MDB_JWT_SECRET:-change_this_to_a_complex_secret_in_production}
+      LOG_LEVEL: INFO
+    volumes:
+      - ./apps:/app/apps
+    command: uvicorn apps.multi_app_main:app --host 0.0.0.0 --port 8000 --reload
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  mongodb_data:

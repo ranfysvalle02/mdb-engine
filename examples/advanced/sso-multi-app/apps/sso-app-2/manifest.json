@@ -1,0 +1,30 @@
+{
+  "schema_version": "2.0",
+  "slug": "flux",
+  "name": "FLUX",
+  "description": "Represents the constant change of the market (and your P&L)",
+  "status": "active",
+  "auth": {
+    "mode": "shared",
+    "auth_hub_url": "/auth-hub",
+    "roles": ["base_user", "viewer", "editor", "admin"],
+    "require_role": "base_user",
+    "public_routes": ["/health", "/"],
+    "csrf_protection": {
+      "enabled": true,
+      "exempt_routes": ["/health"],
+      "token_ttl": 3600
+    }
+  },
+  "cors": {
+    "enabled": true,
+    "allow_origins": ["http://localhost:8000", "http://localhost:8001", "http://localhost:8002"],
+    "allow_credentials": true,
+    "allow_methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    "allow_headers": ["Content-Type", "Authorization", "X-CSRF-Token"]
+  },
+  "data_access": {
+    "read_scopes": ["flux"],
+    "write_scope": "flux"
+  }
+}

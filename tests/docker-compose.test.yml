@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  mongodb-test:
+    image: mongodb/mongodb-atlas-local:latest
+    container_name: mdb_engine_test_mongodb
+    ports:
+      - "27018:27017"  # Use different port to avoid conflicts with examples
+    environment:
+      MONGODB_INITDB_DATABASE: test_db
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh "mongodb://localhost:27017/?directConnection=true" --quiet
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    volumes:
+      - mongodb_test_data:/data/db
+      - mongodb_test_config:/data/configdb
+
+volumes:
+  mongodb_test_data:
+    driver: local
+  mongodb_test_config:
+    driver: local

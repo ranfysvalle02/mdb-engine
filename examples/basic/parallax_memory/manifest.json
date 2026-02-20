@@ -1,0 +1,185 @@
+{
+  "schema_version": "2.0",
+  "slug": "parallax_memory",
+  "name": "Parallax Memory - Call Transcript Analysis with Master Memory",
+  "description": "Multi-lens analysis of call transcripts through SALES, MARKETING, and PRODUCT perspectives",
+  "status": "active",
+  "developer_id": "developer@example.com",
+  "embedding_config": {
+    "enabled": true,
+    "default_embedding_model": "text-embedding-3-small",
+    "max_tokens_per_chunk": 2000,
+    "tokenizer_model": "gpt-3.5-turbo"
+  },
+  "memory_config": {
+    "enabled": true,
+    "collection_name": "call_memories",
+    "embedding_model": "text-embedding-3-small",
+    "chat_model": "gpt-4o",
+    "temperature": 0.3,
+    "infer": true
+  },
+  "auth": {
+    "policy": {
+      "required": false,
+      "allow_anonymous": true
+    },
+    "users": {
+      "enabled": false
+    }
+  },
+  "managed_indexes": {
+    "parallax_reports": [
+      {
+        "type": "regular",
+        "keys": {"call_id": 1},
+        "name": "call_id_idx",
+        "options": {
+          "background": true,
+          "unique": true
+        }
+      },
+      {
+        "type": "regular",
+        "keys": {"repo_id": 1},
+        "name": "repo_id_idx",
+        "options": {
+          "background": true
+        }
+      },
+      {
+        "type": "regular",
+        "keys": {"timestamp": -1},
+        "name": "timestamp_idx",
+        "options": {
+          "background": true
+        }
+      },
+      {
+        "type": "regular",
+        "keys": {"repo_name": 1},
+        "name": "repo_name_idx",
+        "options": {
+          "background": true
+        }
+      }
+    ],
+    "call_transcripts": [
+      {
+        "type": "regular",
+        "keys": {"call_id": 1},
+        "name": "call_id_idx",
+        "options": {
+          "background": true,
+          "unique": true
+        }
+      },
+      {
+        "type": "regular",
+        "keys": {"timestamp": -1},
+        "name": "timestamp_idx",
+        "options": {
+          "background": true
+        }
+      },
+      {
+        "type": "regular",
+        "keys": {"call_type": 1},
+        "name": "call_type_idx",
+        "options": {
+          "background": true
+        }
+      },
+      {
+        "type": "vectorSearch",
+        "name": "transcript_vector_idx",
+        "definition": {
+          "fields": [{
+            "type": "vector",
+            "path": "embedding",
+            "numDimensions": 1536,
+            "similarity": "cosine"
+          }]
+        }
+      }
+    ],
+    "watchlist_config": [
+      {
+        "type": "regular",
+        "keys": {"config_type": 1},
+        "name": "config_type_idx",
+        "options": {
+          "background": true,
+          "unique": true
+        }
+      }
+    ],
+    "customer_profiles": [
+      {
+        "type": "regular",
+        "keys": {"customer_company": 1},
+        "name": "customer_company_idx",
+        "options": {
+          "background": true,
+          "unique": true
+        }
+      },
+      {
+        "type": "regular",
+        "keys": {"relationship_health_score": -1},
+        "name": "health_score_idx",
+        "options": {
+          "background": true
+        }
+      }
+    ],
+    "sentinel_patterns": [
+      {
+        "type": "regular",
+        "keys": {"customer_company": 1, "timestamp": -1},
+        "name": "customer_timestamp_idx",
+        "options": {
+          "background": true
+        }
+      }
+    ],
+    "contradictions": [
+      {
+        "type": "regular",
+        "keys": {"customer_company": 1, "timestamp": -1},
+        "name": "customer_timestamp_idx",
+        "options": {
+          "background": true
+        }
+      }
+    ],
+    "continuity_summaries": [
+      {
+        "type": "regular",
+        "keys": {"customer_company": 1},
+        "name": "customer_company_idx",
+        "options": {
+          "background": true,
+          "unique": true
+        }
+      }
+    ],
+    "intelligence_synthesis": [
+      {
+        "type": "regular",
+        "keys": {"customer_company": 1, "timestamp": -1},
+        "name": "customer_timestamp_idx",
+        "options": {
+          "background": true
+        }
+      }
+    ]
+  },
+  "cors": {
+    "enabled": true,
+    "allow_origins": ["http://localhost:3000", "http://localhost:8000"],
+    "allow_credentials": false,
+    "allow_methods": ["*"],
+    "allow_headers": ["*"]
+  }
+}

@@ -1,0 +1,66 @@
+{
+  "schema_version": "2.0",
+  "slug": "vector_hacking_api",
+  "name": "Vector Hacking API",
+  "description": "Backend-only API for vector inversion attacks with full Swagger documentation",
+  "status": "active",
+  "developer_id": "developer@example.com",
+  "auth": {
+    "policy": {
+      "required": false,
+      "allow_anonymous": true
+    },
+    "users": {
+      "enabled": false
+    }
+  },
+  "managed_indexes": {
+    "experiments": [
+      {
+        "type": "regular",
+        "keys": {"status": 1, "created_at": -1},
+        "name": "status_created_idx",
+        "options": {
+          "background": true
+        }
+      }
+    ],
+    "embeddings": [
+      {
+        "type": "regular",
+        "keys": {"source_id": 1, "chunk_index": 1},
+        "name": "source_chunk_idx",
+        "options": {
+          "background": true
+        }
+      },
+      {
+        "type": "vectorSearch",
+        "name": "embedding_vector_idx",
+        "definition": {
+          "fields": [
+            {
+              "type": "vector",
+              "path": "embedding",
+              "numDimensions": 1536,
+              "similarity": "cosine"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "embedding_config": {
+    "enabled": true,
+    "max_tokens_per_chunk": 1000,
+    "default_embedding_model": "text-embedding-3-small"
+  },
+  "cors": {
+    "enabled": true,
+    "allow_origins": ["http://localhost:3000", "http://localhost:8000"],
+    "allow_credentials": false,
+    "allow_methods": ["*"],
+    "allow_headers": ["*"]
+  }
+}
+

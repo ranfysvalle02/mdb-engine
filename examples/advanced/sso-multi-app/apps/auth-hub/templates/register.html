@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+
+{% block title %}Register - SSO Auth Hub{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>Register New User</h2>
+    <p style="color: var(--muted); margin-bottom: 1.5rem;">Create an account to access all SSO apps</p>
+    
+    <div id="msg"></div>
+    
+    <form id="registerForm" onsubmit="register(event)">
+        <div class="form-group">
+            <label for="email">Email</label>
+            <input type="email" id="email" name="email" required>
+        </div>
+        
+        <div class="form-group">
+            <label for="password">Password</label>
+            <input type="password" id="password" name="password" required minlength="6">
+        </div>
+        
+        <div class="form-group">
+            <label for="full_name">Full Name (Optional)</label>
+            <input type="text" id="full_name" name="full_name">
+        </div>
+        
+        <button type="submit" class="btn btn-primary">Register</button>
+    </form>
+    
+    <p style="margin-top: 1rem; color: var(--muted);">
+        Already have an account? <a href="{{ base_path }}/login" style="color: var(--accent);">Login here</a>
+    </p>
+</div>
+
+<div class="card">
+    <h3>What happens after registration?</h3>
+    <ul style="list-style: none; padding: 0; color: var(--muted);">
+        <li style="padding: 0.5rem 0;"><i class="fas fa-check" style="color: var(--success);"></i> Account created in shared user pool</li>
+        <li style="padding: 0.5rem 0;"><i class="fas fa-check" style="color: var(--success);"></i> Default "base_user" role assigned to all apps</li>
+        <li style="padding: 0.5rem 0;"><i class="fas fa-check" style="color: var(--success);"></i> Automatic login with SSO token</li>
+        <li style="padding: 0.5rem 0;"><i class="fas fa-check" style="color: var(--success);"></i> Access to all SSO apps</li>
+    </ul>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+async function register(event) {
+    event.preventDefault();
+    show('Registering...', 'info');
+    
+    const form = event.target;
+    const formData = new FormData(form);
+    
+    // Check if there's a redirect_to parameter
+    const urlParams = new URLSearchParams(window.location.search);
+    const redirectTo = urlParams.get('redirect_to');
+    
+    const res = await fetch(BASE + '/register?' + (redirectTo ? 'redirect_to=' + encodeURIComponent(redirectTo) : ''), {
+        method: 'POST',
+        body: formData,
+        headers: { 'X-CSRF-Token': getCookie('csrf_token') }
+    });
+    
+    const data = await res.json();
+    
+    if (data.success) {
+        // If we have a token and redirect_to, exchange with SSO apps
+        if (data.token && data.redirect_to) {
+            window.location.href = data.redirect_to + '?token=' + encodeURIComponent(data.token);
+        } else {
+            show('Registration successful! Redirecting...', 'success');
+            setTimeout(() => {
+                const dest = data.redirect || '/dashboard';
+                window.location.href = dest.startsWith('/') && !dest.startsWith(BASE) ? BASE + dest : dest;
+            }, 1000);
+        }
+    } else {
+        show(data.error || 'Registration failed', 'error');
+    }
+}
+
+function show(text, type) {
+    const msgDiv = document.getElementById('msg');
+    msgDiv.innerHTML = `<div class="alert alert-${type}">${text}</div>`;
+    if (type !== 'info') {
+        setTimeout(() => msgDiv.innerHTML = '', 3000);
+    }
+}
+</script>
+{% endblock %}

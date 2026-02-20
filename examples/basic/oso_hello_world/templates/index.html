@@ -1,0 +1,1101 @@
+<!DOCTYPE html>
+<!--
+OSO Cloud Hello World - Frontend Template
+==========================================
+
+This template demonstrates:
+- User authentication flow (login/logout)
+- Permission-based UI rendering (show/hide features based on permissions)
+- Authorization error handling (403 Forbidden responses)
+- Real-time permission checks via /api/me endpoint
+
+Key Concepts:
+- State management: Centralized state object stores user and documents
+- Permission checks: UI adapts based on user's permissions (read/write)
+- Error handling: Graceful handling of authorization failures
+- CSRF protection: All POST requests include CSRF token from cookie
+
+Structure:
+1. CSS Styles - Component-based styling
+2. HTML Structure - Login view and dashboard view
+3. JavaScript - Authentication, authorization, and UI rendering
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OSO Cloud Authorization Demo - mdb-engine</title>
+    <style>
+        /* ========================================================================
+           BASE STYLES
+           ======================================================================== */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #111827;
+            line-height: 1.5;
+            min-height: 100vh;
+            padding: 1rem;
+        }
+
+        /* ========================================================================
+           LAYOUT
+           ======================================================================== */
+        .container {
+            max-width: 1100px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 1.5rem;
+            color: white;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            font-weight: 800;
+            margin-bottom: 0.5rem;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .subtitle {
+            color: rgba(255, 255, 255, 0.9);
+            font-size: 1.1rem;
+            margin-bottom: 0.5rem;
+        }
+
+        /* ========================================================================
+           VALUE PROPOSITION (Collapsible Info Box)
+           ======================================================================== */
+        .value-proposition {
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(10px);
+            border-radius: 0.5rem;
+            padding: 0.75rem 1rem;
+            margin: 0.75rem auto;
+            max-width: 800px;
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .value-proposition:hover {
+            background: rgba(255, 255, 255, 0.2);
+            border-color: rgba(255, 255, 255, 0.3);
+        }
+
+        .value-proposition-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem;
+        }
+
+        .value-proposition-header h3 {
+            font-size: 0.9375rem;
+            margin: 0;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-weight: 600;
+        }
+
+        .value-proposition-summary {
+            font-size: 0.8125rem;
+            opacity: 0.9;
+            margin-top: 0.25rem;
+        }
+
+        .value-proposition-toggle {
+            flex-shrink: 0;
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.2);
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            font-size: 0.75rem;
+        }
+
+        .value-proposition.expanded .value-proposition-toggle {
+            transform: rotate(180deg);
+        }
+
+        .value-proposition-details {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s;
+            opacity: 0;
+            margin-top: 0;
+        }
+
+        .value-proposition.expanded .value-proposition-details {
+            max-height: 500px;
+            opacity: 1;
+            margin-top: 0.75rem;
+        }
+
+        .value-proposition ul {
+            list-style: none;
+            padding-left: 0;
+            margin: 0;
+        }
+
+        .value-proposition li {
+            padding: 0.375rem 0;
+            padding-left: 1.25rem;
+            position: relative;
+            font-size: 0.8125rem;
+            line-height: 1.5;
+        }
+
+        .value-proposition li:before {
+            content: "✓";
+            position: absolute;
+            left: 0;
+            color: #10B981;
+            font-weight: bold;
+        }
+
+        /* ========================================================================
+           CARDS & CONTAINERS
+           ======================================================================== */
+        .card {
+            background: white;
+            border-radius: 1rem;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+        }
+
+        /* ========================================================================
+           LOGIN VIEW
+           ======================================================================== */
+        .login-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+
+        .user-option {
+            border: 2px solid #E5E7EB;
+            border-radius: 0.75rem;
+            padding: 1.25rem;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            text-align: center;
+            position: relative;
+            background: white;
+        }
+
+        .user-option:hover {
+            border-color: #4F46E5;
+            background: #EEF2FF;
+            transform: translateY(-4px);
+            box-shadow: 0 10px 15px -3px rgba(79, 70, 229, 0.2);
+        }
+
+        .user-option:active {
+            transform: translateY(-2px);
+        }
+
+        .user-avatar {
+            width: 64px;
+            height: 64px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2rem;
+            margin: 0 auto 0.75rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+
+        .user-option h3 {
+            font-size: 1.25rem;
+            margin-bottom: 0.5rem;
+            color: #111827;
+        }
+
+        .role-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            text-transform: uppercase;
+            font-size: 0.75rem;
+            font-weight: 700;
+            padding: 0.375rem 0.75rem;
+            border-radius: 0.375rem;
+            margin: 0.5rem 0;
+        }
+
+        .role-badge.editor { 
+            background: #DCFCE7; 
+            color: #166534; 
+        }
+        .role-badge.viewer { 
+            background: #DBEAFE; 
+            color: #1E40AF; 
+        }
+
+        .permissions-list {
+            margin-top: 0.75rem;
+            font-size: 0.875rem;
+            color: #6B7280;
+        }
+
+        .permissions-list .perm-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin: 0.375rem 0;
+            justify-content: center;
+        }
+
+        .perm-icon {
+            width: 20px;
+            height: 20px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 4px;
+            font-size: 0.75rem;
+        }
+
+        .perm-icon.read { background: #DBEAFE; color: #1E40AF; }
+        .perm-icon.write { background: #DCFCE7; color: #166534; }
+
+        .tooltip {
+            position: relative;
+            display: inline-block;
+            cursor: help;
+        }
+
+        .tooltip .tooltip-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #E5E7EB;
+            color: #6B7280;
+            font-size: 0.75rem;
+            font-weight: bold;
+            margin-left: 0.5rem;
+            vertical-align: middle;
+        }
+
+        .tooltip:hover .tooltip-text {
+            visibility: visible;
+            opacity: 1;
+        }
+
+        .tooltip .tooltip-text {
+            visibility: hidden;
+            opacity: 0;
+            position: absolute;
+            bottom: 125%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #1F2937;
+            color: white;
+            padding: 0.75rem 1rem;
+            border-radius: 0.5rem;
+            font-size: 0.875rem;
+            white-space: nowrap;
+            z-index: 1000;
+            transition: opacity 0.3s;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+
+        .tooltip .tooltip-text:after {
+            content: "";
+            position: absolute;
+            top: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            border: 5px solid transparent;
+            border-top-color: #1F2937;
+        }
+
+        /* ========================================================================
+           DASHBOARD VIEW
+           ======================================================================== */
+        .dashboard-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-bottom: 1rem;
+            border-bottom: 2px solid #E5E7EB;
+            margin-bottom: 1rem;
+        }
+
+        .user-profile {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .user-info {
+            display: flex;
+            flex-direction: column;
+            gap: 0.375rem;
+        }
+
+        .permissions-badge {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+            margin-top: 0.375rem;
+        }
+
+        .perm-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.375rem;
+            font-size: 0.75rem;
+            padding: 0.25rem 0.75rem;
+            border-radius: 0.375rem;
+            background: #F3F4F6;
+            color: #4B5563;
+        }
+
+        /* ========================================================================
+           BUTTONS
+           ======================================================================== */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1.25rem;
+            border-radius: 0.5rem;
+            font-weight: 600;
+            border: none;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 0.875rem;
+        }
+
+        .btn-primary { 
+            background: #4F46E5; 
+            color: white; 
+        }
+        .btn-primary:hover { 
+            background: #4338ca; 
+            transform: translateY(-1px);
+            box-shadow: 0 4px 6px -1px rgba(79, 70, 229, 0.3);
+        }
+        .btn-secondary { 
+            background: white; 
+            border: 1px solid #D1D5DB; 
+            color: #111827; 
+        }
+        .btn-secondary:hover { 
+            background: #F9FAFB; 
+            border-color: #9CA3AF;
+        }
+        .btn-danger { 
+            background: #FEF2F2; 
+            color: #DC2626; 
+            border: 1px solid #FEE2E2; 
+        }
+        .btn-danger:hover { 
+            background: #FEE2E2; 
+        }
+
+        /* ========================================================================
+           FORMS
+           ======================================================================== */
+        .form-group { 
+            margin-bottom: 1rem; 
+        }
+        .form-group label { 
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-weight: 600; 
+            margin-bottom: 0.5rem;
+            color: #374151;
+            font-size: 0.875rem;
+        }
+        .form-control {
+            width: 100%;
+            padding: 0.625rem;
+            border: 2px solid #E5E7EB;
+            border-radius: 0.5rem;
+            font-size: 0.9375rem;
+            transition: all 0.2s;
+        }
+        .form-control:focus { 
+            outline: none;
+            border-color: #4F46E5;
+            box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
+        }
+        textarea.form-control { 
+            min-height: 100px; 
+            resize: vertical; 
+            font-family: inherit;
+        }
+
+        .info-box {
+            background: #EFF6FF;
+            border-left: 4px solid #3B82F6;
+            padding: 0.75rem 1rem;
+            border-radius: 0.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .info-box h4 {
+            color: #1E40AF;
+            font-size: 0.875rem;
+            margin-bottom: 0.375rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .info-box p {
+            color: #1E3A8A;
+            font-size: 0.8125rem;
+            margin: 0;
+            line-height: 1.5;
+        }
+
+        .no-perm-box {
+            background: #FEF3C7;
+            color: #92400E;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            border-left: 4px solid #F59E0B;
+            margin-bottom: 1rem;
+        }
+
+        .no-perm-box strong {
+            display: block;
+            margin-bottom: 0.375rem;
+            font-size: 0.9375rem;
+        }
+
+        .no-perm-box div {
+            font-size: 0.875rem;
+            line-height: 1.5;
+        }
+
+        /* ========================================================================
+           DOCUMENTS LIST
+           ======================================================================== */
+        .doc-list {
+            display: grid;
+            gap: 0.75rem;
+        }
+
+        .doc-item {
+            border: 2px solid #E5E7EB;
+            border-radius: 0.5rem;
+            padding: 1rem;
+            background: #FAFAFA;
+            transition: all 0.2s;
+        }
+
+        .doc-item:hover {
+            border-color: #D1D5DB;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+        }
+
+        .doc-item h3 { 
+            font-size: 1.125rem; 
+            margin-bottom: 0.5rem; 
+            color: #111827;
+        }
+        .doc-meta { 
+            font-size: 0.8125rem; 
+            color: #6B7280; 
+            margin-bottom: 0.75rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .doc-content { 
+            color: #4B5563;
+            line-height: 1.6;
+            font-size: 0.9375rem;
+        }
+
+        /* ========================================================================
+           LOADING & FEEDBACK
+           ======================================================================== */
+        .loading-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(255, 255, 255, 0.9);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 50;
+            backdrop-filter: blur(4px);
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid #E5E7EB;
+            border-top: 3px solid #4F46E5;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin-bottom: 0.75rem;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .toast {
+            position: fixed;
+            bottom: 1.5rem;
+            right: 1.5rem;
+            padding: 0.75rem 1.25rem;
+            border-radius: 0.5rem;
+            color: white;
+            font-weight: 500;
+            font-size: 0.875rem;
+            transform: translateY(150%);
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            z-index: 100;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.2);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .toast.show { transform: translateY(0); }
+        .toast.success { background: #10B981; }
+        .toast.error { background: #EF4444; }
+
+        .hidden { display: none !important; }
+
+        .section-title {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+            font-size: 1.25rem;
+            color: #111827;
+        }
+
+        .authz-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 0.75rem;
+            background: #F0FDF4;
+            border: 1px solid #86EFAC;
+            border-radius: 0.375rem;
+            font-size: 0.8125rem;
+            color: #166534;
+            margin-top: 0.5rem;
+        }
+
+        .authz-indicator.denied {
+            background: #FEF2F2;
+            border-color: #FCA5A5;
+            color: #991B1B;
+        }
+    </style>
+</head>
+<body>
+    <div id="loader" class="loading-overlay hidden">
+        <div class="spinner"></div>
+        <div id="loaderText" style="font-weight: 600; color: #4B5563;">Loading...</div>
+    </div>
+
+    <div class="container">
+        <header>
+            <h1>🔐 OSO Cloud Authorization Demo</h1>
+            <p class="subtitle">Powered by mdb-engine</p>
+            <div class="value-proposition" onclick="this.classList.toggle('expanded')">
+                <div class="value-proposition-header">
+                    <div>
+                        <h3>💡 What You're Seeing</h3>
+                        <div class="value-proposition-summary">
+                            RBAC • Policy-Driven • Auto-Enforced • Zero Boilerplate
+                        </div>
+                    </div>
+                    <div class="value-proposition-toggle">▼</div>
+                </div>
+                <div class="value-proposition-details">
+                    <ul>
+                        <li><strong>Role-Based Access Control (RBAC):</strong> Users have roles (Editor/Viewer) that determine their permissions</li>
+                        <li><strong>Policy-Driven Authorization:</strong> OSO Cloud evaluates permissions using declarative policies</li>
+                        <li><strong>Automatic Enforcement:</strong> mdb-engine automatically checks permissions on every API call</li>
+                        <li><strong>Zero Boilerplate:</strong> Authorization is configured via manifest.json - no complex code needed</li>
+                    </ul>
+                </div>
+            </div>
+        </header>
+
+        <div id="loginView" class="card hidden">
+            <h2 style="text-align: center; margin-bottom: 0.75rem; font-size: 1.5rem;">👋 Select a Demo User</h2>
+            <p style="text-align: center; color: #6B7280; margin-bottom: 1rem; font-size: 0.875rem;">
+                Choose a user to see how different roles affect what actions are available
+            </p>
+            <div class="login-grid">
+                <div class="user-option" onclick="handleLogin('alice@example.com')">
+                    <div class="user-avatar">👩</div>
+                    <h3>Alice</h3>
+                    <div class="role-badge editor">Editor</div>
+                    <div class="permissions-list">
+                        <div class="perm-item">
+                            <span class="perm-icon read">R</span>
+                            <span>Read Documents</span>
+                        </div>
+                        <div class="perm-item">
+                            <span class="perm-icon write">W</span>
+                            <span>Write Documents</span>
+                        </div>
+                    </div>
+                    <p style="color: #6B7280; font-size: 0.8125rem; margin-top: 0.75rem;">
+                        Full access to view and create documents
+                    </p>
+                </div>
+                <div class="user-option" onclick="handleLogin('bob@example.com')">
+                    <div class="user-avatar">👨</div>
+                    <h3>Bob</h3>
+                    <div class="role-badge viewer">Viewer</div>
+                    <div class="permissions-list">
+                        <div class="perm-item">
+                            <span class="perm-icon read">R</span>
+                            <span>Read Documents</span>
+                        </div>
+                        <div class="perm-item" style="opacity: 0.4;">
+                            <span class="perm-icon write">W</span>
+                            <span style="text-decoration: line-through;">Write Documents</span>
+                        </div>
+                    </div>
+                    <p style="color: #6B7280; font-size: 0.8125rem; margin-top: 0.75rem;">
+                        Can only view documents, cannot create new ones
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <div id="dashboardView" class="hidden">
+            <div class="card">
+                <div class="dashboard-header">
+                    <div class="user-profile">
+                        <div class="user-avatar" style="width: 56px; height: 56px; font-size: 1.5rem; margin: 0;">👤</div>
+                        <div class="user-info">
+                            <div style="font-weight: 700; font-size: 1.125rem;" id="userEmail">...</div>
+                            <div id="userRole" class="role-badge">...</div>
+                            <div class="permissions-badge" id="permissionsBadge"></div>
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 0.75rem;">
+                        <button class="btn btn-secondary" onclick="switchUser()" title="Switch to a different user to see different permissions">
+                            🔄 Switch User
+                        </button>
+                        <button class="btn btn-danger" onclick="logout()">🚪 Logout</button>
+                    </div>
+                </div>
+
+                <div id="createSection" class="hidden">
+                    <div class="info-box">
+                        <h4>✨ Authorization Check</h4>
+                        <p>
+                            You have <strong>write</strong> permission, so you can create documents. 
+                            <span class="tooltip">
+                                <span class="tooltip-icon">?</span>
+                                <span class="tooltip-text">OSO Cloud checks your role against the policy before allowing this action</span>
+                            </span>
+                        </p>
+                    </div>
+                    <h3 class="section-title">
+                        ➕ Create New Document
+                    </h3>
+                    <form onsubmit="createDocument(event)" style="background: #F9FAFB; padding: 1.25rem; border-radius: 0.5rem; border: 2px solid #E5E7EB;">
+                        <div class="form-group">
+                            <label>
+                                Document Title
+                                <span class="tooltip">
+                                    <span class="tooltip-icon">?</span>
+                                    <span class="tooltip-text">This will be stored in MongoDB with automatic app scoping</span>
+                                </span>
+                            </label>
+                            <input type="text" id="docTitle" class="form-control" placeholder="e.g., Project Plan, Meeting Notes..." required>
+                        </div>
+                        <div class="form-group">
+                            <label>
+                                Content
+                                <span class="tooltip">
+                                    <span class="tooltip-icon">?</span>
+                                    <span class="tooltip-text">All documents are automatically tagged with your user ID and timestamp</span>
+                                </span>
+                            </label>
+                            <textarea id="docContent" class="form-control" placeholder="Write your document content here..." required></textarea>
+                        </div>
+                        <button type="submit" class="btn btn-primary">
+                            💾 Create Document
+                        </button>
+                    </form>
+                    <hr style="margin: 1.5rem 0; border: 0; border-top: 2px solid #E5E7EB;">
+                </div>
+
+                <div id="noPermSection" class="hidden" style="margin-bottom: 1rem;">
+                    <div class="no-perm-box">
+                        <strong>🔒 Read-Only Access</strong>
+                        <div>
+                            You have <strong>read</strong> permission but not <strong>write</strong> permission. 
+                            You can view documents but cannot create new ones.
+                            <span class="tooltip">
+                                <span class="tooltip-icon">?</span>
+                                <span class="tooltip-text">This restriction is enforced by OSO Cloud based on your 'viewer' role</span>
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                <h3 class="section-title">
+                    📄 Documents
+                    <span class="tooltip">
+                        <span class="tooltip-icon">?</span>
+                        <span class="tooltip-text">These documents are fetched from MongoDB. Only users with 'read' permission can see this list.</span>
+                    </span>
+                </h3>
+                <div id="docList" class="doc-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast" class="toast"></div>
+
+    <script>
+        // ========================================================================
+        // APPLICATION STATE
+        // ========================================================================
+        // Centralized state management - stores current user and documents
+        const state = { user: null, documents: [] };
+
+        // ========================================================================
+        // UTILITY FUNCTIONS
+        // ========================================================================
+
+        /**
+         * Extract cookie value by name
+         * Used for CSRF token extraction
+         */
+        function getCookie(name) {
+            const value = `; ${document.cookie}`;
+            const parts = value.split(`; ${name}=`);
+            if (parts.length === 2) return parts.pop().split(';').shift();
+            return '';
+        }
+
+        /**
+         * Escape HTML to prevent XSS attacks
+         */
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        /**
+         * Show/hide loading overlay
+         */
+        function showLoader(show, text = "Loading...") {
+            const el = document.getElementById('loader');
+            document.getElementById('loaderText').textContent = text;
+            if (show) el.classList.remove('hidden');
+            else el.classList.add('hidden');
+        }
+
+        /**
+         * Show toast notification
+         */
+        function showToast(msg, type = 'success') {
+            const el = document.getElementById('toast');
+            el.textContent = msg;
+            el.className = `toast ${type} show`;
+            setTimeout(() => el.classList.remove('show'), 4000);
+        }
+
+        // ========================================================================
+        // INITIALIZATION
+        // ========================================================================
+        // Check authentication status on page load
+        document.addEventListener('DOMContentLoaded', async () => {
+            await checkAuth();
+        });
+
+        // ========================================================================
+        // AUTHENTICATION FLOW
+        // ========================================================================
+
+        /**
+         * Check if user is authenticated
+         * Calls /api/me which requires authentication
+         * If successful, loads dashboard; otherwise shows login screen
+         */
+        async function checkAuth() {
+            showLoader(true);
+            try {
+                const res = await fetch('/api/me');
+                if (res.ok) {
+                    state.user = await res.json();
+                    renderDashboard();
+                    fetchDocuments();
+                } else {
+                    showLogin();
+                }
+            } catch (err) {
+                showLogin();
+            } finally {
+                showLoader(false);
+            }
+        }
+
+        /**
+         * Handle user login
+         * Authenticates with backend and creates session cookie
+         * Demo users: alice@example.com (editor) or bob@example.com (viewer)
+         */
+        async function handleLogin(email) {
+            showLoader(true, "Authenticating...");
+            const formData = new FormData();
+            formData.append('email', email);
+            formData.append('password', 'password123');
+
+            try {
+                const res = await fetch('/login', {
+                    method: 'POST',
+                    body: formData,
+                    headers: { 'X-CSRF-Token': getCookie('csrf_token') }
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    showToast("✅ Login successful! Loading your permissions...", "success");
+                    setTimeout(() => window.location.reload(), 500);
+                } else {
+                    showToast(data.detail || "❌ Login failed", "error");
+                    showLoader(false);
+                }
+            } catch (err) {
+                showToast("❌ Connection error", "error");
+                showLoader(false);
+            }
+        }
+
+        /**
+         * Logout user and clear session
+         */
+        async function logout() {
+            showLoader(true, "Logging out...");
+            try {
+                await fetch('/logout', {
+                    method: 'POST',
+                    headers: { 'X-CSRF-Token': getCookie('csrf_token') }
+                });
+                window.location.reload();
+            } catch (err) {
+                window.location.reload();
+            }
+        }
+
+        /**
+         * Switch to different user (logout then show login)
+         */
+        function switchUser() {
+            logout();
+        }
+
+        // ========================================================================
+        // AUTHORIZATION DEMONSTRATION
+        // ========================================================================
+
+        /**
+         * Fetch documents list
+         * Requires 'read' permission - demonstrates authorization enforcement
+         * If user lacks permission, backend returns 403 Forbidden
+         */
+        async function fetchDocuments() {
+            const listEl = document.getElementById('docList');
+            listEl.innerHTML = '<div style="text-align:center; padding: 1.5rem; color: #6B7280; font-size: 0.875rem;">Loading documents...</div>';
+
+            try {
+                const res = await fetch('/api/documents');
+                if (res.ok) {
+                    const data = await res.json();
+                    state.documents = data.documents;
+                    renderDocuments();
+                } else {
+                    // Handle authorization failure (403) or other errors
+                    const errData = await res.json().catch(() => ({}));
+                    listEl.innerHTML = `
+                        <div class="no-perm-box">
+                            <strong>❌ Failed to Load Documents</strong>
+                            <div>${errData.detail || 'Permission denied or server error'}</div>
+                        </div>
+                    `;
+                }
+            } catch (e) {
+                listEl.innerHTML = `
+                    <div class="no-perm-box">
+                        <strong>❌ Network Error</strong>
+                        <div>Could not connect to the server</div>
+                    </div>
+                `;
+            }
+        }
+
+        /**
+         * Create new document
+         * Requires 'write' permission - only editors can create documents
+         * Demonstrates authorization check before allowing action
+         */
+        async function createDocument(e) {
+            e.preventDefault();
+            const btn = e.target.querySelector('button');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '⏳ Saving...';
+            btn.disabled = true;
+
+            const payload = {
+                title: document.getElementById('docTitle').value,
+                content: document.getElementById('docContent').value
+            };
+
+            try {
+                const res = await fetch('/api/documents', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-Token': getCookie('csrf_token')
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                if (res.ok) {
+                    showToast("✅ Document created successfully!", "success");
+                    e.target.reset();
+                    await fetchDocuments();
+                } else {
+                    const err = await res.json();
+                    showToast(`❌ ${err.detail || "Failed to create document"}`, "error");
+                    
+                    // Show authorization failure indicator (403 = permission denied)
+                    if (res.status === 403) {
+                        const indicator = document.createElement('div');
+                        indicator.className = 'authz-indicator denied';
+                        indicator.innerHTML = '🚫 Authorization Check Failed: ' + (err.detail || 'Permission denied');
+                        e.target.appendChild(indicator);
+                        setTimeout(() => indicator.remove(), 5000);
+                    }
+                }
+            } catch (err) {
+                showToast("❌ Network error", "error");
+            } finally {
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+            }
+        }
+
+        // ========================================================================
+        // UI RENDERING
+        // ========================================================================
+
+        /**
+         * Show login screen
+         */
+        function showLogin() {
+            document.getElementById('loginView').classList.remove('hidden');
+            document.getElementById('dashboardView').classList.add('hidden');
+        }
+
+        /**
+         * Render dashboard with user info and permissions
+         * Shows/hides create form based on user's 'write' permission
+         */
+        function renderDashboard() {
+            document.getElementById('loginView').classList.add('hidden');
+            document.getElementById('dashboardView').classList.remove('hidden');
+
+            // Display user email and role
+            document.getElementById('userEmail').textContent = state.user.email;
+            const roleEl = document.getElementById('userRole');
+            roleEl.textContent = state.user.role;
+            roleEl.className = `role-badge ${state.user.role}`;
+
+            // Display permissions badges (read/write)
+            const permBadgeEl = document.getElementById('permissionsBadge');
+            if (state.user.permissions && state.user.permissions.length > 0) {
+                permBadgeEl.innerHTML = state.user.permissions.map(perm => 
+                    `<span class="perm-badge">
+                        ${perm === 'read' ? '👁️' : '✏️'} ${perm}
+                    </span>`
+                ).join('');
+            } else {
+                permBadgeEl.innerHTML = '<span class="perm-badge">No permissions</span>';
+            }
+
+            // Show/hide create form based on 'write' permission
+            // This demonstrates UI-level permission checks (in addition to API-level checks)
+            if (state.user.permissions && state.user.permissions.includes('write')) {
+                document.getElementById('createSection').classList.remove('hidden');
+                document.getElementById('noPermSection').classList.add('hidden');
+            } else {
+                document.getElementById('createSection').classList.add('hidden');
+                document.getElementById('noPermSection').classList.remove('hidden');
+            }
+        }
+
+        /**
+         * Render documents list
+         */
+        function renderDocuments() {
+            const listEl = document.getElementById('docList');
+            if (state.documents.length === 0) {
+                listEl.innerHTML = `
+                    <div style="text-align: center; padding: 2rem; color: #9CA3AF; border: 2px dashed #E5E7EB; border-radius: 0.5rem; background: #FAFAFA;">
+                        <p style="font-size: 1rem; margin-bottom: 0.375rem;">No documents yet</p>
+                        <p style="font-size: 0.875rem;">Create your first document to get started!</p>
+                    </div>
+                `;
+                return;
+            }
+
+            listEl.innerHTML = state.documents.map(doc => `
+                <div class="doc-item">
+                    <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom: 0.5rem;">
+                        <h3>${escapeHtml(doc.title)}</h3>
+                        <span style="font-size:0.75rem; color:#9CA3AF; font-weight: 500;">
+                            ${new Date(doc.created_at).toLocaleDateString('en-US', { 
+                                year: 'numeric', 
+                                month: 'short', 
+                                day: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit'
+                            })}
+                        </span>
+                    </div>
+                    <div class="doc-meta">
+                        <span>👤 Created by ${escapeHtml(doc.created_by)}</span>
+                    </div>
+                    <div class="doc-content">${escapeHtml(doc.content)}</div>
+                </div>
+            `).join('');
+        }
+    </script>
+</body>
+</html>

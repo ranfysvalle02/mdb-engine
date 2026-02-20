@@ -1,0 +1,110 @@
+# ============================================================================
+# Docker Compose Configuration for OSO Hello World Example
+# ============================================================================
+
+services:
+  # OSO Dev Server - Local OSO Cloud API for development
+  oso-dev:
+    image: public.ecr.aws/osohq/dev-server:latest
+    container_name: oso_hello_world_oso_dev
+    restart: unless-stopped
+    ports:
+      - "${OSO_PORT:-8080}:8080"
+    volumes:
+      # Mount policy file so OSO can load it
+      - ./main.polar:/policies/main.polar:ro
+    # Command to run the server and watch your policy file for changes
+    command: ["--watch-for-changes", "/policies/main.polar"]
+    networks:
+      - mdb_engine_network
+
+  # OSO Hello World Application
+  app:
+    build:
+      context: ../../..
+      dockerfile: examples/basic/oso_hello_world/Dockerfile
+      args:
+        APP_USER: appuser
+        APP_UID: 1000
+        APP_GID: 1000
+    container_name: oso_hello_world_app
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    environment:
+      - MDB_MONGO_URI=${MDB_MONGO_URI:-mongodb://mongodb:27017/?directConnection=true}
+      - MDB_DB_NAME=${MDB_DB_NAME:-oso_hello_world_db}
+      - APP_SLUG=${APP_SLUG:-oso_hello_world}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - PYTHONUNBUFFERED=${PYTHONUNBUFFERED:-1}
+      - MDB_JWT_SECRET=${MDB_JWT_SECRET:-oso_hello_world_demo_secret_key_change_in_production}
+      # OSO Cloud Configuration
+      # Point SDK to local OSO Dev Server
+      - OSO_URL=http://oso-dev:8080
+      # Authentication token (Dev Server accepts any dummy token)
+      - OSO_AUTH=${OSO_AUTH:-e_0123456789_12345_osotesttoken01xiIn}
+    depends_on:
+      oso-dev:
+        condition: service_started
+      mongodb:
+        condition: service_healthy
+    networks:
+      - mdb_engine_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    tmpfs:
+      - /tmp:noexec,nosuid,size=100m
+
+  # MongoDB Atlas Local (No Authentication)
+  # Accessible from MongoDB Compass using:
+  # Connection String: mongodb://localhost:27017/
+  mongodb:
+    image: mongodb/mongodb-atlas-local:latest
+    container_name: oso_hello_world_mongodb
+    restart: unless-stopped
+    ports:
+      - "${MONGO_PORT:-27017}:27017"
+    environment:
+      MONGODB_INITDB_DATABASE: ${MDB_DB_NAME:-oso_hello_world_db}
+    volumes:
+      - mongodb_data:/data/db
+      - mongodb_config:/data/configdb
+    networks:
+      - mdb_engine_network
+    healthcheck:
+      # Wait for replica set primary to be elected (not just ping)
+      test: mongosh "mongodb://localhost:27017/?directConnection=true" --quiet --eval "rs.status().ok && rs.status().myState === 1"
+      interval: 5s
+      timeout: 10s
+      retries: 20
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+volumes:
+  mongodb_data:
+    driver: local
+  mongodb_config:
+    driver: local
+
+networks:
+  mdb_engine_network:
+    driver: bridge

@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}SSO Auth Hub{% endblock %}</title>
+    <style>
+        :root {
+            --bg: #0f0f12;
+            --card: #1a1a1f;
+            --accent: #06b6d4;
+            --text: #f4f4f5;
+            --muted: #71717a;
+            --success: #22c55e;
+            --error: #ef4444;
+            --warning: #f59e0b;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+        
+        .header { background: var(--card); border-bottom: 2px solid var(--accent); padding: 1rem 2rem; }
+        .header-content { max-width: 1400px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; }
+        .header h1 { font-size: 1.5rem; display: flex; align-items: center; gap: 0.5rem; }
+        .header h1 i { color: var(--accent); }
+        
+        .nav-links { display: flex; gap: 1rem; align-items: center; }
+        .nav-links a { color: var(--text); text-decoration: none; padding: 0.5rem 1rem; border-radius: 6px; transition: background 0.2s; }
+        .nav-links a:hover { background: rgba(6, 182, 212, 0.1); }
+        
+        .container { max-width: 1400px; margin: 2rem auto; padding: 0 2rem; }
+        
+        .card { background: var(--card); border-radius: 12px; padding: 1.5rem; margin-bottom: 1rem; }
+        
+        .btn { padding: 0.75rem 1.5rem; border-radius: 8px; border: none; font-weight: 600; cursor: pointer; transition: all 0.2s; text-decoration: none; display: inline-block; }
+        .btn-primary { background: var(--accent); color: #000; }
+        .btn-primary:hover { filter: brightness(1.1); }
+        .btn-secondary { background: transparent; border: 1px solid var(--muted); color: var(--text); }
+        .btn-secondary:hover { background: var(--muted); }
+        
+        .form-group { margin-bottom: 1rem; }
+        .form-group label { display: block; margin-bottom: 0.5rem; font-weight: 500; }
+        .form-group input { width: 100%; padding: 0.75rem; background: var(--bg); border: 1px solid var(--muted); border-radius: 6px; color: var(--text); font-size: 1rem; }
+        .form-group input:focus { outline: none; border-color: var(--accent); }
+        
+        .alert { padding: 1rem; border-radius: 8px; margin-bottom: 1rem; }
+        .alert-success { background: rgba(34, 197, 94, 0.2); color: var(--success); }
+        .alert-error { background: rgba(239, 68, 68, 0.2); color: var(--error); }
+        .alert-info { background: rgba(6, 182, 212, 0.1); color: var(--accent); }
+        
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 0.75rem; text-align: left; border-bottom: 1px solid var(--bg); }
+        th { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; }
+        
+        .badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
+        .badge.viewer { background: rgba(6, 182, 212, 0.2); color: var(--accent); }
+        .badge.editor { background: rgba(139, 92, 246, 0.2); color: #8b5cf6; }
+        .badge.admin { background: rgba(245, 158, 11, 0.2); color: var(--warning); }
+    </style>
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+    <header class="header">
+        <div class="header-content">
+            <h1><i class="fas fa-shield-alt"></i> SSO Auth Hub</h1>
+            <nav class="nav-links">
+                {% if user %}
+                    <a href="{{ base_path }}/dashboard">Dashboard</a>
+                    <a href="#" onclick="logout(); return false;">Logout</a>
+                {% else %}
+                    <a href="{{ base_path }}/login">Login</a>
+                    <a href="{{ base_path }}/register">Register</a>
+                {% endif %}
+            </nav>
+        </div>
+    </header>
+
+    <main class="container">
+        {% block content %}{% endblock %}
+    </main>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js"></script>
+    <script>
+    function getCookie(name) {
+        const value = `; ${document.cookie}`;
+        const parts = value.split(`; ${name}=`);
+        if (parts.length === 2) return parts.pop().split(';').shift();
+        return '';
+    }
+    
+    const BASE = '{{ base_path }}';
+    async function logout() {
+        await fetch(BASE + '/logout', {
+            method: 'POST',
+            headers: { 'X-CSRF-Token': getCookie('csrf_token') }
+        });
+        window.location.href = BASE + '/login';
+    }
+    </script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

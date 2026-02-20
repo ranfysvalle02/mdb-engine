@@ -1,0 +1,1184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vector Inversion Attack | Oblivio Security Labs</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;600;800&family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
+    
+    <!-- Load configuration first -->
+    <script src="config.js"></script>
+    
+    <style>
+        :root {
+            --bg-dark: #0a0a0c;
+            --bg-panel: #131316;
+            --text-primary: #e0e0e0;
+            --text-secondary: #a0a0a0;
+            --accent-green: #00ff9d;
+            --accent-green-dim: rgba(0, 255, 157, 0.1);
+            --accent-red: #ff4d4d;
+            --accent-blue: #00ccff;
+            --accent-purple: #b794f6;
+            --accent-yellow: #fbbf24;
+            --border-color: #333;
+            --font-mono: 'JetBrains Mono', monospace;
+            --font-sans: 'Inter', sans-serif;
+            --font-futuristic: 'Orbitron', sans-serif;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: linear-gradient(135deg, #0a0a0c 0%, #1a1a2e 100%);
+            background-attachment: fixed;
+            color: var(--text-primary);
+            font-family: var(--font-sans);
+            min-height: 100vh;
+            overflow-x: hidden;
+            position: relative;
+        }
+
+        /* Animated background particles */
+        .particles {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 0;
+            opacity: 0.3;
+        }
+
+        .particle {
+            position: absolute;
+            width: 2px;
+            height: 2px;
+            background: var(--accent-green);
+            border-radius: 50%;
+            animation: float 20s infinite;
+            box-shadow: 0 0 10px var(--accent-green);
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translateY(0) translateX(0); opacity: 0; }
+            10% { opacity: 1; }
+            90% { opacity: 1; }
+            100% { transform: translateY(-100vh) translateX(50px); opacity: 0; }
+        }
+
+        .font-mono { font-family: var(--font-mono); }
+        .font-futuristic { font-family: var(--font-futuristic); }
+        .text-accent { color: var(--accent-green); }
+        .text-danger-custom { color: var(--accent-red); }
+        .text-blue-custom { color: var(--accent-blue); }
+        .text-purple-custom { color: var(--accent-purple); }
+        .text-yellow-custom { color: var(--accent-yellow); }
+
+        .navbar {
+            background: linear-gradient(180deg, rgba(19, 19, 22, 0.95) 0%, rgba(19, 19, 22, 0.8) 100%);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid var(--border-color);
+            padding: 1rem 0;
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+        }
+
+        .brand-logo {
+            font-weight: 900;
+            letter-spacing: 2px;
+            color: var(--text-primary);
+            text-transform: uppercase;
+            font-family: var(--font-futuristic);
+            font-size: 1.2rem;
+            text-shadow: 0 0 20px var(--accent-green);
+            animation: glow 2s ease-in-out infinite alternate;
+        }
+
+        @keyframes glow {
+            from { text-shadow: 0 0 20px var(--accent-green), 0 0 30px var(--accent-green); }
+            to { text-shadow: 0 0 30px var(--accent-green), 0 0 40px var(--accent-green), 0 0 50px var(--accent-green); }
+        }
+
+        .panel {
+            background: linear-gradient(135deg, rgba(19, 19, 22, 0.9) 0%, rgba(26, 26, 46, 0.9) 100%);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(0, 255, 157, 0.1);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .panel::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(0, 255, 157, 0.1), transparent);
+            transition: left 0.5s;
+        }
+
+        .panel:hover::before {
+            left: 100%;
+        }
+
+        .panel:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 12px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(0, 255, 157, 0.2);
+        }
+
+        .panel-header {
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 1rem;
+            margin-bottom: 1rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .panel-title {
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: var(--text-secondary);
+            font-weight: 600;
+            margin: 0;
+            font-family: var(--font-futuristic);
+        }
+
+        /* Terminal Styling */
+        .terminal-window {
+            background: #000;
+            border: 2px solid #333;
+            border-radius: 8px;
+            padding: 1rem;
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            height: 400px;
+            overflow-y: auto;
+            color: #d4d4d4;
+            box-shadow: inset 0 0 30px rgba(0,0,0,0.9), 0 0 20px rgba(0, 255, 157, 0.1);
+            position: relative;
+        }
+
+        .terminal-window::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, var(--accent-green), transparent);
+            animation: scan-terminal 3s linear infinite;
+        }
+
+        @keyframes scan-terminal {
+            0% { transform: translateY(0); opacity: 0; }
+            50% { opacity: 1; }
+            100% { transform: translateY(400px); opacity: 0; }
+        }
+
+        .terminal-line {
+            margin-bottom: 6px;
+            display: flex;
+            gap: 10px;
+            animation: fadeIn 0.3s ease-in;
+            line-height: 1.6;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateX(-10px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+
+        .terminal-line.success {
+            color: var(--accent-green);
+            text-shadow: 0 0 10px var(--accent-green);
+        }
+        .terminal-line.info {
+            color: var(--accent-blue);
+            text-shadow: 0 0 8px var(--accent-blue);
+        }
+        .terminal-line.warning {
+            color: var(--accent-yellow);
+            text-shadow: 0 0 8px var(--accent-yellow);
+        }
+        .terminal-line.error {
+            color: var(--accent-red);
+            text-shadow: 0 0 8px var(--accent-red);
+        }
+        .terminal-line.hack {
+            color: var(--accent-purple);
+            text-shadow: 0 0 8px var(--accent-purple);
+            font-weight: 700;
+        }
+
+        /* Progress Bar */
+        .vector-progress {
+            height: 8px;
+            background: linear-gradient(90deg, #1a1a2e, #2a2a3e);
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 12px;
+            position: relative;
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.5);
+        }
+
+        .vector-progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent-red), var(--accent-yellow), var(--accent-blue), var(--accent-green));
+            width: 0%;
+            transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1), background 0.5s;
+            box-shadow: 0 0 20px currentColor, inset 0 0 10px rgba(255,255,255,0.3);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .vector-progress-bar::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
+            animation: shimmer 2s infinite;
+        }
+
+        @keyframes shimmer {
+            0% { left: -100%; }
+            100% { left: 100%; }
+        }
+
+        /* Buttons */
+        .btn-custom {
+            padding: 0.75rem 1.5rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            border-radius: 6px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            border: none;
+            font-family: var(--font-futuristic);
+            font-size: 0.85rem;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .btn-custom::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 0;
+            height: 0;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.3);
+            transform: translate(-50%, -50%);
+            transition: width 0.6s, height 0.6s;
+        }
+
+        .btn-custom:active::before {
+            width: 300px;
+            height: 300px;
+        }
+
+        .btn-primary-custom {
+            background: linear-gradient(135deg, var(--accent-green), #00cc7d);
+            color: #000;
+            box-shadow: 0 4px 15px rgba(0, 255, 157, 0.4);
+        }
+
+        .btn-primary-custom:hover:not(:disabled) {
+            background: linear-gradient(135deg, #00cc7d, var(--accent-green));
+            box-shadow: 0 6px 25px rgba(0, 255, 157, 0.6);
+            transform: translateY(-2px) scale(1.02);
+        }
+
+        .btn-primary-custom:active:not(:disabled) {
+            transform: translateY(0) scale(0.98);
+        }
+
+        .btn-primary-custom:disabled {
+            background: #333;
+            color: #666;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+
+        .btn-danger-custom {
+            background: rgba(255, 77, 77, 0.1);
+            color: var(--accent-red);
+            border: 2px solid var(--accent-red);
+            box-shadow: 0 4px 15px rgba(255, 77, 77, 0.2);
+        }
+
+        .btn-danger-custom:hover:not(:disabled) {
+            background: var(--accent-red);
+            color: #fff;
+            box-shadow: 0 6px 25px rgba(255, 77, 77, 0.5);
+            transform: translateY(-2px) scale(1.02);
+        }
+
+        /* Stats */
+        .stat-value {
+            font-size: 2.5rem;
+            font-weight: 900;
+            font-family: var(--font-futuristic);
+            line-height: 1.2;
+            background: linear-gradient(135deg, var(--text-primary), var(--accent-green));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            text-shadow: 0 0 30px var(--accent-green);
+            transition: all 0.3s;
+        }
+
+        .stat-value.animate {
+            animation: pulse-number 0.5s ease-in-out;
+        }
+
+        @keyframes pulse-number {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+        }
+
+        .stat-label {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-family: var(--font-futuristic);
+            margin-top: 0.5rem;
+        }
+
+        /* Badge */
+        .status-badge {
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-family: var(--font-futuristic);
+            transition: all 0.3s;
+        }
+
+        .status-badge.running {
+            background: linear-gradient(135deg, rgba(0, 255, 157, 0.2), rgba(0, 204, 255, 0.2));
+            color: var(--accent-green);
+            border: 2px solid var(--accent-green);
+            animation: pulse-badge 2s infinite, glow-badge 2s infinite alternate;
+            box-shadow: 0 0 20px rgba(0, 255, 157, 0.5);
+        }
+
+        @keyframes pulse-badge {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+
+        @keyframes glow-badge {
+            from { box-shadow: 0 0 20px rgba(0, 255, 157, 0.5); }
+            to { box-shadow: 0 0 30px rgba(0, 255, 157, 0.8), 0 0 40px rgba(0, 255, 157, 0.4); }
+        }
+
+        .status-badge.stopped {
+            background: rgba(255, 255, 255, 0.05);
+            color: #999;
+            border: 2px solid #666;
+        }
+        .status-badge.match {
+            background: linear-gradient(135deg, rgba(0, 204, 255, 0.3), rgba(183, 148, 246, 0.3));
+            color: var(--accent-blue);
+            border: 2px solid var(--accent-blue);
+            animation: celebrate 1s infinite;
+            box-shadow: 0 0 30px rgba(0, 204, 255, 0.6);
+        }
+
+        @keyframes celebrate {
+            0%, 100% { transform: scale(1) rotate(0deg); }
+            25% { transform: scale(1.1) rotate(-2deg); }
+            75% { transform: scale(1.1) rotate(2deg); }
+        }
+
+        .scan-line {
+            width: 100%;
+            height: 3px;
+            background: linear-gradient(to right, transparent, var(--accent-green), transparent);
+            opacity: 0.6;
+            position: absolute;
+            top: 0;
+            left: 0;
+            animation: scan 3s linear infinite;
+            pointer-events: none;
+            box-shadow: 0 0 20px var(--accent-green);
+        }
+
+        @keyframes scan {
+            0% { top: 0%; opacity: 0; }
+            10% { opacity: 0.6; }
+            90% { opacity: 0.6; }
+            100% { top: 100%; opacity: 0; }
+        }
+
+        /* Confetti */
+        .confetti {
+            position: fixed;
+            width: 10px;
+            height: 10px;
+            background: var(--accent-green);
+            position: absolute;
+            animation: confetti-fall 3s linear forwards;
+            z-index: 9999;
+        }
+
+        @keyframes confetti-fall {
+            0% {
+                transform: translateY(-100vh) rotate(0deg);
+                opacity: 1;
+            }
+            100% {
+                transform: translateY(100vh) rotate(720deg);
+                opacity: 0;
+            }
+        }
+
+        /* Container */
+        .container {
+            position: relative;
+            z-index: 1;
+        }
+
+        /* Modal */
+        .explanation-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.9);
+            backdrop-filter: blur(10px);
+            z-index: 10000;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            animation: fadeIn 0.3s;
+        }
+
+        .explanation-modal.show {
+            display: flex;
+        }
+
+        .explanation-content {
+            background: linear-gradient(135deg, rgba(19, 19, 22, 0.95), rgba(26, 26, 46, 0.95));
+            border: 2px solid var(--accent-green);
+            border-radius: 12px;
+            padding: 2rem;
+            max-width: 600px;
+            margin: 1rem;
+            box-shadow: 0 0 50px rgba(0, 255, 157, 0.5);
+            animation: slideUp 0.5s;
+        }
+
+        @keyframes slideUp {
+            from {
+                transform: translateY(50px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        .explanation-content h2 {
+            color: var(--accent-green);
+            font-family: var(--font-futuristic);
+            margin-bottom: 1rem;
+        }
+
+        .explanation-content p {
+            color: var(--text-secondary);
+            line-height: 1.8;
+            margin-bottom: 1rem;
+        }
+
+        /* API URL display */
+        .api-url-display {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            font-family: var(--font-mono);
+            padding: 4px 8px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 4px;
+            border: 1px solid var(--border-color);
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .stat-value { font-size: 1.8rem; }
+            .panel { padding: 1rem; }
+        }
+    </style>
+</head>
+<body>
+    <!-- Particle background -->
+    <div class="particles" id="particles"></div>
+
+    <!-- Navbar -->
+    <nav class="navbar">
+        <div class="container">
+            <span class="brand-logo">
+                <span class="text-accent">🔓</span> OBLIVIO // SECURITY_LABS
+            </span>
+            <div class="d-flex align-items-center gap-3">
+                <span id="apiUrl" class="api-url-display">API: loading...</span>
+                <span id="connectionStatus" class="status-badge stopped">⚡ SYSTEM IDLE</span>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container py-5">
+        <!-- Intro / Mission -->
+        <div class="row mb-4">
+            <div class="col-lg-8">
+                <h1 class="display-4 fw-bold mb-3 font-futuristic">
+                    <span class="text-accent">VECTOR</span> INVERSION ATTACK
+                </h1>
+                <p class="lead text-secondary mb-3">
+                    🎯 <strong class="text-white">Mission:</strong> We've intercepted an encrypted thought vector.
+                    Our AI agent will use <span class="text-accent">iterative optimization</span> to reverse-engineer
+                    the original text by measuring vector distances. This demonstrates the
+                    <span class="text-danger-custom">security vulnerability</span> of embedding-based systems.
+                </p>
+                <div class="d-flex gap-2 flex-wrap">
+                    <span class="badge bg-dark border border-success text-success">🤖 LLM-Powered</span>
+                    <span class="badge bg-dark border border-info text-info">⚡ Real-Time</span>
+                    <span class="badge bg-dark border border-warning text-warning">🔬 Research Demo</span>
+                </div>
+            </div>
+            <div class="col-lg-4 text-end d-flex align-items-center justify-content-end gap-2 flex-wrap">
+                <button id="startBtn" class="btn btn-custom btn-primary-custom">
+                    🚀 INITIATE ATTACK
+                </button>
+                <button id="stopBtn" class="btn btn-custom btn-danger-custom" disabled>
+                    ⛔ ABORT
+                </button>
+            </div>
+        </div>
+
+        <div class="row">
+            <!-- Left Column: Target & Stats -->
+            <div class="col-lg-5">
+                <!-- Target Panel -->
+                <div class="panel position-relative overflow-hidden">
+                    <div class="scan-line"></div>
+                    <div class="panel-header">
+                        <h3 class="panel-title">🎯 TARGET VECTOR LOCK</h3>
+                        <span class="font-mono text-accent" style="font-size: 0.7rem;">ID: TGT-8842-X</span>
+                    </div>
+
+                    <!-- Target Input -->
+                    <div id="targetInputSection" class="mb-3">
+                        <label class="stat-label mb-2">🎯 Target Phrase (Edit before starting)</label>
+                        <input
+                            type="text"
+                            id="targetInput"
+                            class="form-control font-mono"
+                            style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); color: var(--text-primary); padding: 0.75rem; border-radius: 4px; font-size: 0.9rem;"
+                            value="Be mindful of your thoughts"
+                            placeholder="Enter target phrase to hack..."
+                        />
+                        <small class="text-secondary" style="font-size: 0.75rem; display: block; margin-top: 0.5rem;">
+                            💡 Tip: Longer phrases are harder to crack. The AI will try to guess this phrase.
+                        </small>
+                    </div>
+
+                    <!-- Target Display (during attack) -->
+                    <div id="targetDisplaySection" class="mb-3" style="display: none;">
+                        <div class="stat-label mb-2">🎯 Target Phrase (Hidden from AI)</div>
+                        <div id="targetDisplay" class="font-mono text-accent" style="font-size: 1rem; padding: 0.75rem; background: rgba(0, 255, 157, 0.1); border: 1px solid var(--accent-green); border-radius: 4px; text-align: center;">
+                            Loading...
+                        </div>
+                        <small class="text-secondary" style="font-size: 0.75rem; display: block; margin-top: 0.5rem;">
+                            🔒 This is what the AI is trying to crack (you can see it, but the AI can't)
+                        </small>
+                    </div>
+
+                    <!-- Comparison Display -->
+                    <div class="mb-4 py-4">
+                        <div id="comparisonModeDisplay" style="display: none;">
+                            <div class="stat-label mb-3 text-center">🎯 COMPARISON: Original vs Recovered</div>
+                            <div class="row g-3">
+                                <div class="col-6">
+                                    <div class="text-secondary mb-1" style="font-size: 0.75rem;">ORIGINAL TARGET</div>
+                                    <div id="comparisonOriginal" class="font-mono text-accent" style="font-size: 1.1rem; padding: 1rem; background: rgba(0, 255, 157, 0.1); border: 2px solid var(--accent-green); border-radius: 6px; text-align: center; min-height: 80px; display: flex; align-items: center; justify-content: center; word-wrap: break-word; line-height: 1.4;">
+                                        -
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="text-secondary mb-1" style="font-size: 0.75rem;">RECOVERED BY AI</div>
+                                    <div id="comparisonRecovered" class="font-mono text-white" style="font-size: 1.1rem; padding: 1rem; background: rgba(0, 204, 255, 0.1); border: 2px solid var(--accent-blue); border-radius: 6px; text-align: center; min-height: 80px; display: flex; align-items: center; justify-content: center; word-wrap: break-word; line-height: 1.4;">
+                                        -
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="mt-3 text-center">
+                                <div class="text-secondary font-mono" style="font-size: 0.85rem;">
+                                    ⚡ Vector Error: <span id="comparisonError" class="text-danger-custom">-</span> |
+                                    🎯 Proximity: <span id="comparisonProximity" class="text-accent">-</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Stats Panel -->
+                <div class="panel">
+                    <div class="panel-header">
+                        <h3 class="panel-title">📊 ATTACK METRICS</h3>
+                    </div>
+                    <div class="row g-3">
+                        <div class="col-6">
+                            <div class="stat-value" id="guessCount">0</div>
+                            <div class="stat-label">Guesses Made</div>
+                        </div>
+                        <div class="col-6">
+                            <div class="stat-value" id="costVal">$0.00</div>
+                            <div class="stat-label">API Cost</div>
+                        </div>
+                    </div>
+                    <div class="mt-3">
+                        <small class="text-secondary">Model: <span id="modelUsed" class="font-mono text-accent">-</span></small>
+                    </div>
+                </div>
+
+                <!-- Explanation Panel -->
+                <div class="panel" style="border-left: 4px solid var(--accent-blue);">
+                    <div class="panel-header">
+                        <h3 class="panel-title text-blue-custom">🔬 VULNERABILITY ANALYSIS</h3>
+                    </div>
+                    <p class="small text-secondary mb-0">
+                        Vector databases store <strong class="text-white">semantic meanings</strong>, not just keywords.
+                        If an attacker can measure the "distance" between their query and private data
+                        (via side-channels or error messages), they can use an LLM to
+                        <span class="text-accent">"hill-climb"</span> towards private data without ever seeing it directly.
+                    </p>
+                </div>
+            </div>
+
+            <!-- Right Column: Terminal -->
+            <div class="col-lg-7">
+                <div class="panel h-100 d-flex flex-column">
+                    <div class="panel-header">
+                        <h3 class="panel-title">💻 ATTACK LOG OUTPUT</h3>
+                        <span class="font-mono text-secondary" style="font-size: 0.7rem;">/var/log/vector_hack.log</span>
+                    </div>
+                    <div id="terminal" class="terminal-window flex-grow-1">
+                        <div class="terminal-line text-secondary">
+                            <span class="font-mono">[SYS]</span> System ready. Waiting for initialization...
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Victory Modal -->
+    <div id="explanationModal" class="explanation-modal">
+        <div class="explanation-content">
+            <h2>🎯 TARGET COMPROMISED!</h2>
+
+            <div style="background: rgba(0, 255, 0, 0.1); border: 1px solid var(--accent-green); border-radius: 8px; padding: 1.5rem; margin: 1.5rem 0;">
+                <div style="margin-bottom: 1rem;">
+                    <div style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 0.5rem;">🎯 ORIGINAL TARGET (Hidden from AI):</div>
+                    <div id="originalTarget" style="font-size: 1.2rem; font-weight: bold; color: var(--accent-green); font-family: 'Courier New', monospace;">Loading...</div>
+                </div>
+                <div style="margin-bottom: 1rem;">
+                    <div style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 0.5rem;">🔓 RECOVERED BY AI:</div>
+                    <div id="recoveredTarget" style="font-size: 1.2rem; font-weight: bold; color: var(--accent-blue); font-family: 'Courier New', monospace;">Loading...</div>
+                </div>
+                <div style="border-top: 1px solid rgba(255, 255, 255, 0.2); padding-top: 1rem; margin-top: 1rem;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="color: var(--text-secondary);">⚡ Vector Distance Error:</span>
+                        <span id="matchError" style="font-size: 1.1rem; font-weight: bold; color: var(--accent-purple);">Loading...</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.5rem;">
+                        <span style="color: var(--text-secondary);">📊 Guesses Made:</span>
+                        <span id="matchGuesses" style="font-weight: bold; color: var(--text-primary);">Loading...</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.5rem;">
+                        <span style="color: var(--text-secondary);">💰 Total Cost:</span>
+                        <span id="matchCost" style="font-weight: bold; color: var(--text-primary);">Loading...</span>
+                    </div>
+                </div>
+            </div>
+
+            <p>
+                <strong>What just happened?</strong>
+            </p>
+            <p id="matchStory" style="color: var(--text-secondary); line-height: 1.8;">
+                The AI agent successfully reverse-engineered the hidden text by generating iterative guesses,
+                embedding each one, and measuring vector distance to converge on the target without ever seeing it directly.
+            </p>
+            <p>
+                <strong>Security Implication:</strong> This demonstrates that if an attacker can measure
+                vector distances (via side-channels, error messages, or API responses), they can potentially
+                extract private data from embedding-based systems.
+            </p>
+            <div class="d-flex gap-2 mt-3">
+                <button id="closeExplanationBtn" class="btn btn-custom btn-primary-custom" style="flex: 1;">
+                    ✓ UNDERSTOOD
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // =================================================================
+        // Configuration
+        // =================================================================
+        const config = window.VECTOR_HACKING_CONFIG || {
+            API_URL: 'http://localhost:8000',
+            POLL_INTERVAL: 1000,
+            DEBUG: false
+        };
+        
+        const API_URL = config.API_URL;
+        const POLL_INTERVAL = config.POLL_INTERVAL;
+        
+        // Display API URL in navbar
+        document.getElementById('apiUrl').textContent = `API: ${API_URL}`;
+
+        // =================================================================
+        // Particle Background
+        // =================================================================
+        function createParticles() {
+            const particlesContainer = document.getElementById('particles');
+            const colors = ['var(--accent-green)', 'var(--accent-blue)', 'var(--accent-purple)'];
+            for (let i = 0; i < 50; i++) {
+                const particle = document.createElement('div');
+                particle.className = 'particle';
+                particle.style.left = Math.random() * 100 + '%';
+                particle.style.animationDelay = Math.random() * 20 + 's';
+                particle.style.animationDuration = (15 + Math.random() * 10) + 's';
+                particle.style.background = colors[Math.floor(Math.random() * colors.length)];
+                particlesContainer.appendChild(particle);
+            }
+        }
+        createParticles();
+
+        // =================================================================
+        // DOM Elements
+        // =================================================================
+        const statusBadge = document.getElementById('connectionStatus');
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const guessCountEl = document.getElementById('guessCount');
+        const modelUsedEl = document.getElementById('modelUsed');
+        const costValEl = document.getElementById('costVal');
+        const terminal = document.getElementById('terminal');
+        const explanationModal = document.getElementById('explanationModal');
+        const closeExplanationBtn = document.getElementById('closeExplanationBtn');
+        const targetInput = document.getElementById('targetInput');
+        const targetInputSection = document.getElementById('targetInputSection');
+        const targetDisplaySection = document.getElementById('targetDisplaySection');
+        const targetDisplay = document.getElementById('targetDisplay');
+
+        // =================================================================
+        // State
+        // =================================================================
+        let pollInterval = null;
+        let consecutiveErrors = 0;
+        let lastErrorTime = 0;
+        let lastGuessCount = 0;
+        let isRunning = false;
+        let currentCountDisplay = 0;
+        let targetCount = 0;
+        let lastBestText = '';
+        let celebrationShown = false;
+        let matchFoundData = null;
+
+        // =================================================================
+        // Helpers
+        // =================================================================
+        
+        function log(msg) {
+            if (config.DEBUG) console.log('[VectorHack]', msg);
+        }
+
+        const animateStats = () => {
+            if (currentCountDisplay < targetCount) {
+                const diff = targetCount - currentCountDisplay;
+                const step = Math.max(1, Math.ceil(diff / 8));
+                currentCountDisplay += step;
+                guessCountEl.textContent = currentCountDisplay;
+                guessCountEl.classList.add('animate');
+                setTimeout(() => guessCountEl.classList.remove('animate'), 500);
+            } else if (currentCountDisplay > targetCount && targetCount === 0) {
+                currentCountDisplay = 0;
+                guessCountEl.textContent = 0;
+            }
+            requestAnimationFrame(animateStats);
+        };
+        requestAnimationFrame(animateStats);
+
+        function createConfetti() {
+            const colors = ['#00ff9d', '#00ccff', '#b794f6', '#fbbf24', '#ff4d4d'];
+            for (let i = 0; i < 100; i++) {
+                setTimeout(() => {
+                    const confetti = document.createElement('div');
+                    confetti.className = 'confetti';
+                    confetti.style.left = Math.random() * 100 + '%';
+                    confetti.style.background = colors[Math.floor(Math.random() * colors.length)];
+                    confetti.style.width = (5 + Math.random() * 10) + 'px';
+                    confetti.style.height = (5 + Math.random() * 10) + 'px';
+                    document.body.appendChild(confetti);
+                    setTimeout(() => confetti.remove(), 3000);
+                }, i * 20);
+            }
+        }
+
+        const resetUI = () => {
+            stopPolling();
+            consecutiveErrors = 0;
+            lastErrorTime = 0;
+            statusBadge.textContent = '⚡ SYSTEM IDLE';
+            statusBadge.className = 'status-badge stopped';
+            document.getElementById('comparisonModeDisplay').style.display = 'none';
+            targetCount = 0;
+            currentCountDisplay = 0;
+            guessCountEl.textContent = '0';
+            modelUsedEl.textContent = '-';
+            costValEl.textContent = '$0.00';
+            startBtn.disabled = false;
+            startBtn.textContent = '🚀 INITIATE ATTACK';
+            stopBtn.disabled = true;
+            isRunning = false;
+            lastGuessCount = 0;
+            lastBestText = '';
+            celebrationShown = false;
+            matchFoundData = null;
+            targetInput.disabled = false;
+            targetInput.value = '';
+            targetInputSection.style.opacity = '1';
+            targetInputSection.style.display = 'block';
+            targetDisplaySection.style.display = 'none';
+            targetInput.focus();
+        };
+
+        const logToTerminal = (msg, type = 'text-secondary', icon = '') => {
+            const line = document.createElement('div');
+            line.className = `terminal-line ${type}`;
+            const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false });
+            const iconSpan = icon ? `<span>${icon}</span>` : '';
+            line.innerHTML = `<span class="font-mono opacity-50">[${timestamp}]</span> ${iconSpan}<span>${msg}</span>`;
+            terminal.appendChild(line);
+            terminal.scrollTop = terminal.scrollHeight;
+        };
+
+        const calculateProximity = (error) => {
+            if (error === null || error === undefined || error === Infinity || isNaN(error)) return 0;
+            const maxErr = 2.0;
+            const minErr = 0.35;
+            let pct = (maxErr - error) / (maxErr - minErr) * 100;
+            return Math.max(0, Math.min(100, pct));
+        };
+
+        // =================================================================
+        // API Calls
+        // =================================================================
+        
+        async function apiCall(endpoint, options = {}) {
+            const url = `${API_URL}${endpoint}`;
+            log(`API Call: ${options.method || 'GET'} ${url}`);
+            
+            const response = await fetch(url, {
+                ...options,
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...options.headers
+                }
+            });
+            
+            if (!response.ok) {
+                throw new Error(`API Error: ${response.status}`);
+            }
+            
+            return response.json();
+        }
+
+        const updateStatus = async () => {
+            try {
+                const data = await apiCall('/api/attack/status');
+
+                if (consecutiveErrors > 0) {
+                    consecutiveErrors = 0;
+                    if (statusBadge.textContent.includes('CONNECTION ERROR')) {
+                        if (data.running) {
+                            statusBadge.textContent = '⚡ ATTACK IN PROGRESS';
+                            statusBadge.className = 'status-badge running';
+                        } else if (data.MATCH_FOUND) {
+                            statusBadge.textContent = '🎯 TARGET COMPROMISED';
+                            statusBadge.className = 'status-badge match';
+                        } else {
+                            statusBadge.textContent = '⚡ SYSTEM IDLE';
+                            statusBadge.className = 'status-badge stopped';
+                        }
+                    }
+                }
+
+                // Match found
+                if (data.MATCH_FOUND && !celebrationShown) {
+                    celebrationShown = true;
+                    matchFoundData = data;
+
+                    if (isRunning) {
+                        isRunning = false;
+                        stopPolling();
+
+                        const targetPhrase = data.TARGET || 'Unknown';
+                        const recoveredPhrase = data.CURRENT_BEST_TEXT || 'Unknown';
+                        const error = data.CURRENT_BEST_ERROR || 0;
+                        const guesses = data.GUESSES_MADE || 0;
+                        const cost = data.TOTAL_COST || 0;
+                        const isExactMatch = targetPhrase.toLowerCase().trim() === recoveredPhrase.toLowerCase().trim();
+                        const similarity = isExactMatch ? 100 : Math.max(0, Math.round((1 - (error / 2.0)) * 100));
+
+                        logToTerminal('🎉 *** MATCH FOUND *** Decryption successful!', 'success fw-bold', '🎉');
+                        logToTerminal(`✅ Target: "${targetPhrase}"`, 'info', '🎯');
+                        logToTerminal(`✅ Recovered: "${recoveredPhrase}"`, 'success', '✅');
+                        logToTerminal(`⚡ Error: ${error.toFixed(4)}`, 'info', '⚡');
+
+                        document.getElementById('comparisonModeDisplay').style.display = 'block';
+                        document.getElementById('comparisonOriginal').textContent = `"${targetPhrase}"`;
+                        document.getElementById('comparisonRecovered').textContent = `"${recoveredPhrase}"`;
+                        document.getElementById('comparisonError').textContent = error.toFixed(4);
+                        document.getElementById('comparisonProximity').textContent = calculateProximity(error).toFixed(2) + '%';
+
+                        document.getElementById('originalTarget').textContent = `"${targetPhrase}"`;
+                        document.getElementById('recoveredTarget').textContent = `"${recoveredPhrase}"`;
+                        document.getElementById('matchError').textContent = error.toFixed(4);
+                        document.getElementById('matchGuesses').textContent = guesses.toLocaleString();
+                        document.getElementById('matchCost').textContent = `$${cost.toFixed(4)}`;
+
+                        let story = isExactMatch
+                            ? `🎯 <strong>Perfect Match!</strong> The AI successfully reverse-engineered the exact target phrase "${targetPhrase}" after ${guesses} attempts.`
+                            : `🔓 <strong>Close Match!</strong> The AI recovered "${recoveredPhrase}" which is ${similarity}% similar to the target "${targetPhrase}".`;
+                        document.getElementById('matchStory').innerHTML = story;
+
+                        explanationModal.classList.add('show');
+                    }
+
+                    statusBadge.textContent = '🎯 TARGET COMPROMISED';
+                    statusBadge.className = 'status-badge match';
+                    startBtn.disabled = false;
+                    stopBtn.disabled = true;
+                    startBtn.textContent = '🔄 RESTART ATTACK';
+                }
+                else if (data.running && !isRunning) {
+                    isRunning = true;
+                    statusBadge.textContent = '⚡ ATTACK IN PROGRESS';
+                    statusBadge.className = 'status-badge running';
+                    startBtn.disabled = true;
+                    stopBtn.disabled = false;
+
+                    if (data.TARGET) {
+                        targetDisplay.textContent = `"${data.TARGET}"`;
+                        targetInputSection.style.display = 'none';
+                        targetDisplaySection.style.display = 'block';
+                    }
+
+                    logToTerminal('🚀 Attack sequence initiated!', 'info', '🚀');
+                    logToTerminal('🤖 Deploying AI agents...', 'info', '🤖');
+                    logToTerminal(`🎯 Target locked: "${data.TARGET || 'Unknown'}"`, 'info', '🎯');
+                    startPolling();
+                } else if (!data.running && isRunning && !data.MATCH_FOUND) {
+                    isRunning = false;
+                    stopPolling();
+                    statusBadge.textContent = '⚡ SYSTEM IDLE';
+                    statusBadge.className = 'status-badge stopped';
+                    logToTerminal('⛔ Process halted by user.', 'warning', '⛔');
+                    startBtn.disabled = false;
+                    stopBtn.disabled = true;
+                    startBtn.textContent = '🚀 INITIATE ATTACK';
+                    targetInput.disabled = false;
+                    targetInputSection.style.opacity = '1';
+                    targetInputSection.style.display = 'block';
+                    targetDisplaySection.style.display = 'none';
+                }
+
+                // Update stats
+                if (data.TOTAL_COST !== null && data.TOTAL_COST !== undefined && !isNaN(data.TOTAL_COST)) {
+                    costValEl.textContent = '$' + data.TOTAL_COST.toFixed(4);
+                }
+
+                if (data.GUESSES_MADE !== null && data.GUESSES_MADE !== undefined && !isNaN(data.GUESSES_MADE)) {
+                    targetCount = data.GUESSES_MADE;
+                    lastGuessCount = data.GUESSES_MADE;
+                }
+
+                if (data.CURRENT_BEST_TEXT && data.CURRENT_BEST_TEXT !== "Be" && data.CURRENT_BEST_TEXT !== lastBestText) {
+                    lastBestText = data.CURRENT_BEST_TEXT;
+                    if (data.CURRENT_BEST_ERROR !== null && data.CURRENT_BEST_ERROR !== undefined &&
+                        data.CURRENT_BEST_ERROR !== Infinity && !isNaN(data.CURRENT_BEST_ERROR)) {
+                        logToTerminal(`✨ New optimization: "${data.CURRENT_BEST_TEXT}" (Error: ${data.CURRENT_BEST_ERROR.toFixed(4)})`, 'success', '✨');
+                    } else {
+                        logToTerminal(`✨ New optimization: "${data.CURRENT_BEST_TEXT}"`, 'success', '✨');
+                    }
+                }
+
+                if (data.LAST_ERROR) {
+                    logToTerminal(`❌ System Error: ${data.LAST_ERROR}`, 'error', '❌');
+                }
+
+                if (data.MODEL_USED) {
+                    modelUsedEl.textContent = data.MODEL_USED;
+                }
+
+            } catch (e) {
+                console.error('Poll error', e);
+                consecutiveErrors++;
+                const now = Date.now();
+
+                if (isRunning && (now - lastErrorTime > 5000)) {
+                    if (consecutiveErrors >= 3) {
+                        statusBadge.textContent = '❌ CONNECTION ERROR';
+                        statusBadge.className = 'status-badge stopped';
+                        logToTerminal('❌ Connection error. Retrying...', 'error', '❌');
+                        lastErrorTime = now;
+                    }
+                }
+            }
+        };
+
+        const startPolling = () => {
+            if (pollInterval) return;
+            updateStatus();
+            pollInterval = setInterval(updateStatus, POLL_INTERVAL);
+        };
+
+        const stopPolling = () => {
+            if (pollInterval) {
+                clearInterval(pollInterval);
+                pollInterval = null;
+            }
+        };
+
+        const checkStatus = async () => {
+            await updateStatus();
+        };
+
+        // =================================================================
+        // Event Handlers
+        // =================================================================
+        
+        startBtn.addEventListener('click', async () => {
+            const isRestart = startBtn.textContent.includes('RESTART');
+
+            if (isRestart) {
+                window.location.reload();
+                return;
+            }
+
+            const targetPhrase = targetInput.value.trim();
+
+            if (!targetPhrase) {
+                logToTerminal('❌ Please enter a target phrase first!', 'error', '❌');
+                targetInput.focus();
+                return;
+            }
+
+            logToTerminal(`🎯 Target phrase set: "${targetPhrase}"`, 'info', '🎯');
+            logToTerminal('🔐 Initializing attack vector...', 'info', '🔐');
+            logToTerminal('🔑 Authenticating with AI services...', 'info', '🔑');
+            startBtn.disabled = true;
+            targetInput.disabled = true;
+
+            try {
+                const data = await apiCall('/api/attack/start', {
+                    method: 'POST',
+                    body: JSON.stringify({ target: targetPhrase })
+                });
+                
+                if (data.status === 'started' || data.status === 'already_running') {
+                    logToTerminal('✅ Access granted. Agent active.', 'success', '✅');
+                    targetInputSection.style.opacity = '0.5';
+                    await checkStatus();
+                } else {
+                    logToTerminal('❌ Initialization failed: ' + (data.error || 'Unknown'), 'error', '❌');
+                    startBtn.disabled = false;
+                    targetInput.disabled = false;
+                }
+            } catch (e) {
+                logToTerminal('❌ Network error on start command.', 'error', '❌');
+                startBtn.disabled = false;
+                targetInput.disabled = false;
+            }
+        });
+
+        stopBtn.addEventListener('click', async () => {
+            logToTerminal('⛔ Sending abort signal...', 'warning', '⛔');
+            stopBtn.disabled = true;
+
+            try {
+                await apiCall('/api/attack/stop', { method: 'POST' });
+                await checkStatus();
+            } catch (e) {
+                logToTerminal('❌ Network error on stop command.', 'error', '❌');
+            }
+        });
+
+        closeExplanationBtn.addEventListener('click', () => {
+            explanationModal.classList.remove('show');
+            createConfetti();
+            
+            // Keep victory state visible - don't reset!
+            // User can click "RESTART ATTACK" button when ready
+            if (matchFoundData) {
+                logToTerminal(`📊 Final stats: ${matchFoundData.GUESSES_MADE} guesses, $${matchFoundData.TOTAL_COST.toFixed(4)} cost`, 'info', '📊');
+                logToTerminal('🎉 Victory! Click "RESTART ATTACK" when ready for a new challenge.', 'success', '🎉');
+            }
+        });
+
+        // =================================================================
+        // Initialization
+        // =================================================================
+        
+        const resetOnLoad = async () => {
+            resetUI();
+            terminal.innerHTML = '<div class="terminal-line text-secondary"><span class="font-mono">[SYS]</span> System ready. Waiting for initialization...</div>';
+
+            try {
+                await apiCall('/api/attack/stop', { method: 'POST' });
+            } catch (e) {
+                // Ignore errors on initial stop
+            }
+
+            setTimeout(async () => {
+                await checkStatus();
+                setTimeout(() => logToTerminal(`🔌 Connected to API: ${API_URL}`, 'info', '🔌'), 500);
+                setTimeout(() => logToTerminal('📡 Target vector loaded: [1024 dimensions]', 'info', '📡'), 1200);
+                setTimeout(() => logToTerminal('⚠️ Warning: Target is a longer phrase. This will be challenging!', 'warning', '⚠️'), 1800);
+                setTimeout(() => logToTerminal('⚡ System ready. Press INITIATE ATTACK to begin.', 'success', '⚡'), 2000);
+            }, 100);
+        };
+
+        resetOnLoad();
+    </script>
+</body>
+</html>
+

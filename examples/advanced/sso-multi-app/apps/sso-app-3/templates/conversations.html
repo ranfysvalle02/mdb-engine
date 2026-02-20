@@ -1,0 +1,233 @@
+{% extends "base.html" %}
+
+{% block title %}Conversations | orby{% endblock %}
+
+{% block back_button %}
+<!-- No back button on conversations list page -->
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    .conversations-container {
+        display: flex;
+        gap: 20px;
+        width: 100%;
+        max-width: 1200px;
+        height: calc(100vh - 100px);
+        max-height: 700px;
+    }
+
+    .conversations-sidebar {
+        width: 320px;
+        background: radial-gradient(circle at center, rgba(26, 27, 47, 0.88) 0%, rgba(26, 27, 47, 0.75) 100%);
+        backdrop-filter: blur(18px) saturate(180%);
+        -webkit-backdrop-filter: blur(18px) saturate(180%);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        border-radius: 24px;
+        padding: 20px;
+        overflow-y: auto;
+        box-shadow: 0 15px 40px rgba(0,0,0,0.5), 0 0 40px var(--glow-color) inset;
+    }
+    .conversations-sidebar::-webkit-scrollbar { width: 6px; }
+    .conversations-sidebar::-webkit-scrollbar-track { background: transparent; }
+    .conversations-sidebar::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); border-radius: 3px; }
+
+    .conversations-main {
+        flex: 1;
+        background: radial-gradient(circle at center, rgba(26, 27, 47, 0.88) 0%, rgba(26, 27, 47, 0.75) 100%);
+        backdrop-filter: blur(18px) saturate(180%);
+        -webkit-backdrop-filter: blur(18px) saturate(180%);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        border-radius: 24px;
+        padding: 40px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        box-shadow: 0 15px 40px rgba(0,0,0,0.5), 0 0 40px var(--glow-color) inset;
+    }
+
+    .new-conversation-btn {
+        width: 100%;
+        margin-bottom: 20px;
+        padding: 12px 20px;
+        background: #8A2BE2;
+        color: #fff;
+        border: none;
+        border-radius: 12px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s;
+        font-size: 14px;
+    }
+
+    .new-conversation-btn:hover {
+        background: #9932CC;
+        transform: translateY(-2px);
+    }
+
+    .conversation-item {
+        padding: 12px;
+        margin-bottom: 8px;
+        background: rgba(0, 0, 0, 0.2);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 12px;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+
+    .conversation-item:hover {
+        background: rgba(0, 0, 0, 0.3);
+        border-color: rgba(138, 43, 226, 0.5);
+        transform: translateX(4px);
+    }
+
+    .conversation-item.active {
+        background: rgba(138, 43, 226, 0.2);
+        border-color: rgba(138, 43, 226, 0.8);
+    }
+
+    .conversation-title {
+        font-weight: 600;
+        margin-bottom: 4px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: rgba(255, 255, 255, 0.9);
+        font-size: 14px;
+    }
+
+    .conversation-date {
+        font-size: 11px;
+        opacity: 0.6;
+        color: rgba(255, 255, 255, 0.7);
+    }
+
+    .conversation-memory-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 2px 6px;
+        background: rgba(16, 185, 129, 0.2);
+        border: 1px solid rgba(16, 185, 129, 0.5);
+        border-radius: 10px;
+        font-size: 10px;
+        color: #6ee7b7;
+        margin-top: 4px;
+    }
+
+    .conversation-memory-badge::before {
+        content: "🧠";
+        font-size: 10px;
+    }
+
+    .empty-state {
+        opacity: 0.8;
+        color: rgba(255, 255, 255, 0.9);
+    }
+
+    .empty-state h2 {
+        margin-bottom: 15px;
+        font-size: 24px;
+        font-weight: 600;
+    }
+
+    .empty-state p {
+        margin-bottom: 25px;
+        font-size: 16px;
+        opacity: 0.7;
+    }
+
+    .empty-state .btn {
+        padding: 12px 30px;
+        font-size: 16px;
+        border-radius: 12px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="conversations-container">
+    <div class="conversations-sidebar">
+        <button onclick="createConversation()" class="btn new-conversation-btn">+ New Conversation</button>
+
+        <div id="conversations-list">
+            {% for conversation in conversations %}
+            <div class="conversation-item" onclick="openConversation('{{ conversation._id }}')">
+                <div class="conversation-title">{{ conversation.title }}</div>
+                <div class="conversation-date">
+                    {{ conversation.updated_at.strftime('%Y-%m-%d %H:%M') if conversation.updated_at else 'N/A' }}
+                </div>
+                <div class="conversation-memory-badge" style="display: none;" id="memory-badge-{{ conversation._id }}">
+                    Memory enabled
+                </div>
+            </div>
+            {% else %}
+            <div class="empty-state" style="text-align: center; padding: 40px 0;">
+                <p>No conversations yet</p>
+                <p style="font-size: 14px; opacity: 0.7;">Create your first conversation to get started!</p>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <div class="conversations-main">
+        <div class="empty-state">
+            <h2>💬 Welcome to Conversations</h2>
+            <p>Select a conversation from the sidebar or create a new one to start chatting with AI.</p>
+            <button onclick="createConversation()" class="btn">Create New Conversation</button>
+        </div>
+    </div>
+</div>
+
+<script>
+// Helper to read cookies for CSRF token
+function getCookie(name) {
+    const value = `; ${document.cookie}`;
+    const parts = value.split(`; ${name}=`);
+    if (parts.length === 2) return parts.pop().split(';').shift();
+    return '';
+}
+
+async function createConversation() {
+    try {
+        const response = await fetch(BASE + '/api/conversations', {
+            method: 'POST',
+            headers: { 'X-CSRF-Token': getCookie('csrf_token') }
+        });
+
+        if (response.ok) {
+            const data = await response.json();
+            window.location.href = `${BASE}/conversations/${data.conversation._id}`;
+        } else {
+            alert('Failed to create conversation');
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+function openConversation(conversationId) {
+    window.location.href = `${BASE}/conversations/${conversationId}`;
+}
+
+// Check if memory service is available and show badges
+window.addEventListener('load', async () => {
+    try {
+        const response = await fetch(BASE + '/api/memories/stats');
+        if (response.ok) {
+            const data = await response.json();
+            if (data.success && data.stats && data.stats.memory_enabled) {
+                // Show memory badge on all conversations
+                document.querySelectorAll('[id^="memory-badge-"]').forEach(badge => {
+                    badge.style.display = 'inline-flex';
+                });
+            }
+        }
+    } catch (error) {
+        console.error('Failed to check memory status:', error);
+    }
+});
+</script>
+{% endblock %}

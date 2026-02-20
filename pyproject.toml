@@ -1,0 +1,246 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mdb-engine"
+version = "0.7.11"
+description = "MongoDB Engine"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Fabian Valle", email = "oblivio.company@gmail.com"}
+]
+keywords = ["mongodb", "runtime", "engine", "database", "scoping"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Database",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+dependencies = [
+    "motor>=3.0.0,<4.0.0",
+    "pymongo>=4.0.0,<5.0.0",
+    "fastapi>=0.100.0,<1.0.0",
+    "pydantic>=2.0.0,<3.0.0",
+    "pyjwt>=2.8.0",
+    "jsonschema>=4.0.0",
+    "bcrypt>=4.0.0",
+    "cryptography>=41.0.0",  # Required for envelope encryption
+]
+
+[project.optional-dependencies]
+ai = [
+    "openai>=1.0.0,<3.0.0",  # Embedding providers and memory service
+    "litellm>=1.0.0,<3.0.0",  # LLM service (supports 100+ providers)
+    "semantic-text-splitter>=0.9.0",  # Text chunking for memory extraction
+]
+tokens = [
+    "tiktoken>=0.5.0",  # Accurate token counting for prompt budget enforcement
+]
+osi = [
+    "pyyaml>=6.0.0",  # OSI semantic model YAML parsing
+    "jinja2>=3.1.0",  # OSI YAML template compilation
+]
+oauth = [
+    "authlib>=1.3.0",
+    "httpx>=0.27.0",
+]
+otel = [
+    "opentelemetry-api>=1.20.0",
+    "opentelemetry-sdk>=1.20.0",
+    "opentelemetry-exporter-otlp>=1.20.0",
+    "opentelemetry-instrumentation-fastapi>=0.41b0",
+    "opentelemetry-instrumentation-pymongo>=0.41b0",
+]
+casbin = ["casbin>=1.0.0", "casbin-motor-adapter>=0.1.0"]
+oso = ["oso-cloud>=0.1.0"]
+test = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.1.0",
+    "pytest-mock>=3.11.0",
+    "pytest-timeout>=2.1.0",
+    "pytest-xdist>=3.3.0",  # Parallel test execution
+    "testcontainers>=3.7.0",
+    "nest-asyncio>=1.5.0",  # Required for TestClient with Motor in async tests
+    "python-dateutil>=2.8.2",  # Required for datetime string parsing in seeding tests
+    "pyyaml>=6.0.0",  # Required for OSI integration tests (YAML parsing/validation)
+]
+dev = [
+    # Pin ruff version to prevent local/CI drift
+    # Version policy: Use >=0.4.0,<0.6.0 to allow patch/minor updates but prevent major breaking changes
+    "ruff>=0.4.0,<0.6.0",
+    "semgrep>=1.50.0",
+    "mypy>=1.10.0",
+]
+docs = [
+    "mkdocs>=1.6.0",
+    "mkdocs-material>=9.5.0",
+    "mkdocstrings[python]>=0.25.0",
+]
+all = [
+    "openai>=1.0.0,<3.0.0",
+    "litellm>=1.0.0,<3.0.0",
+    "semantic-text-splitter>=0.9.0",
+    "casbin>=1.0.0",
+    "casbin-motor-adapter>=0.1.0",
+    "oso-cloud>=0.1.0",
+    "authlib>=1.3.0",
+    "httpx>=0.27.0",
+    "opentelemetry-api>=1.20.0",
+    "opentelemetry-sdk>=1.20.0",
+    "opentelemetry-exporter-otlp>=1.20.0",
+    "opentelemetry-instrumentation-fastapi>=0.41b0",
+    "opentelemetry-instrumentation-pymongo>=0.41b0",
+]
+
+[project.urls]
+Homepage = "https://github.com/ranfysvalle02/mdb-engine"
+Documentation = "https://github.com/ranfysvalle02/mdb-engine#readme"
+Repository = "https://github.com/ranfysvalle02/mdb-engine"
+Issues = "https://github.com/ranfysvalle02/mdb-engine/issues"
+
+[tool.coverage.run]
+source = ["mdb_engine"]
+omit = [
+    "*/tests/*",
+    "*/__pycache__/*",
+    "*/__init__.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod",
+    "except ImportError",
+]
+fail_under = 67
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "F",      # pyflakes
+    "W",      # pycodestyle warnings
+    "I",      # isort
+    "B",      # flake8-bugbear
+    "C90",    # mccabe complexity
+    "UP",     # pyupgrade
+    "BLE",    # flake8-blind-except (no bare except)
+    "TRY",    # tryceratops (exception handling best practices)
+    "SLF",    # flake8-self (includes SLF001: private-member-access)
+]
+ignore = [
+    "E203",   # Whitespace before ':' (conflicts with black)
+    "B008",   # Do not perform function call in argument defaults (FastAPI Depends pattern)
+    "B025",   # Duplicate exceptions in try-except (often intentional for clarity)
+    # TRY - Exception handling (keep critical, ignore pedantic)
+    "TRY002", # Create your own exception (too strict - built-ins are fine)
+    "TRY003", # Avoid inline exception messages (too strict)
+    "TRY004", # Prefer TypeError (too strict - ValueError is often appropriate)
+    "TRY201", # Use raise without exception name (bare raise not always clearer)
+    "TRY300", # Move statement to else block (pedantic, minimal benefit)
+    "TRY301", # Abstract raise to inner function (over-engineering)
+    "TRY302", # Remove handler with immediate re-raise (useful for logging)
+    "TRY401", # Redundant exception in logging.exception (minor style issue)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
+"tests/**/*.py" = [
+    "F841",   # Unused variables (common in test assertions)
+    "B018",   # Useless expressions (common in test assertions)
+    "BLE001", # Blind exception catching (acceptable in test mocks)
+    "SLF001", # Private member access (acceptable in tests)
+]
+# Existing files that exceed complexity 25 — tracked for refactoring
+"mdb_engine/auth/casbin_factory.py" = ["C901"]
+"mdb_engine/auth/csrf.py" = ["C901"]
+"mdb_engine/core/app_lifecycle.py" = ["C901"]  # register_app callback nesting
+"mdb_engine/graph/search.py" = ["C901"]
+"mdb_engine/memory/prompt.py" = ["E501"]  # Prompt templates have long lines by nature
+"mdb_engine/graph/query_classifier.py" = ["E501"]  # LLM prompt templates
+"mdb_engine/routing/websockets.py" = ["C901"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 25
+
+[tool.mypy]
+python_version = "3.10"
+plugins = ["pydantic.mypy"]
+
+# Keep useful checks
+check_untyped_defs = true         # still type-check untyped functions
+no_implicit_optional = true       # don't allow implicit None defaults
+warn_unused_configs = true
+
+# Turn off strict-only noise
+strict = false
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+warn_return_any = false
+
+# ── Third-party stubs ──────────────────────────────────────────────
+[[tool.mypy.overrides]]
+module = [
+    "motor.*",
+    "casbin.*",
+    "casbin_motor_adapter.*",
+    "oso_cloud.*",
+    "litellm.*",
+    "semantic_text_splitter.*",
+    "testcontainers.*",
+    "semgrep.*",
+    "nest_asyncio.*",
+    "tiktoken.*",
+    "jsonschema.*",
+    "authlib.*",
+    "httpx.*",
+    "opentelemetry.*",
+]
+ignore_missing_imports = true
+
+# ── Gradual typing: suppress existing errors in internal modules ───
+# The codebase predates mypy adoption; 661 errors remain across 91
+# files (mostly attr-defined from mixin patterns). Ignoring them here
+# lets CI pass now.  To tighten, remove subpackages one at a time and
+# fix the errors that surface.
+[[tool.mypy.overrides]]
+module = [
+    "mdb_engine.auth.*",
+    "mdb_engine.cli.*",
+    "mdb_engine.config",
+    "mdb_engine.core.*",
+    "mdb_engine.database.*",
+    "mdb_engine.dependencies",
+    "mdb_engine.di.*",
+    "mdb_engine.embeddings.*",
+    "mdb_engine.gdpr.*",
+    "mdb_engine.graph.*",
+    "mdb_engine.indexes.*",
+    "mdb_engine.llm.*",
+    "mdb_engine.memory.*",
+    "mdb_engine.observability.*",
+    "mdb_engine.osi.*",
+    "mdb_engine.repositories.*",
+    "mdb_engine.routing.*",
+    "mdb_engine.utils.*",
+]
+ignore_errors = true

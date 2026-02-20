@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>{% block title %}orby | OBLIVIO LLC{% endblock %}</title>
+    <style>
+        /* Global Reset and Box Sizing */
+        :root {
+            --glow-color: rgba(138, 43, 226, 0.7);
+            --safe-area-inset-top: env(safe-area-inset-top, 0px);
+            --safe-area-inset-bottom: env(safe-area-inset-bottom, 0px);
+            --mongodb-green: #00ED64;
+            --mongodb-dark-green: #13AA52;
+            --mongodb-bg: #0D1117;
+            --mongodb-bg-secondary: #161B22;
+            --mongodb-bg-tertiary: #21262D;
+            --mongodb-border: #30363D;
+            --mongodb-text: #E6EDF3;
+            --mongodb-text-secondary: #8B949E;
+        }
+        *, *::before, *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        html {
+            -webkit-text-size-adjust: 100%;
+        }
+
+        body, html {
+            overflow: hidden;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            color: #fff;
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
+            width: 100%;
+            height: 100%;
+            position: fixed;
+        }
+
+        /* Background & Centering */
+        body {
+            background: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        /* --- INTERACTIVE CANVAS BACKGROUND --- */
+        #interactive-background {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: -3;
+        }
+
+        /* Enhanced Header */
+        .header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 1000;
+            padding: 12px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: rgba(0, 0, 0, 0.4);
+            backdrop-filter: blur(15px) saturate(180%);
+            -webkit-backdrop-filter: blur(15px) saturate(180%);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .back-btn {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            color: rgba(255, 255, 255, 0.9);
+            text-decoration: none;
+            padding: 6px 12px;
+            border-radius: 8px;
+            transition: all 0.2s;
+            font-size: 14px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .back-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: rgba(138, 43, 226, 0.5);
+            transform: translateX(-2px);
+        }
+
+        .back-btn svg {
+            width: 16px;
+            height: 16px;
+        }
+
+        .header h1 {
+            font-size: 18px;
+            font-weight: 600;
+            color: rgba(255, 255, 255, 0.95);
+            margin: 0;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .nav-links a {
+            color: rgba(255, 255, 255, 0.8);
+            text-decoration: none;
+            padding: 6px 14px;
+            border-radius: 8px;
+            transition: all 0.2s;
+            font-size: 13px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .nav-links a:hover {
+            background: rgba(138, 43, 226, 0.2);
+            border-color: rgba(138, 43, 226, 0.5);
+            color: #fff;
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .user-email {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.7);
+            padding: 4px 10px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 6px;
+        }
+
+        .container {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding-top: 60px;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            background: #8A2BE2;
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+            transition: all 0.2s;
+        }
+
+        .btn:hover {
+            background: #9932CC;
+            transform: translateY(-2px);
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.15);
+        }
+    </style>
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+    <canvas id="interactive-background"></canvas>
+    
+    <header class="header">
+        <div class="header-left">
+            {% block back_button %}
+            <a href="{{ base_path }}/conversations" class="back-btn" title="Back to Conversations">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/>
+                </svg>
+                <span>Back</span>
+            </a>
+            {% endblock %}
+            <h1>orby</h1>
+        </div>
+        <nav class="nav-links">
+            {% if user %}
+                <a href="{{ base_path }}/conversations" title="All Conversations">💬 Conversations</a>
+                <a href="{{ base_path }}/persona" title="Persona">🎭 Persona</a>
+                <div class="user-info">
+                    <span class="user-email">{{ user.email }}</span>
+                    <a href="#" onclick="logout(); return false;" title="Logout">🚪 Logout</a>
+                </div>
+            {% else %}
+                <a href="{{ base_path }}/login">🔐 Login</a>
+                <a href="{{ base_path }}/register">✨ Register</a>
+            {% endif %}
+        </nav>
+    </header>
+
+    <main class="container">
+        {% block content %}{% endblock %}
+    </main>
+
+    <script>
+    // --- LIVING BACKGROUND SCRIPT ---
+    const canvas = document.getElementById('interactive-background');
+    const ctx = canvas.getContext('2d');
+    let particlesArray;
+
+    const mouse = {
+        x: null,
+        y: null,
+        radius: 150
+    };
+
+    window.addEventListener('mousemove', event => {
+        mouse.x = event.x;
+        mouse.y = event.y;
+    });
+    window.addEventListener('touchmove', event => {
+        if (event.touches.length > 0) {
+            mouse.x = event.touches[0].clientX;
+            mouse.y = event.touches[0].clientY;
+        }
+    });
+    window.addEventListener('touchend', () => {
+        mouse.x = null;
+        mouse.y = null;
+    });
+    window.addEventListener('mouseout', () => {
+        mouse.x = null;
+        mouse.y = null;
+    });
+
+    class Particle {
+        constructor(x, y, size, color) {
+            this.x = x;
+            this.y = y;
+            this.size = size;
+            this.color = color;
+            this.density = (Math.random() * 10) + 1;
+            this.vx = (Math.random() - 0.5) * 0.4;
+            this.vy = (Math.random() - 0.5) * 0.4;
+        }
+
+        draw() {
+            ctx.fillStyle = this.color;
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        update() {
+            if (mouse.x !== null && mouse.y !== null) {
+                let dx = mouse.x - this.x;
+                let dy = mouse.y - this.y;
+                let distance = Math.sqrt(dx * dx + dy * dy);
+                if (distance < 1) distance = 1;
+
+                if (distance < mouse.radius) {
+                    let force = (1 - (distance / mouse.radius)) * this.density * 0.05;
+                    let ax = (dx / distance) * force;
+                    let ay = (dy / distance) * force;
+                    this.vx += ax;
+                    this.vy += ay;
+                }
+            }
+
+            this.vx *= 0.97;
+            this.vy *= 0.97;
+
+            this.x += this.vx;
+            this.y += this.vy;
+
+            if (this.x > canvas.width + this.size) this.x = -this.size;
+            if (this.x < -this.size) this.x = canvas.width + this.size;
+            if (this.y > canvas.height + this.size) this.y = -this.size;
+            if (this.y < -this.size) this.y = canvas.height + this.size;
+        }
+    }
+
+    function init() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        particlesArray = [];
+        let numberOfParticles = (canvas.width * canvas.height) / 9000;
+        mouse.radius = (canvas.width / 10) + 50;
+
+        const colors = [
+            'rgba(255, 255, 255, OPACITY)',
+            'rgba(173, 216, 230, OPACITY)',
+            'rgba(221, 160, 221, OPACITY)'
+        ];
+        
+        for (let i = 0; i < numberOfParticles; i++) {
+            let size = Math.random() * 2 + 1;
+            let x = Math.random() * canvas.width;
+            let y = Math.random() * canvas.height;
+            let baseColor = colors[Math.floor(Math.random() * colors.length)];
+            let opacity = Math.random() * 0.6 + 0.2;
+            let color = baseColor.replace('OPACITY', opacity);
+            particlesArray.push(new Particle(x, y, size, color));
+        }
+    }
+
+    function connectParticles() {
+        let opacityValue = 1;
+        const connectionRadius = 110;
+        for (let a = 0; a < particlesArray.length; a++) {
+            for (let b = a + 1; b < particlesArray.length; b++) {
+                let dx = particlesArray[a].x - particlesArray[b].x;
+                let dy = particlesArray[a].y - particlesArray[b].y;
+                let distance = Math.sqrt(dx * dx + dy * dy);
+
+                if (distance < connectionRadius) {
+                    opacityValue = 1 - (distance / connectionRadius);
+                    ctx.strokeStyle = 'rgba(173, 216, 230, ' + opacityValue * 0.5 + ')';
+                    ctx.lineWidth = 1;
+                    ctx.beginPath();
+                    ctx.moveTo(particlesArray[a].x, particlesArray[a].y);
+                    ctx.lineTo(particlesArray[b].x, particlesArray[b].y);
+                    ctx.stroke();
+                }
+            }
+        }
+    }
+
+    function animate() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        for (let i = 0; i < particlesArray.length; i++) {
+            particlesArray[i].update();
+            particlesArray[i].draw();
+        }
+        connectParticles();
+        requestAnimationFrame(animate);
+    }
+
+    window.addEventListener('resize', init);
+    init();
+    animate();
+    // --- END OF LIVING BACKGROUND SCRIPT ---
+
+    function getCookie(name) {
+        const value = `; ${document.cookie}`;
+        const parts = value.split(`; ${name}=`);
+        if (parts.length === 2) return parts.pop().split(';').shift();
+        return '';
+    }
+    
+    const BASE = '{{ base_path }}';
+    async function logout() {
+        try {
+            await fetch(BASE + '/logout', {
+                method: 'POST',
+                headers: { 'X-CSRF-Token': getCookie('csrf_token') }
+            });
+            window.location.href = '/auth-hub/login';
+        } catch (error) {
+            console.error('Logout error:', error);
+            // Fallback: redirect to auth hub on error
+            window.location.href = '/auth-hub/login';
+        }
+    }
+    </script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

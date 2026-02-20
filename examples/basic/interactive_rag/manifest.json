@@ -1,0 +1,63 @@
+{
+  "schema_version": "2.0",
+  "slug": "interactive_rag",
+  "name": "Interactive RAG Agent",
+  "description": "An interactive RAG (Retrieval Augmented Generation) system with knowledge base management, vector search, and AI-powered chat",
+  "status": "active",
+  "developer_id": "developer@example.com",
+  "auth": {
+    "policy": {
+      "required": false,
+      "allow_anonymous": true
+    },
+    "users": {
+      "enabled": false
+    }
+  },
+  "managed_indexes": {
+    "knowledge_base_sessions": [
+      {
+        "type": "vectorSearch",
+        "name": "embedding_vector_index",
+        "definition": {
+          "fields": [
+            {
+              "type": "vector",
+              "path": "embedding",
+              "numDimensions": 1536,
+              "similarity": "cosine"
+            },
+            {
+              "type": "filter",
+              "path": "metadata.session_id"
+            }
+          ]
+        }
+      },
+      {
+        "type": "regular",
+        "name": "session_source_idx",
+        "keys": {
+          "metadata.session_id": 1,
+          "metadata.source": 1
+        },
+        "options": {
+          "background": true
+        }
+      }
+    ]
+  },
+  "embedding_config": {
+    "enabled": true,
+    "max_tokens_per_chunk": 1000,
+    "tokenizer_model": "gpt-3.5-turbo",
+    "default_embedding_model": "text-embedding-3-small"
+  },
+  "cors": {
+    "enabled": true,
+    "allow_origins": ["http://localhost:3000", "http://localhost:5001"],
+    "allow_credentials": false,
+    "allow_methods": ["*"],
+    "allow_headers": ["*"]
+  }
+}

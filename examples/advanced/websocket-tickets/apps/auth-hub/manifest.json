@@ -1,0 +1,25 @@
+{
+  "schema_version": "2.0",
+  "slug": "auth-hub",
+  "name": "Auth Hub",
+  "description": "Central authentication hub for WebSocket tickets example",
+  "status": "active",
+  "auth": {
+    "mode": "shared",
+    "roles": ["user", "admin"],
+    "default_role": "user",
+    "require_role": "user",
+    "public_routes": ["/", "/health", "/login", "/register"]
+  },
+  "cors": {
+    "enabled": true,
+    "allow_origins": ["http://localhost:8000"],
+    "allow_credentials": true,
+    "allow_methods": ["*"],
+    "allow_headers": ["*"]
+  },
+  "data_access": {
+    "read_scopes": ["auth-hub"],
+    "write_scope": "auth-hub"
+  }
+}

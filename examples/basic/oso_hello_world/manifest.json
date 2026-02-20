@@ -1,0 +1,56 @@
+{
+  "schema_version": "2.0",
+  "slug": "oso_hello_world",
+  "name": "OSO Cloud Hello World",
+  "description": "Simple hello world example demonstrating OSO Cloud authorization",
+  "status": "active",
+  "developer_id": "developer@example.com",
+  "auth": {
+    "policy": {
+      "provider": "oso",
+      "required": true,
+      "allow_anonymous": false,
+      "authorization": {
+        "initial_roles": [
+          {"user": "alice@example.com", "role": "editor"},
+          {"user": "bob@example.com", "role": "viewer"}
+        ]
+      }
+    },
+    "users": {
+      "enabled": true,
+      "strategy": "app_users",
+      "collection_name": "users",
+      "session_cookie_name": "oso_hello_world_session",
+      "session_ttl_seconds": 86400,
+      "demo_users": [
+        {"email": "alice@example.com", "password": "password123", "role": "editor"},
+        {"email": "bob@example.com", "password": "password123", "role": "viewer"}
+      ],
+      "demo_user_seed_strategy": "auto"
+    }
+  },
+  "cors": {
+    "enabled": true,
+    "allow_origins": ["http://localhost:3000", "http://localhost:8000"],
+    "allow_credentials": true,
+    "allow_methods": ["*"],
+    "allow_headers": ["*"]
+  },
+  "initial_data": {
+    "documents": [
+      {
+        "title": "Welcome to OSO Cloud",
+        "content": "This document demonstrates OSO Cloud authorization. Users with 'read' permission can view documents, and users with 'write' permission can create new ones.",
+        "created_by": "alice@example.com",
+        "created_at": "2024-01-01T00:00:00Z"
+      },
+      {
+        "title": "Getting Started",
+        "content": "Try switching between Alice (editor) and Bob (viewer) to see different permission levels in action!",
+        "created_by": "alice@example.com",
+        "created_at": "2024-01-01T00:00:00Z"
+      }
+    ]
+  }
+}

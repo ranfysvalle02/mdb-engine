@@ -1,0 +1,45 @@
+{
+  "schema_version": "2.0",
+  "slug": "chat-app",
+  "name": "Chat App",
+  "description": "Real-time chat with WebSocket ticket authentication",
+  "status": "active",
+  "auth": {
+    "mode": "shared",
+    "auth_hub_url": "/auth-hub",
+    "roles": ["user"],
+    "require_role": "user",
+    "public_routes": ["/health"]
+  },
+  "websockets": {
+    "chat": {
+      "path": "/ws",
+      "auth": {
+        "required": true,
+        "csrf_required": false
+      },
+      "ping_interval": 30,
+      "ticket_ttl_seconds": 3
+    }
+  },
+  "cors": {
+    "enabled": true,
+    "allow_origins": ["http://localhost:8000"],
+    "allow_credentials": true,
+    "allow_methods": ["*"],
+    "allow_headers": ["*"]
+  },
+  "managed_indexes": {
+    "messages": [
+      {
+        "type": "regular",
+        "keys": {"created_at": -1},
+        "name": "messages_created_idx"
+      }
+    ]
+  },
+  "data_access": {
+    "read_scopes": ["chat-app"],
+    "write_scope": "chat-app"
+  }
+}

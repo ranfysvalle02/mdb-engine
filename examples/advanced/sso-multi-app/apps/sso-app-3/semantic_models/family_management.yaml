@@ -1,0 +1,1666 @@
+# ---------------------------------------------------------------------------
+# Family Nexus -- OSI Semantic Model
+# ---------------------------------------------------------------------------
+# A comprehensive family management model for an AI household assistant.
+# Tracks family members, health records, medications, allergies,
+# vaccinations, appointments, routines, meal plans, emergency contacts,
+# pets, grocery lists, chores, homework, budgets, and device locations.
+#
+# 17 datasets  |  22 relationships  |  11 metrics  |  600+ synonyms
+#
+# Loaded by mdb-engine via osi_config.models_path in manifest.json.
+# ---------------------------------------------------------------------------
+
+semantic_model:
+  - name: family_management
+    description: >
+      Comprehensive family management model for an AI household assistant.
+      Tracks family members, health records, medications, allergies,
+      vaccinations, appointments, routines, meal plans, emergency contacts,
+      pets, grocery lists, chores, homework, budgets, and device locations.
+    ai_context:
+      synonyms:
+        - family database
+        - household
+        - home management
+        - family organizer
+        - family planner
+        - family nexus
+        - home assistant
+        - family hub
+
+    # -----------------------------------------------------------------------
+    # DATASETS
+    # -----------------------------------------------------------------------
+    datasets:
+
+      # --- Core: Family Members -------------------------------------------
+      - name: family_member
+        source: mdb_engine.ai_chat.family_member
+        primary_key: [member_id]
+        fields:
+          - name: member_name
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: name
+            ai_context:
+              synonyms: [name, full name, first name, who]
+          - name: role
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: role
+            ai_context:
+              synonyms: [family role, position, title, relationship role]
+          - name: birthday
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: birthday
+            dimension:
+              is_time: true
+            ai_context:
+              synonyms: [date of birth, DOB, born, birth date, age]
+          - name: phone
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: phone
+            ai_context:
+              synonyms: [phone number, cell, mobile, telephone, contact number]
+          - name: email
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: email
+            ai_context:
+              synonyms: [email address, e-mail]
+          - name: blood_type
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: blood_type
+            ai_context:
+              synonyms: [blood group, type, blood]
+          - name: insurance_id
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: insurance_id
+            ai_context:
+              synonyms: [insurance number, policy number, member ID, insurance card]
+          - name: primary_doctor
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: primary_doctor
+            ai_context:
+              synonyms: [PCP, family doctor, general practitioner, GP, physician, pediatrician]
+          - name: school
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: school
+            ai_context:
+              synonyms: [school name, attends, enrolled, grade school, daycare, preschool]
+          - name: grade
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: grade
+            ai_context:
+              synonyms: [class, year, grade level]
+          - name: employer
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: employer
+            ai_context:
+              synonyms: [workplace, works at, company, job, occupation]
+          - name: dietary_preferences
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: dietary_preferences
+            ai_context:
+              synonyms: [diet, vegetarian, vegan, gluten-free, kosher, halal, food preferences, eating habits]
+          - name: notes
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: notes
+            ai_context:
+              synonyms: [additional info, comments, details]
+        ai_context:
+          synonyms:
+            - family
+            - person
+            - member
+            - kid
+            - parent
+            - spouse
+            - child
+            - relative
+            - son
+            - daughter
+            - husband
+            - wife
+            - brother
+            - sister
+            - grandparent
+            - baby
+            - toddler
+            - teen
+            - teenager
+
+      # --- Health: Allergies -----------------------------------------------
+      - name: allergy
+        source: mdb_engine.ai_chat.allergy
+        primary_key: [allergy_id]
+        fields:
+          - name: allergen
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: allergen
+            ai_context:
+              synonyms: ["allergic to", trigger, substance, "what they're allergic to"]
+          - name: severity
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: severity
+            ai_context:
+              synonyms: [how bad, level, risk level, danger level, mild, moderate, severe, life-threatening, anaphylaxis]
+          - name: reaction
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: reaction
+            ai_context:
+              synonyms: [symptoms, what happens, reaction type, hives, swelling, rash, breathing difficulty]
+          - name: diagnosed_date
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: diagnosed_date
+            dimension:
+              is_time: true
+            ai_context:
+              synonyms: [when diagnosed, discovered, found out]
+          - name: epipen_location
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: epipen_location
+            ai_context:
+              synonyms: [EpiPen, epinephrine, auto-injector, where is the EpiPen]
+          - name: notes
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: notes
+        ai_context:
+          synonyms:
+            - allergic
+            - allergies
+            - allergy
+            - reaction
+            - intolerance
+            - sensitivity
+            - food allergy
+            - drug allergy
+            - seasonal allergy
+            - "can't eat"
+            - "can't have"
+            - avoid
+
+      # --- Health: Medications ---------------------------------------------
+      - name: medication
+        source: mdb_engine.ai_chat.medication
+        primary_key: [medication_id]
+        fields:
+          - name: medication_name
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: name
+            ai_context:
+              synonyms: [drug name, medicine name, prescription name, what medication]
+          - name: dosage
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: dosage
+            ai_context:
+              synonyms: [dose, amount, how much, mg, ml, strength]
+          - name: frequency
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: frequency
+            ai_context:
+              synonyms: [how often, schedule, times per day, daily, twice daily, weekly, as needed, PRN]
+          - name: prescriber
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: prescriber
+            ai_context:
+              synonyms: [prescribed by, doctor, provider, who prescribed]
+          - name: reason
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: reason
+            ai_context:
+              synonyms: [what for, why, indication, prescribed for, treats]
+          - name: start_date
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: start_date
+            dimension:
+              is_time: true
+            ai_context:
+              synonyms: [started, began, since when]
+          - name: end_date
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: end_date
+            dimension:
+              is_time: true
+            ai_context:
+              synonyms: [stopped, ended, until when, discontinued]
+          - name: refill_date
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: refill_date
+            dimension:
+              is_time: true
+            ai_context:
+              synonyms: [next refill, refill due, renewal, when to refill]
+          - name: pharmacy
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: pharmacy
+            ai_context:
+              synonyms: [drugstore, pharmacy name, where to pick up, CVS, Walgreens]
+          - name: side_effects
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: side_effects
+            ai_context:
+              synonyms: [side effect, adverse effects, reactions to medication, makes them feel]
+          - name: notes
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: notes
+        ai_context:
+          synonyms:
+            - medicine
+            - prescription
+            - drug
+            - pill
+            - meds
+            - rx
+            - supplement
+            - vitamin
+            - inhaler
+            - drops
+            - cream
+            - ointment
+            - injection
+            - takes
+            - on medication
+
+      # --- Health: Medical Conditions --------------------------------------
+      - name: medical_condition
+        source: mdb_engine.ai_chat.medical_condition
+        primary_key: [condition_id]
+        fields:
+          - name: condition_name
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: condition
+            ai_context:
+              synonyms: [diagnosis, condition, disease, disorder, illness, what they have]
+          - name: diagnosed_date
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: diagnosed_date
+            dimension:
+              is_time: true
+            ai_context:
+              synonyms: [when diagnosed, found out, date of diagnosis]
+          - name: status
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: status
+            ai_context:
+              synonyms: [current status, active, resolved, managed, in remission, chronic]
+          - name: treating_doctor
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: treating_doctor
+            ai_context:
+              synonyms: [specialist, doctor, provider, who treats]
+          - name: treatment_plan
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: treatment_plan
+            ai_context:
+              synonyms: [treatment, care plan, "how it's treated", therapy, management plan]
+          - name: notes
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: notes
+        ai_context:
+          synonyms:
+            - condition
+            - diagnosis
+            - health issue
+            - health problem
+            - disease
+            - illness
+            - chronic
+            - asthma
+            - diabetes
+            - ADHD
+            - anxiety
+            - eczema
+
+      # --- Health: Vaccinations --------------------------------------------
+      - name: vaccination
+        source: mdb_engine.ai_chat.vaccination
+        primary_key: [vaccination_id]
+        fields:
+          - name: vaccine_name
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: vaccine_name
+            ai_context:
+              synonyms: [shot, immunization, vaccine, jab, booster]
+          - name: date_given
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: date_given
+            dimension:
+              is_time: true
+            ai_context:
+              synonyms: [when given, administered, received, date of vaccination]
+          - name: next_due
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: next_due
+            dimension:
+              is_time: true
+            ai_context:
+              synonyms: [next dose, due date, when is the next one, booster due]
+          - name: provider
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: provider
+            ai_context:
+              synonyms: [given by, administered by, clinic, doctor]
+          - name: lot_number
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: lot_number
+            ai_context:
+              synonyms: [batch number, lot, batch]
+          - name: notes
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: notes
+        ai_context:
+          synonyms:
+            - vaccine
+            - vaccination
+            - immunization
+            - shot
+            - booster
+            - flu shot
+            - COVID vaccine
+            - MMR
+            - TDAP
+            - polio
+            - HPV
+
+      # --- Scheduling: Appointments ----------------------------------------
+      - name: appointment
+        source: mdb_engine.ai_chat.appointment
+        primary_key: [appointment_id]
+        fields:
+          - name: title
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: title
+            ai_context:
+              synonyms: [appointment name, event name, what is it, description]
+          - name: date
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: date
+            dimension:
+              is_time: true
+            ai_context:
+              synonyms: [when, appointment date, scheduled for, on what day]
+          - name: time
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: time
+            ai_context:
+              synonyms: [at what time, appointment time, starts at, "o'clock"]
+          - name: location
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: location
+            ai_context:
+              synonyms: [where, address, place, office, clinic]
+          - name: provider
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: provider
+            ai_context:
+              synonyms: [doctor, dentist, specialist, therapist, with whom]
+          - name: type
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: type
+            ai_context:
+              synonyms: [appointment type, kind, category, checkup, dental, eye exam, well visit, sick visit, school event, parent-teacher conference]
+          - name: remind_days_before
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: remind_days_before
+            ai_context:
+              synonyms: [reminder, remind me, advance notice, heads up]
+          - name: recurrence
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: recurrence
+            ai_context:
+              synonyms: [recurring, repeating, every week, every month, annual, how often]
+          - name: notes
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: notes
+        ai_context:
+          synonyms:
+            - appointment
+            - event
+            - calendar
+            - schedule
+            - doctor visit
+            - checkup
+            - meeting
+            - reminder
+            - due date
+            - deadline
+            - school event
+            - practice
+            - game
+            - recital
+            - birthday party
+
+      # --- Scheduling: Routines --------------------------------------------
+      - name: routine
+        source: mdb_engine.ai_chat.routine
+        primary_key: [routine_id]
+        fields:
+          - name: routine_name
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: name
+            ai_context:
+              synonyms: [task name, chore name, routine name, what is it]
+          - name: frequency
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: frequency
+            ai_context:
+              synonyms: [how often, daily, weekly, monthly, every day, schedule]
+          - name: assigned_to
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: assigned_to
+            ai_context:
+              synonyms: [who does it, responsible, assigned, whose job, whose turn]
+          - name: day_of_week
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: day_of_week
+            ai_context:
+              synonyms: [which day, on what day, Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday]
+          - name: time
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: time
+            ai_context:
+              synonyms: [at what time, when, morning, afternoon, evening, bedtime, after school]
+          - name: tasks
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: tasks
+            ai_context:
+              synonyms: [subtasks, steps, what to do, checklist, items, to-do]
+          - name: notes
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: notes
+        ai_context:
+          synonyms:
+            - routine
+            - chore
+            - task
+            - schedule
+            - cleaning
+            - habit
+            - duty
+            - responsibility
+            - to-do
+            - homework time
+            - bedtime routine
+            - morning routine
+            - bath time
+            - screen time
+            - allowance chore
+
+      # --- Nutrition: Meal Plans -------------------------------------------
+      - name: meal_plan
+        source: mdb_engine.ai_chat.meal_plan
+        primary_key: [meal_id]
+        fields:
+          - name: meal_name
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: meal_name
+            ai_context:
+              synonyms: [dish, recipe name, what to make, "what's for dinner"]
+          - name: day_of_week
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: day_of_week
+            ai_context:
+              synonyms: [which day, when, Monday, Tuesday, this week]
+          - name: meal_type
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: meal_type
+            ai_context:
+              synonyms: [breakfast, lunch, dinner, snack, brunch, meal time]
+          - name: recipe_url
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: recipe_url
+            ai_context:
+              synonyms: [recipe link, recipe, how to make, instructions]
+          - name: dietary_tags
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: dietary_tags
+            ai_context:
+              synonyms: [dietary, vegetarian, vegan, gluten-free, nut-free, dairy-free, allergen-safe, peanut-free]
+          - name: prep_time_minutes
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: prep_time_minutes
+            ai_context:
+              synonyms: [prep time, how long, cook time, minutes to prepare]
+          - name: ingredients
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: ingredients
+            ai_context:
+              synonyms: [what we need, shopping list, grocery list, items needed]
+          - name: notes
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: notes
+        ai_context:
+          synonyms:
+            - meal
+            - dinner
+            - lunch
+            - breakfast
+            - snack
+            - recipe
+            - menu
+            - meal prep
+            - "what's for dinner"
+            - food
+            - eating
+            - cook
+            - grocery
+            - shopping list
+
+      # --- Safety: Emergency Contacts --------------------------------------
+      - name: emergency_contact
+        source: mdb_engine.ai_chat.emergency_contact
+        primary_key: [contact_id]
+        fields:
+          - name: contact_name
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: name
+            ai_context:
+              synonyms: [name, who, emergency person]
+          - name: relationship
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: relationship
+            ai_context:
+              synonyms: [relation, how related, connection, neighbor, grandparent, uncle, aunt, babysitter, nanny]
+          - name: phone
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: phone
+            ai_context:
+              synonyms: [phone number, cell, call, reach at]
+          - name: email
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: email
+          - name: is_primary
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: is_primary
+            ai_context:
+              synonyms: [primary contact, first call, main contact, call first]
+          - name: authorized_pickup
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: authorized_pickup
+            ai_context:
+              synonyms: [can pick up, authorized, allowed to pick up from school, pickup list]
+          - name: notes
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: notes
+        ai_context:
+          synonyms:
+            - emergency contact
+            - emergency number
+            - ICE
+            - in case of emergency
+            - backup contact
+            - who to call
+            - babysitter
+            - nanny
+            - neighbor
+
+      # --- Pets ------------------------------------------------------------
+      - name: pet
+        source: mdb_engine.ai_chat.pet
+        primary_key: [pet_id]
+        fields:
+          - name: pet_name
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: name
+            ai_context:
+              synonyms: [name, "pet's name", animal name]
+          - name: species
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: species
+            ai_context:
+              synonyms: [type of animal, dog, cat, fish, hamster, bird, rabbit, guinea pig, reptile]
+          - name: breed
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: breed
+            ai_context:
+              synonyms: [breed, type, kind]
+          - name: birthday
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: birthday
+            dimension:
+              is_time: true
+            ai_context:
+              synonyms: [date of birth, age, how old, born]
+          - name: vet_name
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: vet_name
+            ai_context:
+              synonyms: [veterinarian, vet, animal doctor, vet clinic]
+          - name: vet_phone
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: vet_phone
+            ai_context:
+              synonyms: [vet number, vet contact, vet phone number]
+          - name: medications
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: medications
+            ai_context:
+              synonyms: [pet meds, flea treatment, heartworm, pet medicine]
+          - name: feeding_schedule
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: feeding_schedule
+            ai_context:
+              synonyms: [when to feed, feeding time, how much to feed, food amount, pet food]
+          - name: microchip_id
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: microchip_id
+            ai_context:
+              synonyms: [chip number, microchip, ID chip]
+          - name: notes
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: notes
+        ai_context:
+          synonyms:
+            - pet
+            - dog
+            - cat
+            - animal
+            - furry friend
+            - puppy
+            - kitten
+            - fish
+            - hamster
+            - bird
+            - pet care
+
+      # --- Preferences: Interests ------------------------------------------
+      - name: interest
+        source: mdb_engine.ai_chat.interest
+        primary_key: [interest_id]
+        fields:
+          - name: interest_name
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: name
+            ai_context:
+              synonyms: [what they like, hobby name, favorite, passion]
+          - name: category
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: category
+            ai_context:
+              synonyms: [type, kind, area, domain, field]
+          - name: strength
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: strength
+            ai_context:
+              synonyms: [how much, intensity, passion level, really loves, kind of likes]
+        ai_context:
+          synonyms:
+            - interest
+            - hobby
+            - passion
+            - favorite
+            - likes
+            - enjoys
+            - fan of
+            - into
+            - loves
+            - preference
+            - obsession
+            - activity
+            - pastime
+            - sport
+            - game
+            - music
+            - movie
+            - book
+            - show
+            - food preference
+            - flavor
+            - taste
+
+      # --- Preferences: Foods ----------------------------------------------
+      - name: food
+        source: mdb_engine.ai_chat.food
+        primary_key: [food_id]
+        fields:
+          - name: food_name
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: name
+            ai_context:
+              synonyms: [dish, ingredient, snack, treat, flavor]
+          - name: food_type
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: type
+            ai_context:
+              synonyms: [category, cuisine, food group]
+          - name: safe_for
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: safe_for
+            ai_context:
+              synonyms: [safe for whom, who can eat it, allergy safe, allergen free]
+          - name: unsafe_for
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: unsafe_for
+            ai_context:
+              synonyms: [dangerous for, "who can't eat it", contains allergen, avoid for]
+        ai_context:
+          synonyms:
+            - food
+            - snack
+            - treat
+            - dish
+            - ingredient
+            - meal
+            - cuisine
+            - chocolate
+            - candy
+            - fruit
+            - vegetable
+            - dessert
+            - ice cream
+            - pizza
+            - pasta
+            - sandwich
+
+      # =====================================================================
+      # NEW DATASETS -- Family Nexus Extensions
+      # =====================================================================
+
+      # --- Shopping: Grocery Items -----------------------------------------
+      - name: grocery_item
+        source: mdb_engine.ai_chat.grocery_item
+        primary_key: [item_id]
+        fields:
+          - name: item_name
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: name
+            ai_context:
+              synonyms: [product, item, what to buy, grocery, thing to get]
+          - name: quantity
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: quantity
+            ai_context:
+              synonyms: [how many, how much, amount, count, number]
+          - name: unit
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: unit
+            ai_context:
+              synonyms: [unit of measure, lbs, oz, gallons, liters, bags, boxes, cans, bottles]
+          - name: category
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: category
+            ai_context:
+              synonyms: [aisle, section, department, produce, dairy, frozen, bakery, deli, meat]
+          - name: store
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: store
+            ai_context:
+              synonyms: [where to buy, store name, shop, supermarket, Costco, Trader Joes, Whole Foods, Walmart, Target, Kroger]
+          - name: status
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: status
+            ai_context:
+              synonyms: [purchased, pending, needed, got it, still need, done, bought]
+          - name: requested_by
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: requested_by
+            ai_context:
+              synonyms: [who asked, who needs it, who wants it, added by]
+          - name: priority
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: priority
+            ai_context:
+              synonyms: [urgent, important, need ASAP, can wait, low priority, high priority]
+          - name: estimated_price
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: estimated_price
+            ai_context:
+              synonyms: [price, cost, how much, estimated cost, about how much]
+          - name: notes
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: notes
+            ai_context:
+              synonyms: [brand preference, specific brand, organic, gluten-free version]
+        ai_context:
+          synonyms:
+            - grocery
+            - groceries
+            - shopping list
+            - grocery list
+            - shopping
+            - buy
+            - pick up
+            - need to get
+            - running low on
+            - out of
+            - add to list
+            - supermarket
+            - store run
+            - Costco list
+            - weekly shop
+
+      # --- Tasks: Chore Assignments ----------------------------------------
+      - name: chore
+        source: mdb_engine.ai_chat.chore
+        primary_key: [chore_id]
+        fields:
+          - name: chore_name
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: name
+            ai_context:
+              synonyms: [task, chore name, job, what to do, assignment]
+          - name: assigned_to
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: assigned_to
+            ai_context:
+              synonyms: [who does it, whose job, whose turn, responsible, assigned to whom]
+          - name: due_date
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: due_date
+            dimension:
+              is_time: true
+            ai_context:
+              synonyms: [when, by when, deadline, due by, needs to be done by]
+          - name: status
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: status
+            ai_context:
+              synonyms: [done, not done, completed, pending, in progress, skipped, overdue]
+          - name: reward
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: reward
+            ai_context:
+              synonyms: [allowance, payment, points, stars, stickers, how much, incentive]
+          - name: difficulty
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: difficulty
+            ai_context:
+              synonyms: [how hard, easy, medium, hard, effort, age-appropriate]
+          - name: recurrence
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: recurrence
+            ai_context:
+              synonyms: [repeating, one-time, daily, weekly, recurring, how often]
+          - name: completed_at
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: completed_at
+            dimension:
+              is_time: true
+            ai_context:
+              synonyms: [when finished, when done, completion time]
+          - name: notes
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: notes
+        ai_context:
+          synonyms:
+            - chore
+            - task
+            - job
+            - assignment
+            - responsibility
+            - to-do
+            - clean up
+            - take out trash
+            - do the dishes
+            - vacuum
+            - laundry
+            - mow the lawn
+            - walk the dog
+            - feed the cat
+            - make the bed
+            - set the table
+            - tidy up
+
+      # --- Education: Homework & Assignments -------------------------------
+      - name: homework
+        source: mdb_engine.ai_chat.homework
+        primary_key: [homework_id]
+        fields:
+          - name: assignment_name
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: name
+            ai_context:
+              synonyms: [homework name, assignment, what is it, project name, worksheet]
+          - name: subject
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: subject
+            ai_context:
+              synonyms: [class, course, topic, math, science, English, reading, history, art, PE, Spanish]
+          - name: due_date
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: due_date
+            dimension:
+              is_time: true
+            ai_context:
+              synonyms: [when due, deadline, due by, turn in by, submit by]
+          - name: status
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: status
+            ai_context:
+              synonyms: [done, not done, completed, in progress, not started, submitted, late, missing]
+          - name: grade
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: grade
+            ai_context:
+              synonyms: [score, mark, result, percentage, letter grade, A, B, C, D, F, points]
+          - name: teacher
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: teacher
+            ai_context:
+              synonyms: [teacher name, professor, instructor, "Mrs.", "Mr.", "Ms."]
+          - name: priority
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: priority
+            ai_context:
+              synonyms: [important, urgent, major grade, minor, extra credit, test, quiz, project, exam]
+          - name: notes
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: notes
+        ai_context:
+          synonyms:
+            - homework
+            - assignment
+            - schoolwork
+            - project
+            - worksheet
+            - essay
+            - report
+            - test
+            - quiz
+            - exam
+            - study
+            - reading
+            - book report
+            - science fair
+            - school project
+            - due tomorrow
+
+      # --- Finance: Budget Entries -----------------------------------------
+      - name: budget_entry
+        source: mdb_engine.ai_chat.budget_entry
+        primary_key: [entry_id]
+        fields:
+          - name: description
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: description
+            ai_context:
+              synonyms: [what for, what is it, item, transaction, purchase]
+          - name: amount
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: amount
+            ai_context:
+              synonyms: [how much, cost, price, total, dollars, "$"]
+          - name: category
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: category
+            ai_context:
+              synonyms: [type, expense type, groceries, utilities, gas, entertainment, dining out, subscriptions, medical, school, clothing, home]
+          - name: date
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: date
+            dimension:
+              is_time: true
+            ai_context:
+              synonyms: [when, transaction date, purchase date, on what day]
+          - name: paid_by
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: paid_by
+            ai_context:
+              synonyms: [who paid, paid by whom, whose card, whose account]
+          - name: payment_method
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: payment_method
+            ai_context:
+              synonyms: [how paid, credit card, debit, cash, Venmo, Zelle, Apple Pay, check]
+          - name: is_recurring
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: is_recurring
+            ai_context:
+              synonyms: [recurring, subscription, monthly, automatic, auto-pay, one-time]
+          - name: entry_type
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: entry_type
+            ai_context:
+              synonyms: [expense, income, refund, reimbursement, transfer, savings]
+          - name: notes
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: notes
+        ai_context:
+          synonyms:
+            - budget
+            - expense
+            - spending
+            - cost
+            - money
+            - finances
+            - payment
+            - bill
+            - purchase
+            - income
+            - savings
+            - how much did we spend
+            - monthly expenses
+            - weekly budget
+            - family budget
+
+      # --- Location: Device/Member Location --------------------------------
+      - name: device_location
+        source: mdb_engine.ai_chat.device_location
+        primary_key: [location_id]
+        fields:
+          - name: location_name
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: location
+            ai_context:
+              synonyms: [where, place, current location, at]
+          - name: status
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: status
+            ai_context:
+              synonyms: [what doing, current status, at work, at school, at home, commuting, sleeping, busy, available]
+          - name: last_seen
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: last_seen
+            dimension:
+              is_time: true
+            ai_context:
+              synonyms: [when, last updated, as of, last check-in, last seen at]
+          - name: latitude
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: latitude
+          - name: longitude
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: longitude
+          - name: geofence
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: geofence
+            ai_context:
+              synonyms: [zone, area, safe zone, boundary, home zone, school zone]
+          - name: notes
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: notes
+        ai_context:
+          synonyms:
+            - location
+            - where is
+            - where are
+            - find
+            - locate
+            - GPS
+            - tracking
+            - check in
+            - at home
+            - at work
+            - at school
+            - on the way
+            - ETA
+            - arrived
+            - left
+            - departed
+
+    # -----------------------------------------------------------------------
+    # RELATIONSHIPS
+    # -----------------------------------------------------------------------
+    relationships:
+
+      # --- Existing: Health to Member ---
+      - name: allergy_to_member
+        from: allergy
+        to: family_member
+        from_columns: [member_id]
+        to_columns: [member_id]
+
+      - name: medication_to_member
+        from: medication
+        to: family_member
+        from_columns: [member_id]
+        to_columns: [member_id]
+
+      - name: condition_to_member
+        from: medical_condition
+        to: family_member
+        from_columns: [member_id]
+        to_columns: [member_id]
+
+      - name: vaccination_to_member
+        from: vaccination
+        to: family_member
+        from_columns: [member_id]
+        to_columns: [member_id]
+
+      # --- Existing: Scheduling to Member ---
+      - name: appointment_to_member
+        from: appointment
+        to: family_member
+        from_columns: [member_id]
+        to_columns: [member_id]
+
+      - name: routine_to_member
+        from: routine
+        to: family_member
+        from_columns: [assigned_to]
+        to_columns: [member_id]
+
+      - name: meal_to_member
+        from: meal_plan
+        to: family_member
+        from_columns: [member_id]
+        to_columns: [member_id]
+
+      # --- Existing: Safety & Pets ---
+      - name: emergency_contact_to_member
+        from: emergency_contact
+        to: family_member
+        from_columns: [member_id]
+        to_columns: [member_id]
+
+      - name: pet_to_member
+        from: pet
+        to: family_member
+        from_columns: [owner_id]
+        to_columns: [member_id]
+
+      # --- Existing: Family Structure ---
+      - name: member_spouse
+        from: family_member
+        to: family_member
+        from_columns: [spouse_id]
+        to_columns: [member_id]
+
+      - name: member_parent
+        from: family_member
+        to: family_member
+        from_columns: [parent_id]
+        to_columns: [member_id]
+
+      # --- Existing: Cross-domain ---
+      - name: medication_for_condition
+        from: medication
+        to: medical_condition
+        from_columns: [condition_id]
+        to_columns: [condition_id]
+
+      - name: member_likes_interest
+        from: family_member
+        to: interest
+        from_columns: [member_id]
+        to_columns: [interest_id]
+
+      - name: member_likes_food
+        from: family_member
+        to: food
+        from_columns: [member_id]
+        to_columns: [food_id]
+
+      - name: member_allergic_to_food
+        from: family_member
+        to: food
+        from_columns: [member_id]
+        to_columns: [food_id]
+
+      - name: pet_to_family
+        from: pet
+        to: family_member
+        from_columns: [owner_id]
+        to_columns: [member_id]
+
+      # =====================================================================
+      # NEW RELATIONSHIPS -- Family Nexus Extensions
+      # =====================================================================
+
+      - name: grocery_requested_by_member
+        from: grocery_item
+        to: family_member
+        from_columns: [requested_by]
+        to_columns: [member_id]
+
+      - name: grocery_for_meal
+        from: grocery_item
+        to: meal_plan
+        from_columns: [meal_id]
+        to_columns: [meal_id]
+
+      - name: chore_assigned_to_member
+        from: chore
+        to: family_member
+        from_columns: [assigned_to]
+        to_columns: [member_id]
+
+      - name: homework_assigned_to_member
+        from: homework
+        to: family_member
+        from_columns: [member_id]
+        to_columns: [member_id]
+
+      - name: budget_paid_by_member
+        from: budget_entry
+        to: family_member
+        from_columns: [paid_by]
+        to_columns: [member_id]
+
+      - name: location_of_member
+        from: device_location
+        to: family_member
+        from_columns: [member_id]
+        to_columns: [member_id]
+
+    # -----------------------------------------------------------------------
+    # METRICS
+    # -----------------------------------------------------------------------
+    metrics:
+
+      # --- Existing Metrics ---
+
+      - name: active_medications
+        expression:
+          dialects:
+            - dialect: ANSI_SQL
+              expression: "COUNT(medication.medication_id) WHERE medication.end_date IS NULL"
+        description: Total number of currently active medications across all family members
+        ai_context:
+          synonyms:
+            - how many medications
+            - current meds
+            - active prescriptions
+            - what meds is everyone on
+            - medication count
+
+      - name: upcoming_appointments
+        expression:
+          dialects:
+            - dialect: ANSI_SQL
+              expression: "COUNT(appointment.appointment_id) WHERE appointment.date BETWEEN NOW() AND NOW() + INTERVAL 7 DAY"
+        description: Number of appointments scheduled in the next 7 days
+        ai_context:
+          synonyms:
+            - "what's coming up"
+            - next appointments
+            - "this week's appointments"
+            - upcoming schedule
+            - "what's on the calendar"
+
+      - name: high_severity_allergies
+        expression:
+          dialects:
+            - dialect: ANSI_SQL
+              expression: "COUNT(allergy.allergy_id) WHERE allergy.severity IN ('high', 'severe', 'life-threatening')"
+        description: Count of high-severity or life-threatening allergies across all members
+        ai_context:
+          synonyms:
+            - dangerous allergies
+            - severe allergies
+            - life-threatening allergies
+            - critical allergies
+            - allergy warnings
+
+      - name: overdue_vaccinations
+        expression:
+          dialects:
+            - dialect: ANSI_SQL
+              expression: "COUNT(vaccination.vaccination_id) WHERE vaccination.next_due < NOW()"
+        description: Vaccinations that are past their scheduled next dose date
+        ai_context:
+          synonyms:
+            - missed vaccines
+            - overdue shots
+            - expired vaccinations
+            - vaccines due
+            - need to get vaccinated
+
+      - name: weekly_routine_count
+        expression:
+          dialects:
+            - dialect: ANSI_SQL
+              expression: "COUNT(routine.routine_id) WHERE routine.frequency = 'weekly'"
+        description: Total number of weekly routines and chores
+        ai_context:
+          synonyms:
+            - how many chores
+            - weekly tasks
+            - routine count
+            - chore list
+            - things to do this week
+
+      - name: meals_planned
+        expression:
+          dialects:
+            - dialect: ANSI_SQL
+              expression: "COUNT(meal_plan.meal_id)"
+        description: Total number of meals currently in the meal plan
+        ai_context:
+          synonyms:
+            - how many meals planned
+            - meal count
+            - menu items
+            - "what's planned for meals"
+            - dinner plan
+
+      # =====================================================================
+      # NEW METRICS -- Family Nexus Extensions
+      # =====================================================================
+
+      - name: grocery_items_pending
+        expression:
+          dialects:
+            - dialect: ANSI_SQL
+              expression: "COUNT(grocery_item.item_id) WHERE grocery_item.status = 'pending'"
+        description: Number of items still on the grocery list that have not been purchased
+        ai_context:
+          synonyms:
+            - how many groceries
+            - shopping list count
+            - items to buy
+            - what do we still need
+            - grocery list size
+            - how long is the list
+
+      - name: overdue_homework
+        expression:
+          dialects:
+            - dialect: ANSI_SQL
+              expression: "COUNT(homework.homework_id) WHERE homework.due_date < NOW() AND homework.status != 'completed'"
+        description: Homework assignments past their due date that have not been completed
+        ai_context:
+          synonyms:
+            - late homework
+            - missing assignments
+            - overdue schoolwork
+            - incomplete homework
+            - what homework is late
+
+      - name: chores_completed_this_week
+        expression:
+          dialects:
+            - dialect: ANSI_SQL
+              expression: "COUNT(chore.chore_id) WHERE chore.status = 'completed' AND chore.completed_at BETWEEN NOW() - INTERVAL 7 DAY AND NOW()"
+        description: Number of chores completed in the last 7 days
+        ai_context:
+          synonyms:
+            - chores done this week
+            - completed tasks
+            - how many chores done
+            - weekly chore progress
+            - task completion rate
+
+      - name: monthly_budget_total
+        expression:
+          dialects:
+            - dialect: ANSI_SQL
+              expression: "SUM(budget_entry.amount) WHERE budget_entry.entry_type = 'expense' AND budget_entry.date BETWEEN DATE_TRUNC('month', NOW()) AND NOW()"
+        description: Total expenses for the current month
+        ai_context:
+          synonyms:
+            - how much spent this month
+            - monthly spending
+            - monthly expenses
+            - budget total
+            - this month's costs
+
+      - name: family_members_at_home
+        expression:
+          dialects:
+            - dialect: ANSI_SQL
+              expression: "COUNT(DISTINCT device_location.member_id) WHERE device_location.location = 'home'"
+        description: Number of family members currently at home based on last known location
+        ai_context:
+          synonyms:
+            - who is home
+            - "who's at home"
+            - how many people home
+            - anyone home
+            - is everyone home

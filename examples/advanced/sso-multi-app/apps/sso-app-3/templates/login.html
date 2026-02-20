@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+
+{% block title %}Login - AI Chat{% endblock %}
+
+{% block content %}
+<div style="max-width: 400px; margin: 60px auto;">
+    <div class="card">
+        <h2 style="margin-bottom: 10px;">Login</h2>
+        <p style="opacity: 0.8; margin-bottom: 20px; font-size: 14px;">
+            Redirecting to authentication hub...
+        </p>
+
+        <div style="text-align: center; padding: 20px;">
+            <p style="margin-bottom: 20px;">This app uses Single Sign-On (SSO) authentication.</p>
+            <p style="margin-bottom: 20px; font-size: 14px; opacity: 0.8;">
+                You will be redirected to the authentication hub to log in.
+            </p>
+            <a href="#" id="login-link" class="btn" style="display: inline-block;">
+                Go to Login Page
+            </a>
+        </div>
+    </div>
+</div>
+
+<script>
+// Auto-redirect to auth hub with callback URL
+(function() {
+    // Default auth hub URL (can be overridden by environment)
+    const authHubUrl = '/auth-hub';
+    const currentUrl = window.location.href;
+    const baseUrl = currentUrl.substring(0, currentUrl.lastIndexOf('/'));
+    const callbackUrl = baseUrl + '/auth/callback';
+    const encodedCallback = encodeURIComponent(callbackUrl);
+    const loginUrl = `${authHubUrl}/login?redirect_to=${encodedCallback}`;
+    
+    // Set link href
+    document.getElementById('login-link').href = loginUrl;
+    
+    // Redirect after a short delay
+    setTimeout(() => {
+        window.location.href = loginUrl;
+    }, 1000);
+})();
+</script>
+{% endblock %}

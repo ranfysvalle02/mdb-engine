@@ -1,0 +1,1197 @@
+# manifest.json Reference Guide
+
+**Complete reference for all manifest.json fields and configurations.**
+
+This document provides a comprehensive guide to every field available in `manifest.json`. Use this as a reference when building your application configuration.
+
+---
+
+## Table of Contents
+
+- [Required Fields](#required-fields)
+- [App Identity](#app-identity)
+- [Data Access](#data-access)
+- [Index Management](#index-management)
+- [Authentication & Authorization](#authentication-authorization)
+- [Token Management](#token-management)
+- [AI Services](#ai-services)
+  - [Embedding Service](#embedding-service)
+  - [Memory Service](#memory-service)
+  - [Graph Service](#graph-service)
+- [OSI (Open Semantic Interchange)](#osi-open-semantic-interchange)
+- [WebSockets](#websockets)
+- [CORS](#cors)
+- [Observability](#observability)
+- [Collection Settings](#collection-settings)
+- [Initial Data](#initial-data)
+- [Complete Example](#complete-example)
+
+---
+
+## Required Fields
+
+Every manifest.json **must** include these fields:
+
+```json
+{
+  "schema_version": "2.0",
+  "slug": "my_app",
+  "name": "My App"
+}
+```
+
+### Field Descriptions
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `schema_version` | `string` | Schema version (format: `major.minor`). Defaults to `"2.0"` if not specified. |
+| `slug` | `string` | Unique app identifier. Must be lowercase alphanumeric, underscores, or hyphens. Pattern: `^[a-z0-9_-]+$` |
+| `name` | `string` | Human-readable app name. Minimum length: 1 character |
+
+---
+
+## App Identity
+
+### Basic Fields
+
+```json
+{
+  "description": "Optional app description",
+  "status": "active",
+  "developer_id": "developer@example.com"
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|--------|-------------|
+| `description` | `string` | - | Optional app description |
+| `status` | `string` | `"draft"` | App status: `"active"`, `"draft"`, `"archived"`, `"inactive"` |
+| `developer_id` | `string` (email) | - | Email of the developer who owns this app |
+
+---
+
+## Data Access
+
+Control how your app accesses data across multiple apps:
+
+```json
+{
+  "data_access": {
+    "read_scopes": ["my_app", "shared_data"],
+    "write_scope": "my_app",
+    "cross_app_policy": "explicit"
+  }
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|--------|-------------|
+| `read_scopes` | `array<string>` | `[slug]` | List of app slugs this app can read from |
+| `write_scope` | `string` | `slug` | App slug this app writes to |
+| `cross_app_policy` | `string` | `"explicit"` | Policy: `"explicit"` (allow listed apps) or `"deny_all"` (block all cross-app access) |
+
+**Legacy**: `data_scope` (array) is still supported for backward compatibility but `data_access` is preferred.
+
+---
+
+## Index Management
+
+Define indexes declaratively—they're created automatically on app registration:
+
+```json
+{
+  "managed_indexes": {
+    "tasks": [
+      {
+        "type": "regular",
+        "name": "status_sort",
+        "keys": {"status": 1, "created_at": -1},
+        "options": {
+          "background": true
+        }
+      },
+      {
+        "type": "regular",
+        "name": "user_idx",
+        "keys": {"user_id": 1},
+        "unique": true
+      }
+    ],
+    "knowledge_base": [
+      {
+        "type": "vectorSearch",
+        "name": "embedding_vector_index",
+        "definition": {
+          "fields": [{
+            "type": "vector",
+            "path": "embedding",
+            "numDimensions": 1536,
+            "similarity": "cosine"
+          }]
+        }
+      }
+    ]
+  }
+}
+```
+
+### Index Types
+
+| Type | Description | Required Fields |
+|------|-------------|----------------|
+| `regular` | Standard MongoDB index | `name`, `type`, `keys` |
+| `text` | Full-text search index | `name`, `type`, `keys` |
+| `vectorSearch` | MongoDB Atlas Vector Search | `name`, `type`, `definition` |
+| `search` | Atlas Search index | `name`, `type`, `definition` |
+| `geospatial` | Geospatial index (2dsphere, 2d) | `name`, `type`, `keys` |
+| `ttl` | Time-to-live index | `name`, `type`, `keys`, `options.expireAfterSeconds` |
+| `partial` | Partial index with filter | `name`, `type`, `keys`, `options.partialFilterExpression` |
+| `hybrid` | Hybrid vector + text search | `name`, `type`, `hybrid` |
+
+### Index Options
+
+```json
+{
+  "options": {
+    "unique": true,
+    "sparse": false,
+    "background": true,
+    "expireAfterSeconds": 3600,
+    "partialFilterExpression": {"status": "active"},
+    "weights": {"title": 10, "content": 5},
+    "default_language": "english"
+  }
+}
+```
+
+---
+
+## Encryption (CSFLE)
+
+Configure Client-Side Field Level Encryption for any collection:
+
+```json
+{
+  "encrypted_fields": {
+    "payments": ["card_number", "cvv"],
+    "users": ["ssn"]
+  },
+  "encryption_config": {
+    "kms_provider": "local",
+    "key_vault_namespace": "encryption.__keyVault"
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `encrypted_fields` | `object<string, array<string>>` | Map of collection names to list of fields to encrypt |
+| `encryption_config` | `object` | Global encryption settings (KMS provider, etc.) |
+
+**See**: [CSFLE Setup Guide](guides/CSFLE_SETUP.md) for full documentation.
+
+---
+
+## Authentication & Authorization
+
+### Auth Modes
+
+**Per-App Auth (Default)**:
+```json
+{
+  "auth": {
+    "mode": "app"
+  }
+}
+```
+
+**Shared Auth (SSO)**:
+```json
+{
+  "auth": {
+    "mode": "shared",
+    "auth_hub_url": "http://localhost:8000",
+    "related_apps": {
+      "dashboard": "http://localhost:8001",
+      "click_tracker": "http://localhost:8000"
+    },
+    "roles": ["viewer", "editor", "admin"],
+    "default_role": "viewer",
+    "require_role": "viewer",
+    "public_routes": ["/health", "/api/public/*"]
+  }
+}
+```
+
+**Shared Auth Fields**:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `mode` | `string` | Set to `"shared"` to enable SSO across apps |
+| `auth_hub_url` | `string` (URI) | URL of the authentication hub for SSO apps. Used for redirecting unauthenticated users to login. Can be overridden via `AUTH_HUB_URL` environment variable. Example: `"http://localhost:8000"` or `"https://auth.example.com"` |
+| `related_apps` | `object` | Map of related app slugs to their URLs for cross-app navigation. Keys are app slugs, values are URLs. Can be overridden via `{APP_SLUG_UPPER}_URL` environment variables. Example: `{"dashboard": "http://localhost:8001"}` |
+| `roles` | `array<string>` | Available roles for this app (e.g., `["viewer", "editor", "admin"]`) |
+| `default_role` | `string` | Role assigned to new users for this app (must be one of the defined roles) |
+| `require_role` | `string` | Minimum role required to access app (users without this role are denied) |
+| `public_routes` | `array<string>` | Routes that don't require authentication (supports wildcards, e.g., `["/health", "/api/public/*"]`) |
+
+**Configuration Priority** (for `auth_hub_url` and `related_apps`):
+1. `manifest.auth.auth_hub_url` or `manifest.auth.related_apps[app_slug]` (declarative, versioned)
+2. Environment variables (`AUTH_HUB_URL`, `{APP_SLUG}_URL`) (runtime override)
+3. Defaults (`http://localhost:8000` or app-specific defaults) (fallback)
+
+### Authorization Policy
+
+**Casbin RBAC**:
+```json
+{
+  "auth": {
+    "policy": {
+      "provider": "casbin",
+      "required": true,
+      "authorization": {
+        "model": "rbac",
+        "policies_collection": "casbin_policies",
+        "link_users_roles": true,
+        "default_roles": ["user", "admin"],
+        "initial_policies": [
+          ["admin", "documents", "read"],
+          ["admin", "documents", "write"],
+          ["editor", "documents", "read"]
+        ],
+        "initial_roles": [
+          {"user": "alice@example.com", "role": "admin"}
+        ]
+      }
+    }
+  }
+}
+```
+
+**OSO Cloud**:
+```json
+{
+  "auth": {
+    "policy": {
+      "provider": "oso",
+      "authorization": {
+        "api_key": "your-oso-api-key",
+        "url": "http://oso-dev:8080",
+        "initial_roles": [
+          {"user": "alice@example.com", "role": "editor"}
+        ],
+        "initial_policies": [
+          {"role": "admin", "resource": "documents", "action": "read"}
+        ]
+      }
+    }
+  }
+}
+```
+
+### User Management
+
+```json
+{
+  "auth": {
+    "users": {
+      "enabled": true,
+      "strategy": "app_users",
+      "collection_name": "users",
+      "session_cookie_name": "app_session",
+      "session_ttl_seconds": 86400,
+      "allow_registration": true,
+      "demo_users": [
+        {
+          "email": "admin@example.com",
+          "password": "password123",
+          "role": "admin"
+        }
+      ],
+      "demo_user_seed_strategy": "auto"
+    }
+  }
+}
+```
+
+### Policy Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `provider` | `string` | `"casbin"`, `"oso"`, or `"custom"` |
+| `required` | `boolean` | Whether authentication is required (default: `true`) |
+| `allow_anonymous` | `boolean` | Allow anonymous access (default: `false`) |
+| `allowed_roles` | `array<string>` | Roles that can access this app |
+| `allowed_users` | `array<string>` | User emails whitelist |
+| `denied_users` | `array<string>` | User emails blacklist |
+| `public_routes` | `array<string>` | Routes that don't require auth (supports wildcards) |
+
+---
+
+## Token Management
+
+Enhanced token management with refresh tokens, sessions, and security:
+
+```json
+{
+  "token_management": {
+    "enabled": true,
+    "access_token_ttl": 900,
+    "refresh_token_ttl": 604800,
+    "token_rotation": true,
+    "max_sessions_per_user": 10,
+    "session_inactivity_timeout": 1800,
+    "security": {
+      "require_https": false,
+      "cookie_secure": "auto",
+      "cookie_samesite": "lax",
+      "cookie_httponly": true,
+      "csrf_protection": true,
+      "rate_limiting": {
+        "login": {"max_attempts": 5, "window_seconds": 300},
+        "register": {"max_attempts": 3, "window_seconds": 600},
+        "refresh": {"max_attempts": 10, "window_seconds": 60}
+      },
+      "password_policy": {
+        "allow_plain_text": false,
+        "min_length": 8,
+        "require_uppercase": true,
+        "require_lowercase": true,
+        "require_numbers": true,
+        "require_special": false
+      },
+      "session_fingerprinting": {
+        "enabled": true,
+        "validate_on_login": true,
+        "validate_on_refresh": true,
+        "validate_on_request": false,
+        "strict_mode": false
+      },
+      "account_lockout": {
+        "enabled": true,
+        "max_failed_attempts": 5,
+        "lockout_duration_seconds": 900,
+        "reset_on_success": true
+      }
+    },
+    "auto_setup": true
+  }
+}
+```
+
+---
+
+## AI Services
+
+### Embedding Service
+
+```json
+{
+  "embedding_config": {
+    "enabled": true,
+    "max_tokens_per_chunk": 1000,
+    "tokenizer_model": "gpt-3.5-turbo",
+    "default_embedding_model": "text-embedding-3-small"
+  }
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `boolean` | `false` | Enable embedding service |
+| `max_tokens_per_chunk` | `integer` | `1000` | Max tokens per chunk (100-10000) |
+| `tokenizer_model` | `string` | `"gpt-3.5-turbo"` | Tokenizer model for counting tokens |
+| `default_embedding_model` | `string` | `"text-embedding-3-small"` | Default embedding model |
+
+### Memory Service
+
+**Basic Configuration:**
+```json
+{
+  "memory_config": {
+    "enabled": true,
+    "collection_name": "user_memories",
+    "embedding_model_dims": 1536,
+    "infer": true,
+    "embedding_model": "text-embedding-3-small",
+    "memory_llm_model": "gemini/gemini-3-flash-preview",
+    "temperature": 0.0,
+    "async_mode": true
+  }
+}
+```
+
+**Advanced Configuration with Perfect Brain Features:**
+```json
+{
+  "memory_config": {
+    "enabled": true,
+    "collection_name": "user_memories",
+    "embedding_model": "text-embedding-3-small",
+    "embedding_model_dims": 1536,
+    "memory_llm_model": "gemini/gemini-3-flash-preview",
+    "temperature": 0.0,
+    "infer": true,
+    "async_mode": true,
+    "enable_cognitive": true,
+    "max_depth": 1000,
+    "similarity_threshold": 0.7,
+    "duplicate_threshold": 0.90,
+    "merge_threshold_low": 0.70,
+    "merge_threshold_high": 0.85,
+    "reinforcement_factor": 1.1,
+    "decay_factor": 0.99,
+    "cognitive": {
+      "enabled": true,
+      "decay": {
+        "enabled": true,
+        "default_stability_hours": 24,
+        "use_server_side_pipeline": true
+      },
+      "emotion": {
+        "enabled": true,
+        "flashbulb_threshold": 0.7,
+        "max_stability_multiplier": 100
+      },
+      "conflict_resolution": {
+        "enabled": true,
+        "similarity_threshold": 0.85
+      },
+      "pruning": {
+        "enabled": true,
+        "max_capacity": 1000,
+        "strategy": "soft_delete"
+      },
+      "cold_storage": {
+        "enabled": true,
+        "retention_days": 365
+      }
+    },
+    "encrypted": false
+  }
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `boolean` | `false` | Enable memory service |
+| `collection_name` | `string` | `"{slug}_memories"` | Collection name for memories (will be prefixed with app slug automatically) |
+| `embedding_model_dims` | `integer` | `1536` | Embedding vector dimensions (128-4096) |
+| `infer` | `boolean` | `true` | Infer memories from conversations |
+| `async_mode` | `boolean` | `true` | Process memories asynchronously |
+| `memory_llm_model` | `string` | (inherits from `llm_config.default_model`) | LLM model for memory operations. If not set, automatically uses the app's default LLM model from `llm_config.default_model` |
+| `encrypted` | `boolean` | `false` | Enable Client-Side Field Level Encryption (CSFLE) for memory content |
+| `encryption` | `object` | - | Advanced encryption settings (see CSFLE guide) |
+| `embedding_model` | `string` | `"text-embedding-3-small"` | Embedding model name |
+| `temperature` | `number` | `0.0` | Temperature for LLM operations (0.0-2.0) |
+| `index_name` | `string` | `"{collection_name}_vector_index"` | Vector search index name (auto-generated if not provided) |
+| `enable_cognitive` | `boolean` | `true` | Enable cognitive features (decay, emotion, conflict resolution) |
+| `max_depth` | `integer\|null` | `100` | Max memories per user (null = unlimited) |
+| `similarity_threshold` | `number` | `0.7` | General similarity threshold |
+| `duplicate_threshold` | `number` | `0.90` | Threshold for duplicate detection |
+| `merge_threshold_low` | `number` | `0.70` | Lower bound for memory merging |
+| `merge_threshold_high` | `number` | `0.85` | Upper bound for reinforcement |
+| `reinforcement_factor` | `number` | `1.1` | Importance boost factor when reinforced |
+| `decay_factor` | `number` | `0.99` | Decay rate for unused memories |
+| `cognitive` | `object` | - | Cognitive features configuration (see below) |
+
+**Cognitive Configuration:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `cognitive.enabled` | `boolean` | `true` | Enable cognitive features |
+| `cognitive.decay.enabled` | `boolean` | `true` | Enable Ebbinghaus decay |
+| `cognitive.decay.default_stability_hours` | `number` | `24` | Default half-life in hours |
+| `cognitive.decay.use_server_side_pipeline` | `boolean` | `true` | Use MongoDB aggregation for decay |
+| `cognitive.emotion.enabled` | `boolean` | `true` | Enable emotion extraction |
+| `cognitive.emotion.flashbulb_threshold` | `number` | `0.7` | High-emotion threshold |
+| `cognitive.emotion.max_stability_multiplier` | `number` | `100` | Max stability boost for high emotion |
+| `cognitive.conflict_resolution.enabled` | `boolean` | `true` | Enable conflict detection |
+| `cognitive.conflict_resolution.similarity_threshold` | `number` | `0.85` | Similarity threshold for conflict detection |
+| `cognitive.pruning.enabled` | `boolean` | `true` | Enable memory pruning |
+| `cognitive.pruning.max_capacity` | `integer` | `1000` | Max active memories per user |
+| `cognitive.pruning.strategy` | `string` | `"soft_delete"` | Pruning strategy: `"soft_delete"` or `"hard_delete"` |
+| `cognitive.cold_storage.enabled` | `boolean` | `true` | Enable cold storage for pruned memories |
+| `cognitive.cold_storage.retention_days` | `integer` | `365` | Days to retain pruned memories |
+
+**Perfect Brain Features:**
+
+Perfect Brain features (Memory Consolidator, Timeline Service, Reflective Memory, Predictive Memory, Shared Memory, etc.) are available via the Python API and do not require manifest configuration. They are enabled when you import and use the respective modules.
+
+See [Memory Service Guide](./MEMORY_SERVICE.md) for complete documentation.
+
+**Note**: For GraphRAG (knowledge graph) functionality, use the top-level `graph_config` section. The Graph Service is now standalone and can be used independently or with the Memory Service.
+
+### Graph Service
+
+The Graph Service provides knowledge graph functionality with MongoDB `$graphLookup` for multi-hop traversal. **It is enabled by default** for all apps.
+
+**Default behavior** (no configuration needed):
+```json
+{
+  "schema_version": "2.0",
+  "slug": "my_app",
+  "name": "My App"
+}
+```
+
+**Disable graph** (opt-out):
+```json
+{
+  "graph_config": {
+    "enabled": false
+  }
+}
+```
+
+**Custom configuration**:
+```json
+{
+  "graph_config": {
+    "collection_name": "__kg",
+    "auto_extract": true,
+    "llm_model": "openai/gpt-4o",
+    "temperature": 0.0,
+    "default_max_depth": 2,
+    "vector_index_name": "graph_vector_index",
+    "embedding_dims": 1536,
+    "node_types": ["person", "interest", "event", "location", "organization", "product", "concept"]
+  }
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `boolean` | `true` | Enable Graph Service (enabled by default) |
+| `collection_name` | `string` | `"__kg"` | Collection for graph nodes (prefixed with app slug) |
+| `auto_extract` | `boolean` | `true` | Auto-extract nodes/relationships from text |
+| `llm_model` | `string` | (from llm_config) | LLM model for graph extraction |
+| `temperature` | `number` | `0.0` | Temperature for LLM extraction |
+| `default_max_depth` | `integer` | `2` | Default traversal depth (1-5) |
+| `vector_index_name` | `string` | `"graph_vector_index"` | Vector index name for hybrid search |
+| `embedding_dims` | `integer` | `1536` | Embedding dimensions |
+| `node_types` | `array` | (see default) | Allowed node types for extraction |
+
+**See**: [GRAPH_SERVICE.md](GRAPH_SERVICE.md) for full API documentation and [GRAPHRAG.md](GRAPHRAG.md) for GraphRAG concepts.
+
+**⚠️ Important: Automatic Index Management**
+
+The memory service **automatically creates and manages its own vector search index**. You do NOT need to (and should NOT) add memory collection indexes to `managed_indexes` in your manifest. The service will:
+
+1. **Auto-create the index** on startup with the correct configuration:
+   - Vector field: `embedding` (with dimensions from `embedding_model_dims`)
+   - Filter field: `user_id` (required for user-scoped queries)
+   - Similarity: `cosine`
+2. **Auto-generate the index name** as `{collection_name}_vector_index` (e.g., `my_app_user_memories_vector_index`)
+3. **Auto-update existing indexes** if they're missing the `user_id` filter
+4. **Ensure the index is queryable** before allowing searches
+
+The `user_id` filter is **required** for vector search queries that filter by user. The service automatically includes this in the index definition to ensure all queries work correctly.
+
+If you try to manually define vector search indexes for memory collections in `managed_indexes`, the engine will raise an error to prevent conflicts. The memory service has full control over its indexes to ensure consistency.
+
+**Note**: The memory service uses environment variables for LLM/embedding configuration. Set `OPENAI_API_KEY` or `AZURE_OPENAI_API_KEY`/`AZURE_OPENAI_ENDPOINT` in your `.env` file.
+
+**Memory Service Operations** (v0.7.5+, all methods fully async as of v0.7.7):
+- `add()` - Store memories with LLM inference (extracts facts from conversations)
+- `inject()` - Manually inject memories without LLM inference (for facts, preferences, structured data)
+- `search()` - Semantic search across memories
+- `get()` / `get_all()` - Retrieve memories
+- `update()` - Update memory content and/or metadata
+- `delete()` / `delete_all()` - Delete memories
+
+---
+
+## OSI (Open Semantic Interchange)
+
+Configure OSI integration to teach MDB-Engine your organization's domain vocabulary. OSI models define datasets (entity types), fields, synonyms, relationships, and governed metrics. The engine uses these for post-extraction entity resolution, metric-aware query routing, and semantic discovery.
+
+Models are persisted in a MongoDB collection (`{slug}_osi_models`) with SHA-256 hash-based seeding -- YAML changes propagate on restart, API mutations take effect immediately without restarts.
+
+### Three Tiers
+
+**Tier 1 (one-liner)**: Add `osi_models_path` to `graph_config`:
+```json
+{
+  "graph_config": {
+    "osi_models_path": "semantic_models/"
+  }
+}
+```
+
+**Tier 2 (config section)**: Full `osi_config` with feature flags:
+```json
+{
+  "osi_config": {
+    "enabled": true,
+    "models_path": "semantic_models/",
+    "entity_resolution": true,
+    "metric_routing": true,
+    "export_enabled": true
+  }
+}
+```
+
+**YAML is the single source of truth.** All OSI models must be defined in YAML files in the `semantic_models/` directory. If no YAML files exist when `osi_config.enabled` is `true`, a starter model is auto-scaffolded from `graph_config.node_types` and written to disk.
+
+When OSI is active, YAML datasets **replace** `graph_config.node_types` as the authoritative list of entity types for graph extraction.
+
+### osi_config Fields
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | boolean | `false` | Master switch for OSI integration |
+| `models_path` | string | - | Path to directory of OSI YAML files |
+| `models` | string[] | - | Specific YAML file paths to load |
+| `entity_resolution` | boolean | `true` | Remap extracted node types to OSI datasets via synonyms |
+| `metric_routing` | boolean | `false` | Detect governed metrics in user queries |
+| `export_enabled` | boolean | `false` | Enable `/api/osi/export` endpoint |
+| `sync_interval_minutes` | integer | `60` | Polling interval for YAML file changes (0 = disabled) |
+
+### How It Works
+
+1. **Startup**: YAML files are read and hashed (SHA-256 of actual file bytes). If the content hash differs from what's stored in MongoDB, models are re-seeded. If no YAML files exist, a starter model is auto-scaffolded from `graph_config.node_types` and written to disk.
+2. **Validation**: Every loaded model is validated on load with clear error/warning messages (field paths, suggestions). Use `POST /api/osi/validate` to check YAML before deploying.
+3. **Extraction**: LLM extracts nodes using the base prompt + OSI dataset names in the type list.
+4. **Resolution**: Post-extraction, `resolve_entities()` remaps types (e.g., `person:tom_hanks` -> `actor:tom_hanks`) using OSI synonyms.
+5. **Query routing**: `QueryClassifier` checks queries against metric synonyms. "What was our revenue?" -> `osi_metric` classification.
+6. **File watcher**: Polls YAML files for changes (configurable interval). On change, re-seeds MongoDB and reloads the in-memory registry. YAML and database stay synchronized.
+7. **API mutations**: `POST /api/osi/models/import` validates then writes to MongoDB. Changes are live immediately.
+
+### API Endpoints (when export_enabled=true)
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/osi/validate` | POST | Validate YAML without loading (no side effects) |
+| `/api/osi/models` | GET | List loaded semantic models |
+| `/api/osi/metrics` | GET | List governed metrics |
+| `/api/osi/models/import` | POST | Validate + import YAML (live immediately) |
+| `/api/osi/concepts` | GET | List discovered concept definitions |
+| `/api/osi/concepts/{id}/approve` | POST | Promote concept to governed |
+| `/api/osi/concepts/{id}/reject` | POST | Reject a concept |
+| `/api/osi/export` | POST | Export knowledge graph as OSI YAML |
+| `/api/osi/discovery-report` | GET | Gap analysis: graph entities not in OSI |
+| `/api/osi/reload` | POST | Force reload from MongoDB store |
+
+### Example: Family Management Model
+
+See `examples/advanced/sso-multi-app/apps/sso-app-3/semantic_models/family_management.yaml` for a production example with:
+- 12 datasets (family_member, allergy, medication, medical_condition, vaccination, appointment, routine, meal_plan, emergency_contact, pet, chore, budget)
+- 16 relationships
+- 6 governed metrics (active_medications, upcoming_appointments, high_severity_allergies, etc.)
+- 600+ synonyms for natural language recognition
+
+For the complete OSI reference including YAML schema, Python API, auto-scaffold, and validation details, see [OSI_REFERENCE.md](OSI_REFERENCE.md).
+
+---
+
+## Prompt Safety
+
+Configure how prompt injection detection and content filtering behaves. By default, injection patterns are detected and logged but never block execution. The `prompt_safety` block lets you escalate to blocking mode, add custom patterns, and enforce input length limits.
+
+```json
+{
+  "prompt_safety": {
+    "injection_mode": "block_high_confidence",
+    "max_input_length": 10000,
+    "custom_blocked_patterns": [
+      "reveal\\s+api\\s+key",
+      "extract\\s+database",
+      "dump\\s+schema"
+    ],
+    "allow_patterns": [
+      "^test_safe:"
+    ]
+  }
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `injection_mode` | `string` | `"log"` | `"log"` = warn only (default). `"block"` = raise `PromptInjectionError` on any match. `"block_high_confidence"` = block ChatML/Llama markers, log the rest. |
+| `max_input_length` | `integer` | `0` | Maximum character length for user input. `0` = no limit. Raises `ValueError` when exceeded. |
+| `custom_blocked_patterns` | `array<string>` | `[]` | Additional regex patterns (IGNORECASE) to treat as injection. Invalid regexes are logged and skipped. |
+| `allow_patterns` | `array<string>` | `[]` | Regex patterns that whitelist input. If any pattern matches, injection detection is skipped entirely. |
+
+**Built-in patterns** (11 total): The engine ships with patterns for "ignore previous instructions", "disregard prior context", role overrides ("you are now a..."), ChatML tokens (`<|im_start|>`), Llama markers (`<<SYS>>`, `[INST]`), DAN jailbreaks, and more. These cannot be removed but can be supplemented with `custom_blocked_patterns`.
+
+**High-confidence patterns** (used by `block_high_confidence` mode):
+- `<|im_start|>` / `<|im_end|>` (ChatML special tokens)
+- `<<SYS>>` / `<</SYS>>` (Llama system markers)
+- `[INST]` / `[/INST]` (Llama instruction markers)
+
+These are almost never legitimate user input and are safe to block without false positives.
+
+---
+
+## Resilience
+
+Configure retry, backoff, and circuit breaker policies for each AI service. Each of `llm_config`, `embedding_config`, and `graph_config` accepts an optional `resilience` block. When omitted, sensible per-service defaults apply.
+
+```json
+{
+  "llm_config": {
+    "default_model": "openai/gpt-4o",
+    "resilience": {
+      "max_retries": 3,
+      "timeout": 60,
+      "circuit_failure_threshold": 5,
+      "circuit_recovery_window": 30
+    }
+  },
+  "embedding_config": {
+    "resilience": {
+      "max_retries": 3,
+      "timeout": 30
+    }
+  },
+  "graph_config": {
+    "resilience": {
+      "max_retries": 2,
+      "timeout": 45
+    }
+  }
+}
+```
+
+| Field | Type | LLM Default | Embeddings Default | Graph Default | Description |
+|-------|------|-------------|-------------------|---------------|-------------|
+| `max_retries` | `integer` | `3` | `3` | `2` | Maximum retry attempts on transient failures |
+| `backoff_base` | `number` | `1.0` | `0.5` | `1.0` | Base delay (seconds) for exponential backoff |
+| `backoff_max` | `number` | `30.0` | `15.0` | `15.0` | Maximum backoff delay in seconds |
+| `timeout` | `number\|null` | `60` | `30` | `45` | Per-call timeout in seconds (`null` = no timeout) |
+| `circuit_failure_threshold` | `integer` | `5` | `5` | `5` | Consecutive failures before circuit breaker opens |
+| `circuit_recovery_window` | `number` | `30.0` | `30.0` | `30.0` | Seconds before an open circuit transitions to half-open |
+
+**How it works**: Each service wraps its key async methods with the `@resilient` decorator from `mdb_engine.core.resilience`. On transient failures (network errors, 5xx, rate limits) the call is retried with exponential backoff and jitter. If a `RateLimitError` carries a `retry_after` value, the backoff honours it. After `circuit_failure_threshold` consecutive failures the circuit breaker opens and rejects further calls until `circuit_recovery_window` elapses.
+
+---
+
+## WebSockets
+
+Define real-time WebSocket endpoints with secure ticket-based authentication.
+
+**Security Note**: MDB-Engine uses **ticket-based authentication** for WebSocket connections. Tickets are short-lived (10-second TTL), single-use UUIDs that are generated via the `/auth/ticket` endpoint and consumed immediately upon WebSocket connection. This provides secure, fast authentication without database lookups.
+
+**CSRF Protection**: By default, WebSocket connections use Origin validation + SameSite cookies for CSRF protection, which is sufficient for WebSocket security. The CSRF requirement can be enabled per-endpoint via `auth.csrf_required: true` for extra strict security requirements.
+
+```json
+{
+  "websockets": {
+    "realtime": {
+      "path": "/ws",
+      "description": "Real-time updates",
+      "auth": {
+        "required": true,
+        "allow_anonymous": false
+      },
+      "ping_interval": 30
+    },
+    "events": {
+      "path": "/events",
+      "description": "Event stream",
+      "auth": {
+        "required": true
+      }
+    }
+  }
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `path` | `string` | ✅ | WebSocket path (must start with `/`) |
+| `description` | `string` | - | Description of the endpoint |
+| `auth.required` | `boolean` | - | Whether auth is required (default: `true`) |
+| `auth.allow_anonymous` | `boolean` | - | Allow anonymous connections (default: `false`) |
+| `auth.csrf_required` | `boolean` | - | Require CSRF cookie (default: `false`). When `false`, CSRF protection relies on Origin validation + SameSite cookies, which is sufficient for WebSocket security. Set to `true` for extra strict security requirements. |
+| `ping_interval` | `integer` | - | Ping interval in seconds (5-300, default: `30`) |
+
+### Authentication
+
+When `auth.required` is `true` (default), clients must authenticate using **ticket-based authentication**:
+
+**Client Implementation:**
+```javascript
+// Step 1: Get ticket from /auth/ticket endpoint (requires JWT cookie)
+const ticketResponse = await fetch('/auth/ticket', {
+  method: 'POST',
+  credentials: 'include', // Sends JWT cookie
+});
+const { ticket } = await ticketResponse.json();
+
+// Step 2: Connect WebSocket with ticket (must be done within 10 seconds)
+const ws = new WebSocket(`wss://api.example.com/app1/ws?ticket=${ticket}`);
+```
+
+**Ticket Flow:**
+1. User logs in → JWT stored in httpOnly cookie
+2. Client requests ticket → `POST /auth/ticket` (sends JWT cookie)
+3. Server validates JWT → Generates one-time ticket (UUID, 10-second TTL)
+4. Client connects WebSocket → `ws://host/app/ws?ticket=<uuid>`
+5. Server validates & consumes ticket → WebSocket connection established
+
+**Security Benefits:**
+- ✅ Short-lived tickets (10-second TTL reduces attack window)
+- ✅ Single-use tickets (prevents replay attacks)
+- ✅ Fast validation (in-memory, no database lookups)
+- ✅ CSRF protection (Origin validation + SameSite cookies by default)
+- ✅ No encryption overhead (simpler than session keys)
+- ✅ Server validates token **before** accepting connection
+- ✅ Elegant multi-app support (parent app manages security, configurable per-endpoint)
+
+**See Also:**
+- [WebSocket Security Guide](guides/WEBSOCKET_SECURITY_ELEGANT_SOLUTION.md) - Comprehensive security documentation
+- [WebSocket + SSO Multi-App Guide](guides/SSO_MULTI_APP_SETUP.md) - Multi-app setup guide
+
+---
+
+## CORS
+
+Configure Cross-Origin Resource Sharing:
+
+```json
+{
+  "cors": {
+    "enabled": true,
+    "allow_origins": ["http://localhost:3000", "https://yourdomain.com"],
+    "allow_credentials": true,
+    "allow_methods": ["GET", "POST", "PUT", "DELETE", "PATCH"],
+    "allow_headers": ["*"],
+    "expose_headers": ["X-Request-ID"],
+    "max_age": 3600
+  }
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `boolean` | `false` | Enable CORS |
+| `allow_origins` | `array<string>` | `["*"]` | Allowed origins (use `["*"]` for all, but see warning below) |
+| `allow_credentials` | `boolean` | `false` | Allow credentials in CORS requests |
+| `allow_methods` | `array<string>` | `["GET", "POST", "PUT", "DELETE", "PATCH"]` | Allowed HTTP methods |
+| `allow_headers` | `array<string>` | `["*"]` | Allowed headers |
+| `expose_headers` | `array<string>` | - | Headers to expose to client |
+| `max_age` | `integer` | `3600` | Max age for preflight requests (seconds) |
+
+### Important CORS Warnings
+
+**⚠️ Wildcard Origins with Credentials**
+
+Browsers **reject** the combination of `allow_origins: ["*"]` with `allow_credentials: true`. This is a browser security restriction.
+
+**❌ Invalid Configuration:**
+```json
+{
+  "cors": {
+    "allow_origins": ["*"],
+    "allow_credentials": true
+  }
+}
+```
+
+**✅ Correct Configuration:**
+```json
+{
+  "cors": {
+    "allow_origins": [
+      "http://localhost:3000",
+      "https://yourdomain.com"
+    ],
+    "allow_credentials": true
+  }
+}
+```
+
+MDB Engine validates this configuration and will raise a `ValueError` during app initialization if detected.
+
+**See Also:**
+- [CORS Troubleshooting Guide](guides/CORS_TROUBLESHOOTING.md) - Comprehensive CORS troubleshooting
+- [WebSocket Troubleshooting Guide](guides/WEBSOCKET_TROUBLESHOOTING.md) - WebSocket-specific CORS issues
+
+---
+
+## Observability
+
+Configure health checks, metrics, and logging:
+
+```json
+{
+  "observability": {
+    "health_checks": {
+      "enabled": true,
+      "endpoint": "/health",
+      "interval_seconds": 30
+    },
+    "metrics": {
+      "enabled": true,
+      "collect_operation_metrics": true,
+      "collect_performance_metrics": true,
+      "custom_metrics": ["custom_metric_1", "custom_metric_2"]
+    },
+    "logging": {
+      "level": "INFO",
+      "format": "json",
+      "include_request_id": true,
+      "log_sensitive_data": false
+    }
+  }
+}
+```
+
+---
+
+## Collection Settings
+
+Configure collection-level settings:
+
+```json
+{
+  "collection_settings": {
+    "events": {
+      "validation": {
+        "validator": {
+          "$jsonSchema": {
+            "bsonType": "object",
+            "required": ["timestamp", "event_type"],
+            "properties": {
+              "timestamp": {"bsonType": "date"},
+              "event_type": {"bsonType": "string"}
+            }
+          }
+        },
+        "validationLevel": "strict",
+        "validationAction": "error"
+      }
+    },
+    "metrics": {
+      "timeseries": {
+        "timeField": "timestamp",
+        "metaField": "metadata",
+        "granularity": "seconds"
+      }
+    },
+    "logs": {
+      "capped": true,
+      "size": 10485760,
+      "max": 10000
+    }
+  }
+}
+```
+
+---
+
+## Initial Data
+
+Seed collections with initial data:
+
+```json
+{
+  "initial_data": {
+    "roles": [
+      {"name": "admin", "permissions": ["read", "write", "delete"]},
+      {"name": "user", "permissions": ["read"]}
+    ],
+    "settings": [
+      {"key": "theme", "value": "dark"},
+      {"key": "language", "value": "en"}
+    ]
+  }
+}
+```
+
+**Note**: Initial data is only inserted if the collection is empty (idempotent).
+
+---
+
+## Multi-App Mounting
+
+Mount multiple FastAPI apps under a single parent app for single-deployment scenarios (e.g., Render.com):
+
+```json
+{
+  "schema_version": "2.0",
+  "multi_app": {
+    "enabled": true,
+    "apps": [
+      {
+        "slug": "auth-hub",
+        "manifest": "./apps/auth-hub/manifest.json",
+        "path_prefix": "/auth-hub"
+      },
+      {
+        "slug": "dashboard",
+        "manifest": "./apps/dashboard/manifest.json",
+        "path_prefix": "/dashboard"
+      }
+    ],
+    "shared_middleware": {
+      "cors": true,
+      "rate_limiting": true,
+      "health_checks": true
+    }
+  }
+}
+```
+
+**Usage:**
+
+```python
+from mdb_engine import MongoDBEngine
+from pathlib import Path
+
+engine = MongoDBEngine(mongo_uri=..., db_name=...)
+app = engine.create_multi_app(
+    multi_app_manifest=Path("./multi_app_manifest.json")
+)
+```
+
+**Benefits:**
+- Single FastAPI instance for multiple apps
+- Shared engine and connection pool
+- SSO/shared auth works seamlessly
+- Perfect for single-service deployments (Render.com, Railway, etc.)
+- Unified health check endpoint at `/health`
+
+**Path Prefix Rules:**
+- Must start with `/`
+- Must be unique across all apps
+- Cannot conflict with reserved paths (`/health`, `/docs`, `/openapi.json`)
+- Cannot be a prefix of another (e.g., `/app` conflicts with `/app/v2`)
+
+## Complete Example
+
+Here's a complete manifest.json demonstrating all major features:
+
+```json
+{
+  "schema_version": "2.0",
+  "slug": "my_app",
+  "name": "My Application",
+  "description": "A complete example application",
+  "status": "active",
+  "developer_id": "developer@example.com",
+  
+  "data_access": {
+    "read_scopes": ["my_app", "shared_data"],
+    "write_scope": "my_app",
+    "cross_app_policy": "explicit"
+  },
+  
+  "managed_indexes": {
+    "tasks": [
+      {
+        "type": "regular",
+        "name": "status_sort",
+        "keys": {"status": 1, "created_at": -1},
+        "options": {"background": true}
+      }
+    ],
+    "knowledge_base": [
+      {
+        "type": "vectorSearch",
+        "name": "embedding_vector_index",
+        "definition": {
+          "fields": [{
+            "type": "vector",
+            "path": "embedding",
+            "numDimensions": 1536,
+            "similarity": "cosine"
+          }]
+        }
+      }
+    ]
+  },
+  
+  "auth": {
+    "mode": "app",
+    "policy": {
+      "provider": "casbin",
+      "required": true,
+      "authorization": {
+        "model": "rbac",
+        "initial_policies": [
+          ["admin", "tasks", "read"],
+          ["admin", "tasks", "write"]
+        ]
+      }
+    },
+    "users": {
+      "enabled": true,
+      "allow_registration": true,
+      "demo_users": [
+        {"email": "admin@example.com", "password": "password123", "role": "admin"}
+      ]
+    }
+  },
+  
+  "embedding_config": {
+    "enabled": true,
+    "max_tokens_per_chunk": 1000
+  },
+  
+  "memory_config": {
+    "enabled": true,
+    "collection_name": "user_memories"
+  },
+  
+  "websockets": {
+    "realtime": {
+      "path": "/ws",
+      "description": "Real-time updates"
+    }
+  },
+  
+  "cors": {
+    "enabled": true,
+    "allow_origins": ["*"]
+  },
+  
+  "observability": {
+    "health_checks": {"enabled": true},
+    "metrics": {"enabled": true},
+    "logging": {"level": "INFO"}
+  }
+}
+```
+
+---
+
+## Validation
+
+Validate your manifest.json before using it:
+
+```python
+from mdb_engine.core import ManifestValidator
+
+validator = ManifestValidator()
+is_valid, error, paths = validator.validate(manifest_dict)
+
+if not is_valid:
+    print(f"Validation error: {error}")
+    print(f"Paths: {paths}")
+```
+
+---
+
+## Best Practices
+
+1. **Start Minimal**: Begin with just required fields (`schema_version`, `slug`, `name`)
+2. **Add Incrementally**: Add features as you need them
+3. **Version Control**: Keep your manifest.json in git
+4. **Validate Early**: Validate before deployment
+5. **Use Examples**: Check `examples/` directory for real-world manifests
+6. **Document Choices**: Use `description` field to explain configuration decisions
+
+---
+
+## Related Documentation
+
+- [Quick Start Guide](QUICK_START.md) - Get started with manifest.json
+- [Manifest Deep Dive](MANIFEST_DEEP_DIVE.md) - Comprehensive analysis and incremental adoption
+- [Architecture](ARCHITECTURE.md) - How manifest.json works under the hood
+
+---
+
+**Remember**: Your `manifest.json` is the foundation of your application. Start simple, grow as needed!

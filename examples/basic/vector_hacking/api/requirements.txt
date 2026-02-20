@@ -1,0 +1,19 @@
+# Requirements for Vector Hacking API (Backend Only)
+# Install mdb-engine from source (NOT published to PyPI):
+#   pip install -e "../../../..[ai]"
+
+# Core dependencies
+python-dotenv>=1.0.0
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+
+# Web framework (no templates)
+uvicorn[standard]>=0.24.0
+
+# LLM and Embedding dependencies
+instructor>=0.4.0
+tenacity>=8.0.0
+semantic-text-splitter>=0.9.0
+
+# Vector operations
+numpy>=1.24.0

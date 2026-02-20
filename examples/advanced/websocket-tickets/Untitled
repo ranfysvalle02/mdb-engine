@@ -1,0 +1,90 @@
+docker compose logs app
+websocket-tickets-app  | INFO:     Will watch for changes in these directories: ['/app']
+websocket-tickets-app  | INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+websocket-tickets-app  | INFO:     Started reloader process [1] using WatchFiles
+websocket-tickets-app  | 2026-02-01 19:52:36,223 - apps.multi_app_main - INFO - ============================================================
+websocket-tickets-app  | 2026-02-01 19:52:36,223 - apps.multi_app_main - INFO - Creating WebSocket Tickets Multi-App
+websocket-tickets-app  | 2026-02-01 19:52:36,223 - apps.multi_app_main - INFO - ============================================================
+websocket-tickets-app  | 2026-02-01 19:52:36,224 - mdb_engine.core.engine - INFO - CSRFMiddleware added to parent app for WebSocket origin validation
+websocket-tickets-app  | 2026-02-01 19:52:36,232 - mdb_engine.core.engine - INFO - Multi-app parent created with 3 app(s) configured
+websocket-tickets-app  | 2026-02-01 19:52:36,232 - apps.multi_app_main - INFO - Multi-app created successfully!
+websocket-tickets-app  | 2026-02-01 19:52:36,232 - apps.multi_app_main - INFO - Apps will be accessible at:
+websocket-tickets-app  | 2026-02-01 19:52:36,232 - apps.multi_app_main - INFO -   - /auth-hub/*           (Auth Hub - Registration/Login)
+websocket-tickets-app  | 2026-02-01 19:52:36,232 - apps.multi_app_main - INFO -   - /chat-app/*           (Chat App - WebSocket Chat)
+websocket-tickets-app  | 2026-02-01 19:52:36,232 - apps.multi_app_main - INFO -   - /notifications-app/*  (Notifications App - WebSocket Notifications)
+websocket-tickets-app  | 2026-02-01 19:52:36,232 - apps.multi_app_main - INFO -   - /auth/ticket          (Ticket endpoint - available on parent app)
+websocket-tickets-app  | 2026-02-01 19:52:36,232 - apps.multi_app_main - INFO -   - /health               (Unified health check)
+websocket-tickets-app  | INFO:     Started server process [8]
+websocket-tickets-app  | INFO:     Waiting for application startup.
+websocket-tickets-app  | 2026-02-01 19:52:36,232 - mdb_engine.auth.csrf - INFO - CSRFMiddleware initialized (exempt_routes=['/health', '/docs', '/openapi.json', '/_mdb/routes', '/auth-hub/', '/auth-hub/health', '/auth-hub/login', '/auth-hub/register', '/chat-app/health', '/notifications-app/health', '/auth/websocket-session', '/auth/ticket'], rotate_tokens=False)
+websocket-tickets-app  | 2026-02-01 19:52:36,232 - mdb_engine.core.connection - INFO - Initializing MongoDB connection
+websocket-tickets-app  | 2026-02-01 19:52:36,236 - mdb_engine.core.connection - INFO - MongoDB connection initialized successfully
+websocket-tickets-app  | 2026-02-01 19:52:36,236 - mdb_engine.core.engine - WARNING - Encryption service not initialized: Master key not found. Set MDB_ENGINE_MASTER_KEY environment variable or provide master_key parameter.. App-level authentication will not be available. Set MDB_ENGINE_MASTER_KEY environment variable.
+websocket-tickets-app  | 2026-02-01 19:52:36,236 - mdb_engine.auth.websocket_tickets - INFO - Initialized WebSocket ticket store (TTL: 10s)
+websocket-tickets-app  | 2026-02-01 19:52:36,236 - mdb_engine.core.engine - INFO - WebSocket ticket store initialized
+websocket-tickets-app  | 2026-02-01 19:52:36,236 - mdb_engine.core.engine - INFO - WebSocket ticket store stored in parent app state
+websocket-tickets-app  | 2026-02-01 19:52:36,240 - mdb_engine.routing.websockets - INFO - ✅ Global WebSocket ticket store set for multi-app WebSocket authentication (store type: WebSocketTicketStore)
+websocket-tickets-app  | 2026-02-01 19:52:36,240 - mdb_engine.core.engine - INFO - Global WebSocket ticket store set for multi-app authentication
+websocket-tickets-app  | 2026-02-01 19:52:36,240 - mdb_engine.core.engine - INFO - WebSocket ticket endpoint registered at /auth/ticket
+websocket-tickets-app  | 2026-02-01 19:52:36,240 - mdb_engine.core.engine - INFO - Initializing shared user pool for multi-app deployment
+websocket-tickets-app  | 2026-02-01 19:52:36,241 - mdb_engine.auth.shared_users - INFO - SharedUserPool initialized (algorithm=HS256)
+websocket-tickets-app  | 2026-02-01 19:52:36,253 - mdb_engine.auth.shared_users - INFO - SharedUserPool user indexes ensured
+websocket-tickets-app  | 2026-02-01 19:52:36,263 - mdb_engine.auth.shared_users - INFO - SharedUserPool blacklist indexes ensured
+websocket-tickets-app  | 2026-02-01 19:52:36,263 - mdb_engine.core.engine - INFO - SharedUserPool initialized
+websocket-tickets-app  | 2026-02-01 19:52:36,263 - mdb_engine.auth.audit - INFO - AuthAuditLog initialized (retention: 90 days)
+websocket-tickets-app  | 2026-02-01 19:52:36,280 - mdb_engine.auth.audit - INFO - AuthAuditLog indexes ensured
+websocket-tickets-app  | 2026-02-01 19:52:36,280 - mdb_engine.core.engine - INFO - AuthAuditLog initialized (retention: 90 days)
+websocket-tickets-app  | 2026-02-01 19:52:36,280 - mdb_engine.core.engine - INFO - SharedUserPool and AuditLog attached to app.state
+websocket-tickets-app  | 2026-02-01 19:52:36,280 - mdb_engine.core.engine - INFO - Shared user pool initialized for multi-app deployment
+websocket-tickets-app  | 2026-02-01 19:52:36,280 - mdb_engine.core.engine - INFO - Mounting app 'auth-hub' at '/auth-hub': auth_mode=shared, public_routes=4 routes
+websocket-tickets-app  | 2026-02-01 19:52:36,281 - mdb_engine.core.engine - INFO - AuthRateLimitMiddleware added for 'auth-hub' (endpoints: defaults)
+websocket-tickets-app  | 2026-02-01 19:52:36,281 - mdb_engine.core.engine - INFO - LazySharedAuthMiddleware added for 'auth-hub' (require_role=user)
+websocket-tickets-app  | 2026-02-01 19:52:36,281 - mdb_engine.core.engine - INFO - SecurityMiddleware added for 'auth-hub'
+websocket-tickets-app  | 2026-02-01 19:52:36,290 - mdb_engine_imported_routes_auth-hub_281473145530896 - INFO - Using injected MongoDBEngine for 'auth-hub' (multi-app mode)
+websocket-tickets-app  | 2026-02-01 19:52:36,290 - mdb_engine_imported_routes_auth-hub_281473145530896 - INFO - Using injected FastAPI app for 'auth-hub' (multi-app mode)
+websocket-tickets-app  | 2026-02-01 19:52:36,292 - mdb_engine.core.engine - INFO - ✅ Auto-imported routes from 'web.py' for app 'auth-hub'. Added 6 route(s) (total: 10)
+websocket-tickets-app  | 2026-02-01 19:52:36,292 - mdb_engine.core.engine - INFO - ✅ Merged CORS config from 'auth-hub': origins=['*'], credentials=True
+websocket-tickets-app  | 2026-02-01 19:52:36,292 - mdb_engine.core.engine - INFO - Mounted app 'auth-hub' at path prefix '/auth-hub'
+websocket-tickets-app  | 2026-02-01 19:52:36,292 - mdb_engine.core.engine - INFO - Mounting app 'chat-app' at '/chat-app': auth_mode=shared, public_routes=1 routes
+websocket-tickets-app  | 2026-02-01 19:52:36,292 - mdb_engine.core.engine - INFO - AuthRateLimitMiddleware added for 'chat-app' (endpoints: defaults)
+websocket-tickets-app  | 2026-02-01 19:52:36,292 - mdb_engine.core.engine - INFO - LazySharedAuthMiddleware added for 'chat-app' (require_role=user)
+websocket-tickets-app  | 2026-02-01 19:52:36,292 - mdb_engine.core.engine - INFO - SecurityMiddleware added for 'chat-app'
+websocket-tickets-app  | 2026-02-01 19:52:36,293 - mdb_engine_imported_routes_chat-app_281473144891216 - INFO - Using injected MongoDBEngine for 'chat-app' (multi-app mode)
+websocket-tickets-app  | 2026-02-01 19:52:36,293 - mdb_engine_imported_routes_chat-app_281473144891216 - INFO - Using injected FastAPI app for 'chat-app' (multi-app mode)
+websocket-tickets-app  | 2026-02-01 19:52:36,293 - mdb_engine.routing.websockets - INFO - Registered message handler for app 'chat-app', endpoint 'chat'
+websocket-tickets-app  | 2026-02-01 19:52:36,293 - mdb_engine_imported_routes_chat-app_281473144891216 - INFO - WebSocket message handler registered for chat-app
+websocket-tickets-app  | 2026-02-01 19:52:36,294 - mdb_engine.core.engine - INFO - ✅ Auto-imported routes from 'web.py' for app 'chat-app'. Added 3 route(s) (total: 7)
+websocket-tickets-app  | 2026-02-01 19:52:36,294 - mdb_engine.core.engine - INFO - ✅ Merged CORS config from 'chat-app': origins=['*'], credentials=True
+websocket-tickets-app  | 2026-02-01 19:52:36,294 - mdb_engine.core.engine - INFO - ✅ Stored WebSocket config for 'chat-app' in parent app state (1 endpoint(s))
+websocket-tickets-app  | 2026-02-01 19:52:36,295 - mdb_engine.core.engine - INFO - ✅ Registered WebSocket route '/chat-app/ws' for mounted app 'chat-app' (mounted at '/chat-app', auth: True, ping: 30s)
+websocket-tickets-app  | ✅ [ROUTE REGISTRATION] WebSocket route '/chat-app/ws' registered for 'chat-app'
+websocket-tickets-app  | 📋 [ROUTE VERIFICATION] All WebSocket-like routes: [('/openapi.json', 'Route'), ('/docs', 'Route'), ('/docs/oauth2-redirect', 'Route'), ('/redoc', 'Route'), ('/health', 'APIRoute'), ('/_mdb/routes', 'APIRoute'), ('/docs/{app_slug}', 'APIRoute'), ('/_mdb/openapi/{app_slug}.json', 'APIRoute'), ('/', 'APIRoute'), ('/info', 'APIRoute'), ('/auth/ticket', 'APIRoute'), ('/chat-app/ws', 'APIWebSocketRoute')]
+websocket-tickets-app  | 2026-02-01 19:52:36,295 - mdb_engine.core.engine - INFO - 📋 [ROUTE VERIFICATION] All WebSocket-like routes: [('/openapi.json', 'Route'), ('/docs', 'Route'), ('/docs/oauth2-redirect', 'Route'), ('/redoc', 'Route'), ('/health', 'APIRoute'), ('/_mdb/routes', 'APIRoute'), ('/docs/{app_slug}', 'APIRoute'), ('/_mdb/openapi/{app_slug}.json', 'APIRoute'), ('/', 'APIRoute'), ('/info', 'APIRoute'), ('/auth/ticket', 'APIRoute'), ('/chat-app/ws', 'APIWebSocketRoute')]
+websocket-tickets-app  | 2026-02-01 19:52:36,295 - mdb_engine.core.engine - INFO - ✅ WebSocket registration summary for 'chat-app': 1/1 routes registered successfully
+websocket-tickets-app  | 2026-02-01 19:52:36,295 - mdb_engine.core.engine - INFO - Mounted app 'chat-app' at path prefix '/chat-app'
+websocket-tickets-app  | 2026-02-01 19:52:36,295 - mdb_engine.core.engine - INFO - Mounting app 'notifications-app' at '/notifications-app': auth_mode=shared, public_routes=1 routes
+websocket-tickets-app  | 2026-02-01 19:52:36,296 - mdb_engine.core.engine - INFO - AuthRateLimitMiddleware added for 'notifications-app' (endpoints: defaults)
+websocket-tickets-app  | 2026-02-01 19:52:36,296 - mdb_engine.core.engine - INFO - LazySharedAuthMiddleware added for 'notifications-app' (require_role=user)
+websocket-tickets-app  | 2026-02-01 19:52:36,296 - mdb_engine.core.engine - INFO - SecurityMiddleware added for 'notifications-app'
+websocket-tickets-app  | 2026-02-01 19:52:36,297 - mdb_engine_imported_routes_notifications-app_281473145003920 - INFO - Using injected MongoDBEngine for 'notifications-app' (multi-app mode)
+websocket-tickets-app  | 2026-02-01 19:52:36,297 - mdb_engine_imported_routes_notifications-app_281473145003920 - INFO - Using injected FastAPI app for 'notifications-app' (multi-app mode)
+websocket-tickets-app  | 2026-02-01 19:52:36,297 - mdb_engine.routing.websockets - INFO - Registered message handler for app 'notifications-app', endpoint 'notifications'
+websocket-tickets-app  | 2026-02-01 19:52:36,297 - mdb_engine_imported_routes_notifications-app_281473145003920 - INFO - WebSocket message handler registered for notifications-app
+websocket-tickets-app  | 2026-02-01 19:52:36,298 - mdb_engine.core.engine - INFO - ✅ Auto-imported routes from 'web.py' for app 'notifications-app'. Added 3 route(s) (total: 7)
+websocket-tickets-app  | 2026-02-01 19:52:36,298 - mdb_engine.core.engine - INFO - ✅ Merged CORS config from 'notifications-app': origins=['*'], credentials=True
+websocket-tickets-app  | 2026-02-01 19:52:36,298 - mdb_engine.core.engine - INFO - ✅ Stored WebSocket config for 'notifications-app' in parent app state (1 endpoint(s))
+websocket-tickets-app  | 2026-02-01 19:52:36,298 - mdb_engine.core.engine - INFO - ✅ Registered WebSocket route '/notifications-app/ws' for mounted app 'notifications-app' (mounted at '/notifications-app', auth: True, ping: 30s)
+websocket-tickets-app  | ✅ [ROUTE REGISTRATION] WebSocket route '/notifications-app/ws' registered for 'notifications-app'
+websocket-tickets-app  | 📋 [ROUTE VERIFICATION] All WebSocket-like routes: [('/openapi.json', 'Route'), ('/docs', 'Route'), ('/docs/oauth2-redirect', 'Route'), ('/redoc', 'Route'), ('/health', 'APIRoute'), ('/_mdb/routes', 'APIRoute'), ('/docs/{app_slug}', 'APIRoute'), ('/_mdb/openapi/{app_slug}.json', 'APIRoute'), ('/', 'APIRoute'), ('/info', 'APIRoute'), ('/auth/ticket', 'APIRoute'), ('/chat-app/ws', 'APIWebSocketRoute'), ('/notifications-app/ws', 'APIWebSocketRoute')]
+websocket-tickets-app  | 2026-02-01 19:52:36,299 - mdb_engine.core.engine - INFO - 📋 [ROUTE VERIFICATION] All WebSocket-like routes: [('/openapi.json', 'Route'), ('/docs', 'Route'), ('/docs/oauth2-redirect', 'Route'), ('/redoc', 'Route'), ('/health', 'APIRoute'), ('/_mdb/routes', 'APIRoute'), ('/docs/{app_slug}', 'APIRoute'), ('/_mdb/openapi/{app_slug}.json', 'APIRoute'), ('/', 'APIRoute'), ('/info', 'APIRoute'), ('/auth/ticket', 'APIRoute'), ('/chat-app/ws', 'APIWebSocketRoute'), ('/notifications-app/ws', 'APIWebSocketRoute')]
+websocket-tickets-app  | 2026-02-01 19:52:36,299 - mdb_engine.core.engine - INFO - ✅ WebSocket registration summary for 'notifications-app': 1/1 routes registered successfully
+websocket-tickets-app  | 2026-02-01 19:52:36,299 - mdb_engine.core.engine - INFO - Mounted app 'notifications-app' at path prefix '/notifications-app'
+websocket-tickets-app  | 2026-02-01 19:52:36,299 - mdb_engine.core.engine - INFO - ============================================================
+websocket-tickets-app  | 2026-02-01 19:52:36,299 - mdb_engine.core.engine - INFO - MDB-Engine Multi-App Configuration Verification
+websocket-tickets-app  | 2026-02-01 19:52:36,299 - mdb_engine.core.engine - INFO - ============================================================
+websocket-tickets-app  | 2026-02-01 19:52:36,299 - mdb_engine.core.engine - INFO - ✅ CORS Config: enabled=True, origins=['*'], credentials=True
+websocket-tickets-app  | 2026-02-01 19:52:36,299 - mdb_engine.core.engine - INFO - ✅ Found 2 WebSocket route(s):
+websocket-tickets-app  | 2026-02-01 19:52:36,299 - mdb_engine.core.engine - INFO -    🔌 /chat-app/ws
+websocket-tickets-app  | 2026-02-01 19:52:36,299 - mdb_engine.core.engine - INFO -    🔌 /notifications-app/ws
+websocket-tickets-app  | 2026-02-01 19:52:36,299 - mdb_engine.core.engine - INFO - ============================================================
+websocket-tickets-app  | INFO:     Application startup complete.

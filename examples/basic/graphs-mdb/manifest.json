@@ -1,0 +1,43 @@
+{
+  "schema_version": "2.0",
+  "slug": "graphs_mdb",
+  "name": "Graphs MDB Example",
+  "description": "Demonstrates MDB-Engine graph features: nodes, edges, traversal, hybrid search (GraphRAG), and LLM-powered node extraction",
+  "status": "active",
+  "developer_id": "developer@example.com",
+
+  "graph_config": {
+    "enabled": true,
+    "collection_name": "__kg",
+    "auto_extract": true,
+    "default_max_depth": 2,
+    "vector_index_name": "graph_vector_index",
+    "embedding_dims": 1536,
+    "node_types": ["person", "interest", "event", "location", "organization", "product", "concept"]
+  },
+
+  "llm_config": {
+    "enabled": true,
+    "providers": {
+      "chat": "openai/gpt-4o"
+    },
+    "litellm_config": {
+      "num_retries": 2,
+      "request_timeout": 60
+    }
+  },
+
+  "embedding_config": {
+    "enabled": true,
+    "default_embedding_model": "text-embedding-3-small",
+    "max_tokens_per_chunk": 1000
+  },
+
+  "cors": {
+    "enabled": true,
+    "allow_origins": ["http://localhost:3000", "http://localhost:8000", "*"],
+    "allow_credentials": true,
+    "allow_methods": ["*"],
+    "allow_headers": ["*"]
+  }
+}

@@ -1,0 +1,299 @@
+{
+  "schema_version": "2.0",
+  "slug": "ai-chat",
+  "name": "AI Chat - True Perfect Recall",
+  "description": "AI chat with True Perfect Recall, emotion-weighted recall, prospective memory triggers, GraphRAG, and the full power of mdb-engine's cognitive memory system.",
+  "status": "active",
+  "developer_id": "developer@example.com",
+  "auth": {
+    "mode": "shared",
+    "auth_hub_url": "/auth-hub",
+    "roles": [
+      "base_user",
+      "viewer",
+      "editor",
+      "admin"
+    ],
+    "require_role": "base_user",
+    "public_routes": [
+      "/health"
+    ],
+    "csrf_protection": {
+      "enabled": true,
+      "exempt_routes": [
+        "/health"
+      ],
+      "token_ttl": 3600
+    }
+  },
+    "memory_config": {
+      "enabled": true,
+      "encrypted": true,
+      "provider": "cognitive",
+      "collection_name": "user_memories",
+      "embedding_model_dims": 1536,
+      "embedding_model": "text-embedding-3-small",
+      "chat_model": "gemini/gemini-2.5-flash-lite",
+      "memory_llm_model": "gemini/gemini-2.5-flash-lite",
+      "extraction_provider": "extraction",
+      "infer": true,
+      "enable_cognitive": true,
+      "max_depth": 1000,
+      "emotion_weight": 0.5,
+      "recency_weight": 0.3,
+      "recency_half_life_hours": 168,
+      "spreading_activation": true,
+      "activation_discount": 0.7,
+      "salience_gate": true,
+      "salience_threshold": 0.3,
+      "persona": {
+        "enabled": true,
+        "default_role": "Orby - AI Assistant",
+        "default_description": "Orby is an intelligent AI assistant with access to stored memories and document context. When answering questions about document authors, titles, or metadata, Orby pays special attention to the [Document Context] information in memories. Orby provides accurate, helpful responses with a friendly, professional tone.",
+        "default_traits": {
+          "technical_focus": 0.6,
+          "humor": 0.3,
+          "formality": 0.6,
+          "empathy": 0.7,
+          "creativity": 0.5
+        }
+      },
+      "cognitive": {
+      "enabled": true,
+      "emotion": {
+        "enabled": true,
+        "flashbulb_threshold": 0.7,
+        "max_stability_multiplier": 100
+      },
+      "conflict_resolution": {
+        "enabled": true,
+        "similarity_threshold": 0.85
+      }
+    },
+    "categories": {
+      "enabled": true,
+      "custom_categories": [
+        "work",
+        "health",
+        "finance",
+        "travel"
+      ]
+    },
+    "reflection": {
+      "enabled": true,
+      "interval_hours": 24,
+      "message_threshold": 50,
+      "min_salience_to_keep": 0.3,
+      "store_reflections": true
+    },
+    "verification": {
+      "enabled": true,
+      "max_file_size_kb": 500
+    }
+  },
+  "graph_config": {
+    "enabled": true,
+    "collection_name": "__kg",
+    "auto_extract": true,
+    "default_max_depth": 2,
+    "node_types": [
+      "family_member",
+      "interest",
+      "food",
+      "allergy",
+      "medication",
+      "medical_condition",
+      "vaccination",
+      "appointment",
+      "routine",
+      "meal_plan",
+      "emergency_contact",
+      "pet",
+      "grocery_item",
+      "chore",
+      "homework",
+      "budget_entry",
+      "device_location",
+      "event",
+      "location",
+      "organization",
+      "product",
+      "concept",
+      "document",
+      "project"
+    ]
+  },
+  "graphrag_config": {
+    "enabled": true,
+    "community_detection": {
+      "enabled": true,
+      "rebuild_threshold": 100,
+      "rebuild_interval_hours": 24,
+      "min_community_size": 2,
+      "max_community_size": 1000
+    },
+    "community_summaries": {
+      "enabled": true,
+      "generate_on_detection": true,
+      "regenerate_on_rebuild": true
+    },
+    "query_classification": {
+      "enabled": true,
+      "use_llm": true,
+      "cache_results": true
+    },
+    "search_methods": {
+      "local_enabled": true,
+      "global_enabled": true,
+      "drift_enabled": true,
+      "basic_fallback": true
+    }
+  },
+  "llm_config": {
+    "enabled": true,
+    "providers": {
+      "chat": "gemini/gemini-2.5-flash-lite",
+      "extraction": "gemini/gemini-2.5-flash-lite"
+    },
+    "litellm_config": {
+      "num_retries": 2,
+      "request_timeout": 60
+    }
+  },
+  "raw_content_config": {
+    "enabled": true,
+    "collection_name": "raw_content",
+    "embedding_model_dims": 1536,
+    "embedding_model": "text-embedding-3-small"
+  },
+  "managed_indexes": {
+    "conversations": [
+      {
+        "type": "regular",
+        "keys": {
+          "user_id": 1,
+          "created_at": -1
+        },
+        "name": "user_conversations_idx",
+        "options": {
+          "background": true
+        }
+      },
+      {
+        "type": "regular",
+        "keys": {
+          "created_at": -1
+        },
+        "name": "created_idx",
+        "options": {
+          "background": true
+        }
+      }
+    ],
+    "messages": [
+      {
+        "type": "regular",
+        "keys": {
+          "conversation_id": 1,
+          "created_at": 1
+        },
+        "name": "conversation_messages_idx",
+        "options": {
+          "background": true
+        }
+      },
+      {
+        "type": "regular",
+        "keys": {
+          "user_id": 1,
+          "created_at": -1
+        },
+        "name": "user_messages_idx",
+        "options": {
+          "background": true
+        }
+      }
+    ],
+    "raw_content": [
+      {
+        "type": "vectorSearch",
+        "name": "raw_content_vector_idx",
+        "definition": {
+          "fields": [
+            {
+              "type": "vector",
+              "path": "embedding",
+              "numDimensions": 1536,
+              "similarity": "cosine"
+            }
+          ]
+        }
+      },
+      {
+        "type": "regular",
+        "keys": {
+          "bucket_id": 1,
+          "user_id": 1
+        },
+        "name": "raw_content_bucket_user_idx",
+        "options": {
+          "background": true
+        }
+      }
+    ]
+  },
+  "websockets": {
+    "realtime": {
+      "path": "/ws",
+      "description": "Real-time message updates and memory events",
+      "auth": {
+        "required": true,
+        "csrf_required": false
+      },
+      "ping_interval": 30
+    }
+  },
+  "cors": {
+    "enabled": true,
+    "allow_origins": [
+      "http://localhost:3000",
+      "http://localhost:8000",
+      "http://localhost:8003"
+    ],
+    "allow_credentials": true,
+    "allow_methods": [
+      "GET",
+      "POST",
+      "PUT",
+      "DELETE",
+      "OPTIONS"
+    ],
+    "allow_headers": [
+      "Content-Type",
+      "Authorization",
+      "X-CSRF-Token"
+    ]
+  },
+  "profile_config": {
+    "enabled": true,
+    "user_profiles": {
+      "enabled": true,
+      "rebuild_interval_hours": 24,
+      "incremental_on_memory_add": true,
+      "collection_name": "user_profiles"
+    },
+    "community_profile": {
+      "enabled": true,
+      "min_users_for_aggregation": 2,
+      "collection_name": "community_profile"
+    }
+  },
+  "osi_config": {
+    "enabled": true,
+    "models_path": "semantic_models/",
+    "entity_resolution": true,
+    "metric_routing": true,
+    "export_enabled": true,
+    "sync_interval_minutes": 60
+  }
+}

@@ -1,0 +1,443 @@
+[
+  {
+    "call_id": "CALL-2024-001",
+    "timestamp": "2024-01-15T10:30:00Z",
+    "duration_seconds": 1247,
+    "call_type": "sales_discovery",
+    "participants": {
+      "agent": "Sarah Chen",
+      "customer": "Michael Rodriguez",
+      "company": "TechFlow Solutions",
+      "role": "CTO"
+    },
+    "transcript": "Agent: Hi Michael, thanks for taking the time today. I understand you're looking for an API integration platform?\n\nCustomer: Yes, exactly! We're currently building integrations manually and honestly, it's killing our velocity. We have about 15 different systems we need to connect - Salesforce, Stripe, Shopify, you name it - and each new integration takes our engineering team 2-3 weeks. It's become a real bottleneck.\n\nAgent: That's a common challenge we hear. What's your current process look like?\n\nCustomer: Well, our engineering team writes custom code for each integration. It works, but it's slow and hard to maintain. We're spending way too much time on plumbing instead of building features our customers actually want. Plus, when APIs change, we have to update everything manually. It's frustrating.\n\nAgent: I completely understand. Our Integration Platform can help with that. We have pre-built connectors for hundreds of popular services, and a visual workflow builder so you can set up integrations without coding.\n\nCustomer: That sounds amazing! How does the workflow builder work?\n\nAgent: It's drag-and-drop. You select your source system, choose the data transformation you need, and connect it to your destination. Most integrations can be set up in minutes instead of weeks. We've had customers reduce integration time from weeks to hours.\n\nCustomer: Wow, that would be a game-changer for us. What about custom APIs? We have some proprietary systems that aren't standard.\n\nAgent: You can still use our platform for those. We have a generic REST connector and you can write custom transformations in JavaScript if needed. But you'd still get the monitoring, error handling, and retry logic built-in. No more building that infrastructure yourself.\n\nCustomer: That's really appealing. What's the pricing?\n\nAgent: For your volume, I'd recommend our Professional plan which starts at $2,500/month. That includes up to 50 integrations and 5 million API calls. We can scale up as you grow.\n\nCustomer: That's actually very reasonable. We're probably spending more than that in engineering time alone. What about security?\n\nAgent: Security is built-in. All connections are encrypted end-to-end, we're SOC 2 Type II certified, and you can store credentials securely in our vault. We also support SSO for your team.\n\nCustomer: Perfect. We're also evaluating CompetitorX. How do you compare?\n\nAgent: CompetitorX is solid, but we focus more on developer experience. Our API is more flexible, and we have better monitoring and debugging tools. Also, our pricing is more predictable - no surprise overage charges. Many customers switch to us because of that.\n\nCustomer: That's really helpful. Can we do a trial?\n\nAgent: Absolutely. I can set up a 30-day free trial for you today. You'll get full access to all features. Would next week work for a technical walkthrough?\n\nCustomer: Yes, let's schedule that. I'm very interested in seeing how it works with our systems. This could really accelerate our roadmap.\n\nAgent: Perfect. I'll send over the trial credentials and we'll get you set up. Thanks Michael, looking forward to working with you!",
+    "metadata": {
+      "product_mentioned": ["Integration Platform", "API Hub", "workflow builder"],
+      "pain_points": ["manual integrations", "slow development", "maintenance burden", "API changes breaking integrations"],
+      "budget_range": "2500-5000",
+      "decision_stage": "Evaluating",
+      "competitor": "CompetitorX",
+      "campaign_attribution": "direct"
+    }
+  },
+  {
+    "call_id": "CALL-2024-002",
+    "timestamp": "2024-01-15T14:15:00Z",
+    "duration_seconds": 892,
+    "call_type": "customer_support",
+    "participants": {
+      "agent": "David Kim",
+      "customer": "Lisa Thompson",
+      "company": "DataVault Inc",
+      "role": "Platform Engineer"
+    },
+    "transcript": "Agent: Hi Lisa, I see you opened a ticket about API rate limits. Can you walk me through what you're experiencing?\n\nCustomer: Yes, we're getting 429 errors during peak hours and it's really frustrating. Our application is making requests but the API is throttling us, and it's causing timeouts for our users. This is impacting our customer experience.\n\nAgent: I can see from your account that you're on the Starter plan which has a limit of 10,000 requests per hour. During peak, you're hitting 9,500+ requests.\n\nCustomer: That makes sense. We've grown a lot since we signed up. Is there a way to increase this without breaking the bank?\n\nAgent: Yes, you can upgrade to Professional which has 100,000 requests per hour, or Enterprise with unlimited. But first, let me check if there are any optimizations we can make.\n\nCustomer: We'd prefer not to upgrade if possible. Can you help us optimize?\n\nAgent: Absolutely! I notice you're making a lot of individual requests. You could batch multiple operations into single API calls, which would reduce your request count significantly. Are you using our batch endpoints?\n\nCustomer: No, we're not. We're calling the API for each item individually. I didn't even know batch endpoints existed!\n\nAgent: That's the issue. Our batch endpoints let you process up to 100 items per request. That could reduce your API calls by 90% or more. I'll send you documentation and code examples right away.\n\nCustomer: That would be amazing! How do we implement that?\n\nAgent: It's pretty straightforward. Instead of making 100 individual POST requests, you send one POST with an array of 100 items. The API processes them all and returns results for each. Same functionality, much fewer requests.\n\nCustomer: Perfect. That should solve our problem completely. Thanks so much for the help!\n\nAgent: My pleasure. I'll also send you some best practices for rate limit handling - things like exponential backoff and request queuing. Let me know if you need anything else!",
+    "metadata": {
+      "product_mentioned": ["API", "batch endpoints"],
+      "pain_points": ["API rate limits causing 429 errors", "API throttling during peak hours", "user timeouts"],
+      "budget_range": "Not specified",
+      "decision_stage": "Unknown",
+      "competitor": null,
+      "campaign_attribution": null
+    }
+  },
+  {
+    "call_id": "CALL-2024-003",
+    "timestamp": "2024-01-16T09:00:00Z",
+    "duration_seconds": 1845,
+    "call_type": "product_demo",
+    "participants": {
+      "agent": "Jennifer Martinez",
+      "customer": "Robert Chen",
+      "company": "AI Innovations Lab",
+      "role": "Head of Data"
+    },
+    "transcript": "Agent: Hi Robert, thanks for joining! Today I'll show you how our Analytics Platform can help you build real-time dashboards and analyze your data.\n\nCustomer: Hi Jennifer. We're really excited about this. We currently use a basic BI tool but it's too slow for our needs. We need something that can handle real-time analytics.\n\nAgent: Perfect! That's exactly what we're built for. Let me show you our dashboard builder first. You can drag and drop widgets, connect to any data source, and get real-time updates.\n\nCustomer: That's impressive. Can we do custom SQL queries?\n\nAgent: Absolutely! You can write custom SQL, use our query builder, or connect to pre-built data models. We support PostgreSQL, MySQL, MongoDB, and more.\n\nCustomer: Excellent. What about sharing dashboards? We need to embed them in our product.\n\nAgent: Yes! You can share dashboards via link, embed them in iframes, or use our API to build custom integrations. We have white-label options too.\n\nCustomer: That's exactly what we need! Our customers want to see their analytics in our app, not leave to another tool.\n\nAgent: Perfect use case. You can also set up alerts - like notify me when revenue drops below a threshold, or when a metric changes significantly.\n\nCustomer: That's really powerful. What's the pricing?\n\nAgent: For your use case, I'd recommend our Business plan at $10,000/month. That includes unlimited dashboards, 50 data sources, and up to 100 embedded views.\n\nCustomer: That's reasonable for what we're getting. Can we try it?\n\nAgent: Absolutely! I'll set up a trial account and we can load some of your data. How does next week work for a deeper dive?\n\nCustomer: Perfect. I'm very interested in moving forward with this.",
+    "metadata": {
+      "product_mentioned": ["Analytics Platform", "dashboard builder", "real-time analytics"],
+      "pain_points": ["slow BI tool", "need real-time analytics", "need embedded dashboards"],
+      "budget_range": "10000-15000",
+      "decision_stage": "Evaluating",
+      "competitor": null,
+      "campaign_attribution": "blog"
+    }
+  },
+  {
+    "call_id": "CALL-2024-004",
+    "timestamp": "2024-01-16T15:45:00Z",
+    "duration_seconds": 623,
+    "call_type": "sales_followup",
+    "participants": {
+      "agent": "Sarah Chen",
+      "customer": "Emily Watson",
+      "company": "CloudScale Analytics",
+      "role": "VP of Engineering"
+    },
+    "transcript": "Agent: Hi Emily, following up on our conversation last week about the API Gateway. How did the trial go?\n\nCustomer: Hi Sarah! It went really well. We tested the rate limiting and analytics features, and they're exactly what we needed. The team is impressed.\n\nAgent: That's great to hear! What did you like most?\n\nCustomer: The analytics dashboard is fantastic. We can see exactly which APIs are being used, by whom, and when. The rate limiting is also very flexible - we can set different limits per endpoint, per user, per IP. It's perfect.\n\nAgent: Excellent! Are you ready to move forward?\n\nCustomer: Yes, we'd like to sign up for the Business plan. The $3,000/month works for our budget. Can we get started this week?\n\nAgent: Absolutely! I'll send over the contract and we can get you set up immediately. Welcome aboard!\n\nCustomer: Perfect. Thanks for all your help, Sarah. We're excited to get started!",
+    "metadata": {
+      "product_mentioned": ["API Gateway", "rate limiting", "analytics"],
+      "pain_points": [],
+      "budget_range": "3000-5000",
+      "decision_stage": "Closed Won",
+      "competitor": null,
+      "campaign_attribution": "direct"
+    }
+  },
+  {
+    "call_id": "CALL-2024-005",
+    "timestamp": "2024-01-17T11:20:00Z",
+    "duration_seconds": 1456,
+    "call_type": "sales_discovery",
+    "participants": {
+      "agent": "Mark Thompson",
+      "customer": "Kevin Brown",
+      "company": "Mobile App Studio",
+      "role": "Founder"
+    },
+    "transcript": "Agent: Hi Kevin, thanks for your interest in our Backend Platform. I understand you're currently using Firebase?\n\nCustomer: Yes, we've been on Firebase for about a year, but we're hitting limitations. The pricing is unpredictable - our bill jumped from $200 to $800 last month with no warning. Plus, the query capabilities are really limited.\n\nAgent: I hear that a lot. What specific limitations are you running into?\n\nCustomer: Well, we can't do complex queries. We need to filter by multiple fields, do aggregations, and Firebase just doesn't support that well. We end up doing a lot of client-side filtering which is slow and expensive.\n\nAgent: Our platform solves that. You get full SQL-like querying, real-time subscriptions, and predictable pricing. No surprise bills.\n\nCustomer: That sounds great. What about offline support? Our app needs to work offline.\n\nAgent: Yes, we have built-in offline support with automatic sync when connectivity returns. Your data is cached locally and syncs seamlessly.\n\nCustomer: Perfect. What about migration? Moving from Firebase seems daunting.\n\nAgent: We have migration tools that can help. We can import your Firebase data and we provide SDKs that match Firebase's API patterns, so minimal code changes.\n\nCustomer: That's a huge relief. What's pricing?\n\nAgent: Our Starter plan is $99/month for up to 100K requests. That's much more predictable than Firebase's usage-based model.\n\nCustomer: That's very reasonable. Can we try it?\n\nAgent: Absolutely! I'll set up a trial and we can migrate a small dataset to show you how it works. Sound good?\n\nCustomer: Yes, let's do it!",
+    "metadata": {
+      "product_mentioned": ["Backend Platform", "mobile SDK", "real-time"],
+      "pain_points": ["Firebase limitations", "unpredictable pricing", "limited query capabilities", "need better queries"],
+      "budget_range": "99-500",
+      "decision_stage": "Discovery",
+      "competitor": "Firebase",
+      "campaign_attribution": "ad"
+    }
+  },
+  {
+    "call_id": "CALL-2024-006",
+    "timestamp": "2024-01-18T09:30:00Z",
+    "duration_seconds": 1123,
+    "call_type": "customer_support",
+    "participants": {
+      "agent": "David Kim",
+      "customer": "James Wilson",
+      "company": "StartupXYZ",
+      "role": "Backend Engineer"
+    },
+    "transcript": "Agent: Hi James, I see you're having issues with webhook delivery. What's happening?\n\nCustomer: Yeah, we're getting delivery failures. Our endpoint is timing out because it's doing too much processing synchronously. We need to process webhooks asynchronously.\n\nAgent: I understand. The issue is that your webhook endpoint needs to respond quickly, but you're doing heavy processing in the handler.\n\nCustomer: Exactly. We're processing payments, sending emails, updating databases - it all takes time. By the time we're done, the webhook has timed out.\n\nAgent: You have a few options. First, you can make your endpoint respond immediately with a 200 status, then process asynchronously in the background.\n\nCustomer: That's what we're trying to do, but we're still getting failures. Can we configure retry schedules?\n\nAgent: Yes! You can customize retry attempts and schedules. By default we retry 3 times with exponential backoff, but you can increase that.\n\nCustomer: That would help. Can we add more retry attempts?\n\nAgent: Absolutely. You can set it to retry up to 10 times with custom intervals. I'll show you how to configure that.\n\nCustomer: Perfect. Also, can we get notifications when webhooks fail after all retries?\n\nAgent: Yes, we can send you alerts via email or webhook when delivery fails permanently. That way you know if something needs manual intervention.\n\nCustomer: That's exactly what we need. Thanks for the help!",
+    "metadata": {
+      "product_mentioned": ["webhooks", "API"],
+      "pain_points": ["webhook delivery failures", "timeout issues", "need async processing"],
+      "budget_range": "Not specified",
+      "decision_stage": "Unknown",
+      "competitor": null,
+      "campaign_attribution": null
+    }
+  },
+  {
+    "call_id": "CALL-2024-007",
+    "timestamp": "2024-01-18T14:00:00Z",
+    "duration_seconds": 1876,
+    "call_type": "sales_discovery",
+    "participants": {
+      "agent": "Sarah Chen",
+      "customer": "Patricia Lee",
+      "company": "E-commerce Plus",
+      "role": "VP of Marketing"
+    },
+    "transcript": "Agent: Hi Patricia, thanks for your interest in our Customer Data Platform. I understand you're looking to unify customer data?\n\nCustomer: Yes, we have customer data scattered across multiple systems - our e-commerce platform, email marketing tool, CRM, and support system. It's a nightmare trying to get a complete view of our customers.\n\nAgent: That's a common challenge. Our platform can ingest data from all those sources and create a unified customer profile in real-time.\n\nCustomer: That sounds perfect. How does the data ingestion work?\n\nAgent: We have connectors for all major platforms - Shopify, Mailchimp, Salesforce, Zendesk, you name it. You can also send data via our API. Everything syncs in real-time.\n\nCustomer: Real-time is important. We need to update customer profiles immediately when they make a purchase or interact with us.\n\nAgent: Absolutely. Our real-time sync ensures your customer profiles are always up-to-date. You can also set up triggers - like when a customer's lifetime value crosses a threshold, automatically add them to a VIP segment.\n\nCustomer: That's powerful. What about data privacy? We need to be GDPR and CCPA compliant.\n\nAgent: Compliance is built-in. You can handle right-to-deletion requests, consent management, and data retention policies. All automated.\n\nCustomer: Excellent. What's the pricing?\n\nAgent: For your volume, I'd recommend our Enterprise plan at $5,000-$8,000/month. That includes unlimited data sources and real-time sync.\n\nCustomer: That's a bit higher than we budgeted. Do you have a plan without real-time sync?\n\nAgent: Yes, our Professional plan at $2,000/month has hourly sync instead of real-time. But for email campaigns, real-time is really valuable.\n\nCustomer: You're right. Let me discuss with my team. We might need to adjust our budget. Can you send me more details?\n\nAgent: Absolutely. I'll send over a detailed proposal and we can schedule a follow-up call.\n\nCustomer: Perfect. Thanks!",
+    "metadata": {
+      "product_mentioned": ["Customer Data Platform", "data ingestion", "real-time sync"],
+      "pain_points": ["siloed data", "delayed updates", "data privacy concerns", "need unified customer view"],
+      "budget_range": "5000-8000",
+      "decision_stage": "Evaluating",
+      "competitor": null,
+      "campaign_attribution": "conference"
+    }
+  },
+  {
+    "call_id": "CALL-2024-008",
+    "timestamp": "2024-01-19T10:15:00Z",
+    "duration_seconds": 987,
+    "call_type": "customer_support",
+    "participants": {
+      "agent": "David Kim",
+      "customer": "Amanda Foster",
+      "company": "DataSync Corp",
+      "role": "Data Analyst"
+    },
+    "transcript": "Agent: Hi Amanda, I see you're experiencing slow query performance. Can you tell me more?\n\nCustomer: Yes, our dashboards are loading really slowly. We have complex joins across multiple data sources and queries are taking 30+ seconds. It's frustrating.\n\nAgent: I can see you're doing a lot of complex joins. Have you considered using data caching?\n\nCustomer: No, we haven't. How would that help?\n\nAgent: You can cache query results and set refresh intervals. For dashboards that don't need real-time data, you can cache for 5 minutes, 15 minutes, or even an hour. That would make them load instantly.\n\nCustomer: That sounds perfect! Can we customize the refresh intervals?\n\nAgent: Yes, you can set different cache durations for different queries. Some can be real-time, others can be cached for hours. It's very flexible.\n\nCustomer: That would solve our problem. How do we set it up?\n\nAgent: I'll send you documentation and we can set it up together. It's just a few configuration changes.\n\nCustomer: Perfect. Thanks so much!",
+    "metadata": {
+      "product_mentioned": ["dashboard", "data caching"],
+      "pain_points": ["slow query performance", "complex joins across multiple data sources"],
+      "budget_range": "Not specified",
+      "decision_stage": "Unknown",
+      "competitor": null,
+      "campaign_attribution": null
+    }
+  },
+  {
+    "call_id": "CALL-2024-009",
+    "timestamp": "2024-01-19T15:30:00Z",
+    "duration_seconds": 2134,
+    "call_type": "product_demo",
+    "participants": {
+      "agent": "Jennifer Martinez",
+      "customer": "Daniel Park",
+      "company": "FinTech Solutions",
+      "role": "Security Lead"
+    },
+    "transcript": "Agent: Hi Daniel, thanks for joining! Today I'll show you our Security Platform and how it can help with access control and compliance.\n\nCustomer: Hi Jennifer. We're very interested. We need to meet SOC 2 and PCI-DSS requirements, and our current solution isn't cutting it.\n\nAgent: Perfect. Our platform is SOC 2 Type II certified and PCI-DSS compliant. Let me show you the access control features first.\n\nCustomer: Great. We need fine-grained permissions - role-based access control with custom roles.\n\nAgent: Absolutely. You can create custom roles, assign permissions at the resource level, and even set up attribute-based access control. Very flexible.\n\nCustomer: Excellent. What about audit logging? We need to track every access attempt.\n\nAgent: Yes, we log everything - who accessed what, when, from where, and what they did. You can search and filter logs, set up alerts, and export for compliance audits.\n\nCustomer: That's exactly what we need. Can we integrate with our existing identity provider?\n\nAgent: Yes, we support SAML, OAuth, and LDAP. You can use your existing SSO.\n\nCustomer: Perfect. What about alerts? We need to be notified immediately if there's suspicious activity.\n\nAgent: You can set up alerts for any event - failed login attempts, access to sensitive resources, permission changes, anything. Alerts go to email, Slack, or webhook.\n\nCustomer: That's powerful. What's the pricing?\n\nAgent: For your needs, I'd recommend our Enterprise plan at $10,000/month. That includes unlimited users, advanced audit logging, and priority support.\n\nCustomer: That's reasonable for what we're getting. We're evaluating a few options, but this looks very promising.\n\nAgent: Great! I'll send over a detailed proposal and we can schedule a security review.\n\nCustomer: Perfect. Thanks!",
+    "metadata": {
+      "product_mentioned": ["Security Platform", "access control", "audit logging"],
+      "pain_points": ["compliance requirements", "security infrastructure", "need SOC 2 and PCI-DSS"],
+      "budget_range": "10000-15000",
+      "decision_stage": "Evaluating",
+      "competitor": null,
+      "campaign_attribution": "referral"
+    }
+  },
+  {
+    "call_id": "CALL-2024-010",
+    "timestamp": "2024-01-22T11:00:00Z",
+    "duration_seconds": 1654,
+    "call_type": "sales_discovery",
+    "participants": {
+      "agent": "Mark Thompson",
+      "customer": "Emily Watson",
+      "company": "CloudScale Analytics",
+      "role": "VP of Engineering"
+    },
+    "transcript": "Agent: Hi Emily, thanks for your interest in our API Gateway. I understand you're looking to replace your current reverse proxy?\n\nCustomer: Yes, we have a basic reverse proxy but it's missing a lot of features. We need rate limiting, analytics, and better monitoring. Right now we're handling rate limiting in our application code and it's messy.\n\nAgent: I completely understand. Our API Gateway handles all of that out of the box. You get rate limiting, analytics, request/response transformation, and comprehensive monitoring.\n\nAgent: Let me show you the analytics dashboard. You can see API usage by endpoint, by user, by IP, over time. Very detailed.\n\nCustomer: That's impressive. Can we export this data? We want to build custom analytics.\n\nAgent: Yes, you can export via API or set up real-time event streaming. Many customers pipe this into their own analytics systems.\n\nCustomer: Perfect. What about rate limiting? We need different limits for different endpoints.\n\nAgent: Absolutely. You can set rate limits per endpoint, per API key, per IP address, or any combination. Very flexible.\n\nCustomer: That's exactly what we need. What's the pricing?\n\nAgent: For your volume, I'd recommend our Business plan at $2,000-$3,000/month. That includes up to 10 million requests per month.\n\nCustomer: That's reasonable. We're also looking at CompetitorY. How do you compare?\n\nAgent: CompetitorY is good, but we focus more on developer experience. Our configuration is simpler, our API is more intuitive, and our analytics are more detailed. Plus, our support is better.\n\nCustomer: That's helpful. Can we do a proof of concept?\n\nAgent: Absolutely! I'll set up a trial and we can test it with your APIs. How does next week work?\n\nCustomer: Perfect. Let's schedule it!",
+    "metadata": {
+      "product_mentioned": ["API Gateway", "rate limiting", "analytics"],
+      "pain_points": ["basic reverse proxy lacking features", "messy rate limiting code in application"],
+      "budget_range": "2000-3000",
+      "decision_stage": "Evaluating",
+      "competitor": "CompetitorY",
+      "campaign_attribution": "blog"
+    }
+  },
+  {
+    "call_id": "CALL-2024-011",
+    "timestamp": "2024-01-22T14:20:00Z",
+    "duration_seconds": 756,
+    "call_type": "customer_support",
+    "participants": {
+      "agent": "David Kim",
+      "customer": "Rachel Green",
+      "company": "Content Platform Inc",
+      "role": "API Developer"
+    },
+    "transcript": "Agent: Hi Rachel, I see you have questions about API versioning. How can I help?\n\nCustomer: Yes, we need to support multiple API versions for our customers. Some are on v1, some on v2, and we're planning v3. How do we handle this?\n\nAgent: Great question. Our platform supports API versioning out of the box. You can route requests to different versions based on the URL path or header.\n\nCustomer: That's helpful. Can we deprecate old versions gradually?\n\nAgent: Yes! You can mark versions as deprecated and set a sunset date. We'll automatically add deprecation headers to responses and notify users.\n\nCustomer: Perfect. What about detecting breaking changes? We want to know if v3 breaks compatibility.\n\nAgent: We have a compatibility checker that compares API schemas. It will flag breaking changes automatically.\n\nCustomer: That's exactly what we need. Can you send documentation?\n\nAgent: Absolutely! I'll send it over right away.\n\nCustomer: Thanks!",
+    "metadata": {
+      "product_mentioned": ["API", "versioning"],
+      "pain_points": ["need to support multiple API versions for existing customers"],
+      "budget_range": "Not specified",
+      "decision_stage": "Unknown",
+      "competitor": null,
+      "campaign_attribution": null
+    }
+  },
+  {
+    "call_id": "CALL-2024-012",
+    "timestamp": "2024-01-23T09:45:00Z",
+    "duration_seconds": 1987,
+    "call_type": "sales_discovery",
+    "participants": {
+      "agent": "Sarah Chen",
+      "customer": "Sophie Anderson",
+      "company": "IoT Device Co",
+      "role": "Head of Platform"
+    },
+    "transcript": "Agent: Hi Sophie, thanks for your interest in our Data Pipeline Platform. I understand you're processing IoT device data?\n\nCustomer: Yes! We have thousands of IoT devices sending data 24/7. We're currently using a basic message queue but it's not scaling well. We need something more robust.\n\nCustomer: The volume is huge - we're processing millions of messages per day. Our current system can't keep up, and we're losing data during peak times.\n\nAgent: That's a serious problem. Our platform is built for high-volume data ingestion. We can handle millions of messages per second with guaranteed delivery.\n\nCustomer: That sounds perfect. How does it handle real-time processing?\n\nAgent: We support real-time stream processing. You can transform, filter, and route data in real-time as it comes in. No batching delays.\n\nCustomer: Excellent. We also need to store data for analytics. Can we write to multiple destinations?\n\nAgent: Absolutely. You can write to databases, data warehouses, object storage, or multiple destinations simultaneously. Very flexible.\n\nCustomer: Perfect. What about MQTT? Our devices use MQTT.\n\nAgent: Yes, we have native MQTT support. Devices can publish directly to our platform.\n\nCustomer: That's great. What's the pricing?\n\nAgent: For your volume, I'd recommend our Enterprise plan at $12,000/month. That includes unlimited message volume and real-time processing.\n\nCustomer: That's higher than we budgeted, but if it solves our data loss problem, it's worth it. Can we do a proof of concept?\n\nAgent: Absolutely! We can set up a trial and process a sample of your data. How does next week work?\n\nCustomer: Perfect. I'm very interested in moving forward. This could be a game-changer for us.\n\nAgent: Great! I'll send over the trial details and we'll get you set up.",
+    "metadata": {
+      "product_mentioned": ["Data Pipeline Platform", "MQTT", "stream processing"],
+      "pain_points": ["high-volume data ingestion", "real-time processing needs", "losing data during peak times", "current system not scaling"],
+      "budget_range": "12000-15000",
+      "decision_stage": "Evaluating",
+      "competitor": null,
+      "campaign_attribution": "direct"
+    }
+  },
+  {
+    "call_id": "CALL-2024-013",
+    "timestamp": "2024-01-24T10:30:00Z",
+    "duration_seconds": 543,
+    "call_type": "sales_followup",
+    "participants": {
+      "agent": "Mark Thompson",
+      "customer": "Michael Rodriguez",
+      "company": "TechFlow Solutions",
+      "role": "CTO"
+    },
+    "transcript": "Agent: Hi Michael, following up on the trial. How did it go?\n\nCustomer: Hi Mark! It went really well. The team loves the workflow builder - we set up 5 integrations in one afternoon. That would have taken us weeks before.\n\nAgent: That's fantastic! Are you ready to move forward?\n\nCustomer: Yes, we'd like to sign up for the Professional plan. The $2,500/month works perfectly for us.\n\nAgent: Excellent! I'll send over the contract and we can get you set up today. Welcome aboard!\n\nCustomer: Perfect. Thanks for all your help, Mark. This is going to save us so much time.\n\nAgent: My pleasure! Looking forward to working with you.",
+    "metadata": {
+      "product_mentioned": ["Integration Platform", "workflow builder"],
+      "pain_points": [],
+      "budget_range": "2500-5000",
+      "decision_stage": "Closed Won",
+      "competitor": null,
+      "campaign_attribution": "direct"
+    }
+  },
+  {
+    "call_id": "CALL-2024-014",
+    "timestamp": "2024-01-25T13:15:00Z",
+    "duration_seconds": 2234,
+    "call_type": "product_demo",
+    "participants": {
+      "agent": "Jennifer Martinez",
+      "customer": "Alexandra Kim",
+      "company": "Logistics Pro",
+      "role": "Operations Director"
+    },
+    "transcript": "Agent: Hi Alexandra, thanks for joining! Today I'll show you how our platform can help with real-time tracking and geospatial queries.\n\nCustomer: Hi Jennifer. We're very interested. We need to track shipments in real-time and query by location. Our current system can't do that efficiently.\n\nAgent: Perfect! Our platform has built-in geospatial support. You can store location data and query by proximity, within boundaries, or along routes.\n\nCustomer: That's exactly what we need. Can we track vehicles moving in real-time?\n\nAgent: Yes! You can update locations in real-time and query vehicles within a certain radius of a point, or along a specific route. Very powerful for logistics.\n\nCustomer: Excellent. What about route optimization? We need to optimize delivery routes.\n\nAgent: We have route optimization APIs that can calculate optimal routes based on multiple stops, traffic, and constraints.\n\nCustomer: That's powerful. Can we integrate with mapping services?\n\nAgent: Yes, we integrate with Google Maps, Mapbox, and others. You can display routes and locations on maps.\n\nCustomer: Perfect. What's the pricing?\n\nAgent: For your volume, I'd recommend our Enterprise plan at $4,000-$8,000/month. That includes unlimited geospatial queries and real-time updates.\n\nCustomer: That's reasonable. We're evaluating a few options, but this looks very promising. Can we do a trial?\n\nAgent: Absolutely! I'll set up a trial and we can test with some sample routes.\n\nCustomer: Perfect. Let's schedule it!",
+    "metadata": {
+      "product_mentioned": ["Platform", "geospatial queries", "real-time tracking", "route optimization"],
+      "pain_points": ["real-time tracking", "geospatial queries", "route optimization"],
+      "budget_range": "4000-8000",
+      "decision_stage": "Evaluating",
+      "competitor": null,
+      "campaign_attribution": "direct"
+    }
+  },
+  {
+    "call_id": "CALL-2024-015",
+    "timestamp": "2024-01-26T11:00:00Z",
+    "duration_seconds": 1432,
+    "call_type": "sales_discovery",
+    "participants": {
+      "agent": "Sarah Chen",
+      "customer": "Thomas Wright",
+      "company": "Media Streaming Co",
+      "role": "Platform Architect"
+    },
+    "transcript": "Agent: Hi Thomas, thanks for your interest in our platform. I understand you're looking for a content delivery solution?\n\nCustomer: Yes, we're building a video streaming platform and need CDN capabilities. We're currently using AWS CloudFront but the costs are getting out of control.\n\nAgent: I understand. Our CDN is more cost-effective, especially at scale. We charge based on bandwidth, not requests, which saves customers 30-50% compared to CloudFront.\n\nCustomer: That's significant. What about performance?\n\nAgent: We have edge locations worldwide, and our caching is very aggressive. Most content is served from cache, which means faster load times and lower costs.\n\nCustomer: Good. Can we purge cache when we update content?\n\nAgent: Yes, you can purge by URL, by pattern, or purge everything. Very flexible.\n\nCustomer: Perfect. What about video streaming? We need HLS and DASH support.\n\nAgent: Yes, we support both HLS and DASH, plus adaptive bitrate streaming. Your videos will stream smoothly on any device.\n\nCustomer: Excellent. What's the pricing?\n\nAgent: For your volume, I'd recommend our Business plan at $5,000/month. That includes 10TB of bandwidth and unlimited requests.\n\nCustomer: That's much better than CloudFront. Can we try it?\n\nAgent: Absolutely! I'll set up a trial and we can test with some sample videos.\n\nCustomer: Perfect. Let's do it!",
+    "metadata": {
+      "product_mentioned": ["CDN", "video streaming", "HLS", "DASH"],
+      "pain_points": ["AWS CloudFront costs getting out of control", "need cost-effective CDN"],
+      "budget_range": "5000-10000",
+      "decision_stage": "Evaluating",
+      "competitor": "AWS CloudFront",
+      "campaign_attribution": "ad"
+    }
+  },
+  {
+    "call_id": "CALL-2024-016",
+    "timestamp": "2024-01-27T09:30:00Z",
+    "duration_seconds": 1876,
+    "call_type": "sales_discovery",
+    "participants": {
+      "agent": "Mark Thompson",
+      "customer": "Maria Garcia",
+      "company": "Healthcare Data Systems",
+      "role": "IT Director"
+    },
+    "transcript": "Agent: Hi Maria, thanks for your interest. I understand you need HIPAA-compliant data storage?\n\nCustomer: Yes, we handle patient data and need to be HIPAA compliant. Our current solution isn't certified, and we're worried about compliance.\n\nAgent: I understand the concern. Our platform is HIPAA-compliant and we sign BAAs. All data is encrypted at rest and in transit.\n\nCustomer: That's good. What about audit logs? We need to track all access to patient data.\n\nAgent: Yes, we log every access - who accessed what, when, and why. You can search and export logs for audits.\n\nCustomer: Perfect. Can we set up access controls? Only authorized staff should access patient data.\n\nAgent: Absolutely. You can set up role-based access control, require MFA, and set up IP restrictions. Very secure.\n\nCustomer: Excellent. What about data backup? We can't lose patient data.\n\nAgent: We have automated backups with point-in-time recovery. You can restore to any point in the last 30 days.\n\nCustomer: That's reassuring. What's the pricing?\n\nAgent: For healthcare, we have a special plan at $8,000/month. That includes HIPAA compliance, advanced security, and priority support.\n\nCustomer: That's reasonable for what we're getting. We need to get this approved by our compliance team, but I'm very interested.\n\nAgent: Perfect. I'll send over our BAA and compliance documentation.\n\nCustomer: Thanks!",
+    "metadata": {
+      "product_mentioned": ["Platform", "HIPAA compliance", "data storage"],
+      "pain_points": ["HIPAA compliance concerns", "need secure patient data storage", "current solution not certified"],
+      "budget_range": "8000-12000",
+      "decision_stage": "Evaluating",
+      "competitor": null,
+      "campaign_attribution": "direct"
+    }
+  },
+  {
+    "call_id": "CALL-2024-017",
+    "timestamp": "2024-01-28T14:00:00Z",
+    "duration_seconds": 1098,
+    "call_type": "customer_support",
+    "participants": {
+      "agent": "David Kim",
+      "customer": "Christopher Lee",
+      "company": "SaaS Analytics Inc",
+      "role": "Data Engineer"
+    },
+    "transcript": "Agent: Hi Christopher, I see you're having issues with data synchronization. What's happening?\n\nCustomer: Yes, we're syncing data from multiple sources and some records are getting duplicated. It's creating data quality issues.\n\nAgent: I understand. Are you using our deduplication features?\n\nCustomer: No, we're not. How does that work?\n\nAgent: You can set up deduplication rules based on unique fields. For example, if you're syncing customer data, you can deduplicate by email address. The system will merge duplicates automatically.\n\nCustomer: That would solve our problem. Can we customize the merge logic?\n\nAgent: Yes, you can choose which fields to keep, set merge priorities, and even write custom merge logic.\n\nCustomer: Perfect. How do we set it up?\n\nAgent: I'll send you documentation and we can configure it together. It's straightforward.\n\nCustomer: Thanks! This will save us a lot of manual cleanup.",
+    "metadata": {
+      "product_mentioned": ["data synchronization", "deduplication"],
+      "pain_points": ["data duplication", "data quality issues"],
+      "budget_range": "Not specified",
+      "decision_stage": "Unknown",
+      "competitor": null,
+      "campaign_attribution": null
+    }
+  },
+  {
+    "call_id": "CALL-2024-018",
+    "timestamp": "2024-01-29T10:45:00Z",
+    "duration_seconds": 1654,
+    "call_type": "sales_discovery",
+    "participants": {
+      "agent": "Sarah Chen",
+      "customer": "Jessica Martinez",
+      "company": "EdTech Platform",
+      "role": "Product Manager"
+    },
+    "transcript": "Agent: Hi Jessica, thanks for your interest. I understand you're building an education platform?\n\nCustomer: Yes, we're building a learning management system and need a backend that can handle students, courses, assignments, and grades. We're currently using a basic database but it's not scaling.\n\nAgent: I understand. Our platform is perfect for that. You can model students, courses, assignments as documents, and query them flexibly.\n\nCustomer: That sounds good. What about real-time features? We need live chat and notifications.\n\nAgent: Yes, we have real-time subscriptions. When a student submits an assignment, you can notify the teacher instantly. Very powerful.\n\nCustomer: Perfect. What about file storage? Students upload assignments and teachers upload course materials.\n\nAgent: We have integrated file storage. You can store files, images, videos - anything. With automatic CDN delivery for fast access.\n\nCustomer: Excellent. What about search? Students need to search courses and content.\n\nAgent: We have full-text search built-in. You can search across courses, assignments, content - very fast and accurate.\n\nCustomer: That's great. What's the pricing?\n\nAgent: For your size, I'd recommend our Professional plan at $1,500/month. That includes up to 100K users and unlimited storage.\n\nCustomer: That's reasonable. Can we try it?\n\nAgent: Absolutely! I'll set up a trial and we can build a sample course together.\n\nCustomer: Perfect. Let's do it!",
+    "metadata": {
+      "product_mentioned": ["Platform", "backend", "real-time", "file storage", "search"],
+      "pain_points": ["basic database not scaling", "need real-time features", "need file storage"],
+      "budget_range": "1500-3000",
+      "decision_stage": "Evaluating",
+      "competitor": null,
+      "campaign_attribution": "blog"
+    }
+  },
+  {
+    "call_id": "CALL-2024-019",
+    "timestamp": "2024-01-30T15:20:00Z",
+    "duration_seconds": 432,
+    "call_type": "sales_followup",
+    "participants": {
+      "agent": "Mark Thompson",
+      "customer": "Kevin Brown",
+      "company": "Mobile App Studio",
+      "role": "Founder"
+    },
+    "transcript": "Agent: Hi Kevin, following up on the trial. How did it go?\n\nCustomer: Hi Mark! It went great. We migrated our test data and the queries are so much faster. The offline support works perfectly too.\n\nAgent: That's fantastic! Are you ready to move forward?\n\nCustomer: Yes, we'd like to sign up for the Starter plan. The $99/month is perfect for us right now.\n\nAgent: Excellent! I'll get you set up today. Welcome aboard!\n\nCustomer: Thanks Mark!",
+    "metadata": {
+      "product_mentioned": ["Platform", "queries", "offline support"],
+      "pain_points": [],
+      "budget_range": "99-500",
+      "decision_stage": "Closed Won",
+      "competitor": null,
+      "campaign_attribution": "ad"
+    }
+  },
+  {
+    "call_id": "CALL-2024-020",
+    "timestamp": "2024-01-31T11:30:00Z",
+    "duration_seconds": 2456,
+    "call_type": "product_demo",
+    "participants": {
+      "agent": "Jennifer Martinez",
+      "customer": "Steven Chen",
+      "company": "Machine Learning Platform",
+      "role": "ML Engineer"
+    },
+    "transcript": "Agent: Hi Steven, thanks for joining! Today I'll show you how our platform can store and query ML model metadata.\n\nCustomer: Hi Jennifer. We train thousands of models and need to track versions, metrics, hyperparameters. Can your platform handle that?\n\nAgent: Absolutely! Our platform's flexible schema is perfect for ML metadata. Each model can have different metrics, different hyperparameters. You can store everything as JSON documents.\n\nCustomer: Can we search models by performance?\n\nAgent: Yes, you can query by any field. Find models with accuracy above 95%, or models trained in the last week, or models using specific algorithms. Our query engine is very flexible.\n\nCustomer: What about vector search for similar models?\n\nAgent: Perfect use case! You can store model embeddings and use our vector search to find similar models. Or find models that perform similarly on test data.\n\nCustomer: Can we track experiment runs?\n\nAgent: Yes, you can store experiment metadata - parameters, results, artifacts. Our query engine makes it easy to analyze experiment results. You can aggregate across experiments, compare runs, identify best performers.\n\nCustomer: What about model serving?\n\nAgent: You can store model artifacts and reference them. Our platform stores the metadata, and you can query efficiently to find the right model. We also integrate with model serving platforms via APIs.\n\nCustomer: Can we do A/B testing?\n\nAgent: Yes, you can track A/B test results in the platform. Store test configurations, results, and use our analytics to analyze performance.\n\nCustomer: What's the pricing?\n\nAgent: For ML workloads, I'd recommend our Business plan - about $3,000/month. But you can start smaller and scale up.\n\nCustomer: Can we try it?\n\nAgent: Absolutely. I'll set up a trial cluster and we can load a sample of your model metadata. How does next week work?\n\nCustomer: Perfect, let's schedule it.",
+    "metadata": {
+      "product_mentioned": ["Platform", "vector search", "ML metadata"],
+      "pain_points": ["model versioning", "experiment tracking", "similarity search"],
+      "budget_range": "3000-5000",
+      "decision_stage": "Evaluating",
+      "competitor": null,
+      "campaign_attribution": "blog"
+    }
+  },
+  {
+    "call_id": "CALL-2024-021",
+    "timestamp": "2024-02-01T11:00:00Z",
+    "duration_seconds": 1345,
+    "call_type": "product_demo",
+    "participants": {
+      "agent": "Marcus Johnson",
+      "customer": "Steven Chen",
+      "company": "Machine Learning Platform",
+      "role": "ML Engineer"
+    },
+    "transcript": "Agent: Hi Steven, thanks for joining. Today I'll show you how our platform can store and query ML model metadata.\n\nCustomer: Hi Marcus. We train thousands of models and need to track versions, metrics, hyperparameters. Can your platform handle that?\n\nAgent: Absolutely! Our platform's flexible schema is perfect for ML metadata. Each model can have different metrics, different hyperparameters. You can store everything as JSON documents.\n\nCustomer: Can we search models by performance?\n\nAgent: Yes, you can query by any field. Find models with accuracy above 95%, or models trained in the last week, or models using specific algorithms. Our query engine is very flexible.\n\nCustomer: What about vector search for similar models?\n\nAgent: Perfect use case! You can store model embeddings and use our vector search to find similar models. Or find models that perform similarly on test data.\n\nCustomer: Can we track experiment runs?\n\nAgent: Yes, you can store experiment metadata - parameters, results, artifacts. Our query engine makes it easy to analyze experiment results. You can aggregate across experiments, compare runs, identify best performers.\n\nCustomer: What about model serving?\n\nAgent: You can store model artifacts and reference them. Our platform stores the metadata, and you can query efficiently to find the right model. We also integrate with model serving platforms via APIs.\n\nCustomer: Can we do A/B testing?\n\nAgent: Yes, you can track A/B test results in the platform. Store test configurations, results, and use our analytics to analyze performance.\n\nCustomer: What's the pricing?\n\nAgent: For ML workloads, I'd recommend our Business plan - about $3,000/month. But you can start smaller and scale up.\n\nCustomer: Can we try it?\n\nAgent: Absolutely. I'll set up a trial cluster and we can load a sample of your model metadata. How does next week work?\n\nCustomer: Perfect, let's schedule it.",
+    "metadata": {
+      "product_mentioned": ["Platform", "vector search", "ML metadata"],
+      "pain_points": ["model versioning", "experiment tracking", "similarity search"],
+      "budget_range": "3000-5000",
+      "decision_stage": "Evaluating",
+      "competitor": null,
+      "campaign_attribution": "blog"
+    }
+  }
+]

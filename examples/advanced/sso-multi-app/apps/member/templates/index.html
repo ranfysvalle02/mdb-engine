@@ -1,0 +1,2708 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Member Berry | Cognitive Memory Showcase</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        const _w = console.warn;
+        console.warn = (...a) => { if (a[0]?.includes?.('cdn.tailwindcss.com')) return; _w.apply(console, a); };
+    </script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'sans-serif'], mono: ['JetBrains Mono', 'monospace'] },
+                    colors: {
+                        berry: { 50:'#fdf4ff',100:'#fae8ff',200:'#f5d0fe',300:'#f0abfc',400:'#e879f9',500:'#d946ef',600:'#c026d3',700:'#a21caf',800:'#86198f',900:'#701a75',950:'#4a044e' },
+                        surface: { 50:'rgba(255,255,255,0.03)', 100:'rgba(255,255,255,0.05)', 200:'rgba(255,255,255,0.08)' }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; }
+        body { background: #09080f; color: #e2e8f0; font-family: 'Inter', sans-serif; min-height: 100vh; overflow-x: hidden; }
+        body::before { content: ''; position: fixed; inset: 0; background: radial-gradient(ellipse 80% 60% at 50% -20%, rgba(168,85,247,0.08) 0%, transparent 70%), radial-gradient(ellipse 60% 40% at 80% 100%, rgba(217,70,239,0.05) 0%, transparent 60%); pointer-events: none; z-index: 0; }
+
+        /* Glass surfaces */
+        .glass { background: rgba(15,13,25,0.65); backdrop-filter: blur(20px) saturate(150%); border: 1px solid rgba(255,255,255,0.06); }
+        .glass-subtle { background: rgba(15,13,25,0.4); border: 1px solid rgba(255,255,255,0.04); }
+        .glass-elevated { background: rgba(20,17,35,0.75); backdrop-filter: blur(24px); border: 1px solid rgba(255,255,255,0.08); box-shadow: 0 8px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.02) inset; }
+
+        /* Inputs & buttons */
+        .input-field { background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.08); color: #e2e8f0; transition: all 0.2s ease; }
+        .input-field:focus { border-color: rgba(217,70,239,0.5); outline: none; box-shadow: 0 0 0 3px rgba(217,70,239,0.1); }
+        .input-field::placeholder { color: rgba(148,163,184,0.5); }
+        .btn-primary { background: linear-gradient(135deg, #c026d3, #9333ea); color: white; font-weight: 600; transition: all 0.2s; position: relative; overflow: hidden; }
+        .btn-primary:hover { box-shadow: 0 0 24px rgba(217,70,239,0.3); transform: translateY(-1px); }
+        .btn-primary:active { transform: translateY(0); }
+        .btn-primary:disabled { opacity: 0.4; pointer-events: none; }
+        .btn-secondary { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); color: #cbd5e1; transition: all 0.2s; }
+        .btn-secondary:hover { background: rgba(255,255,255,0.08); border-color: rgba(217,70,239,0.2); color: #f0abfc; }
+
+        /* Tabs */
+        .tab-btn { position: relative; color: rgba(148,163,184,0.7); font-weight: 500; transition: all 0.2s; padding: 0.625rem 1rem; white-space: nowrap; }
+        .tab-btn::after { content: ''; position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); width: 0; height: 2px; background: linear-gradient(90deg, #c026d3, #d946ef); border-radius: 1px; transition: width 0.25s ease; }
+        .tab-btn:hover { color: #e2e8f0; }
+        .tab-btn.active { color: #e879f9; }
+        .tab-btn.active::after { width: 70%; }
+
+        /* Chat */
+        .chat-user { background: linear-gradient(135deg, rgba(192,38,211,0.12), rgba(147,51,234,0.08)); border: 1px solid rgba(217,70,239,0.1); }
+        .chat-ai { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05); }
+        .chat-error { background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.15); }
+        .chat-meta { background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.04); }
+
+        /* Memory cards */
+        .mem-card { background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06); transition: all 0.25s ease; }
+        .mem-card:hover { border-color: rgba(217,70,239,0.15); background: rgba(255,255,255,0.04); transform: translateY(-1px); box-shadow: 0 4px 16px rgba(0,0,0,0.2); }
+
+        /* Strength ring SVG */
+        .strength-ring { transform: rotate(-90deg); }
+        .strength-track { fill: none; stroke: rgba(255,255,255,0.06); stroke-width: 3; }
+        .strength-value { fill: none; stroke-width: 3; stroke-linecap: round; transition: stroke-dashoffset 0.8s ease; }
+
+        /* Sidebar drawer (mobile) */
+        .sidebar-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px); z-index: 90; opacity: 0; pointer-events: none; transition: opacity 0.3s; }
+        .sidebar-overlay.open { opacity: 1; pointer-events: all; }
+        .sidebar-drawer { position: fixed; top: 0; right: 0; bottom: 0; width: 320px; max-width: 85vw; z-index: 91; transform: translateX(100%); transition: transform 0.3s cubic-bezier(0.4,0,0.2,1); overflow-y: auto; }
+        .sidebar-drawer.open { transform: translateX(0); }
+
+        /* Strength bar */
+        .str-bar { height: 4px; border-radius: 2px; background: rgba(255,255,255,0.05); overflow: hidden; }
+        .str-fill { height: 100%; border-radius: 2px; transition: width 0.6s ease; }
+
+        /* Badges */
+        .badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 6px; font-size: 0.65rem; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase; }
+
+        /* Graph */
+        #graph-canvas { border: 1px solid rgba(255,255,255,0.06); border-radius: 12px; background: rgba(0,0,0,0.3); }
+
+        /* No-scrollbar utility */
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+        /* Collapsible */
+        .collapse-body { max-height: 0; overflow: hidden; transition: max-height 0.35s ease; }
+        .collapse-body.open { max-height: 2000px; }
+
+        /* Animations */
+        .fade-up { animation: fadeUp 0.35s ease both; }
+        @keyframes fadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes pulse-soft { 0%, 100% { box-shadow: 0 0 0 0 rgba(217,70,239,0.3); } 50% { box-shadow: 0 0 0 8px rgba(217,70,239,0); } }
+        .pulse-hint { animation: pulse-soft 2.5s ease-out infinite; }
+        .boot-fade-out { animation: bootFade 0.6s ease forwards; }
+        @keyframes bootFade { to { opacity: 0; pointer-events: none; } }
+
+        /* Toast */
+        .toast-container { position: fixed; top: 16px; right: 16px; z-index: 200; display: flex; flex-direction: column; gap: 8px; }
+        .toast { animation: toastIn 0.35s ease; backdrop-filter: blur(16px); }
+        @keyframes toastIn { from { opacity: 0; transform: translateX(40px); } to { opacity: 1; transform: translateX(0); } }
+        .toast-exit { animation: toastOut 0.3s ease forwards; }
+        @keyframes toastOut { to { opacity: 0; transform: translateX(40px); } }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(217,70,239,0.15); border-radius: 2px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(217,70,239,0.3); }
+
+        /* Sources modal */
+        .sources-modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); backdrop-filter: blur(8px); z-index: 300; opacity: 0; pointer-events: none; transition: opacity 0.25s ease; display: flex; align-items: center; justify-content: center; padding: 1rem; }
+        .sources-modal-overlay.open { opacity: 1; pointer-events: all; }
+        .sources-modal { background: rgba(20,17,35,0.95); border: 1px solid rgba(255,255,255,0.1); border-radius: 1.25rem; max-width: 640px; width: 100%; max-height: 80vh; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 24px 64px rgba(0,0,0,0.6), 0 0 0 1px rgba(217,70,239,0.08); transform: translateY(16px) scale(0.97); transition: transform 0.25s ease; }
+        .sources-modal-overlay.open .sources-modal { transform: translateY(0) scale(1); }
+        .source-card { background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05); transition: all 0.2s; }
+        .source-card:hover { border-color: rgba(217,70,239,0.12); background: rgba(255,255,255,0.04); }
+
+        /* Responsive */
+        @media (max-width: 1023px) {
+            .desktop-sidebar { display: none; }
+        }
+        @media (min-width: 1024px) {
+            .mobile-sidebar-trigger { display: none; }
+            .sidebar-overlay, .sidebar-drawer { display: none; }
+        }
+    </style>
+</head>
+<body class="antialiased relative">
+
+<!-- Toast container -->
+<div id="toast-container" class="toast-container"></div>
+
+<!-- Boot overlay — shown during initial data load, then fades out -->
+<div id="boot-overlay" class="fixed inset-0 z-[500] flex items-center justify-center" style="background: #09080f;">
+    <div class="text-center">
+        <div class="w-20 h-20 rounded-2xl bg-gradient-to-br from-berry-500 to-purple-700 flex items-center justify-center text-4xl shadow-2xl shadow-berry-500/30 mx-auto mb-6 animate-pulse">🍇</div>
+        <h2 class="text-xl font-bold bg-gradient-to-r from-berry-300 to-berry-500 bg-clip-text text-transparent mb-2">Member Berry</h2>
+        <p id="boot-status" class="text-sm text-slate-500">Loading cognitive memory system...</p>
+        <div class="mt-4 w-48 h-1 rounded-full bg-white/5 mx-auto overflow-hidden">
+            <div id="boot-progress" class="h-full rounded-full bg-gradient-to-r from-berry-500 to-purple-600 transition-all duration-700 ease-out" style="width: 10%"></div>
+        </div>
+    </div>
+</div>
+
+<!-- Sources Modal -->
+<div id="sources-modal-overlay" class="sources-modal-overlay" onclick="if(event.target===this)closeSourcesModal()">
+    <div class="sources-modal">
+        <div class="px-5 py-4 border-b border-white/5 flex items-center justify-between flex-shrink-0">
+            <div class="flex items-center gap-2.5">
+                <div class="w-7 h-7 rounded-lg bg-berry-500/15 flex items-center justify-center border border-berry-500/20">
+                    <i data-lucide="book-open" class="w-3.5 h-3.5 text-berry-400"></i>
+                </div>
+                <div>
+                    <h3 class="text-sm font-bold text-slate-200">Memory Sources</h3>
+                    <p id="sources-modal-subtitle" class="text-[10px] text-slate-500">Memories used to generate this response</p>
+                </div>
+            </div>
+            <button onclick="closeSourcesModal()" class="p-1.5 text-slate-500 hover:text-white transition-colors rounded-lg hover:bg-white/5">
+                <i data-lucide="x" class="w-5 h-5"></i>
+            </button>
+        </div>
+        <div id="sources-modal-body" class="flex-1 overflow-y-auto p-5 space-y-3">
+        </div>
+    </div>
+</div>
+
+<!-- Info / Educational Modal -->
+<div id="info-modal-overlay" class="sources-modal-overlay" onclick="if(event.target===this)closeInfoModal()">
+    <div class="sources-modal">
+        <div class="px-5 py-4 border-b border-white/5 flex items-center justify-between flex-shrink-0">
+            <div class="flex items-center gap-2.5">
+                <div class="w-7 h-7 rounded-lg bg-berry-500/15 flex items-center justify-center border border-berry-500/20">
+                    <i data-lucide="graduation-cap" class="w-3.5 h-3.5 text-berry-400"></i>
+                </div>
+                <h3 id="info-modal-title" class="text-sm font-bold text-slate-200">How It Works</h3>
+            </div>
+            <button onclick="closeInfoModal()" class="p-1.5 text-slate-500 hover:text-white transition-colors rounded-lg hover:bg-white/5">
+                <i data-lucide="x" class="w-5 h-5"></i>
+            </button>
+        </div>
+        <div id="info-modal-body" class="flex-1 overflow-y-auto p-5 space-y-4 text-sm text-slate-300 leading-relaxed"></div>
+    </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- HEADER                                                        -->
+<!-- ============================================================ -->
+<header class="glass sticky top-0 z-50 border-b border-white/5">
+    <div class="max-w-[1440px] mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-4">
+        <!-- Logo -->
+        <div class="flex items-center gap-3 flex-shrink-0">
+            <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-berry-500 to-purple-700 flex items-center justify-center text-lg shadow-lg shadow-berry-500/20">🍇</div>
+            <div class="hidden sm:block">
+                <h1 class="text-base font-bold bg-gradient-to-r from-berry-300 to-berry-500 bg-clip-text text-transparent leading-tight">Member Berry</h1>
+                <p class="text-[10px] text-slate-500 leading-tight">Cognitive Memory Showcase</p>
+            </div>
+        </div>
+
+        <!-- Inline stats (desktop) -->
+        <div id="header-stats" class="hidden md:flex items-center gap-1.5 flex-shrink-0">
+            <div class="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/[0.03] border border-white/5">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                <span id="hs-active" class="text-[11px] font-mono text-slate-400">0</span>
+                <span class="text-[10px] text-slate-600">active</span>
+            </div>
+            <div class="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/[0.03] border border-white/5">
+                <span class="w-1.5 h-1.5 rounded-full bg-blue-400"></span>
+                <span id="hs-cold" class="text-[11px] font-mono text-slate-400">0</span>
+                <span class="text-[10px] text-slate-600">cold</span>
+            </div>
+            <div class="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/[0.03] border border-white/5">
+                <span class="w-1.5 h-1.5 rounded-full bg-berry-400"></span>
+                <span id="hs-strength" class="text-[11px] font-mono text-slate-400">0.00</span>
+                <span class="text-[10px] text-slate-600">avg str</span>
+            </div>
+        </div>
+
+        <!-- User & actions -->
+        <div class="flex items-center gap-3 flex-shrink-0">
+            <span class="text-xs text-slate-500 hidden sm:inline truncate max-w-[180px]">{{ user.email }}</span>
+            <button onclick="doLogout()" class="text-xs text-slate-500 hover:text-berry-400 transition-colors">Logout</button>
+            <button onclick="openSidebar()" class="mobile-sidebar-trigger p-2 -mr-2 text-slate-400 hover:text-berry-400 transition-colors lg:hidden">
+                <i data-lucide="panel-right-open" class="w-5 h-5"></i>
+            </button>
+        </div>
+    </div>
+</header>
+
+<!-- ============================================================ -->
+<!-- TAB NAVIGATION                                                -->
+<!-- ============================================================ -->
+<nav class="sticky top-14 z-40 glass-subtle border-b border-white/5">
+    <div class="max-w-[1440px] mx-auto px-4 sm:px-6 flex gap-0.5 overflow-x-auto no-scrollbar">
+        <button onclick="switchTab('chat')" id="tab-chat" class="tab-btn active flex items-center gap-1.5 text-sm">
+            <i data-lucide="message-circle" class="w-3.5 h-3.5"></i><span>Chat</span>
+        </button>
+        <button onclick="switchTab('memories')" id="tab-memories" class="tab-btn flex items-center gap-1.5 text-sm">
+            <i data-lucide="brain" class="w-3.5 h-3.5"></i><span>Memory Vault</span>
+        </button>
+        <button onclick="switchTab('graph')" id="tab-graph" class="tab-btn flex items-center gap-1.5 text-sm">
+            <i data-lucide="share-2" class="w-3.5 h-3.5"></i><span>Brain Map</span>
+        </button>
+        <button onclick="switchTab('mflix')" id="tab-mflix" class="tab-btn flex items-center gap-1.5 text-sm">
+            <i data-lucide="clapperboard" class="w-3.5 h-3.5"></i><span>Network</span>
+        </button>
+        <button onclick="switchTab('cold')" id="tab-cold" class="tab-btn flex items-center gap-1.5 text-sm">
+            <i data-lucide="snowflake" class="w-3.5 h-3.5"></i><span>Cold Storage</span>
+        </button>
+        <button onclick="switchTab('types')" id="tab-types" class="tab-btn flex items-center gap-1.5 text-sm">
+            <i data-lucide="layers" class="w-3.5 h-3.5"></i><span>Memory Types</span>
+        </button>
+        <button onclick="switchTab('timelines')" id="tab-timelines" class="tab-btn flex items-center gap-1.5 text-sm">
+            <i data-lucide="git-branch" class="w-3.5 h-3.5"></i><span>Timelines</span>
+        </button>
+        <button onclick="switchTab('triggers')" id="tab-triggers" class="tab-btn flex items-center gap-1.5 text-sm">
+            <i data-lucide="bell-ring" class="w-3.5 h-3.5"></i><span>Triggers</span>
+        </button>
+        <button onclick="switchTab('profile')" id="tab-profile" class="tab-btn flex items-center gap-1.5 text-sm">
+            <i data-lucide="user-circle" class="w-3.5 h-3.5"></i><span>Profile</span>
+        </button>
+    </div>
+</nav>
+
+<!-- ============================================================ -->
+<!-- MAIN LAYOUT                                                   -->
+<!-- ============================================================ -->
+<main class="max-w-[1440px] mx-auto px-4 sm:px-6 py-5 flex gap-5 relative" style="min-height: calc(100vh - 7.5rem);">
+
+    <!-- ====== CONTENT AREA ====== -->
+    <div class="flex-1 min-w-0">
+
+        <!-- ==================== CHAT ==================== -->
+        <section id="panel-chat" class="fade-up">
+            <div class="glass-elevated rounded-2xl overflow-hidden flex flex-col" style="height: calc(100vh - 10rem);">
+                <!-- Chat header -->
+                <div class="px-5 py-3 border-b border-white/5 flex items-center justify-between flex-wrap gap-2">
+                    <div class="flex items-center gap-2.5">
+                        <div class="w-7 h-7 rounded-lg bg-gradient-to-br from-berry-500/20 to-purple-600/20 flex items-center justify-center border border-berry-500/20">
+                            <i data-lucide="bot" class="w-3.5 h-3.5 text-berry-400"></i>
+                        </div>
+                        <div>
+                            <span class="text-sm font-semibold text-slate-200">Member Berry</span>
+                            <span id="chat-session-count" class="text-[10px] text-slate-600 ml-2"></span>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2 flex-wrap">
+                        <select id="bucket-select" class="input-field text-xs rounded-lg px-2.5 py-1.5" onchange="updateBucket()">
+                            <option value="">All Memories</option>
+                            <option value="category:favorites">Favorites</option>
+                            <option value="category:reviews">Reviews</option>
+                            <option value="category:watchlist">Watchlist</option>
+                        </select>
+                        <label class="flex items-center gap-1.5 text-[11px] text-slate-500 cursor-pointer select-none">
+                            <input type="checkbox" id="extract-facts" checked class="w-3.5 h-3.5 rounded border-berry-700 text-berry-500 focus:ring-berry-500/20 bg-black/30">
+                            Extract facts
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Messages -->
+                <div id="chat-messages" class="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+                    <!-- Welcome / Hero message -->
+                    <div class="chat-ai rounded-2xl px-5 py-5 max-w-[95%] md:max-w-[85%] fade-up">
+                        <p class="text-sm text-slate-300 leading-relaxed">Hey there! I'm your <strong class="text-berry-300">Member Berry</strong> -- a movie-obsessed AI companion with a brain that actually <em>works</em> like memory should.</p>
+
+                        <div class="mt-4 rounded-xl bg-gradient-to-br from-berry-500/8 to-purple-600/5 border border-berry-500/10 p-4">
+                            <p class="text-xs font-bold text-berry-300 uppercase tracking-widest mb-2.5">Why this matters</p>
+                            <p class="text-xs text-slate-400 leading-relaxed">Most AI chatbots have <strong class="text-red-400">no memory</strong> -- every conversation starts from zero. Some use simple vector search to find "relevant" context. <strong class="text-berry-300">This demo is different.</strong> It implements a full <strong class="text-berry-400">cognitive memory architecture</strong> backed by MongoDB:</p>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3">
+                                <div class="rounded-lg bg-black/20 border border-white/5 p-2.5">
+                                    <p class="text-[10px] font-bold text-berry-400 mb-0.5">Ebbinghaus Decay</p>
+                                    <p class="text-[10px] text-slate-500">Memories weaken over time. Important ones persist; trivia fades -- just like your brain.</p>
+                                </div>
+                                <div class="rounded-lg bg-black/20 border border-white/5 p-2.5">
+                                    <p class="text-[10px] font-bold text-amber-400 mb-0.5">Flashbulb Memory</p>
+                                    <p class="text-[10px] text-slate-500">High-emotion events get stability boosts (up to 100x). You never forget your first IMAX experience.</p>
+                                </div>
+                                <div class="rounded-lg bg-black/20 border border-white/5 p-2.5">
+                                    <p class="text-[10px] font-bold text-cyan-400 mb-0.5">Knowledge Graph</p>
+                                    <p class="text-[10px] text-slate-500">Entities and relationships extracted via GraphRAG. "Tom Hanks starred in Apollo 13 with Kevin Bacon."</p>
+                                </div>
+                                <div class="rounded-lg bg-black/20 border border-white/5 p-2.5">
+                                    <p class="text-[10px] font-bold text-emerald-400 mb-0.5">Context Engineering</p>
+                                    <p class="text-[10px] text-slate-500">Every response is built from persona + STM + LTM + graph context -- dynamically assembled per query.</p>
+                                </div>
+                            </div>
+                            <p class="text-[10px] text-slate-500 mt-3">Plus: <strong class="text-slate-400">memory types</strong> (episodic, procedural, working), <strong class="text-slate-400">timelines</strong> (multiverse branching), <strong class="text-slate-400">prospective triggers</strong>, <strong class="text-slate-400">cold storage</strong>, <strong class="text-slate-400">conflict detection</strong>, <strong class="text-slate-400">user profiles</strong>, and <strong class="text-slate-400">OSI semantic models</strong>. All stored in MongoDB. All declarative via manifest.json.</p>
+                        </div>
+
+                        <div class="mt-4 p-3 rounded-xl bg-berry-500/5 border border-berry-500/10">
+                            <p class="text-xs font-semibold text-berry-300 mb-2">Try these</p>
+                            <div class="space-y-1.5">
+                                <p class="text-xs text-slate-400 flex items-start gap-2"><span class="text-berry-400 font-mono font-bold mt-px">1</span> <em class="text-slate-300">"What movies have I told you about?"</em> -- watch it recall seeded memories with decay scores</p>
+                                <p class="text-xs text-slate-400 flex items-start gap-2"><span class="text-berry-400 font-mono font-bold mt-px">2</span> <em class="text-slate-300">"I just watched Interstellar and cried at the docking scene"</em> -- creates a high-emotion flashbulb memory</p>
+                                <p class="text-xs text-slate-400 flex items-start gap-2"><span class="text-berry-400 font-mono font-bold mt-px">3</span> Open <strong class="text-berry-300">Brain Map</strong> to see the knowledge graph, then click a node to traverse relationships</p>
+                                <p class="text-xs text-slate-400 flex items-start gap-2"><span class="text-berry-400 font-mono font-bold mt-px">4</span> Use the <strong class="text-berry-300">Time Machine</strong> in the sidebar to fast-forward time, then <strong class="text-amber-400">Force Prune</strong> to watch weak memories move to cold storage</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Suggestions -->
+                <div id="chat-suggestions" class="px-5 py-2 border-t border-white/[0.03] flex gap-2 overflow-x-auto no-scrollbar">
+                    <button onclick="fillChat('What movies have I told you about?')" class="btn-secondary rounded-full px-3 py-1 text-[11px] whitespace-nowrap flex-shrink-0">What do you remember?</button>
+                    <button onclick="fillChat('Who is my favorite actor and why?')" class="btn-secondary rounded-full px-3 py-1 text-[11px] whitespace-nowrap flex-shrink-0">My favorite actor?</button>
+                    <button onclick="fillChat('I just watched Interstellar and cried at the docking scene')" class="btn-secondary rounded-full px-3 py-1 text-[11px] whitespace-nowrap flex-shrink-0">New flashbulb memory</button>
+                    <button onclick="fillChat('How are Tom Hanks and Brad Pitt connected?')" class="btn-secondary rounded-full px-3 py-1 text-[11px] whitespace-nowrap flex-shrink-0">Graph traversal</button>
+                    <button onclick="fillChat('What genres do I seem to prefer?')" class="btn-secondary rounded-full px-3 py-1 text-[11px] whitespace-nowrap flex-shrink-0">Preference inference</button>
+                </div>
+
+                <!-- Input -->
+                <div class="px-5 py-3 border-t border-white/5">
+                    <div class="flex gap-2">
+                        <input type="text" id="chat-input" class="input-field flex-1 rounded-xl px-4 py-2.5 text-sm" placeholder="Tell me about a movie..." onkeydown="if(event.key==='Enter')sendChat()">
+                        <button onclick="sendChat()" id="chat-send-btn" class="btn-primary rounded-xl px-5 py-2.5 text-sm">Send</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ==================== MEMORY VAULT ==================== -->
+        <section id="panel-memories" class="hidden fade-up">
+            <div class="glass-elevated rounded-2xl overflow-hidden">
+                <!-- Header -->
+                <div class="px-5 py-4 border-b border-white/5 flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                        <h2 class="text-base font-bold text-slate-200 flex items-center gap-2">
+                            <i data-lucide="brain" class="w-4 h-4 text-berry-400"></i> Memory Vault
+                        </h2>
+                        <p class="text-[11px] text-slate-500 mt-0.5">Strength decays via Ebbinghaus: <span class="font-mono text-berry-400/70">S = R &times; e<sup>(-t/H)</sup></span>. High emotion = slower decay.</p>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button onclick="toggleInjectForm()" class="btn-secondary rounded-lg px-3 py-1.5 text-xs flex items-center gap-1.5">
+                            <i data-lucide="plus" class="w-3 h-3"></i> Inject
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Inject form -->
+                <div id="inject-form" class="hidden border-b border-white/5 px-5 py-4 bg-berry-500/[0.02] fade-up">
+                    <p class="text-xs font-semibold text-berry-300 mb-2">Inject a memory directly</p>
+                    <input type="text" id="inject-text" class="input-field w-full rounded-lg px-3 py-2.5 text-sm mb-2" placeholder='e.g. Just watched Inception -- the ending still blows my mind'>
+                    <div class="flex flex-wrap gap-2">
+                        <select id="inject-category" class="input-field text-xs rounded-lg px-2.5 py-1.5 flex-1 min-w-[120px]">
+                            <option value="reviews">Reviews</option>
+                            <option value="favorites">Favorites</option>
+                            <option value="actors">Actors</option>
+                            <option value="directors">Directors</option>
+                            <option value="preferences">Preferences</option>
+                            <option value="nostalgia">Nostalgia</option>
+                            <option value="experiences">Experiences</option>
+                            <option value="watchlist">Watchlist</option>
+                        </select>
+                        <div class="flex items-center gap-1">
+                            <label class="text-[10px] text-slate-500">Imp</label>
+                            <input type="number" id="inject-importance" class="input-field w-16 rounded-lg px-2 py-1.5 text-xs text-center" value="0.7" min="0" max="1" step="0.1">
+                        </div>
+                        <div class="flex items-center gap-1">
+                            <label class="text-[10px] text-slate-500">Emo</label>
+                            <input type="number" id="inject-emotion" class="input-field w-16 rounded-lg px-2 py-1.5 text-xs text-center" value="0.3" min="0" max="1" step="0.1">
+                        </div>
+                        <button onclick="injectMemory()" class="btn-primary rounded-lg px-4 py-1.5 text-xs">Inject</button>
+                    </div>
+                </div>
+
+                <!-- Toolbar: Mode toggle + Sort + Search -->
+                <div class="px-5 py-3 border-b border-white/5 space-y-2.5">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <!-- Browse / Search toggle -->
+                        <div class="flex rounded-lg border border-white/8 overflow-hidden flex-shrink-0">
+                            <button onclick="setMemMode('browse')" id="mem-mode-browse" class="px-3 py-1.5 text-[11px] font-semibold bg-berry-500/15 text-berry-300 transition-all flex items-center gap-1">
+                                <i data-lucide="layout-grid" class="w-3 h-3"></i> Browse
+                            </button>
+                            <button onclick="setMemMode('search')" id="mem-mode-search" class="px-3 py-1.5 text-[11px] font-semibold text-slate-500 hover:text-slate-300 transition-all flex items-center gap-1">
+                                <i data-lucide="search" class="w-3 h-3"></i> Search
+                            </button>
+                        </div>
+                        <!-- Sort -->
+                        <select id="mem-sort" class="input-field text-[11px] rounded-lg px-2.5 py-1.5" onchange="renderFilteredMemories()">
+                            <option value="strength-desc">Strongest first</option>
+                            <option value="strength-asc">Weakest first</option>
+                            <option value="age-asc">Newest first</option>
+                            <option value="age-desc">Oldest first</option>
+                            <option value="importance-desc">Most important</option>
+                            <option value="emotion-desc">Most emotional</option>
+                        </select>
+                        <!-- Count -->
+                        <span id="mem-count-label" class="text-[10px] text-slate-600 ml-auto"></span>
+                    </div>
+                    <!-- Category filter pills -->
+                    <div id="mem-cat-pills" class="flex flex-wrap gap-1.5">
+                        <button onclick="setMemCatFilter('')" class="badge bg-berry-500/15 text-berry-300 border border-berry-500/20 cursor-pointer hover:bg-berry-500/25 transition-all" data-cat="">All</button>
+                    </div>
+                    <!-- Search bar (hidden in browse mode) -->
+                    <div id="mem-search-bar" class="hidden flex gap-2">
+                        <div class="relative flex-1">
+                            <i data-lucide="search" class="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-600"></i>
+                            <input type="text" id="mem-search-input" class="input-field w-full rounded-lg pl-9 pr-8 py-2 text-sm" placeholder="Semantic search across memories..." onkeydown="if(event.key==='Enter')searchMemories()" oninput="if(!this.value)loadMemories()">
+                            <button onclick="document.getElementById('mem-search-input').value=''; loadMemories();" class="absolute right-2 top-1/2 -translate-y-1/2 text-slate-600 hover:text-slate-400 transition-colors hidden" id="mem-search-clear">
+                                <i data-lucide="x" class="w-3.5 h-3.5"></i>
+                            </button>
+                        </div>
+                        <button onclick="searchMemories()" class="btn-primary rounded-lg px-4 py-2 text-xs">Search</button>
+                    </div>
+                </div>
+
+                <!-- Memory grid -->
+                <div id="memories-list" class="p-4 grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[calc(100vh-22rem)] overflow-y-auto">
+                    <div class="col-span-full flex flex-col items-center justify-center py-12 text-center">
+                        <div class="w-16 h-16 rounded-2xl bg-berry-500/10 flex items-center justify-center mb-3">
+                            <i data-lucide="brain" class="w-7 h-7 text-berry-500/50"></i>
+                        </div>
+                        <p class="text-sm text-slate-500">No memories yet</p>
+                        <p class="text-xs text-slate-600 mt-1">Chat with Member Berry or inject memories to get started</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ==================== BRAIN MAP (GRAPH) ==================== -->
+        <section id="panel-graph" class="hidden fade-up">
+            <div class="glass-elevated rounded-2xl overflow-hidden">
+                <div class="px-5 py-4 border-b border-white/5 flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                        <h2 class="text-base font-bold text-slate-200 flex items-center gap-2">
+                            <i data-lucide="share-2" class="w-4 h-4 text-berry-400"></i> Brain Map
+                        </h2>
+                        <p class="text-[11px] text-slate-500 mt-0.5">Knowledge graph -- entities and relationships extracted from memories</p>
+                    </div>
+                    <div class="flex gap-2">
+                        <button onclick="loadGraphVisual()" class="btn-secondary rounded-lg px-3 py-1.5 text-xs flex items-center gap-1.5">
+                            <i data-lucide="refresh-cw" class="w-3 h-3"></i> Refresh
+                        </button>
+                        <button onclick="graphFitAll()" class="btn-secondary rounded-lg px-3 py-1.5 text-xs">Fit All</button>
+                    </div>
+                </div>
+
+                <!-- Canvas -->
+                <div class="p-4">
+                    <div id="graph-canvas" style="height: 480px; width: 100%;" class="rounded-xl"></div>
+                </div>
+
+                <!-- Legend + detail -->
+                <div class="px-5 pb-4 space-y-3">
+                    <div class="flex flex-wrap gap-1.5">
+                        <span class="badge bg-cyan-500/10 text-cyan-400 border border-cyan-500/15">actor</span>
+                        <span class="badge bg-pink-500/10 text-pink-400 border border-pink-500/15">movie</span>
+                        <span class="badge bg-purple-500/10 text-purple-400 border border-purple-500/15">director</span>
+                        <span class="badge bg-rose-500/10 text-rose-400 border border-rose-500/15">genre</span>
+                        <span class="badge bg-blue-500/10 text-blue-400 border border-blue-500/15">person</span>
+                    </div>
+
+                    <div id="graph-detail" class="hidden glass-subtle rounded-xl p-4 fade-up">
+                        <div class="flex items-center justify-between mb-2">
+                            <div class="flex items-center gap-2">
+                                <span id="detail-badge" class="badge"></span>
+                                <span id="detail-label" class="text-sm font-bold text-berry-300"></span>
+                            </div>
+                            <span id="detail-id" class="text-[10px] text-slate-600 font-mono"></span>
+                        </div>
+                        <div id="detail-edges" class="space-y-1"></div>
+                    </div>
+
+                    <!-- Traverse controls -->
+                    <div class="flex flex-wrap gap-2 items-end">
+                        <div class="flex-1 min-w-[200px]">
+                            <label class="text-[10px] text-slate-500 mb-1 block">Start node</label>
+                            <input type="text" id="graph-start-id" class="input-field w-full rounded-lg px-3 py-2 text-sm" placeholder="Click a node or type an ID (e.g. actor:tom_hanks)">
+                        </div>
+                        <div class="w-20">
+                            <label class="text-[10px] text-slate-500 mb-1 block">Depth</label>
+                            <input type="number" id="graph-depth" class="input-field w-full rounded-lg px-2 py-2 text-xs text-center" value="2" min="1" max="5">
+                        </div>
+                        <button onclick="traverseGraph()" class="btn-primary rounded-lg px-4 py-2 text-xs">Traverse</button>
+                    </div>
+
+                    <div id="graph-results" class="space-y-2 max-h-[40vh] overflow-y-auto hidden"></div>
+
+                    <!-- Path Finding controls -->
+                    <div class="border-t border-white/5 pt-3 mt-3">
+                        <h3 class="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-1.5">
+                            <i data-lucide="route" class="w-3 h-3 text-emerald-400"></i> Path Finder (BFS)
+                        </h3>
+                        <div class="flex flex-wrap gap-2 items-end">
+                            <div class="flex-1 min-w-[160px]">
+                                <label class="text-[10px] text-slate-500 mb-1 block">Source node</label>
+                                <input type="text" id="path-source" class="input-field w-full rounded-lg px-3 py-2 text-sm" placeholder="e.g. actor:tom_hanks">
+                            </div>
+                            <div class="flex-1 min-w-[160px]">
+                                <label class="text-[10px] text-slate-500 mb-1 block">Target node</label>
+                                <input type="text" id="path-target" class="input-field w-full rounded-lg px-3 py-2 text-sm" placeholder="e.g. actor:brad_pitt">
+                            </div>
+                            <button onclick="findGraphPath()" class="btn-primary rounded-lg px-4 py-2 text-xs flex items-center gap-1.5">
+                                <i data-lucide="route" class="w-3 h-3"></i> Find Path
+                            </button>
+                        </div>
+                        <div id="path-results" class="mt-3 hidden">
+                            <div id="path-display" class="rounded-xl bg-black/30 border border-white/5 p-3 text-sm text-slate-300 font-mono"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ==================== CO-STAR NETWORK ==================== -->
+        <section id="panel-mflix" class="hidden fade-up">
+            <div class="glass-elevated rounded-2xl overflow-hidden">
+                <div class="px-5 py-4 border-b border-white/5">
+                    <h2 class="text-base font-bold text-slate-200 flex items-center gap-2">
+                        <i data-lucide="clapperboard" class="w-4 h-4 text-berry-400"></i> Co-Star Network
+                    </h2>
+                    <p class="text-[11px] text-slate-500 mt-0.5">Traverse movie cast connections via MongoDB <span class="font-mono text-berry-400/60">$graphLookup</span> -- how many degrees from Kevin Bacon?</p>
+                </div>
+
+                <div class="px-5 py-3 border-b border-white/5 flex flex-wrap gap-2">
+                    <input type="text" id="mflix-actor" class="input-field flex-1 min-w-[200px] rounded-lg px-3 py-2 text-sm" placeholder="Actor name..." onkeydown="if(event.key==='Enter')mflixLookup()">
+                    <div class="flex items-center gap-1">
+                        <label class="text-[10px] text-slate-500">Depth</label>
+                        <input type="number" id="mflix-depth" class="input-field w-14 rounded-lg px-2 py-2 text-xs text-center" value="1" min="1" max="3">
+                    </div>
+                    <button onclick="mflixLookup()" class="btn-primary rounded-lg px-4 py-2 text-xs">Lookup</button>
+                    <button onclick="mflixBrowse()" class="btn-secondary rounded-lg px-3 py-2 text-xs">Browse</button>
+                </div>
+
+                <div id="mflix-results" class="p-5 max-h-[calc(100vh-18rem)] overflow-y-auto">
+                    <div class="glass-subtle rounded-xl p-5 text-center">
+                        <div class="w-12 h-12 rounded-xl bg-berry-500/10 flex items-center justify-center mx-auto mb-3">
+                            <i data-lucide="film" class="w-5 h-5 text-berry-500/50"></i>
+                        </div>
+                        <p class="text-sm text-slate-400 mb-1">Explore co-star connections</p>
+                        <p class="text-xs text-slate-600">The same actors from your memories (Tom Hanks, Kevin Bacon, Brad Pitt) are in the movie database. Data is auto-loaded on first visit.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ==================== COLD STORAGE ==================== -->
+        <section id="panel-cold" class="hidden fade-up">
+            <div class="glass-elevated rounded-2xl overflow-hidden">
+                <div class="px-5 py-4 border-b border-white/5 flex items-center justify-between">
+                    <div>
+                        <h2 class="text-base font-bold text-slate-200 flex items-center gap-2">
+                            <i data-lucide="snowflake" class="w-4 h-4 text-blue-400"></i> Cold Storage
+                        </h2>
+                        <p class="text-[11px] text-slate-500 mt-0.5">Pruned memories -- gracefully forgotten but recoverable</p>
+                    </div>
+                    <button onclick="loadColdStorage()" class="btn-secondary rounded-lg px-3 py-1.5 text-xs flex items-center gap-1.5">
+                        <i data-lucide="refresh-cw" class="w-3 h-3"></i> Refresh
+                    </button>
+                </div>
+                <div id="cold-storage-list" class="p-4 space-y-3 max-h-[calc(100vh-14rem)] overflow-y-auto">
+                    <div class="flex flex-col items-center justify-center py-12 text-center">
+                        <div class="w-16 h-16 rounded-2xl bg-blue-500/10 flex items-center justify-center mb-3">
+                            <i data-lucide="snowflake" class="w-7 h-7 text-blue-500/40"></i>
+                        </div>
+                        <p class="text-sm text-slate-500">No pruned memories</p>
+                        <p class="text-xs text-slate-600 mt-1 max-w-xs">Use the <strong class="text-berry-300">Time Machine</strong> to simulate time passing, then <strong class="text-amber-400">Force Prune</strong> to see the Ebbinghaus curve claim weak memories.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ==================== MEMORY TYPES ==================== -->
+        <section id="panel-types" class="hidden fade-up">
+            <div class="glass-elevated rounded-2xl overflow-hidden">
+                <div class="px-5 py-4 border-b border-white/5">
+                    <div class="flex items-start justify-between gap-3">
+                        <div>
+                            <h2 class="text-base font-bold text-slate-200 flex items-center gap-2">
+                                <i data-lucide="layers" class="w-4 h-4 text-berry-400"></i> Memory Types
+                            </h2>
+                            <p class="text-[11px] text-slate-500 mt-0.5">Human cognition uses distinct memory systems. MDB-Engine mirrors this architecture.</p>
+                        </div>
+                        <button onclick="openInfoModal('types')" class="p-1.5 text-slate-600 hover:text-berry-400 transition-colors flex-shrink-0" title="Learn about memory types">
+                            <i data-lucide="help-circle" class="w-4 h-4"></i>
+                        </button>
+                    </div>
+                    <div class="flex gap-3 mt-3 text-[10px]">
+                        <div class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-amber-400"></span><span class="text-slate-500"><strong class="text-amber-400">Episodic</strong> = time-stamped events</span></div>
+                        <div class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-purple-400"></span><span class="text-slate-500"><strong class="text-purple-400">Procedural</strong> = skills & how-tos</span></div>
+                        <div class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-blue-400"></span><span class="text-slate-500"><strong class="text-blue-400">Working</strong> = short-lived context</span></div>
+                    </div>
+                </div>
+                <!-- Sub-tabs -->
+                <div class="flex gap-0.5 px-5 pt-3 border-b border-white/5 overflow-x-auto no-scrollbar">
+                    <button onclick="switchTypeTab('episodic')" id="typetab-episodic" class="tab-btn active text-xs">Episodic</button>
+                    <button onclick="switchTypeTab('procedural')" id="typetab-procedural" class="tab-btn text-xs">Procedural</button>
+                    <button onclick="switchTypeTab('working')" id="typetab-working" class="tab-btn text-xs">Working</button>
+                </div>
+
+                <!-- Episodic sub-panel -->
+                <div id="typepanel-episodic" class="p-4 space-y-4">
+                    <div class="flex gap-2">
+                        <input type="text" id="episode-text" class="input-field flex-1 rounded-lg px-3 py-2 text-sm" placeholder="Record a movie experience (e.g. 'Saw Dune Part 2 in IMAX')...">
+                        <input type="number" id="episode-emotion" class="input-field w-20 rounded-lg px-2 py-2 text-sm text-center" placeholder="0.5" min="0" max="1" step="0.1" value="0.5">
+                        <button onclick="recordEpisode()" class="btn-primary rounded-lg px-4 py-2 text-sm">Record</button>
+                    </div>
+                    <div id="episodes-list" class="space-y-2 max-h-[calc(100vh-20rem)] overflow-y-auto">
+                        <div class="text-center py-8 text-sm text-slate-500">No episodes yet. Record a movie experience above.</div>
+                    </div>
+                </div>
+
+                <!-- Procedural sub-panel -->
+                <div id="typepanel-procedural" class="p-4 space-y-4 hidden">
+                    <div class="space-y-2">
+                        <input type="text" id="proc-name" class="input-field w-full rounded-lg px-3 py-2 text-sm" placeholder="Procedure name (e.g. 'How to pick a date-night movie')...">
+                        <input type="text" id="proc-desc" class="input-field w-full rounded-lg px-3 py-2 text-sm" placeholder="Description (optional)...">
+                        <textarea id="proc-steps" class="input-field w-full rounded-lg px-3 py-2 text-sm" rows="3" placeholder="Steps (one per line)..."></textarea>
+                        <button onclick="storeProcedure()" class="btn-primary rounded-lg px-4 py-2 text-sm">Store Procedure</button>
+                    </div>
+                    <div id="procedures-list" class="space-y-2 max-h-[calc(100vh-24rem)] overflow-y-auto">
+                        <div class="text-center py-8 text-sm text-slate-500">No procedures yet. Create a movie how-to above.</div>
+                    </div>
+                </div>
+
+                <!-- Working context sub-panel -->
+                <div id="typepanel-working" class="p-4 space-y-4 hidden">
+                    <div class="flex gap-2">
+                        <input type="text" id="working-text" class="input-field flex-1 rounded-lg px-3 py-2 text-sm" placeholder="Set working context (e.g. 'Currently watching the MCU in order')...">
+                        <input type="number" id="working-ttl" class="input-field w-24 rounded-lg px-2 py-2 text-sm text-center" placeholder="TTL (h)" min="1" max="168" value="24">
+                        <button onclick="setWorkingContext()" class="btn-primary rounded-lg px-4 py-2 text-sm">Set</button>
+                    </div>
+                    <div class="flex justify-end">
+                        <button onclick="clearWorkingContext()" class="btn-secondary rounded-lg px-3 py-1.5 text-xs text-red-400 border-red-500/10 hover:bg-red-500/5">Clear All</button>
+                    </div>
+                    <div id="working-list" class="space-y-2 max-h-[calc(100vh-20rem)] overflow-y-auto">
+                        <div class="text-center py-8 text-sm text-slate-500">No working context set. Add short-lived context above.</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ==================== TIMELINES ==================== -->
+        <section id="panel-timelines" class="hidden fade-up">
+            <div class="glass-elevated rounded-2xl overflow-hidden">
+                <div class="px-5 py-4 border-b border-white/5">
+                    <div class="flex items-start justify-between gap-3">
+                        <div>
+                            <h2 class="text-base font-bold text-slate-200 flex items-center gap-2">
+                                <i data-lucide="git-branch" class="w-4 h-4 text-berry-400"></i> Memory Timelines
+                            </h2>
+                            <p class="text-[11px] text-slate-500 mt-0.5">Fork alternate memory realities -- like git branches for your AI's memory</p>
+                        </div>
+                        <div class="flex gap-1.5 flex-shrink-0">
+                            <button onclick="openInfoModal('timelines')" class="p-1.5 text-slate-600 hover:text-berry-400 transition-colors" title="How do timelines work?">
+                                <i data-lucide="help-circle" class="w-4 h-4"></i>
+                            </button>
+                            <button onclick="loadTimelines()" class="btn-secondary rounded-lg px-3 py-1.5 text-xs flex items-center gap-1.5">
+                                <i data-lucide="refresh-cw" class="w-3 h-3"></i> Refresh
+                            </button>
+                        </div>
+                    </div>
+                    <div class="mt-3 rounded-lg bg-berry-500/5 border border-berry-500/10 p-2.5">
+                        <p class="text-[10px] text-slate-400 leading-relaxed"><strong class="text-berry-300">Think of it like git:</strong> Fork a timeline to explore "what if I only liked horror movies?" without losing your real memories. Switch back anytime. Each timeline has its own memory context -- useful for A/B testing AI personalities or isolating conversations.</p>
+                    </div>
+                </div>
+                <div class="p-4 space-y-4">
+                    <!-- Fork form -->
+                    <div class="flex gap-2">
+                        <input type="text" id="timeline-name" class="input-field flex-1 rounded-lg px-3 py-2 text-sm" placeholder="New timeline name (e.g. 'What-If: Horror Only')...">
+                        <button onclick="forkTimeline()" class="btn-primary rounded-lg px-4 py-2 text-sm flex items-center gap-1.5">
+                            <i data-lucide="git-branch" class="w-3.5 h-3.5"></i> Fork
+                        </button>
+                    </div>
+                    <!-- Current timeline -->
+                    <div id="current-timeline-banner" class="rounded-xl bg-berry-500/10 border border-berry-500/15 p-3">
+                        <div class="flex items-center gap-2">
+                            <div class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></div>
+                            <span class="text-xs text-slate-400">Active timeline:</span>
+                            <span id="current-timeline-name" class="text-sm font-semibold text-berry-300">root</span>
+                        </div>
+                    </div>
+                    <!-- Timeline list -->
+                    <div id="timelines-list" class="space-y-2 max-h-[calc(100vh-20rem)] overflow-y-auto">
+                        <div class="text-center py-8 text-sm text-slate-500">Loading timelines...</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ==================== PROSPECTIVE TRIGGERS ==================== -->
+        <section id="panel-triggers" class="hidden fade-up">
+            <div class="glass-elevated rounded-2xl overflow-hidden">
+                <div class="px-5 py-4 border-b border-white/5">
+                    <div class="flex items-start justify-between gap-3">
+                        <div>
+                            <h2 class="text-base font-bold text-slate-200 flex items-center gap-2">
+                                <i data-lucide="bell-ring" class="w-4 h-4 text-amber-400"></i> Prospective Memory
+                            </h2>
+                            <p class="text-[11px] text-slate-500 mt-0.5">Intention-based triggers -- the AI remembers <em>to do</em> something in the future</p>
+                        </div>
+                        <div class="flex gap-1.5 flex-shrink-0">
+                            <button onclick="openInfoModal('triggers')" class="p-1.5 text-slate-600 hover:text-berry-400 transition-colors" title="What is prospective memory?">
+                                <i data-lucide="help-circle" class="w-4 h-4"></i>
+                            </button>
+                            <button onclick="loadTriggers()" class="btn-secondary rounded-lg px-3 py-1.5 text-xs flex items-center gap-1.5">
+                                <i data-lucide="refresh-cw" class="w-3 h-3"></i> Refresh
+                            </button>
+                        </div>
+                    </div>
+                    <div class="mt-3 rounded-lg bg-amber-500/5 border border-amber-500/10 p-2.5">
+                        <p class="text-[10px] text-slate-400 leading-relaxed"><strong class="text-amber-400">Like tying a string around your finger:</strong> Humans don't just remember the past -- we remember intentions. "Remind me to buy milk" is prospective memory. Here, triggers fire when a future conversation matches the condition using semantic similarity.</p>
+                    </div>
+                </div>
+                <div class="p-4 space-y-4">
+                    <!-- Create trigger form -->
+                    <div class="space-y-2">
+                        <input type="text" id="trigger-condition" class="input-field w-full rounded-lg px-3 py-2 text-sm" placeholder="Condition (e.g. 'someone mentions a new Nolan movie')...">
+                        <input type="text" id="trigger-action" class="input-field w-full rounded-lg px-3 py-2 text-sm" placeholder="Action (e.g. 'Add it to my watchlist immediately!')...">
+                        <div class="flex items-center gap-3">
+                            <label class="flex items-center gap-1.5 text-xs text-slate-400 cursor-pointer">
+                                <input type="checkbox" id="trigger-oneshot" checked class="w-3.5 h-3.5 rounded border-berry-700 text-berry-500 focus:ring-berry-500/20 bg-black/30">
+                                One-shot (auto-deactivate after firing)
+                            </label>
+                            <button onclick="createTrigger()" class="btn-primary rounded-lg px-4 py-2 text-sm ml-auto">Set Trigger</button>
+                        </div>
+                    </div>
+                    <!-- Trigger list -->
+                    <div id="triggers-list" class="space-y-2 max-h-[calc(100vh-22rem)] overflow-y-auto">
+                        <div class="text-center py-8 text-sm text-slate-500">No active triggers. Set one above.</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ==================== PROFILE ==================== -->
+        <section id="panel-profile" class="hidden fade-up">
+            <div class="glass-elevated rounded-2xl overflow-hidden">
+                <div class="px-5 py-4 border-b border-white/5 flex items-center justify-between">
+                    <div>
+                        <h2 class="text-base font-bold text-slate-200 flex items-center gap-2">
+                            <i data-lucide="user-circle" class="w-4 h-4 text-berry-400"></i> User Profile
+                        </h2>
+                        <p class="text-[11px] text-slate-500 mt-0.5">LLM-generated profile materialized from your memories + knowledge graph. Click <strong class="text-berry-300">Build</strong> to regenerate.</p>
+                    </div>
+                    <div class="flex gap-2">
+                        <button onclick="buildProfile()" id="profile-build-btn" class="btn-primary rounded-lg px-3 py-1.5 text-xs flex items-center gap-1.5">
+                            <i data-lucide="refresh-cw" class="w-3 h-3"></i> Build Profile
+                        </button>
+                        <button onclick="deleteProfile()" class="btn-secondary rounded-lg px-3 py-1.5 text-xs text-red-400 border-red-500/10 hover:bg-red-500/5">Delete</button>
+                    </div>
+                </div>
+                <div class="p-4 space-y-4">
+                    <!-- Profile card -->
+                    <div id="profile-card" class="space-y-4">
+                        <div class="text-center py-8 text-sm text-slate-500">
+                            <div class="w-16 h-16 rounded-2xl bg-berry-500/10 flex items-center justify-center mx-auto mb-3">
+                                <i data-lucide="user-circle" class="w-7 h-7 text-berry-500/40"></i>
+                            </div>
+                            <p>No profile yet.</p>
+                            <p class="text-xs text-slate-600 mt-1">Click <strong class="text-berry-300">Build Profile</strong> to create one from your memories.</p>
+                        </div>
+                    </div>
+                    <!-- Profile text -->
+                    <div id="profile-text-section" class="hidden">
+                        <h3 class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Profile Summary (LLM-ready)</h3>
+                        <div id="profile-text-content" class="rounded-xl bg-black/30 border border-white/5 p-4 text-sm text-slate-300 font-mono whitespace-pre-wrap max-h-60 overflow-y-auto"></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+    </div>
+
+    <!-- ====== SIDEBAR (desktop) ====== -->
+    <aside class="desktop-sidebar w-72 flex-shrink-0 space-y-4 hidden lg:block">
+        <div id="sidebar-content">
+
+            <!-- Time Machine -->
+            <div class="glass-elevated rounded-2xl p-4">
+                <div class="flex items-center justify-between mb-1">
+                    <h3 class="text-[11px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+                        <i data-lucide="clock" class="w-3 h-3 text-berry-400"></i> Time Machine
+                    </h3>
+                    <button onclick="openInfoModal('decay')" class="p-1 text-slate-600 hover:text-berry-400 transition-colors" title="How does memory decay work?">
+                        <i data-lucide="help-circle" class="w-3.5 h-3.5"></i>
+                    </button>
+                </div>
+                <p class="text-[10px] text-slate-600 mb-3">Fast-forward time to demonstrate the <strong class="text-berry-400">Ebbinghaus forgetting curve</strong>. Watch memory strength drop as hours pass.</p>
+                <div class="grid grid-cols-4 gap-1.5 mb-3">
+                    <button onclick="simulateDecay(6)" class="btn-secondary rounded-lg py-2 text-[11px] font-mono font-semibold text-berry-300 hover:text-berry-200" title="Advance 6 hours">+6h</button>
+                    <button onclick="simulateDecay(24)" class="btn-secondary rounded-lg py-2 text-[11px] font-mono font-semibold text-berry-300 hover:text-berry-200" title="Advance 1 day">+1d</button>
+                    <button onclick="simulateDecay(48)" class="btn-secondary rounded-lg py-2 text-[11px] font-mono font-semibold text-berry-300 hover:text-berry-200" title="Advance 2 days">+2d</button>
+                    <button onclick="simulateDecay(168)" class="btn-secondary rounded-lg py-2 text-[11px] font-mono font-semibold text-berry-300 hover:text-berry-200" title="Advance 1 week">+1w</button>
+                </div>
+                <button onclick="forcePrune()" id="prune-btn" class="btn-secondary rounded-xl w-full py-2 text-xs text-amber-400 border-amber-500/10 hover:bg-amber-500/5 hover:border-amber-500/20 flex items-center justify-center gap-1.5" title="Move memories with strength below 30% to cold storage">
+                    <i data-lucide="scissors" class="w-3 h-3"></i> Force Prune &lt; 30%
+                </button>
+                <div class="mt-2 rounded-lg bg-amber-500/5 border border-amber-500/10 p-2">
+                    <p class="text-[10px] text-amber-400/80 leading-relaxed"><strong>Try it:</strong> Hit <strong>+1w</strong> twice, then <strong>Force Prune</strong>. Low-importance memories move to <strong>Cold Storage</strong> where you can still recover them -- modeling how humans forget trivia but preserve core memories.</p>
+                </div>
+            </div>
+
+            <!-- Memory Health -->
+            <div class="glass-elevated rounded-2xl p-4">
+                <div class="flex items-center justify-between mb-3">
+                    <h3 class="text-[11px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+                        <i data-lucide="activity" class="w-3 h-3 text-berry-400"></i> Memory Health
+                    </h3>
+                    <button onclick="openInfoModal('health')" class="p-1 text-slate-600 hover:text-berry-400 transition-colors" title="What do these metrics mean?">
+                        <i data-lucide="help-circle" class="w-3.5 h-3.5"></i>
+                    </button>
+                </div>
+                <div id="analytics-panel" class="space-y-3">
+                    <div class="grid grid-cols-2 gap-2">
+                        <div class="rounded-xl bg-white/[0.02] border border-white/5 p-2.5 text-center">
+                            <div id="stat-active" class="text-lg font-bold text-emerald-400 font-mono">--</div>
+                            <div class="text-[10px] text-slate-600">Active</div>
+                        </div>
+                        <div class="rounded-xl bg-white/[0.02] border border-white/5 p-2.5 text-center">
+                            <div id="stat-cold" class="text-lg font-bold text-blue-400 font-mono">--</div>
+                            <div class="text-[10px] text-slate-600">Cold</div>
+                        </div>
+                        <div class="rounded-xl bg-white/[0.02] border border-white/5 p-2.5 text-center">
+                            <div id="stat-strong" class="text-lg font-bold text-emerald-400 font-mono">--</div>
+                            <div class="text-[10px] text-slate-600">Strong</div>
+                        </div>
+                        <div class="rounded-xl bg-white/[0.02] border border-white/5 p-2.5 text-center">
+                            <div id="stat-weak" class="text-lg font-bold text-amber-400 font-mono">--</div>
+                            <div class="text-[10px] text-slate-600">Weak</div>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="flex justify-between text-[10px] text-slate-500 mb-1"><span>Capacity</span><span id="stat-capacity" class="font-mono">0%</span></div>
+                        <div class="str-bar"><div id="capacity-bar" class="str-fill bg-gradient-to-r from-berry-600 to-berry-400" style="width:0%"></div></div>
+                    </div>
+                    <div>
+                        <div class="flex justify-between text-[10px] text-slate-500 mb-1"><span>Avg Strength</span><span id="stat-avg-strength" class="font-mono">0.000</span></div>
+                        <div class="str-bar"><div id="strength-bar" class="str-fill bg-gradient-to-r from-emerald-600 to-emerald-400" style="width:0%"></div></div>
+                    </div>
+                    <div class="flex justify-between text-[10px] text-slate-500"><span>Graph Nodes</span><span id="stat-graph" class="text-berry-400 font-mono font-semibold">--</span></div>
+                    <div id="categories-list" class="space-y-1 pt-2 border-t border-white/5"></div>
+                </div>
+            </div>
+
+            <!-- Personality Tuning -->
+            <div class="glass-elevated rounded-2xl p-4">
+                <button onclick="toggleCollapse('persona-body')" class="w-full flex items-center justify-between text-left">
+                    <h3 class="text-[11px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+                        <i data-lucide="sliders-horizontal" class="w-3 h-3 text-berry-400"></i> Personality
+                    </h3>
+                    <i data-lucide="chevron-down" class="w-3.5 h-3.5 text-slate-600 transition-transform" id="persona-chevron"></i>
+                </button>
+                <div id="persona-body" class="collapse-body">
+                    <p class="text-[10px] text-slate-600 mt-2 mb-1">Adjust traits to change how Member Berry responds. These traits are stored in MongoDB and injected into the LLM system prompt via <strong class="text-berry-400">Context Engineering</strong>.</p>
+                    <p class="text-[10px] text-slate-500 mb-3">Try cranking <strong class="text-berry-300">Humor</strong> to 1.0 and <strong class="text-berry-300">Formality</strong> to 0 -- then chat.</p>
+                    <div id="persona-sliders" class="space-y-3">
+                        <div>
+                            <div class="flex justify-between text-[10px] mb-1"><span class="text-slate-500">Humor</span><span id="val-humor" class="text-berry-400 font-mono">0.8</span></div>
+                            <input type="range" id="trait-humor" min="0" max="1" step="0.1" value="0.8" class="w-full h-1 rounded-lg appearance-none cursor-pointer accent-berry-500 bg-white/5">
+                        </div>
+                        <div>
+                            <div class="flex justify-between text-[10px] mb-1"><span class="text-slate-500">Formality</span><span id="val-formality" class="text-berry-400 font-mono">0.3</span></div>
+                            <input type="range" id="trait-formality" min="0" max="1" step="0.1" value="0.3" class="w-full h-1 rounded-lg appearance-none cursor-pointer accent-berry-500 bg-white/5">
+                        </div>
+                        <div>
+                            <div class="flex justify-between text-[10px] mb-1"><span class="text-slate-500">Empathy</span><span id="val-empathy" class="text-berry-400 font-mono">0.8</span></div>
+                            <input type="range" id="trait-empathy" min="0" max="1" step="0.1" value="0.8" class="w-full h-1 rounded-lg appearance-none cursor-pointer accent-berry-500 bg-white/5">
+                        </div>
+                        <div>
+                            <div class="flex justify-between text-[10px] mb-1"><span class="text-slate-500">Technical Focus</span><span id="val-technical_focus" class="text-berry-400 font-mono">0.4</span></div>
+                            <input type="range" id="trait-technical_focus" min="0" max="1" step="0.1" value="0.4" class="w-full h-1 rounded-lg appearance-none cursor-pointer accent-berry-500 bg-white/5">
+                        </div>
+                        <div>
+                            <div class="flex justify-between text-[10px] mb-1"><span class="text-slate-500">Creativity</span><span id="val-creativity" class="text-berry-400 font-mono">0.7</span></div>
+                            <input type="range" id="trait-creativity" min="0" max="1" step="0.1" value="0.7" class="w-full h-1 rounded-lg appearance-none cursor-pointer accent-berry-500 bg-white/5">
+                        </div>
+                    </div>
+                    <button onclick="savePersona()" id="persona-save-btn" class="btn-secondary rounded-xl w-full py-2 text-xs text-berry-300 mt-3">Save Personality</button>
+                </div>
+            </div>
+
+            <!-- The Science -->
+            <div class="glass-elevated rounded-2xl p-4">
+                <button onclick="toggleCollapse('formula-body')" class="w-full flex items-center justify-between text-left">
+                    <h3 class="text-[11px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+                        <i data-lucide="flask-conical" class="w-3 h-3 text-berry-400"></i> The Science
+                    </h3>
+                    <i data-lucide="chevron-down" class="w-3.5 h-3.5 text-slate-600 transition-transform" id="formula-chevron"></i>
+                </button>
+                <div id="formula-body" class="collapse-body">
+                    <div class="mt-3 font-mono text-sm text-center text-slate-300 bg-black/30 rounded-xl p-4 border border-white/5">
+                        S = R &times; e<sup class="text-berry-400">(-t / H)</sup>
+                    </div>
+                    <div class="mt-3 space-y-1 text-[11px] text-slate-500">
+                        <p><span class="text-berry-400 font-semibold font-mono">S</span> = Retrieval Strength</p>
+                        <p><span class="text-berry-400 font-semibold font-mono">R</span> = Raw Importance (0.1 -- 1.0)</p>
+                        <p><span class="text-berry-400 font-semibold font-mono">t</span> = Hours since last access</p>
+                        <p><span class="text-berry-400 font-semibold font-mono">H</span> = Stability (half-life in hours)</p>
+                    </div>
+                    <p class="text-[10px] text-slate-600 mt-3 leading-relaxed">High-emotion events (<strong class="text-amber-400">flashbulb memories</strong>) get stability boosts up to 100x, resisting decay. This models how humans never forget weddings, accidents, or promotions.</p>
+                </div>
+            </div>
+        </div>
+    </aside>
+</main>
+
+<!-- ============================================================ -->
+<!-- MOBILE SIDEBAR DRAWER                                         -->
+<!-- ============================================================ -->
+<div id="sidebar-overlay" class="sidebar-overlay lg:hidden" onclick="closeSidebar()"></div>
+<div id="sidebar-drawer" class="sidebar-drawer glass-elevated lg:hidden p-4 space-y-4">
+    <div class="flex items-center justify-between mb-2">
+        <span class="text-sm font-bold text-berry-300">Tools</span>
+        <button onclick="closeSidebar()" class="p-1.5 text-slate-400 hover:text-white transition-colors">
+            <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+    </div>
+    <div id="mobile-sidebar-content"></div>
+</div>
+
+<!-- ============================================================ -->
+<!-- JAVASCRIPT                                                    -->
+<!-- ============================================================ -->
+<script>
+// ========================================================================
+// STATE
+// ========================================================================
+const BASE = '{{ base_path }}';
+let currentTab = 'chat';
+let currentBucket = '';
+let chatSessionId = 'member:{{ user.email }}:default';
+let graphNetwork = null;
+let graphNodesDataset = null;
+let graphEdgesDataset = null;
+
+function getCookie(name) {
+    const v = `; ${document.cookie}`;
+    const p = v.split(`; ${name}=`);
+    if (p.length === 2) return p.pop().split(';').shift();
+    return '';
+}
+function csrfHeaders(extra = {}) {
+    return { 'Content-Type': 'application/json', 'X-CSRF-Token': getCookie('csrf_token'), ...extra };
+}
+async function doLogout() {
+    await fetch(BASE + '/logout', { method: 'POST', headers: { 'X-CSRF-Token': getCookie('csrf_token') } });
+    window.location.href = '{{ auth_hub_url }}/login';
+}
+
+// ========================================================================
+// SIDEBAR (mobile drawer)
+// ========================================================================
+function openSidebar() {
+    document.getElementById('sidebar-overlay').classList.add('open');
+    document.getElementById('sidebar-drawer').classList.add('open');
+    // Clone sidebar content for mobile
+    const src = document.getElementById('sidebar-content');
+    const dest = document.getElementById('mobile-sidebar-content');
+    if (src && dest && !dest.hasChildNodes()) {
+        dest.innerHTML = src.innerHTML;
+    }
+}
+function closeSidebar() {
+    document.getElementById('sidebar-overlay').classList.remove('open');
+    document.getElementById('sidebar-drawer').classList.remove('open');
+}
+
+// ========================================================================
+// COLLAPSIBLE SECTIONS
+// ========================================================================
+function toggleCollapse(id) {
+    const body = document.getElementById(id);
+    const chevron = document.getElementById(id.replace('-body', '-chevron'));
+    body.classList.toggle('open');
+    if (chevron) chevron.style.transform = body.classList.contains('open') ? 'rotate(180deg)' : '';
+}
+
+// ========================================================================
+// TAB SWITCHING
+// ========================================================================
+function switchTab(tab) {
+    document.querySelectorAll('[id^="panel-"]').forEach(p => {
+        if (!p.id.startsWith('panel-')) return;
+        p.classList.add('hidden');
+    });
+    document.querySelectorAll('nav .tab-btn').forEach(t => t.classList.remove('active'));
+    const panel = document.getElementById('panel-' + tab);
+    if (panel) { panel.classList.remove('hidden'); }
+    const tabBtn = document.getElementById('tab-' + tab);
+    if (tabBtn) tabBtn.classList.add('active');
+    currentTab = tab;
+
+    if (tab === 'memories') loadMemories();
+    if (tab === 'cold') loadColdStorage();
+    if (tab === 'graph') loadGraphVisual();
+    if (tab === 'mflix') mflixBrowse();
+    if (tab === 'types') loadEpisodes();
+    if (tab === 'timelines') loadTimelines();
+    if (tab === 'triggers') loadTriggers();
+    if (tab === 'profile') loadProfile();
+}
+
+// ========================================================================
+// CHAT
+// ========================================================================
+function updateBucket() {
+    currentBucket = document.getElementById('bucket-select').value;
+    chatSessionId = currentBucket
+        ? `member:{{ user.email }}:${currentBucket}`
+        : `member:{{ user.email }}:default`;
+}
+
+function fillChat(text) {
+    document.getElementById('chat-input').value = text;
+    document.getElementById('chat-input').focus();
+}
+
+async function sendChat() {
+    const input = document.getElementById('chat-input');
+    const msg = input.value.trim();
+    if (!msg) return;
+    input.value = '';
+    const btn = document.getElementById('chat-send-btn');
+    btn.disabled = true;
+    // Hide suggestions after first message
+    const sug = document.getElementById('chat-suggestions');
+    if (sug) sug.style.display = 'none';
+
+    appendChatBubble(msg, 'user');
+    const typingId = 'typing-' + Date.now();
+    appendTypingIndicator(typingId);
+
+    try {
+        const body = {
+            message: msg,
+            session_id: chatSessionId,
+            extract_facts: document.getElementById('extract-facts').checked,
+        };
+        if (currentBucket) {
+            body.bucket_id = currentBucket + ':{{ user.email }}';
+            body.bucket_type = 'category';
+        }
+        const res = await fetch(BASE + '/api/chat', { method: 'POST', headers: csrfHeaders(), body: JSON.stringify(body) });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Chat failed');
+
+        removeElement(typingId);
+        appendChatBubble(data.response, 'ai', data);
+
+        if (data.session_message_count) {
+            document.getElementById('chat-session-count').textContent = `${data.session_message_count} msgs`;
+        }
+        loadAnalytics();
+    } catch (e) {
+        removeElement(typingId);
+        appendChatBubble('Error: ' + e.message, 'error');
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+function appendChatBubble(text, type, data = null) {
+    const container = document.getElementById('chat-messages');
+    const div = document.createElement('div');
+    div.className = 'fade-up';
+    const bubbleId = 'bubble-' + Date.now();
+
+    if (type === 'user') {
+        div.innerHTML = `<div class="chat-user rounded-2xl px-4 py-3 max-w-[85%] ml-auto"><p class="text-sm text-slate-200">${escapeHtml(text)}</p></div>`;
+    } else if (type === 'error') {
+        div.innerHTML = `<div class="chat-error rounded-2xl px-4 py-3 max-w-[85%]"><p class="text-sm text-red-400">${escapeHtml(text)}</p></div>`;
+    } else {
+        const hasSources = data?.ltm_memories?.length > 0;
+        const hasGraph = data?.graph_context?.entry_nodes > 0;
+        const hasStored = data?.memories_stored?.length > 0;
+        const hasAnyMeta = hasSources || hasGraph || hasStored;
+
+        // Build the action bar that sits below the response text
+        let actionBar = '';
+        if (hasAnyMeta) {
+            // Store data on window for modal access
+            const dataKey = bubbleId + '-data';
+            window[dataKey] = data;
+
+            const parts = [];
+            if (hasSources) parts.push(`${data.ltm_memories.length} memories recalled`);
+            if (hasGraph) parts.push(`${data.graph_context.entry_nodes} graph nodes`);
+
+            actionBar = `<div class="mt-3 pt-3 border-t border-white/5 flex flex-wrap items-center gap-2">`;
+
+            // "View Sources" button -- always visible when there's metadata
+            actionBar += `
+                <button onclick="openSourcesModal('${dataKey}')" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-berry-500/10 border border-berry-500/15 text-[11px] font-semibold text-berry-300 hover:bg-berry-500/20 hover:border-berry-500/25 transition-all">
+                    <i data-lucide="book-open" class="w-3 h-3"></i>
+                    View Sources${hasSources ? ` (${data.ltm_memories.length})` : ''}
+                </button>`;
+
+            if (hasStored) {
+                actionBar += `
+                    <span class="flex items-center gap-1 text-[10px] text-slate-500">
+                        <i data-lucide="sparkles" class="w-3 h-3 text-berry-400/50"></i>
+                        ${data.memories_stored.length} new memor${data.memories_stored.length === 1 ? 'y' : 'ies'} stored
+                    </span>`;
+            }
+            if (hasGraph) {
+                actionBar += `
+                    <span class="flex items-center gap-1 text-[10px] text-slate-500">
+                        <i data-lucide="share-2" class="w-3 h-3 text-berry-400/50"></i>
+                        ${data.graph_context.entry_nodes} graph nodes
+                    </span>`;
+            }
+
+            // Conflict placeholder (filled async)
+            if (hasStored) {
+                actionBar += `<div id="${bubbleId}-conflicts" class="w-full"></div>`;
+            }
+
+            actionBar += `</div>`;
+        }
+
+        div.innerHTML = `<div class="chat-ai rounded-2xl px-4 py-3 max-w-[90%] md:max-w-[75%]"><p class="text-sm text-slate-300 leading-relaxed">${formatResponse(text)}</p>${actionBar}</div>`;
+    }
+
+    container.appendChild(div);
+    container.scrollTop = container.scrollHeight;
+    try { lucide.createIcons({ nodes: [div] }); } catch(e) {}
+
+    // Fire async conflict checks for newly stored memories
+    if (type === 'ai' && data?.memories_stored?.length > 0) {
+        checkConflictsForBubble(bubbleId, data.memories_stored);
+    }
+}
+
+// ========================================================================
+// SOURCES MODAL
+// ========================================================================
+function openSourcesModal(dataKey) {
+    const data = window[dataKey];
+    if (!data) return;
+
+    const overlay = document.getElementById('sources-modal-overlay');
+    const body = document.getElementById('sources-modal-body');
+    const subtitle = document.getElementById('sources-modal-subtitle');
+
+    const parts = [];
+    if (data.ltm_memories?.length) parts.push(`${data.ltm_memories.length} memories`);
+    if (data.graph_context?.entry_nodes) parts.push(`${data.graph_context.entry_nodes} graph nodes`);
+    if (data.memories_stored?.length) parts.push(`${data.memories_stored.length} stored`);
+    subtitle.textContent = parts.join(' · ') || 'Context used for this response';
+
+    let html = '';
+
+    // Section: Recalled memories (the "sources")
+    if (data.ltm_memories?.length > 0) {
+        html += `<div>
+            <h4 class="text-xs font-bold text-slate-300 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                <i data-lucide="book-open" class="w-3.5 h-3.5 text-berry-400"></i> Recalled Memories
+            </h4>
+            <div class="space-y-2">`;
+
+        data.ltm_memories.forEach((m, i) => {
+            const str = (m.strength || 0);
+            const pct = Math.min(Math.max(str * 100, 0), 100);
+            const strokeColor = pct > 70 ? '#10b981' : pct > 30 ? '#f59e0b' : '#ef4444';
+            const circumference = 2 * Math.PI * 16;
+            const offset = circumference - (pct / 100) * circumference;
+            const cat = m.category || 'unknown';
+            const flashbulb = (m.emotion || 0) > 0.7;
+
+            html += `
+                <div class="source-card rounded-xl p-3.5">
+                    <div class="flex items-start gap-3">
+                        <div class="flex-shrink-0 relative">
+                            <svg class="strength-ring w-11 h-11" viewBox="0 0 36 36">
+                                <circle class="strength-track" cx="18" cy="18" r="16"/>
+                                <circle class="strength-value" cx="18" cy="18" r="16" stroke="${strokeColor}"
+                                    stroke-dasharray="${circumference}" stroke-dashoffset="${offset}"/>
+                            </svg>
+                            <span class="absolute inset-0 flex items-center justify-center text-[8px] font-bold font-mono" style="color:${strokeColor}">${Math.round(pct)}</span>
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <p class="text-sm text-slate-200 leading-snug">${escapeHtml(m.text || '')}</p>
+                            <div class="flex flex-wrap items-center gap-1.5 mt-2">
+                                <span class="badge ${getCategoryBadge(cat)}">${cat}</span>
+                                ${flashbulb ? '<span class="badge bg-amber-500/10 text-amber-400 border border-amber-500/15">&#x26A1; flashbulb</span>' : ''}
+                                <span class="text-[10px] text-slate-600">str: <span class="font-mono text-slate-400">${str.toFixed(3)}</span></span>
+                                ${m.importance ? `<span class="text-[10px] text-slate-600">imp: <span class="font-mono text-slate-400">${m.importance}</span></span>` : ''}
+                                ${m.similarity ? `<span class="text-[10px] text-slate-600">sim: <span class="font-mono text-berry-400">${m.similarity.toFixed(3)}</span></span>` : ''}
+                            </div>
+                        </div>
+                    </div>
+                </div>`;
+        });
+        html += `</div></div>`;
+    }
+
+    // Section: Graph context
+    if (data.graph_context?.entry_nodes > 0) {
+        html += `<div>
+            <h4 class="text-xs font-bold text-slate-300 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                <i data-lucide="share-2" class="w-3.5 h-3.5 text-berry-400"></i> Knowledge Graph
+            </h4>
+            <div class="source-card rounded-xl p-3.5">
+                <div class="flex items-center gap-4">
+                    <div class="text-center">
+                        <div class="text-lg font-bold text-berry-400 font-mono">${data.graph_context.entry_nodes}</div>
+                        <div class="text-[10px] text-slate-500">entry nodes</div>
+                    </div>
+                    <div class="text-center">
+                        <div class="text-lg font-bold text-slate-400 font-mono">${data.graph_context.related_nodes}</div>
+                        <div class="text-[10px] text-slate-500">related nodes</div>
+                    </div>
+                </div>
+                ${data.graph_context.nodes?.length > 0 ? `
+                    <div class="flex flex-wrap gap-1.5 mt-2 pt-2 border-t border-white/5">
+                        ${data.graph_context.nodes.map(n => `<span class="badge ${getNodeBadgeClass(n.type)}">${escapeHtml(n.label)}</span>`).join('')}
+                    </div>` : ''}
+            </div>
+        </div>`;
+    }
+
+    // Section: Newly stored memories
+    if (data.memories_stored?.length > 0) {
+        html += `<div>
+            <h4 class="text-xs font-bold text-slate-300 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                <i data-lucide="sparkles" class="w-3.5 h-3.5 text-berry-400"></i> Newly Stored
+            </h4>
+            <div class="space-y-2">`;
+        data.memories_stored.forEach(m => {
+            html += `
+                <div class="source-card rounded-xl p-3.5">
+                    <p class="text-sm text-slate-300">${escapeHtml(m.text)}</p>
+                    <div class="flex items-center gap-1.5 mt-2">
+                        <span class="badge ${getCategoryBadge(m.category)}">${m.category}</span>
+                        <span class="text-[10px] text-slate-600">imp: <span class="font-mono text-slate-400">${m.importance}</span></span>
+                        ${m.emotion ? `<span class="text-[10px] text-slate-600">emo: <span class="font-mono text-slate-400">${m.emotion}</span></span>` : ''}
+                    </div>
+                </div>`;
+        });
+        html += `</div></div>`;
+    }
+
+    if (!html) html = '<p class="text-sm text-slate-500 text-center py-8">No source data available</p>';
+
+    body.innerHTML = html;
+    overlay.classList.add('open');
+    try { lucide.createIcons({ nodes: [body] }); } catch(e) {}
+}
+
+function closeSourcesModal() {
+    document.getElementById('sources-modal-overlay').classList.remove('open');
+}
+
+function appendTypingIndicator(id) {
+    const container = document.getElementById('chat-messages');
+    const div = document.createElement('div');
+    div.id = id;
+    div.className = 'fade-up';
+    div.innerHTML = `<div class="chat-ai rounded-2xl px-4 py-3 max-w-[85%] inline-flex items-center gap-1.5"><span class="w-2 h-2 bg-berry-500 rounded-full animate-bounce" style="animation-delay:0s"></span><span class="w-2 h-2 bg-berry-500 rounded-full animate-bounce" style="animation-delay:0.15s"></span><span class="w-2 h-2 bg-berry-500 rounded-full animate-bounce" style="animation-delay:0.3s"></span></div>`;
+    container.appendChild(div);
+    container.scrollTop = container.scrollHeight;
+}
+
+// ========================================================================
+// MEMORIES (browse + search + sort + filter)
+// ========================================================================
+let allMemories = [];
+let memMode = 'browse';
+let memCatFilter = '';
+
+function setMemMode(mode) {
+    memMode = mode;
+    const browseBtn = document.getElementById('mem-mode-browse');
+    const searchBtn = document.getElementById('mem-mode-search');
+    const searchBar = document.getElementById('mem-search-bar');
+
+    if (mode === 'browse') {
+        browseBtn.className = browseBtn.className.replace('text-slate-500 hover:text-slate-300', 'bg-berry-500/15 text-berry-300').replace(/bg-berry-500\/15\s*/g, '') ;
+        browseBtn.classList.add('bg-berry-500/15', 'text-berry-300');
+        browseBtn.classList.remove('text-slate-500');
+        searchBtn.classList.remove('bg-berry-500/15', 'text-berry-300');
+        searchBtn.classList.add('text-slate-500');
+        searchBar.classList.add('hidden');
+        loadMemories();
+    } else {
+        searchBtn.classList.add('bg-berry-500/15', 'text-berry-300');
+        searchBtn.classList.remove('text-slate-500');
+        browseBtn.classList.remove('bg-berry-500/15', 'text-berry-300');
+        browseBtn.classList.add('text-slate-500');
+        searchBar.classList.remove('hidden');
+        document.getElementById('mem-search-input').focus();
+    }
+}
+
+function setMemCatFilter(cat) {
+    memCatFilter = cat;
+    document.querySelectorAll('#mem-cat-pills .badge').forEach(el => {
+        if (el.getAttribute('data-cat') === cat) {
+            el.classList.add('bg-berry-500/15', 'text-berry-300', 'border-berry-500/20');
+            el.classList.remove('bg-white/[0.03]', 'text-slate-500', 'border-white/5');
+        } else {
+            el.classList.remove('bg-berry-500/15', 'text-berry-300', 'border-berry-500/20');
+            el.classList.add('bg-white/[0.03]', 'text-slate-500', 'border-white/5');
+        }
+    });
+    renderFilteredMemories();
+}
+
+function renderFilteredMemories() {
+    let filtered = [...allMemories];
+
+    // Category filter
+    if (memCatFilter) {
+        filtered = filtered.filter(m => m.category === memCatFilter);
+    }
+
+    // Sort
+    const sort = document.getElementById('mem-sort')?.value || 'strength-desc';
+    const [field, dir] = sort.split('-');
+    filtered.sort((a, b) => {
+        let va, vb;
+        if (field === 'strength') { va = a.strength; vb = b.strength; }
+        else if (field === 'age') { va = a.t_hours; vb = b.t_hours; }
+        else if (field === 'importance') { va = a.importance; vb = b.importance; }
+        else if (field === 'emotion') { va = a.emotion; vb = b.emotion; }
+        else { va = a.strength; vb = b.strength; }
+        return dir === 'asc' ? va - vb : vb - va;
+    });
+
+    // Render
+    const list = document.getElementById('memories-list');
+    const countLabel = document.getElementById('mem-count-label');
+    if (countLabel) countLabel.textContent = `${filtered.length} of ${allMemories.length} memories`;
+
+    if (filtered.length === 0) {
+        list.innerHTML = `
+            <div class="col-span-full flex flex-col items-center justify-center py-12 text-center">
+                <div class="w-16 h-16 rounded-2xl bg-berry-500/10 flex items-center justify-center mb-3">
+                    <i data-lucide="brain" class="w-7 h-7 text-berry-500/40"></i>
+                </div>
+                <p class="text-sm text-slate-500">${allMemories.length === 0 ? 'No memories yet' : 'No memories in this category'}</p>
+                <p class="text-xs text-slate-600 mt-1">${allMemories.length === 0 ? 'Chat with Member Berry or inject memories to get started' : 'Try selecting a different category or "All"'}</p>
+            </div>`;
+        lucide.createIcons({ nodes: [list] });
+        return;
+    }
+    list.innerHTML = filtered.map(m => renderMemoryCard(m)).join('');
+    lucide.createIcons({ nodes: [list] });
+}
+
+function buildCategoryPills(memories) {
+    const cats = {};
+    memories.forEach(m => { cats[m.category] = (cats[m.category] || 0) + 1; });
+    const pills = document.getElementById('mem-cat-pills');
+    if (!pills) return;
+    let html = `<button onclick="setMemCatFilter('')" class="badge ${memCatFilter === '' ? 'bg-berry-500/15 text-berry-300 border-berry-500/20' : 'bg-white/[0.03] text-slate-500 border-white/5'} border cursor-pointer hover:bg-berry-500/10 transition-all" data-cat="">All <span class="opacity-60 ml-0.5">${memories.length}</span></button>`;
+    Object.entries(cats).sort((a, b) => b[1] - a[1]).forEach(([cat, count]) => {
+        const active = memCatFilter === cat;
+        html += `<button onclick="setMemCatFilter('${cat}')" class="badge ${active ? 'bg-berry-500/15 text-berry-300 border-berry-500/20' : 'bg-white/[0.03] text-slate-500 border-white/5'} border cursor-pointer hover:bg-berry-500/10 transition-all" data-cat="${cat}">${cat} <span class="opacity-60 ml-0.5">${count}</span></button>`;
+    });
+    pills.innerHTML = html;
+}
+
+async function loadMemories() {
+    const list = document.getElementById('memories-list');
+    list.innerHTML = '<p class="col-span-full text-xs text-slate-500 text-center py-8">Loading memories...</p>';
+
+    try {
+        const res = await fetch(`${BASE}/api/memories`);
+        const data = await res.json();
+        allMemories = data.memories || [];
+        buildCategoryPills(allMemories);
+        renderFilteredMemories();
+    } catch (e) {
+        list.innerHTML = `<p class="col-span-full text-xs text-red-400 text-center py-4">${e.message}</p>`;
+    }
+}
+
+function renderMemoryCard(m) {
+    const pct = Math.min(Math.max(m.strength * 100, 0), 100);
+    const strokeColor = pct > 70 ? '#10b981' : pct > 30 ? '#f59e0b' : '#ef4444';
+    const bgTint = pct > 70 ? 'border-emerald-500/10' : pct > 30 ? 'border-amber-500/10' : 'border-red-500/10';
+    const circumference = 2 * Math.PI * 16;
+    const offset = circumference - (pct / 100) * circumference;
+    const flashbulb = m.emotion > 0.7;
+    const catBadge = getCategoryBadge(m.category);
+
+    return `
+    <div class="mem-card rounded-xl p-4 ${bgTint} group fade-up">
+        <div class="flex items-start gap-3">
+            <!-- Strength ring -->
+            <div class="flex-shrink-0 relative">
+                <svg class="strength-ring w-12 h-12" viewBox="0 0 36 36">
+                    <circle class="strength-track" cx="18" cy="18" r="16"/>
+                    <circle class="strength-value" cx="18" cy="18" r="16" stroke="${strokeColor}"
+                        stroke-dasharray="${circumference}" stroke-dashoffset="${offset}"/>
+                </svg>
+                <span class="absolute inset-0 flex items-center justify-center text-[9px] font-bold font-mono" style="color:${strokeColor}">${Math.round(pct)}</span>
+            </div>
+            <!-- Content -->
+            <div class="flex-1 min-w-0">
+                <p class="text-sm text-slate-300 leading-snug mb-2">${escapeHtml(m.text)}</p>
+                <div class="flex flex-wrap items-center gap-1.5">
+                    <span class="badge ${catBadge}">${m.category}</span>
+                    ${flashbulb ? '<span class="badge bg-amber-500/10 text-amber-400 border border-amber-500/15" title="Flashbulb memory -- high emotion">&#x26A1; flashbulb</span>' : ''}
+                    <span class="text-[10px] text-slate-600">imp: <span class="text-slate-500 font-mono">${m.importance}</span></span>
+                    <span class="text-[10px] text-slate-600">emo: <span class="text-slate-500 font-mono">${m.emotion}</span></span>
+                    <span class="text-[10px] text-slate-600">H: <span class="text-slate-500 font-mono">${m.stability}h</span></span>
+                    <span class="text-[10px] text-slate-600">age: <span class="text-slate-500 font-mono">${m.t_hours}h</span></span>
+                </div>
+            </div>
+            <!-- Delete -->
+            <button onclick="deleteMemory('${m.id}')" class="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-1 text-slate-600 hover:text-red-400" title="Delete memory">
+                <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+            </button>
+        </div>
+    </div>`;
+}
+
+function getCategoryBadge(cat) {
+    const map = {
+        reviews: 'bg-pink-500/10 text-pink-400 border border-pink-500/15',
+        favorites: 'bg-amber-500/10 text-amber-400 border border-amber-500/15',
+        actors: 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/15',
+        directors: 'bg-purple-500/10 text-purple-400 border border-purple-500/15',
+        preferences: 'bg-blue-500/10 text-blue-400 border border-blue-500/15',
+        nostalgia: 'bg-rose-500/10 text-rose-400 border border-rose-500/15',
+        experiences: 'bg-teal-500/10 text-teal-400 border border-teal-500/15',
+        watchlist: 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/15',
+    };
+    return map[cat] || 'bg-slate-500/10 text-slate-400 border border-slate-500/15';
+}
+
+async function searchMemories() {
+    const query = document.getElementById('mem-search-input').value.trim();
+    if (!query) return loadMemories();
+    const list = document.getElementById('memories-list');
+    const clearBtn = document.getElementById('mem-search-clear');
+    const countLabel = document.getElementById('mem-count-label');
+    list.innerHTML = '<p class="col-span-full text-xs text-slate-500 text-center py-8">Searching...</p>';
+    if (clearBtn) clearBtn.classList.remove('hidden');
+
+    try {
+        const res = await fetch(BASE + '/api/memories/search', {
+            method: 'POST', headers: csrfHeaders(), body: JSON.stringify({ query, limit: 20 }),
+        });
+        const data = await res.json();
+        if (!data.results || data.results.length === 0) {
+            list.innerHTML = '<p class="col-span-full text-xs text-slate-500 text-center py-8">No semantic matches found. Try different keywords.</p>';
+            if (countLabel) countLabel.textContent = '0 results';
+            return;
+        }
+        if (countLabel) countLabel.textContent = `${data.results.length} search results`;
+        list.innerHTML = data.results.map(m => renderMemoryCard({...m, t_hours: m.t_hours || 0, stability: m.stability || 48})).join('');
+        lucide.createIcons({ nodes: [list] });
+    } catch (e) {
+        list.innerHTML = `<p class="col-span-full text-xs text-red-400 text-center py-4">${e.message}</p>`;
+    }
+}
+
+function toggleInjectForm() { document.getElementById('inject-form').classList.toggle('hidden'); }
+
+async function injectMemory() {
+    const text = document.getElementById('inject-text').value.trim();
+    if (!text) return;
+    try {
+        const res = await fetch(BASE + '/api/memories/inject', {
+            method: 'POST', headers: csrfHeaders(),
+            body: JSON.stringify({
+                text,
+                importance: parseFloat(document.getElementById('inject-importance').value) || 0.7,
+                emotion: parseFloat(document.getElementById('inject-emotion').value) || 0.3,
+                category: document.getElementById('inject-category').value,
+                bucket_id: currentBucket ? currentBucket + ':{{ user.email }}' : null,
+                bucket_type: currentBucket ? 'category' : null,
+            }),
+        });
+        if (!res.ok) throw new Error('Inject failed');
+        document.getElementById('inject-text').value = '';
+        showToast('Memory injected');
+        loadMemories();
+        loadAnalytics();
+    } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+    }
+}
+
+async function deleteMemory(id) {
+    if (!confirm('Delete this memory?')) return;
+    try {
+        await fetch(`${BASE}/api/memories/${id}`, { method: 'DELETE', headers: { 'X-CSRF-Token': getCookie('csrf_token') } });
+        loadMemories();
+        loadAnalytics();
+    } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+    }
+}
+
+// ========================================================================
+// GRAPH EXPLORER (vis-network)
+// ========================================================================
+const NODE_COLORS = {
+    actor:    { bg: '#06b6d4', border: '#22d3ee', font: '#fff' },
+    movie:    { bg: '#ec4899', border: '#f472b6', font: '#fff' },
+    director: { bg: '#a855f7', border: '#c084fc', font: '#fff' },
+    genre:    { bg: '#f43f5e', border: '#fb7185', font: '#fff' },
+    person:   { bg: '#3b82f6', border: '#60a5fa', font: '#fff' },
+    concept:  { bg: '#6366f1', border: '#818cf8', font: '#fff' },
+    event:    { bg: '#14b8a6', border: '#2dd4bf', font: '#fff' },
+};
+const DEFAULT_COLOR = { bg: '#64748b', border: '#94a3b8', font: '#fff' };
+
+function getVisNodeColor(type) { return NODE_COLORS[type] || DEFAULT_COLOR; }
+
+async function loadGraphVisual() {
+    const container = document.getElementById('graph-canvas');
+    try {
+        const res = await fetch(BASE + '/api/graph/nodes?limit=50');
+        const data = await res.json();
+        if (!data.nodes || data.nodes.length === 0) {
+            container.innerHTML = `<div class="flex flex-col items-center justify-center h-full text-center p-8"><div class="w-14 h-14 rounded-2xl bg-berry-500/10 flex items-center justify-center mb-3"><i data-lucide="share-2" class="w-6 h-6 text-berry-500/40"></i></div><p class="text-sm text-slate-500 mb-1">No graph nodes yet</p><p class="text-xs text-slate-600">Chat with Member Berry or use <strong class="text-berry-300">Re-Seed Demo Data</strong> to populate the graph</p></div>`;
+            lucide.createIcons({ nodes: [container] });
+            return;
+        }
+        const nodes = [], edges = [], nodeMap = {};
+        data.nodes.forEach(n => {
+            const c = getVisNodeColor(n.type);
+            nodeMap[n.id] = true;
+            nodes.push({
+                id: n.id, label: n.label || n.id,
+                title: `${n.type}: ${n.label}\n${n.edge_count} connections`,
+                color: { background: c.bg, border: c.border, highlight: { background: c.border, border: '#d946ef' } },
+                font: { color: c.font, size: 13, face: 'Inter' },
+                shape: 'dot',
+                size: (n.type === 'actor' || n.type === 'movie') ? 24 : (n.type === 'director' || n.type === 'person') ? 18 : 14,
+                borderWidth: 2, _type: n.type, _edges: n.edges || [],
+            });
+        });
+        data.nodes.forEach(n => {
+            if (n.edges) n.edges.forEach(e => {
+                if (nodeMap[e.target]) {
+                    edges.push({
+                        from: n.id, to: e.target, label: e.relation,
+                        font: { size: 9, color: '#94a3b8', strokeWidth: 0, face: 'Inter' },
+                        color: { color: 'rgba(217,70,239,0.2)', highlight: '#d946ef' },
+                        arrows: { to: { enabled: true, scaleFactor: 0.5 } },
+                        smooth: { type: 'curvedCW', roundness: 0.15 },
+                    });
+                }
+            });
+        });
+        graphNodesDataset = new vis.DataSet(nodes);
+        graphEdgesDataset = new vis.DataSet(edges);
+        const options = {
+            physics: { solver: 'forceAtlas2Based', forceAtlas2Based: { gravitationalConstant: -40, centralGravity: 0.005, springLength: 130, springConstant: 0.05 }, stabilization: { iterations: 100 } },
+            interaction: { hover: true, tooltipDelay: 100, zoomView: true, dragView: true },
+            edges: { width: 1.5 },
+            nodes: { shadow: { enabled: true, color: 'rgba(0,0,0,0.3)', size: 8, x: 0, y: 2 } },
+        };
+        container.innerHTML = '';
+        graphNetwork = new vis.Network(container, { nodes: graphNodesDataset, edges: graphEdgesDataset }, options);
+        graphNetwork.on('click', params => {
+            if (params.nodes.length > 0) { showNodeDetail(params.nodes[0]); document.getElementById('graph-start-id').value = params.nodes[0]; }
+            else document.getElementById('graph-detail').classList.add('hidden');
+        });
+        graphNetwork.on('doubleClick', params => {
+            if (params.nodes.length > 0) { document.getElementById('graph-start-id').value = params.nodes[0]; traverseGraph(); }
+        });
+    } catch (e) {
+        container.innerHTML = `<div class="flex items-center justify-center h-full"><p class="text-xs text-red-400">${e.message}</p></div>`;
+    }
+}
+
+function showNodeDetail(nodeId) {
+    const node = graphNodesDataset.get(nodeId);
+    if (!node) return;
+    const detail = document.getElementById('graph-detail');
+    document.getElementById('detail-badge').className = 'badge ' + getNodeBadgeClass(node._type);
+    document.getElementById('detail-badge').textContent = node._type;
+    document.getElementById('detail-label').textContent = node.label;
+    document.getElementById('detail-id').textContent = node.id;
+    const edgesEl = document.getElementById('detail-edges');
+    if (node._edges?.length > 0) {
+        edgesEl.innerHTML = '<p class="text-[10px] text-slate-600 mb-1">Relationships:</p>' +
+            node._edges.map(e =>
+                `<div class="flex items-center gap-2 text-[11px]"><span class="text-berry-400 font-medium">${e.relation}</span><span class="text-slate-700">&rarr;</span><span class="text-slate-400 font-mono cursor-pointer hover:text-berry-300 transition-colors" onclick="focusNode('${e.target}')">${e.target}</span></div>`
+            ).join('');
+    } else {
+        edgesEl.innerHTML = '<p class="text-[10px] text-slate-600">No outgoing edges</p>';
+    }
+    detail.classList.remove('hidden');
+}
+
+function focusNode(nodeId) {
+    if (graphNetwork && graphNodesDataset.get(nodeId)) {
+        graphNetwork.focus(nodeId, { scale: 1.5, animation: { duration: 500, easingFunction: 'easeInOutQuad' } });
+        graphNetwork.selectNodes([nodeId]);
+        showNodeDetail(nodeId);
+        document.getElementById('graph-start-id').value = nodeId;
+    }
+}
+function graphFitAll() { if (graphNetwork) graphNetwork.fit({ animation: { duration: 500, easingFunction: 'easeInOutQuad' } }); }
+
+function getNodeBadgeClass(type) {
+    const c = {
+        actor: 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/15',
+        movie: 'bg-pink-500/10 text-pink-400 border border-pink-500/15',
+        director: 'bg-purple-500/10 text-purple-400 border border-purple-500/15',
+        genre: 'bg-rose-500/10 text-rose-400 border border-rose-500/15',
+        person: 'bg-blue-500/10 text-blue-400 border border-blue-500/15',
+        concept: 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/15',
+        event: 'bg-teal-500/10 text-teal-400 border border-teal-500/15',
+    };
+    return c[type] || 'bg-slate-500/10 text-slate-400 border border-slate-500/15';
+}
+
+async function traverseGraph() {
+    const startId = document.getElementById('graph-start-id').value.trim();
+    if (!startId) return;
+    const depth = parseInt(document.getElementById('graph-depth').value) || 2;
+    const results = document.getElementById('graph-results');
+    results.classList.remove('hidden');
+    results.innerHTML = '<p class="text-xs text-slate-500 text-center py-4">Traversing...</p>';
+    try {
+        const res = await fetch(BASE + '/api/graph/traverse', {
+            method: 'POST', headers: csrfHeaders(), body: JSON.stringify({ start_id: startId, max_depth: depth }),
+        });
+        const data = await res.json();
+        if (!data.start) { results.innerHTML = `<p class="text-xs text-slate-500 text-center py-8">${data.message || 'Node not found'}</p>`; return; }
+        let html = `
+            <div class="glass-subtle rounded-xl p-3 mb-2 border-l-2 border-berry-500">
+                <div class="flex items-center gap-2">
+                    <span class="badge ${getNodeBadgeClass(data.start.type)}">${data.start.type}</span>
+                    <span class="text-sm font-bold text-berry-300">${escapeHtml(data.start.label)}</span>
+                    <span class="badge bg-berry-500/10 text-berry-400">START</span>
+                </div>
+                <p class="text-[10px] text-slate-600 mt-1 font-mono">${data.start.id}</p>
+            </div>
+            <p class="text-xs text-slate-500 my-2">${data.total_nodes} nodes discovered via <span class="font-mono text-berry-400/60">$graphLookup</span> (depth ${depth})</p>`;
+        data.network.forEach(n => {
+            const edgeInfo = n.edges?.length > 0
+                ? n.edges.map(e => `<span class="text-berry-400">${e.relation}</span> &rarr; <span class="text-slate-400 font-mono cursor-pointer hover:text-berry-300" onclick="focusNode('${e.target}')">${e.target}</span>`).join(', ')
+                : '';
+            html += `
+                <div class="glass-subtle rounded-xl p-3 fade-up" style="margin-left:${n.hop * 20}px">
+                    <div class="flex items-center gap-2">
+                        <span class="text-[10px] text-slate-600 font-mono">hop ${n.hop}</span>
+                        <span class="badge ${getNodeBadgeClass(n.type)}">${n.type}</span>
+                        <span class="text-sm text-slate-300">${escapeHtml(n.label)}</span>
+                    </div>
+                    ${edgeInfo ? `<p class="text-[10px] mt-1">${edgeInfo}</p>` : ''}
+                    <p class="text-[10px] text-slate-600 font-mono">${n.id}</p>
+                </div>`;
+        });
+        results.innerHTML = html;
+    } catch (e) {
+        results.innerHTML = `<p class="text-xs text-red-400 text-center py-4">${e.message}</p>`;
+    }
+}
+
+// ========================================================================
+// MFLIX (CO-STAR NETWORK)
+// ========================================================================
+async function mflixLookup() {
+    const actor = document.getElementById('mflix-actor').value.trim();
+    if (!actor) return;
+    const depth = parseInt(document.getElementById('mflix-depth').value) || 1;
+    const results = document.getElementById('mflix-results');
+    results.innerHTML = '<p class="text-xs text-slate-500 text-center py-4">Looking up co-star network...</p>';
+    try {
+        const res = await fetch(BASE + '/api/mflix/graph-lookup', {
+            method: 'POST', headers: csrfHeaders(), body: JSON.stringify({ actor, max_depth: depth }),
+        });
+        const data = await res.json();
+        if (data.error) { results.innerHTML = `<div class="glass-subtle rounded-xl p-4"><p class="text-xs text-amber-400">${data.error}</p></div>`; return; }
+        let html = `<div class="glass-subtle rounded-xl p-4 border-l-2 border-berry-500 mb-4">
+            <p class="text-base font-bold text-berry-300">${escapeHtml(data.actor)}</p>
+            <p class="text-xs text-slate-500 mt-0.5">${data.total_connections} connections found</p>
+        </div>`;
+        if (data.co_stars?.length > 0) {
+            html += '<p class="text-xs font-semibold text-slate-400 mb-2">1st Degree Co-Stars</p><div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-4">';
+            data.co_stars.forEach(cs => {
+                html += `
+                    <div class="glass-subtle rounded-xl p-3 cursor-pointer hover:border-berry-500/20 transition-all group" onclick="document.getElementById('mflix-actor').value='${escapeHtml(cs.actor)}'; mflixLookup();">
+                        <div class="flex items-center justify-between">
+                            <span class="text-sm text-slate-300 group-hover:text-berry-300 transition-colors">${escapeHtml(cs.actor)}</span>
+                            <span class="badge bg-berry-500/10 text-berry-400">${cs.movie_count} shared</span>
+                        </div>
+                        <p class="text-[10px] text-slate-600 mt-1 truncate">${cs.shared_movies.map(m => escapeHtml(m)).join(', ')}</p>
+                    </div>`;
+            });
+            html += '</div>';
+        }
+        if (data.second_degree?.length > 0) {
+            html += `<p class="text-xs font-semibold text-slate-400 mb-2">2nd Degree (via ${escapeHtml(data.co_stars[0]?.actor || '?')})</p><div class="space-y-2">`;
+            data.second_degree.forEach(cs => {
+                html += `
+                    <div class="glass-subtle rounded-xl p-3 ml-4 opacity-80">
+                        <div class="flex items-center justify-between">
+                            <span class="text-sm text-slate-300">${escapeHtml(cs.actor)}</span>
+                            <span class="text-[10px] text-blue-400">via ${escapeHtml(cs.via)}</span>
+                        </div>
+                        <p class="text-[10px] text-slate-600 mt-0.5">${cs.shared_movies.map(m => escapeHtml(m)).join(', ')}</p>
+                    </div>`;
+            });
+            html += '</div>';
+        }
+        results.innerHTML = html;
+    } catch (e) {
+        results.innerHTML = `<p class="text-xs text-red-400 text-center py-4">${e.message}</p>`;
+    }
+}
+
+async function mflixBrowse() {
+    const results = document.getElementById('mflix-results');
+    results.innerHTML = '<p class="text-xs text-slate-500 text-center py-4">Loading actors...</p>';
+    try {
+        const res = await fetch(BASE + '/api/mflix/actors?limit=30');
+        const data = await res.json();
+        if (data.error) { results.innerHTML = `<div class="glass-subtle rounded-xl p-4"><p class="text-xs text-amber-400">${data.error}</p></div>`; return; }
+        if (data.actors?.length > 0) {
+            results.innerHTML = '<p class="text-xs text-slate-400 mb-3">Click an actor to explore their co-star network:</p><div class="flex flex-wrap gap-1.5">' +
+                data.actors.map(a =>
+                    `<button onclick="document.getElementById('mflix-actor').value='${escapeHtml(a)}'; mflixLookup();" class="btn-secondary rounded-full px-3 py-1.5 text-xs hover:text-berry-300">${escapeHtml(a)}</button>`
+                ).join('') + '</div>';
+        } else {
+            results.innerHTML = `<div class="text-center py-12"><div class="w-14 h-14 rounded-2xl bg-berry-500/10 flex items-center justify-center mx-auto mb-3"><i data-lucide="film" class="w-6 h-6 text-berry-500/40"></i></div><p class="text-sm text-slate-500">No actors found</p><p class="text-xs text-slate-600 mt-1">Search for an actor above or browse the list</p></div>`;
+            lucide.createIcons({ nodes: [results] });
+        }
+    } catch (e) {
+        results.innerHTML = `<p class="text-xs text-red-400 text-center py-4">${e.message}</p>`;
+    }
+}
+
+// ========================================================================
+// COLD STORAGE
+// ========================================================================
+async function loadColdStorage() {
+    const list = document.getElementById('cold-storage-list');
+    try {
+        const res = await fetch(BASE + '/api/cold-storage');
+        const data = await res.json();
+        if (!data.memories || data.memories.length === 0) {
+            list.innerHTML = `
+                <div class="flex flex-col items-center justify-center py-12 text-center">
+                    <div class="w-16 h-16 rounded-2xl bg-blue-500/10 flex items-center justify-center mb-3">
+                        <i data-lucide="snowflake" class="w-7 h-7 text-blue-500/40"></i>
+                    </div>
+                    <p class="text-sm text-slate-500">No pruned memories</p>
+                    <p class="text-xs text-slate-600 mt-1 max-w-xs">Use the <strong class="text-berry-300">Time Machine</strong> to simulate time, then <strong class="text-amber-400">Force Prune</strong> to see the Ebbinghaus curve in action.</p>
+                </div>`;
+            lucide.createIcons({ nodes: [list] });
+            return;
+        }
+        list.innerHTML = data.memories.map(m => `
+            <div class="mem-card rounded-xl p-4 opacity-60 border-blue-500/10 fade-up">
+                <div class="flex items-start justify-between gap-3">
+                    <div class="flex-1 min-w-0">
+                        <p class="text-sm text-slate-500 line-through">${escapeHtml(m.text)}</p>
+                        <div class="flex flex-wrap items-center gap-1.5 mt-2">
+                            <span class="badge bg-blue-500/10 text-blue-400 border border-blue-500/15">${m.category}</span>
+                            <span class="text-[10px] text-slate-600">${m.pruning_reason}</span>
+                            <span class="text-[10px] text-slate-700">${m.pruned_at}</span>
+                        </div>
+                    </div>
+                    <button onclick="restoreMemory('${m.id}')" class="btn-secondary rounded-lg px-3 py-1.5 text-[11px] font-semibold text-emerald-400 border-emerald-500/15 hover:bg-emerald-500/10 flex-shrink-0 flex items-center gap-1">
+                        <i data-lucide="undo-2" class="w-3 h-3"></i> Restore
+                    </button>
+                </div>
+            </div>`).join('');
+        lucide.createIcons({ nodes: [list] });
+    } catch (e) {
+        list.innerHTML = `<p class="text-xs text-red-400 text-center py-4">${e.message}</p>`;
+    }
+}
+
+async function restoreMemory(id) {
+    try {
+        const res = await fetch(`${BASE}/api/cold-storage/${id}/restore`, { method: 'POST', headers: { 'X-CSRF-Token': getCookie('csrf_token') } });
+        if (!res.ok) throw new Error('Restore failed');
+        showToast('Memory restored');
+        loadColdStorage();
+        loadAnalytics();
+    } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+    }
+}
+
+// ========================================================================
+// CONFLICT DETECTION (inline in chat)
+// ========================================================================
+async function checkConflictsForBubble(bubbleId, storedMemories) {
+    const container = document.getElementById(bubbleId + '-conflicts');
+    if (!container) return;
+
+    const allConflicts = [];
+    for (const mem of storedMemories) {
+        try {
+            const res = await fetch(BASE + '/api/conflicts/check', {
+                method: 'POST', headers: csrfHeaders(), body: JSON.stringify({ fact: mem.text }),
+            });
+            const data = await res.json();
+            if (data.has_conflicts) {
+                for (const c of data.potential_conflicts) {
+                    if (!allConflicts.find(x => x.text === c.text)) {
+                        allConflicts.push({ ...c, new_fact: mem.text });
+                    }
+                }
+            }
+        } catch (e) {
+            console.warn('Conflict check failed:', e);
+        }
+    }
+
+    if (allConflicts.length > 0) {
+        container.innerHTML = `
+            <div class="rounded-lg bg-amber-500/5 border border-amber-500/15 p-2.5 mt-1">
+                <p class="text-[11px] font-semibold text-amber-400 flex items-center gap-1.5 mb-1.5">
+                    <i data-lucide="alert-triangle" class="w-3 h-3"></i>
+                    ${allConflicts.length} potential conflict${allConflicts.length > 1 ? 's' : ''} detected
+                </p>
+                ${allConflicts.map(c => `
+                    <div class="py-1 border-t border-amber-500/10 first:border-0">
+                        <p class="text-[10px] text-slate-400">${escapeHtml(c.text)}</p>
+                        <p class="text-[9px] text-amber-500/70 font-mono mt-0.5">${(c.similarity * 100).toFixed(0)}% similar</p>
+                    </div>
+                `).join('')}
+            </div>`;
+        try { lucide.createIcons({ nodes: [container] }); } catch(e) {}
+        // Scroll chat to show the conflict
+        const chatMsgs = document.getElementById('chat-messages');
+        if (chatMsgs) chatMsgs.scrollTop = chatMsgs.scrollHeight;
+    }
+}
+
+// ========================================================================
+// ANALYTICS
+// ========================================================================
+async function loadAnalytics() {
+    try {
+        const res = await fetch(BASE + '/api/analytics');
+        const data = await res.json();
+
+        const active = data.active_memories || 0;
+        const cold = data.cold_storage_memories || 0;
+        const avgStr = data.average_strength || 0;
+
+        // Sidebar stats
+        document.getElementById('stat-active').textContent = active;
+        document.getElementById('stat-cold').textContent = cold;
+        document.getElementById('stat-strong').textContent = data.strong_memories || 0;
+        document.getElementById('stat-weak').textContent = data.weak_memories || 0;
+        document.getElementById('stat-graph').textContent = data.graph_nodes || 0;
+
+        const capPct = Math.min((data.capacity_used || 0) * 100, 100);
+        document.getElementById('stat-capacity').textContent = capPct.toFixed(0) + '%';
+        document.getElementById('capacity-bar').style.width = capPct + '%';
+        document.getElementById('stat-avg-strength').textContent = avgStr.toFixed(3);
+        document.getElementById('strength-bar').style.width = (avgStr * 100) + '%';
+
+        // Header stats
+        const hsActive = document.getElementById('hs-active');
+        const hsCold = document.getElementById('hs-cold');
+        const hsStr = document.getElementById('hs-strength');
+        if (hsActive) hsActive.textContent = active;
+        if (hsCold) hsCold.textContent = cold;
+        if (hsStr) hsStr.textContent = avgStr.toFixed(2);
+
+        // Categories
+        const catList = document.getElementById('categories-list');
+        if (data.categories && Object.keys(data.categories).length > 0) {
+            catList.innerHTML = Object.entries(data.categories)
+                .sort((a, b) => b[1] - a[1])
+                .map(([cat, count]) =>
+                    `<div class="flex justify-between text-[10px]"><span class="text-slate-500">${cat}</span><span class="text-berry-400 font-mono">${count}</span></div>`
+                ).join('');
+        } else {
+            catList.innerHTML = '';
+        }
+    } catch (e) {
+        console.error('Analytics error:', e);
+    }
+}
+
+// ========================================================================
+// MEMORY TYPES (episodic / procedural / working)
+// ========================================================================
+let currentTypeTab = 'episodic';
+
+function switchTypeTab(tab) {
+    ['episodic', 'procedural', 'working'].forEach(t => {
+        const panel = document.getElementById('typepanel-' + t);
+        const btn = document.getElementById('typetab-' + t);
+        if (panel) panel.classList.add('hidden');
+        if (btn) btn.classList.remove('active');
+    });
+    const panel = document.getElementById('typepanel-' + tab);
+    const btn = document.getElementById('typetab-' + tab);
+    if (panel) panel.classList.remove('hidden');
+    if (btn) btn.classList.add('active');
+    currentTypeTab = tab;
+    if (tab === 'episodic') loadEpisodes();
+    if (tab === 'procedural') loadProcedures();
+    if (tab === 'working') loadWorkingContext();
+}
+
+async function loadEpisodes() {
+    const list = document.getElementById('episodes-list');
+    try {
+        const res = await fetch(BASE + '/api/memories/episodic');
+        const data = await res.json();
+        if (!data.episodes || data.episodes.length === 0) {
+            list.innerHTML = '<div class="text-center py-8 text-sm text-slate-500">No episodes yet. Record a movie experience above.</div>';
+            return;
+        }
+        list.innerHTML = data.episodes.map(ep => `
+            <div class="mem-card rounded-xl p-3">
+                <div class="flex items-start justify-between gap-2">
+                    <div class="flex-1 min-w-0">
+                        <p class="text-sm text-slate-200">${escapeHtml(ep.text)}</p>
+                        <div class="flex gap-2 mt-1.5 flex-wrap">
+                            ${ep.tags.map(t => `<span class="badge bg-berry-500/10 text-berry-400 border border-berry-500/15">${t}</span>`).join('')}
+                            ${ep.context ? `<span class="text-[10px] text-slate-600">${escapeHtml(ep.context)}</span>` : ''}
+                        </div>
+                    </div>
+                    <div class="text-right flex-shrink-0">
+                        <div class="text-xs text-amber-400 font-mono">${(ep.emotion || 0).toFixed(1)}</div>
+                        <div class="text-[10px] text-slate-600">${new Date(ep.created_at).toLocaleDateString()}</div>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    } catch (e) {
+        list.innerHTML = '<div class="text-center py-4 text-sm text-red-400">Failed to load episodes</div>';
+    }
+}
+
+async function recordEpisode() {
+    const text = document.getElementById('episode-text').value.trim();
+    const emotion = parseFloat(document.getElementById('episode-emotion').value) || 0.5;
+    if (!text) return;
+    try {
+        const res = await fetch(BASE + '/api/memories/episodic', {
+            method: 'POST', headers: csrfHeaders(), body: JSON.stringify({ text, emotion, tags: [], context: '' }),
+        });
+        if (!res.ok) throw new Error((await res.json()).detail || 'Failed');
+        document.getElementById('episode-text').value = '';
+        showToast('Episode recorded!');
+        loadEpisodes();
+    } catch (e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function loadProcedures() {
+    const list = document.getElementById('procedures-list');
+    try {
+        const res = await fetch(BASE + '/api/memories/procedural');
+        const data = await res.json();
+        if (!data.procedures || data.procedures.length === 0) {
+            list.innerHTML = '<div class="text-center py-8 text-sm text-slate-500">No procedures yet. Create a movie how-to above.</div>';
+            return;
+        }
+        list.innerHTML = data.procedures.map(proc => `
+            <div class="mem-card rounded-xl p-3">
+                <div class="flex items-start justify-between gap-2">
+                    <div class="flex-1 min-w-0">
+                        <p class="text-sm font-semibold text-slate-200">${escapeHtml(proc.name)}</p>
+                        ${proc.description ? `<p class="text-xs text-slate-500 mt-0.5">${escapeHtml(proc.description)}</p>` : ''}
+                        <ol class="mt-2 space-y-1 text-xs text-slate-400 list-decimal list-inside">
+                            ${(proc.steps || []).map(s => `<li>${escapeHtml(s)}</li>`).join('')}
+                        </ol>
+                    </div>
+                    <div class="text-right flex-shrink-0">
+                        <span class="badge bg-purple-500/10 text-purple-400 border border-purple-500/15">v${proc.version}</span>
+                        <div class="text-[10px] text-slate-600 mt-1">${proc.category}</div>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    } catch (e) {
+        list.innerHTML = '<div class="text-center py-4 text-sm text-red-400">Failed to load procedures</div>';
+    }
+}
+
+async function storeProcedure() {
+    const name = document.getElementById('proc-name').value.trim();
+    const desc = document.getElementById('proc-desc').value.trim();
+    const stepsText = document.getElementById('proc-steps').value.trim();
+    if (!name) return;
+    const steps = stepsText.split('\n').map(s => s.trim()).filter(Boolean);
+    try {
+        const res = await fetch(BASE + '/api/memories/procedural', {
+            method: 'POST', headers: csrfHeaders(), body: JSON.stringify({ name, description: desc, steps }),
+        });
+        if (!res.ok) throw new Error((await res.json()).detail || 'Failed');
+        document.getElementById('proc-name').value = '';
+        document.getElementById('proc-desc').value = '';
+        document.getElementById('proc-steps').value = '';
+        showToast('Procedure stored!');
+        loadProcedures();
+    } catch (e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function loadWorkingContext() {
+    const list = document.getElementById('working-list');
+    try {
+        const res = await fetch(BASE + '/api/memories/working/context');
+        const data = await res.json();
+        if (!data.contexts || data.contexts.length === 0) {
+            list.innerHTML = '<div class="text-center py-8 text-sm text-slate-500">No working context set. Add short-lived context above.</div>';
+            return;
+        }
+        list.innerHTML = data.contexts.map(ctx => `
+            <div class="mem-card rounded-xl p-3">
+                <div class="flex items-start justify-between gap-2">
+                    <div class="flex-1 min-w-0">
+                        <span class="badge bg-blue-500/10 text-blue-400 border border-blue-500/15 mb-1">${escapeHtml(ctx.key)}</span>
+                        <p class="text-sm text-slate-200">${escapeHtml(ctx.text)}</p>
+                    </div>
+                    <div class="text-right flex-shrink-0 text-[10px] text-slate-600">
+                        expires ${new Date(ctx.expires_at).toLocaleString()}
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    } catch (e) {
+        list.innerHTML = '<div class="text-center py-4 text-sm text-red-400">Failed to load working context</div>';
+    }
+}
+
+async function setWorkingContext() {
+    const text = document.getElementById('working-text').value.trim();
+    const ttl = parseInt(document.getElementById('working-ttl').value) || 24;
+    if (!text) return;
+    try {
+        const res = await fetch(BASE + '/api/memories/working/context', {
+            method: 'POST', headers: csrfHeaders(), body: JSON.stringify({ text, ttl_hours: ttl }),
+        });
+        if (!res.ok) throw new Error((await res.json()).detail || 'Failed');
+        document.getElementById('working-text').value = '';
+        showToast('Working context set!');
+        loadWorkingContext();
+    } catch (e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function clearWorkingContext() {
+    if (!confirm('Clear all working memory context?')) return;
+    try {
+        const res = await fetch(BASE + '/api/memories/working/context', { method: 'DELETE', headers: { 'X-CSRF-Token': getCookie('csrf_token') } });
+        if (!res.ok) throw new Error('Failed');
+        showToast('Working context cleared');
+        loadWorkingContext();
+    } catch (e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+// ========================================================================
+// TIMELINES
+// ========================================================================
+async function loadTimelines() {
+    const list = document.getElementById('timelines-list');
+    const nameEl = document.getElementById('current-timeline-name');
+    try {
+        const res = await fetch(BASE + '/api/memories/timelines');
+        const data = await res.json();
+        if (nameEl && data.active) {
+            const activeTl = (data.timelines || []).find(t => t.is_active);
+            nameEl.textContent = activeTl ? activeTl.name : data.active;
+        }
+        if (!data.timelines || data.timelines.length === 0) {
+            list.innerHTML = '<div class="text-center py-8 text-sm text-slate-500">No timelines yet. Fork one above or seed demo data.</div>';
+            return;
+        }
+        list.innerHTML = data.timelines.map(tl => `
+            <div class="mem-card rounded-xl p-3 ${tl.is_active ? 'border-berry-500/30 bg-berry-500/5' : ''}">
+                <div class="flex items-center justify-between gap-2">
+                    <div class="flex items-center gap-2">
+                        ${tl.is_active ? '<div class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></div>' : '<div class="w-2 h-2 rounded-full bg-slate-700"></div>'}
+                        <div>
+                            <p class="text-sm font-semibold ${tl.is_active ? 'text-berry-300' : 'text-slate-200'}">${escapeHtml(tl.name || tl.id)}</p>
+                            ${tl.parent ? `<p class="text-[10px] text-slate-600">forked from: ${escapeHtml(tl.parent)}</p>` : '<p class="text-[10px] text-slate-600">root timeline</p>'}
+                        </div>
+                    </div>
+                    <div class="flex gap-1.5">
+                        ${!tl.is_active ? `<button onclick="switchTimeline('${tl.id}')" class="btn-secondary rounded-lg px-3 py-1 text-xs">Activate</button>` : '<span class="badge bg-emerald-500/10 text-emerald-400 border border-emerald-500/15">active</span>'}
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    } catch (e) {
+        list.innerHTML = '<div class="text-center py-4 text-sm text-red-400">Failed to load timelines</div>';
+    }
+}
+
+async function forkTimeline() {
+    const name = document.getElementById('timeline-name').value.trim();
+    if (!name) return;
+    try {
+        const res = await fetch(BASE + '/api/memories/timelines/fork', {
+            method: 'POST', headers: csrfHeaders(), body: JSON.stringify({ name }),
+        });
+        if (!res.ok) throw new Error((await res.json()).detail || 'Failed');
+        document.getElementById('timeline-name').value = '';
+        showToast('Timeline forked: ' + name);
+        loadTimelines();
+    } catch (e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function switchTimeline(timelineId) {
+    try {
+        const res = await fetch(BASE + '/api/memories/timelines/switch', {
+            method: 'POST', headers: csrfHeaders(), body: JSON.stringify({ timeline_id: timelineId }),
+        });
+        if (!res.ok) throw new Error((await res.json()).detail || 'Failed');
+        showToast('Switched timeline');
+        loadTimelines();
+    } catch (e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+// ========================================================================
+// PROSPECTIVE TRIGGERS
+// ========================================================================
+async function loadTriggers() {
+    const list = document.getElementById('triggers-list');
+    try {
+        const res = await fetch(BASE + '/api/prospective/triggers');
+        const data = await res.json();
+        if (!data.triggers || data.triggers.length === 0) {
+            list.innerHTML = '<div class="text-center py-8 text-sm text-slate-500">No active triggers. Set one above.</div>';
+            return;
+        }
+        list.innerHTML = data.triggers.map(t => `
+            <div class="mem-card rounded-xl p-3">
+                <div class="flex items-start justify-between gap-2">
+                    <div class="flex-1 min-w-0">
+                        <p class="text-xs text-amber-400 font-semibold uppercase tracking-wide mb-1">When:</p>
+                        <p class="text-sm text-slate-200">${escapeHtml(t.condition)}</p>
+                        <p class="text-xs text-berry-400 font-semibold uppercase tracking-wide mt-2 mb-0.5">Then:</p>
+                        <p class="text-sm text-slate-300">${escapeHtml(t.action)}</p>
+                        <div class="flex gap-2 mt-2">
+                            <span class="badge ${t.one_shot ? 'bg-amber-500/10 text-amber-400 border border-amber-500/15' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/15'}">${t.one_shot ? 'one-shot' : 'recurring'}</span>
+                        </div>
+                    </div>
+                    <button onclick="deactivateTrigger('${t.id}')" class="btn-secondary rounded-lg px-2.5 py-1 text-xs text-red-400 border-red-500/10 hover:bg-red-500/5 flex-shrink-0">
+                        <i data-lucide="x" class="w-3 h-3"></i>
+                    </button>
+                </div>
+            </div>
+        `).join('');
+        lucide.createIcons();
+    } catch (e) {
+        list.innerHTML = '<div class="text-center py-4 text-sm text-red-400">Failed to load triggers</div>';
+    }
+}
+
+async function createTrigger() {
+    const condition = document.getElementById('trigger-condition').value.trim();
+    const action = document.getElementById('trigger-action').value.trim();
+    const oneShot = document.getElementById('trigger-oneshot').checked;
+    if (!condition || !action) return;
+    try {
+        const res = await fetch(BASE + '/api/prospective/triggers', {
+            method: 'POST', headers: csrfHeaders(), body: JSON.stringify({ condition, action, one_shot: oneShot }),
+        });
+        if (!res.ok) throw new Error((await res.json()).detail || 'Failed');
+        document.getElementById('trigger-condition').value = '';
+        document.getElementById('trigger-action').value = '';
+        showToast('Trigger set!');
+        loadTriggers();
+    } catch (e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function deactivateTrigger(triggerId) {
+    try {
+        const res = await fetch(BASE + '/api/prospective/triggers/' + triggerId, { method: 'DELETE', headers: { 'X-CSRF-Token': getCookie('csrf_token') } });
+        if (!res.ok) throw new Error('Failed');
+        showToast('Trigger deactivated');
+        loadTriggers();
+    } catch (e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+// ========================================================================
+// PROFILE
+// ========================================================================
+async function loadProfile() {
+    const card = document.getElementById('profile-card');
+    const textSection = document.getElementById('profile-text-section');
+    const textContent = document.getElementById('profile-text-content');
+    try {
+        const res = await fetch(BASE + '/api/profile');
+        const data = await res.json();
+        if (!data.success || !data.profile) {
+            card.innerHTML = `
+                <div class="text-center py-8 text-sm text-slate-500">
+                    <div class="w-16 h-16 rounded-2xl bg-berry-500/10 flex items-center justify-center mx-auto mb-3">
+                        <i data-lucide="user-circle" class="w-7 h-7 text-berry-500/40"></i>
+                    </div>
+                    <p>No profile yet.</p>
+                    <p class="text-xs text-slate-600 mt-1">Click <strong class="text-berry-300">Build Profile</strong> to create one from your memories.</p>
+                </div>`;
+            textSection.classList.add('hidden');
+            lucide.createIcons();
+            return;
+        }
+        const p = data.profile;
+        const fields = Object.entries(p).filter(([k]) => !['_id', 'user_id', 'app_slug', 'created_at', 'updated_at'].includes(k));
+        card.innerHTML = `
+            <div class="space-y-3">
+                ${fields.map(([key, val]) => {
+                    const display = typeof val === 'object' ? JSON.stringify(val, null, 2) : String(val);
+                    return `<div class="rounded-xl bg-white/[0.02] border border-white/5 p-3">
+                        <div class="text-[10px] text-slate-500 uppercase tracking-wide mb-1">${escapeHtml(key.replace(/_/g, ' '))}</div>
+                        <div class="text-sm text-slate-200 ${typeof val === 'object' ? 'font-mono text-xs whitespace-pre-wrap' : ''}">${escapeHtml(display)}</div>
+                    </div>`;
+                }).join('')}
+                <div class="text-[10px] text-slate-600 text-right">
+                    ${p.updated_at ? 'Updated: ' + new Date(p.updated_at).toLocaleString() : ''}
+                </div>
+            </div>`;
+
+        // Load profile text
+        try {
+            const textRes = await fetch(BASE + '/api/profile/text');
+            const textData = await textRes.json();
+            if (textData.success && textData.text) {
+                textContent.textContent = textData.text;
+                textSection.classList.remove('hidden');
+            } else {
+                textSection.classList.add('hidden');
+            }
+        } catch (_) { textSection.classList.add('hidden'); }
+    } catch (e) {
+        card.innerHTML = '<div class="text-center py-4 text-sm text-red-400">Failed to load profile</div>';
+    }
+}
+
+async function buildProfile() {
+    const btn = document.getElementById('profile-build-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="animate-spin inline-block w-3 h-3 border-2 border-white/30 border-t-white rounded-full mr-1.5"></span>Building...';
+    try {
+        const res = await fetch(BASE + '/api/profile/build', { method: 'POST', headers: { 'X-CSRF-Token': getCookie('csrf_token') } });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Build failed');
+        showToast('Profile built from memories and graph!');
+        loadProfile();
+    } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i data-lucide="refresh-cw" class="w-3 h-3"></i> Build Profile';
+        lucide.createIcons();
+    }
+}
+
+async function deleteProfile() {
+    if (!confirm('Delete your materialized profile?')) return;
+    try {
+        const res = await fetch(BASE + '/api/profile', { method: 'DELETE', headers: { 'X-CSRF-Token': getCookie('csrf_token') } });
+        if (!res.ok) throw new Error('Delete failed');
+        showToast('Profile deleted');
+        loadProfile();
+    } catch (e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+// ========================================================================
+// GRAPH PATH FINDING
+// ========================================================================
+async function findGraphPath() {
+    const source = document.getElementById('path-source').value.trim();
+    const target = document.getElementById('path-target').value.trim();
+    if (!source || !target) { showToast('Enter both source and target node IDs', 'error'); return; }
+
+    const display = document.getElementById('path-display');
+    const container = document.getElementById('path-results');
+    display.innerHTML = '<span class="text-slate-500">Searching...</span>';
+    container.classList.remove('hidden');
+
+    try {
+        const res = await fetch(BASE + `/api/graph/path?source=${encodeURIComponent(source)}&target=${encodeURIComponent(target)}`);
+        const data = await res.json();
+        if (data.found && data.path && data.path.length > 0) {
+            display.innerHTML = `
+                <div class="text-emerald-400 text-xs font-semibold mb-1">Path found (${data.hops} hop${data.hops !== 1 ? 's' : ''}):</div>
+                <div class="flex flex-wrap items-center gap-1">
+                    ${data.path.map((node, i) => `<span class="text-berry-300">${escapeHtml(node)}</span>${i < data.path.length - 1 ? '<span class="text-slate-600">&rarr;</span>' : ''}`).join('')}
+                </div>
+            `;
+        } else {
+            display.innerHTML = `<span class="text-amber-400">No path found between ${escapeHtml(source)} and ${escapeHtml(target)}</span>`;
+        }
+    } catch (e) {
+        display.innerHTML = `<span class="text-red-400">Error: ${escapeHtml(e.message)}</span>`;
+    }
+}
+
+// ========================================================================
+// PERSONA
+// ========================================================================
+const TRAIT_NAMES = ['humor', 'formality', 'empathy', 'technical_focus', 'creativity'];
+
+function initPersonaSliders() {
+    TRAIT_NAMES.forEach(trait => {
+        const slider = document.getElementById('trait-' + trait);
+        const label = document.getElementById('val-' + trait);
+        if (slider && label) {
+            slider.addEventListener('input', () => { label.textContent = parseFloat(slider.value).toFixed(1); });
+        }
+    });
+}
+
+async function loadPersona() {
+    try {
+        const res = await fetch(BASE + '/api/persona');
+        const data = await res.json();
+        if (data.success && data.persona?.traits) {
+            TRAIT_NAMES.forEach(trait => {
+                const val = data.persona.traits[trait];
+                if (val !== undefined) {
+                    const slider = document.getElementById('trait-' + trait);
+                    const label = document.getElementById('val-' + trait);
+                    if (slider) slider.value = val;
+                    if (label) label.textContent = parseFloat(val).toFixed(1);
+                }
+            });
+        }
+    } catch (e) { console.error('Load persona error:', e); }
+}
+
+async function savePersona() {
+    const btn = document.getElementById('persona-save-btn');
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+    const traits = {};
+    TRAIT_NAMES.forEach(trait => {
+        const slider = document.getElementById('trait-' + trait);
+        if (slider) traits[trait] = parseFloat(slider.value);
+    });
+    try {
+        const res = await fetch(BASE + '/api/persona', { method: 'PUT', headers: csrfHeaders(), body: JSON.stringify({ traits }) });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Save failed');
+        showToast('Personality updated -- try chatting to see the difference!');
+    } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Save Personality';
+    }
+}
+
+// ========================================================================
+// DEMO SEED / RESET / TIME MACHINE
+// ========================================================================
+function showToast(message, type = 'success') {
+    const container = document.getElementById('toast-container');
+    const id = 'toast-' + Date.now();
+    const bg = type === 'success'
+        ? 'bg-gradient-to-r from-berry-600/90 to-purple-700/90 border-berry-500/20'
+        : 'bg-gradient-to-r from-red-600/90 to-red-800/90 border-red-500/20';
+    const el = document.createElement('div');
+    el.id = id;
+    el.className = `toast glass-elevated rounded-xl px-4 py-3 ${bg} border shadow-xl max-w-sm`;
+    el.innerHTML = `<p class="text-sm text-white">${message}</p>`;
+    container.appendChild(el);
+    setTimeout(() => {
+        el.classList.add('toast-exit');
+        setTimeout(() => el.remove(), 300);
+    }, 4000);
+}
+
+async function seedDemo() {
+    const btn = document.getElementById('seed-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="animate-spin inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full mr-2"></span>Seeding...';
+    try {
+        const res = await fetch(BASE + '/api/demo/seed', { method: 'POST', headers: { 'X-CSRF-Token': getCookie('csrf_token') } });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Seed failed');
+        btn.innerHTML = `&#x2713; ${data.seeded.memories}m + ${data.seeded.graph_nodes}g + ${data.seeded.mflix_movies || 0}f`;
+        setTimeout(() => { btn.innerHTML = '<span>🍇</span> Re-Seed Demo Data'; btn.disabled = false; }, 3000);
+        showToast(`${data.seeded.memories} memories, ${data.seeded.graph_nodes} graph nodes, ${data.seeded.mflix_movies || 0} movies seeded. Oh, I member!`);
+        await refreshAll();
+    } catch (e) {
+        btn.textContent = 'Error!';
+        setTimeout(() => { btn.innerHTML = '<span>🍇</span> Re-Seed Demo Data'; btn.disabled = false; }, 2000);
+        showToast('Seed error: ' + e.message, 'error');
+    }
+}
+
+async function refreshAll() {
+    await Promise.all([
+        loadAnalytics(),
+        loadMemories().catch(() => {}),
+        loadGraphVisual().catch(() => {}),
+        loadColdStorage().catch(() => {}),
+        loadEpisodes().catch(() => {}),
+        loadTimelines().catch(() => {}),
+        loadTriggers().catch(() => {}),
+        loadProfile().catch(() => {}),
+    ]);
+}
+
+async function resetDemo() {
+    if (!confirm('This will delete ALL your memories, graph nodes, chat history, and seeded mflix movies. Continue?')) return;
+    try {
+        const res = await fetch(BASE + '/api/demo/reset', { method: 'POST', headers: { 'X-CSRF-Token': getCookie('csrf_token') } });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Reset failed');
+        showToast(`Reset: ${data.deleted.memories} memories, ${data.deleted.graph_nodes} nodes, ${data.deleted.chat_messages} messages deleted.`);
+        await refreshAll();
+    } catch (e) {
+        showToast('Reset error: ' + e.message, 'error');
+    }
+}
+
+async function simulateDecay(hours) {
+    try {
+        const res = await fetch(BASE + '/api/demo/simulate-decay', {
+            method: 'POST', headers: csrfHeaders(), body: JSON.stringify({ hours }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Simulate failed');
+        const label = hours >= 168 ? '1 week' : hours >= 24 ? `${Math.round(hours/24)}d` : `${hours}h`;
+        showToast(`Fast-forwarded ${label} on ${data.affected} memories`);
+        await refreshAll();
+    } catch (e) {
+        showToast('Simulate error: ' + e.message, 'error');
+    }
+}
+
+async function forcePrune() {
+    const btn = document.getElementById('prune-btn');
+    btn.disabled = true;
+    const origHTML = btn.innerHTML;
+    btn.textContent = 'Pruning...';
+    try {
+        const res = await fetch(BASE + '/api/demo/force-prune', {
+            method: 'POST', headers: csrfHeaders(), body: JSON.stringify({ threshold: 0.3 }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Prune failed');
+        if (data.pruned > 0) {
+            showToast(`Pruned ${data.pruned} weak memories to cold storage`);
+            switchTab('cold');
+        } else {
+            showToast(data.message);
+        }
+        await refreshAll();
+    } catch (e) {
+        showToast('Prune error: ' + e.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = origHTML;
+    }
+}
+
+// ========================================================================
+// INFO MODALS (educational content)
+// ========================================================================
+const INFO_CONTENT = {
+    decay: {
+        title: 'Ebbinghaus Forgetting Curve',
+        body: `
+            <p>In 1885, German psychologist <strong class="text-berry-300">Hermann Ebbinghaus</strong> discovered that memory retention decays exponentially over time unless reinforced.</p>
+            <div class="font-mono text-center text-lg text-slate-200 bg-black/30 rounded-xl p-4 border border-white/5 my-3">S = R &times; e<sup class="text-berry-400">(-t / H)</sup></div>
+            <div class="space-y-1.5 text-xs text-slate-400">
+                <p><span class="text-berry-400 font-mono font-bold">S</span> = Retrieval Strength (0 to 1) -- can the AI recall this?</p>
+                <p><span class="text-berry-400 font-mono font-bold">R</span> = Raw Importance -- how significant was this memory?</p>
+                <p><span class="text-berry-400 font-mono font-bold">t</span> = Time elapsed since storage (hours)</p>
+                <p><span class="text-berry-400 font-mono font-bold">H</span> = Stability -- half-life in hours (higher = decays slower)</p>
+            </div>
+            <p class="mt-3"><strong class="text-amber-400">Flashbulb memories</strong> (high emotion) get massive stability boosts -- up to 100x. This is why you remember your wedding but forget what you had for lunch. The Time Machine lets you simulate this by fast-forwarding time.</p>
+            <p class="mt-2"><strong class="text-blue-400">Cold Storage</strong> is where pruned memories go. They're soft-deleted with an audit trail so they can be restored -- modeling how humans can sometimes recover "forgotten" memories with the right cue.</p>
+        `
+    },
+    health: {
+        title: 'Memory Health Metrics',
+        body: `
+            <div class="space-y-3">
+                <div class="rounded-xl bg-white/[0.02] border border-white/5 p-3">
+                    <p class="text-xs font-bold text-emerald-400 mb-1">Active Memories</p>
+                    <p class="text-xs text-slate-400">Memories with strength above the prune threshold. These are available for recall during chat.</p>
+                </div>
+                <div class="rounded-xl bg-white/[0.02] border border-white/5 p-3">
+                    <p class="text-xs font-bold text-blue-400 mb-1">Cold Storage</p>
+                    <p class="text-xs text-slate-400">Memories that decayed below threshold. Soft-deleted but restorable -- like how a smell can trigger a "forgotten" childhood memory.</p>
+                </div>
+                <div class="rounded-xl bg-white/[0.02] border border-white/5 p-3">
+                    <p class="text-xs font-bold text-emerald-400 mb-1">Strong (&gt; 0.7)</p>
+                    <p class="text-xs text-slate-400">Memories with high retrieval strength. Recent or high-importance memories live here.</p>
+                </div>
+                <div class="rounded-xl bg-white/[0.02] border border-white/5 p-3">
+                    <p class="text-xs font-bold text-amber-400 mb-1">Weak (&lt; 0.3)</p>
+                    <p class="text-xs text-slate-400">Memories at risk of pruning. Use the Time Machine to watch them weaken, then prune to see the lifecycle.</p>
+                </div>
+                <div class="rounded-xl bg-white/[0.02] border border-white/5 p-3">
+                    <p class="text-xs font-bold text-berry-400 mb-1">Capacity</p>
+                    <p class="text-xs text-slate-400">Percentage of the 1,000-memory capacity used. When full, the system auto-prunes the weakest 5% -- modeling how the brain discards low-salience information during sleep.</p>
+                </div>
+            </div>
+        `
+    },
+    types: {
+        title: 'Multi-Tier Memory System',
+        body: `
+            <p>Cognitive science identifies distinct memory systems. MDB-Engine implements each as a separate collection with different retention rules.</p>
+            <div class="space-y-3 mt-3">
+                <div class="rounded-xl bg-amber-500/5 border border-amber-500/10 p-3">
+                    <p class="text-xs font-bold text-amber-400 mb-1">Episodic Memory</p>
+                    <p class="text-xs text-slate-400">Time-stamped autobiographical events. "I watched Oppenheimer at the IMAX on Friday." Has temporal context and emotional weight. Configured with retention period (default: 365 days).</p>
+                </div>
+                <div class="rounded-xl bg-purple-500/5 border border-purple-500/10 p-3">
+                    <p class="text-xs font-bold text-purple-400 mb-1">Procedural Memory</p>
+                    <p class="text-xs text-slate-400">Skills, workflows, and how-tos. "How to pick a date-night movie." Versioned and updatable -- like how you refine a recipe over time.</p>
+                </div>
+                <div class="rounded-xl bg-blue-500/5 border border-blue-500/10 p-3">
+                    <p class="text-xs font-bold text-blue-400 mb-1">Working Memory</p>
+                    <p class="text-xs text-slate-400">Short-lived context with TTL. "Currently watching the MCU in order." Auto-expires after the configured hours -- like how you forget a phone number after dialing it.</p>
+                </div>
+                <div class="rounded-xl bg-emerald-500/5 border border-emerald-500/10 p-3">
+                    <p class="text-xs font-bold text-emerald-400 mb-1">Semantic Memory</p>
+                    <p class="text-xs text-slate-400">Factual knowledge without temporal context. "Tom Hanks is my favorite actor." These are the core memories in the Memory Vault -- they undergo Ebbinghaus decay and can form graph relationships.</p>
+                </div>
+            </div>
+        `
+    },
+    timelines: {
+        title: 'Memory Timelines (Multiverse)',
+        body: `
+            <p>Timelines are <strong class="text-berry-300">branches of memory reality</strong> -- like git branches for your AI's brain.</p>
+            <div class="space-y-3 mt-3">
+                <div class="rounded-xl bg-white/[0.02] border border-white/5 p-3">
+                    <p class="text-xs font-bold text-berry-400 mb-1">Why?</p>
+                    <p class="text-xs text-slate-400">Explore "what-if" scenarios without corrupting real memories. Test different AI personalities. Isolate conversations for different contexts.</p>
+                </div>
+                <div class="rounded-xl bg-white/[0.02] border border-white/5 p-3">
+                    <p class="text-xs font-bold text-berry-400 mb-1">How it works</p>
+                    <p class="text-xs text-slate-400">Every user starts on the <strong class="text-emerald-400">root</strong> timeline. Fork creates a new branch that inherits the parent's memories at that point. Switch changes which timeline is active for chat and memory operations.</p>
+                </div>
+                <div class="rounded-xl bg-white/[0.02] border border-white/5 p-3">
+                    <p class="text-xs font-bold text-berry-400 mb-1">Real-world use cases</p>
+                    <ul class="text-xs text-slate-400 list-disc list-inside space-y-1 mt-1">
+                        <li>A/B testing different AI behaviors</li>
+                        <li>Isolating work vs personal memory contexts</li>
+                        <li>Safe experimentation without data loss</li>
+                        <li>Multi-persona support (one user, multiple AI personalities)</li>
+                    </ul>
+                </div>
+            </div>
+        `
+    },
+    triggers: {
+        title: 'Prospective Memory',
+        body: `
+            <p>Most AI memory systems only handle <em>retrospective</em> memory -- recalling the past. <strong class="text-amber-400">Prospective memory</strong> is about remembering <em>to do something in the future</em>.</p>
+            <div class="space-y-3 mt-3">
+                <div class="rounded-xl bg-white/[0.02] border border-white/5 p-3">
+                    <p class="text-xs font-bold text-amber-400 mb-1">Condition</p>
+                    <p class="text-xs text-slate-400">A natural-language description of a future context. Uses <strong class="text-berry-300">semantic similarity</strong> (vector search) to match against incoming messages.</p>
+                </div>
+                <div class="rounded-xl bg-white/[0.02] border border-white/5 p-3">
+                    <p class="text-xs font-bold text-amber-400 mb-1">Action</p>
+                    <p class="text-xs text-slate-400">What to do when the condition fires. Injected into the AI's context during the matching conversation.</p>
+                </div>
+                <div class="rounded-xl bg-white/[0.02] border border-white/5 p-3">
+                    <p class="text-xs font-bold text-amber-400 mb-1">One-shot vs Recurring</p>
+                    <p class="text-xs text-slate-400"><strong>One-shot</strong> triggers auto-deactivate after firing once. <strong>Recurring</strong> triggers fire every time the condition matches -- like a standing reminder.</p>
+                </div>
+            </div>
+            <p class="mt-3 text-xs text-slate-500">In humans, prospective memory failures are common ("I forgot to call the dentist"). This feature gives AI agents the ability to keep future intentions alive.</p>
+        `
+    },
+};
+
+function openInfoModal(key) {
+    const content = INFO_CONTENT[key];
+    if (!content) return;
+    document.getElementById('info-modal-title').textContent = content.title;
+    document.getElementById('info-modal-body').innerHTML = content.body;
+    document.getElementById('info-modal-overlay').classList.add('open');
+}
+
+function closeInfoModal() {
+    document.getElementById('info-modal-overlay').classList.remove('open');
+}
+
+// ========================================================================
+// UTILS
+// ========================================================================
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function formatResponse(text) {
+    if (!text) return '';
+    return escapeHtml(text)
+        .replace(/\*\*(.*?)\*\*/g, '<strong class="text-berry-300">$1</strong>')
+        .replace(/\*(.*?)\*/g, '<em>$1</em>')
+        .replace(/`(.*?)`/g, '<code class="text-berry-400 text-xs bg-black/30 px-1 py-0.5 rounded">$1</code>')
+        .replace(/\n/g, '<br>');
+}
+
+function removeElement(id) {
+    const el = document.getElementById(id);
+    if (el) el.remove();
+}
+
+// ========================================================================
+// INIT — full boot sequence with progress overlay
+// ========================================================================
+document.addEventListener('DOMContentLoaded', async () => {
+    const overlay = document.getElementById('boot-overlay');
+    const status = document.getElementById('boot-status');
+    const progress = document.getElementById('boot-progress');
+
+    function setBootProgress(pct, msg) {
+        if (progress) progress.style.width = pct + '%';
+        if (status) status.textContent = msg;
+    }
+
+    try {
+        lucide.createIcons();
+        setBootProgress(15, 'Loading analytics...');
+
+        // Phase 1: Analytics + persona (parallel)
+        await Promise.all([loadAnalytics(), loadPersona()]);
+        initPersonaSliders();
+        setBootProgress(35, 'Loading memories...');
+
+        // Phase 2: Memories + graph (parallel) — the two biggest visual tabs
+        await Promise.all([
+            loadMemories().catch(() => {}),
+            loadGraphVisual().catch(() => {}),
+        ]);
+        setBootProgress(65, 'Loading episodes & triggers...');
+
+        // Phase 3: Remaining tabs (parallel)
+        await Promise.all([
+            loadEpisodes().catch(() => {}),
+            loadTriggers().catch(() => {}),
+            loadTimelines().catch(() => {}),
+        ]);
+        setBootProgress(85, 'Loading profile...');
+
+        // Phase 4: Profile + cold storage
+        await Promise.all([
+            loadProfile().catch(() => {}),
+            loadColdStorage().catch(() => {}),
+        ]);
+        setBootProgress(100, 'Ready!');
+    } catch (e) {
+        console.error('Boot error:', e);
+        setBootProgress(100, 'Ready');
+    }
+
+    // Dismiss overlay
+    await new Promise(r => setTimeout(r, 300));
+    if (overlay) {
+        overlay.classList.add('boot-fade-out');
+        overlay.addEventListener('animationend', () => overlay.remove());
+    }
+
+    // Re-render icons for any dynamically loaded content
+    lucide.createIcons();
+});
+</script>
+</body>
+</html>

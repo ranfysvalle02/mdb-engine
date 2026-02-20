@@ -1,0 +1,984 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ app_name }}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tsparticles@2.12.0/tsparticles.bundle.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+                        mono: ['"Fira Code"', 'monospace'],
+                    },
+                    colors: {
+                        glass: {
+                            100: 'rgba(255, 255, 255, 0.05)',
+                            200: 'rgba(255, 255, 255, 0.1)',
+                            300: 'rgba(255, 255, 255, 0.2)',
+                            border: 'rgba(255, 255, 255, 0.08)',
+                        },
+                        accent: {
+                            DEFAULT: '#6366f1',
+                            glow: '#818cf8',
+                        }
+                    },
+                    animation: {
+                        'blob': 'blob 10s infinite',
+                        'float': 'float 6s ease-in-out infinite',
+                    },
+                    keyframes: {
+                        blob: {
+                            '0%': { transform: 'translate(0px, 0px) scale(1)' },
+                            '33%': { transform: 'translate(30px, -50px) scale(1.1)' },
+                            '66%': { transform: 'translate(-20px, 20px) scale(0.9)' },
+                            '100%': { transform: 'translate(0px, 0px) scale(1)' },
+                        },
+                        float: {
+                            '0%, 100%': { transform: 'translateY(0)' },
+                            '50%': { transform: 'translateY(-10px)' },
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            background-color: #0f172a;
+            color: #e2e8f0;
+            overflow-x: hidden;
+        }
+        
+        /* Aurora Background */
+        .aurora-bg {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: -1;
+            background: radial-gradient(circle at 50% 50%, #1e1b4b 0%, #0f172a 100%);
+            overflow: hidden;
+        }
+        .aurora-blob {
+            position: absolute;
+            filter: blur(80px);
+            opacity: 0.6;
+            animation: blob 20s infinite alternate;
+        }
+        .blob-1 { top: -10%; left: -10%; width: 50vw; height: 50vw; background: #4338ca; animation-delay: 0s; }
+        .blob-2 { bottom: -10%; right: -10%; width: 50vw; height: 50vw; background: #3730a3; animation-delay: 2s; }
+        .blob-3 { top: 40%; left: 40%; width: 40vw; height: 40vw; background: #312e81; animation-delay: 4s; }
+
+        /* Modern Glassmorphism */
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.6);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.36);
+        }
+        
+        .glass-input {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: white;
+            transition: all 0.3s ease;
+        }
+        .glass-input:focus {
+            background: rgba(0, 0, 0, 0.5);
+            border-color: #6366f1;
+            box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.1);
+            outline: none;
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+
+        /* Preset button active state */
+        .gen-preset.active {
+            border-color: rgba(99, 102, 241, 0.5);
+            background-color: rgba(99, 102, 241, 0.1);
+            color: white;
+        }
+        
+        /* Password generation animation */
+        @keyframes generatePulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.8; transform: scale(0.98); }
+        }
+        
+        .gen-animating {
+            animation: generatePulse 0.2s ease-in-out;
+        }
+
+        /* Password Mask Logic */
+        .password-field { font-family: 'Fira Code', monospace; letter-spacing: 0.1em; }
+        .password-hidden { -webkit-text-security: disc; }
+
+        /* Custom Checkbox Style */
+        .custom-checkbox:checked + div {
+            background-color: #6366f1;
+            border-color: #6366f1;
+        }
+        .custom-checkbox:checked + div svg {
+            opacity: 1;
+        }
+    </style>
+</head>
+<body class="antialiased min-h-screen flex flex-col">
+
+    <div class="aurora-bg">
+        <div class="aurora-blob blob-1"></div>
+        <div class="aurora-blob blob-2"></div>
+        <div class="aurora-blob blob-3"></div>
+    </div>
+    <div id="tsparticles" class="absolute inset-0 z-0 pointer-events-none"></div>
+
+    <nav class="sticky top-0 z-40 glass-panel border-b border-white/5">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-16">
+                <div class="flex items-center gap-3">
+                    <div class="bg-indigo-600/20 p-2 rounded-lg border border-indigo-500/30">
+                        <i data-lucide="shield-check" class="h-6 w-6 text-indigo-400"></i>
+                    </div>
+                    <span class="font-bold text-xl tracking-tight text-white">pwd-<span class="text-indigo-400">zero</span></span>
+                </div>
+                
+                <div class="flex items-center gap-4">
+                    <div class="hidden md:flex flex-col items-end mr-2">
+                        <span class="text-sm font-medium text-white">{{ user.email }}</span>
+                        <div class="flex gap-1">
+                            {% for role in roles %}
+                            <span class="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">{{ role }}</span>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    <div class="h-8 w-px bg-white/10 mx-1"></div>
+                    <a href="{{ auth_hub_url }}/dashboard" class="p-2 text-gray-400 hover:text-white hover:bg-white/5 rounded-lg transition-all" title="Hub">
+                        <i data-lucide="grid" class="h-5 w-5"></i>
+                    </a>
+                    <form id="logout-form" method="POST" action="{{ base_path }}/logout" class="inline">
+                        <button type="submit" class="p-2 text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-lg transition-all" title="Logout">
+                            <i data-lucide="log-out" class="h-5 w-5"></i>
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <main class="flex-grow container mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8 z-10 relative">
+        
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div class="glass-panel p-6 rounded-2xl flex items-center justify-between hover:border-indigo-500/30 transition-colors">
+                <div>
+                    <p class="text-sm text-gray-400 font-medium mb-1">Total Vault Items</p>
+                    <h3 id="stat-total" class="text-3xl font-bold text-white">0</h3>
+                </div>
+                <div class="bg-indigo-500/10 p-3 rounded-xl border border-indigo-500/20">
+                    <i data-lucide="database" class="h-6 w-6 text-indigo-400"></i>
+                </div>
+            </div>
+            
+            <div class="glass-panel p-6 rounded-2xl flex items-center justify-between hover:border-emerald-500/30 transition-colors">
+                <div>
+                    <p class="text-sm text-gray-400 font-medium mb-1">Security Score</p>
+                    <h3 class="text-3xl font-bold text-white flex items-end gap-2">
+                        A+ <span class="text-sm font-normal text-emerald-400 mb-1 pb-1">Excellent</span>
+                    </h3>
+                </div>
+                <div class="bg-emerald-500/10 p-3 rounded-xl border border-emerald-500/20">
+                    <i data-lucide="activity" class="h-6 w-6 text-emerald-400"></i>
+                </div>
+            </div>
+
+            <div class="glass-panel p-6 rounded-2xl flex flex-col justify-center gap-3 cursor-pointer hover:bg-indigo-600/20 hover:border-indigo-500/50 transition-all group" id="open-add-modal-btn">
+                <div class="flex items-center justify-center gap-3 text-indigo-300 group-hover:text-white">
+                    <div class="bg-indigo-600 p-2 rounded-lg shadow-lg shadow-indigo-500/30 group-hover:scale-110 transition-transform">
+                        <i data-lucide="plus" class="h-6 w-6 text-white"></i>
+                    </div>
+                    <span class="font-semibold text-lg">Add New Item</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="flex flex-col sm:flex-row justify-between items-center gap-4 mb-8">
+            <div class="relative w-full sm:w-96 group">
+                <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <i data-lucide="search" class="h-5 w-5 text-gray-500 group-focus-within:text-indigo-400 transition-colors"></i>
+                </div>
+                <input type="text" id="search-input" 
+                    class="glass-input w-full rounded-xl py-3 pl-10 pr-4 text-sm placeholder-gray-500 focus:ring-0" 
+                    placeholder="Search vault by name, email or url...">
+            </div>
+        </div>
+
+        <div id="password-list-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pb-20">
+            </div>
+
+    </main>
+
+    <div id="account-modal" class="fixed inset-0 z-50 hidden">
+        <div class="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity opacity-0" id="modal-backdrop"></div>
+        <div class="absolute inset-0 flex items-center justify-center p-4">
+            <div class="glass-panel w-full max-w-lg rounded-2xl shadow-2xl transform scale-95 opacity-0 transition-all duration-300" id="modal-panel">
+                <div class="p-6 border-b border-white/5 flex justify-between items-center">
+                    <h2 class="text-xl font-bold text-white flex items-center gap-2">
+                        <span class="bg-indigo-500/20 p-1.5 rounded-lg text-indigo-400"><i data-lucide="key" class="h-5 w-5"></i></span>
+                        <span id="modal-title">New Vault Item</span>
+                    </h2>
+                    <button id="close-modal" class="text-gray-400 hover:text-white transition-colors">
+                        <i data-lucide="x" class="h-6 w-6"></i>
+                    </button>
+                </div>
+                
+                <form id="account-form" class="p-6 space-y-5">
+                    <input type="hidden" id="entry-id">
+                    
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Website URL</label>
+                        <div class="relative">
+                            <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-500">
+                                <i data-lucide="globe" class="h-4 w-4"></i>
+                            </div>
+                            <input type="text" id="entry-website" required class="glass-input w-full rounded-lg pl-10 pr-4 py-2.5" placeholder="https://example.com">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Username / Email</label>
+                        <div class="relative">
+                            <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-500">
+                                <i data-lucide="user" class="h-4 w-4"></i>
+                            </div>
+                            <input type="text" id="entry-username" required class="glass-input w-full rounded-lg pl-10 pr-4 py-2.5" placeholder="user@email.com">
+                        </div>
+                    </div>
+
+                    <div id="password-section" class="space-y-3">
+                        <div class="flex justify-between items-end">
+                            <label class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Password</label>
+                            <button type="button" id="toggle-gen-options" class="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1 transition-colors select-none">
+                                <i data-lucide="sliders-horizontal" class="h-3 w-3"></i> Customize
+                            </button>
+                        </div>
+                        
+                        <div class="relative group/pass">
+                            <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-500">
+                                <i data-lucide="lock" class="h-4 w-4"></i>
+                            </div>
+                            
+                            <input type="text" id="entry-password" required 
+                                class="glass-input w-full rounded-t-lg rounded-b-none pl-10 pr-28 py-3 font-mono text-sm tracking-wider border-b-0 focus:border-b-0" 
+                                placeholder="Generating...">
+                                
+                            <div class="absolute inset-y-0 right-0 flex items-center gap-1 pr-2">
+                                <button type="button" id="modal-copy-btn" class="p-1.5 text-gray-400 hover:text-emerald-400 transition-colors" title="Copy">
+                                    <i data-lucide="copy" class="h-4 w-4"></i>
+                                </button>
+                                <div class="h-4 w-px bg-white/10"></div>
+                                <button type="button" id="modal-regen-btn" class="p-1.5 text-indigo-400 hover:text-white hover:bg-indigo-500/20 rounded-md transition-all group/dice" title="Roll New Password">
+                                    <i data-lucide="dices" class="h-4 w-4 group-hover/dice:rotate-180 transition-transform duration-500"></i>
+                                </button>
+                                <button type="button" class="toggle-password p-1.5 text-gray-500 hover:text-white transition-colors">
+                                    <i data-lucide="eye" class="h-4 w-4"></i>
+                                </button>
+                            </div>
+
+                            <div class="h-1 w-full bg-gray-700/50 rounded-b-lg overflow-hidden relative">
+                                <div id="strength-bar" class="h-full w-0 transition-all duration-500 ease-out bg-red-500"></div>
+                            </div>
+                            
+                            <div class="absolute -bottom-5 right-0 text-[10px] font-medium opacity-0 group-hover/pass:opacity-100 transition-opacity" id="strength-text">
+                                Checking...
+                            </div>
+                        </div>
+
+                        <div id="gen-options-panel" class="grid grid-rows-[0fr] transition-all duration-300 ease-in-out">
+                            <div class="overflow-hidden">
+                                <div class="p-4 rounded-xl bg-black/20 border border-white/5 space-y-4 mt-2">
+                                    
+                                    <div class="grid grid-cols-3 gap-2">
+                                        <button type="button" data-preset="simple" class="gen-preset px-2 py-1.5 rounded bg-gray-800 hover:bg-indigo-500/20 border border-transparent hover:border-indigo-500/50 text-xs text-gray-400 transition-all">Simple</button>
+                                        <button type="button" data-preset="strong" class="gen-preset active px-2 py-1.5 rounded bg-gray-800 hover:bg-indigo-500/20 border border-transparent hover:border-indigo-500/50 text-xs text-gray-400 transition-all">Strong</button>
+                                        <button type="button" data-preset="extra" class="gen-preset px-2 py-1.5 rounded bg-gray-800 hover:bg-indigo-500/20 border border-transparent hover:border-indigo-500/50 text-xs text-gray-400 transition-all">Paranoid</button>
+                                    </div>
+
+                                    <div class="space-y-2">
+                                        <div class="flex justify-between text-xs text-gray-400">
+                                            <span>Length</span>
+                                            <span id="modal-length-val" class="text-indigo-400 font-mono">16</span>
+                                        </div>
+                                        <input type="range" id="modal-length-range" min="8" max="64" value="16" class="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-indigo-500">
+                                    </div>
+
+                                    <div class="flex flex-wrap gap-4">
+                                        <label class="flex items-center gap-2 cursor-pointer group/chk">
+                                            <div class="relative flex items-center">
+                                                <input type="checkbox" id="modal-opt-upper" checked class="custom-checkbox peer sr-only">
+                                                <div class="w-4 h-4 border border-gray-600 rounded bg-transparent transition-all flex items-center justify-center">
+                                                    <i data-lucide="check" class="h-3 w-3 text-white opacity-0 transition-opacity"></i>
+                                                </div>
+                                            </div>
+                                            <span class="text-xs text-gray-400 group-hover/chk:text-white transition-colors">ABC</span>
+                                        </label>
+
+                                        <label class="flex items-center gap-2 cursor-pointer group/chk">
+                                            <div class="relative flex items-center">
+                                                <input type="checkbox" id="modal-opt-lower" checked class="custom-checkbox peer sr-only">
+                                                <div class="w-4 h-4 border border-gray-600 rounded bg-transparent transition-all flex items-center justify-center">
+                                                    <i data-lucide="check" class="h-3 w-3 text-white opacity-0 transition-opacity"></i>
+                                                </div>
+                                            </div>
+                                            <span class="text-xs text-gray-400 group-hover/chk:text-white transition-colors">abc</span>
+                                        </label>
+
+                                        <label class="flex items-center gap-2 cursor-pointer group/chk">
+                                            <div class="relative flex items-center">
+                                                <input type="checkbox" id="modal-opt-num" checked class="custom-checkbox peer sr-only">
+                                                <div class="w-4 h-4 border border-gray-600 rounded bg-transparent transition-all flex items-center justify-center">
+                                                    <i data-lucide="check" class="h-3 w-3 text-white opacity-0 transition-opacity"></i>
+                                                </div>
+                                            </div>
+                                            <span class="text-xs text-gray-400 group-hover/chk:text-white transition-colors">123</span>
+                                        </label>
+
+                                        <label class="flex items-center gap-2 cursor-pointer group/chk">
+                                            <div class="relative flex items-center">
+                                                <input type="checkbox" id="modal-opt-sym" checked class="custom-checkbox peer sr-only">
+                                                <div class="w-4 h-4 border border-gray-600 rounded bg-transparent transition-all flex items-center justify-center">
+                                                    <i data-lucide="check" class="h-3 w-3 text-white opacity-0 transition-opacity"></i>
+                                                </div>
+                                            </div>
+                                            <span class="text-xs text-gray-400 group-hover/chk:text-white transition-colors">#$&</span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="pt-4 flex gap-3">
+                        <button type="button" id="cancel-modal" class="flex-1 py-2.5 rounded-xl border border-gray-600 text-gray-300 hover:bg-white/5 transition-all font-medium">Cancel</button>
+                        <button type="submit" class="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-500/20 transition-all font-medium flex justify-center items-center gap-2">
+                            <i data-lucide="save" class="h-4 w-4"></i> Save Item
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast" class="fixed bottom-6 right-6 z-[70] translate-y-24 opacity-0 transition-all duration-500 flex items-center gap-4 p-4 rounded-xl glass-panel border-l-4 border-indigo-500 shadow-2xl min-w-[300px]">
+        <div id="toast-icon-bg" class="p-2 rounded-full bg-indigo-500/20">
+            <i id="toast-icon" data-lucide="check" class="h-5 w-5 text-indigo-400"></i>
+        </div>
+        <div>
+            <h4 id="toast-title" class="font-bold text-white text-sm">Success</h4>
+            <p id="toast-msg" class="text-xs text-gray-400 mt-0.5">Operation completed.</p>
+        </div>
+    </div>
+
+    <script>
+        // --- tsParticles ---
+        tsParticles.load("tsparticles", {
+            fpsLimit: 60,
+            particles: {
+                color: { value: "#ffffff" },
+                move: { enable: true, speed: 0.3, direction: "none", random: true, outMode: "out" },
+                number: { value: 30, density: { enable: true, area: 800 } },
+                opacity: { value: 0.1, random: true },
+                shape: { type: "circle" },
+                size: { value: { min: 1, max: 3 }, random: true },
+            },
+            detectRetina: true,
+        });
+
+        // --- Helpers ---
+        function getCookie(name) {
+            const v = document.cookie.match('(^|;) ?' + name + '=([^;]*)(;|$)');
+            return v ? v[2] : null;
+        }
+
+        // --- Core Logic ---
+        document.addEventListener('DOMContentLoaded', () => {
+            let allPasswords = [];
+
+            // DOM Elements
+            const listContainer = document.getElementById('password-list-container');
+            const searchInput = document.getElementById('search-input');
+            const statTotal = document.getElementById('stat-total');
+            
+            // Modals
+            const accountModal = {
+                el: document.getElementById('account-modal'),
+                backdrop: document.getElementById('modal-backdrop'),
+                panel: document.getElementById('modal-panel'),
+                form: document.getElementById('account-form'),
+                title: document.getElementById('modal-title'),
+                show: (isEdit = false) => {
+                    accountModal.el.classList.remove('hidden');
+                    setTimeout(() => {
+                        accountModal.backdrop.classList.remove('opacity-0');
+                        accountModal.panel.classList.remove('opacity-0', 'scale-95');
+                    }, 10);
+                    
+                    // Collapse options by default on open
+                    const genPanel = document.getElementById('gen-options-panel');
+                    if(genPanel) {
+                        genPanel.classList.add('grid-rows-[0fr]');
+                        genPanel.classList.remove('grid-rows-[1fr]');
+                    }
+                    
+                    // Auto-generate password for new items only
+                    if (!isEdit) {
+                        setTimeout(() => {
+                            generateModalPassword();
+                        }, 100);
+                    }
+                },
+                hide: () => {
+                    accountModal.backdrop.classList.add('opacity-0');
+                    accountModal.panel.classList.add('opacity-0', 'scale-95');
+                    setTimeout(() => {
+                        accountModal.el.classList.add('hidden');
+                        accountModal.form.reset();
+                        document.getElementById('entry-id').value = '';
+                        // Reset to default preset
+                        applyModalPreset('strong');
+                    }, 300);
+                }
+            };
+
+
+            // --- Toast ---
+            let toastTimer;
+            const showToast = (title, msg, type = 'success') => {
+                const toast = document.getElementById('toast');
+                const icon = document.getElementById('toast-icon');
+                const tTitle = document.getElementById('toast-title');
+                const tMsg = document.getElementById('toast-msg');
+                const iconBg = document.getElementById('toast-icon-bg');
+                
+                tTitle.textContent = title;
+                tMsg.textContent = msg;
+                
+                const colors = {
+                    success: 'text-emerald-400',
+                    error: 'text-red-400',
+                    info: 'text-indigo-400'
+                };
+                const bgs = {
+                    success: 'bg-emerald-500/20',
+                    error: 'bg-red-500/20',
+                    info: 'bg-indigo-500/20'
+                };
+                
+                // Reset classes
+                icon.className = `h-5 w-5 ${colors[type]}`;
+                iconBg.className = `p-2 rounded-full ${bgs[type]}`;
+                toast.className = `fixed bottom-6 right-6 z-[70] transition-all duration-500 flex items-center gap-4 p-4 rounded-xl glass-panel shadow-2xl min-w-[300px] border-l-4 ${type === 'success' ? 'border-emerald-500' : type === 'error' ? 'border-red-500' : 'border-indigo-500'}`;
+
+                // Animate In
+                toast.classList.remove('translate-y-24', 'opacity-0');
+                
+                clearTimeout(toastTimer);
+                toastTimer = setTimeout(() => {
+                    toast.classList.add('translate-y-24', 'opacity-0');
+                }, 3000);
+            };
+
+            const BASE = '{{ base_path }}';
+
+            // --- API Handling ---
+            const handleApiError = async (res) => {
+                if (res.status === 401) {
+                    showToast('Session Expired', 'Redirecting to login...', 'error');
+                    setTimeout(() => window.location.href = '{{ auth_hub_url }}/login', 1500);
+                    return true;
+                }
+                if (!res.ok) {
+                    const data = await res.json();
+                    throw new Error(data.detail || 'API Error');
+                }
+                return false;
+            };
+
+            const fetchPasswords = async () => {
+                try {
+                    // Simulating loading state if needed
+                    const res = await fetch(BASE + '/api/passwords');
+                    if (await handleApiError(res)) return;
+                    const data = await res.json();
+                    allPasswords = data.data || [];
+                    renderPasswords(allPasswords);
+                } catch (e) {
+                    showToast('Error', e.message, 'error');
+                }
+            };
+
+            // --- Rendering ---
+            const renderPasswords = (items) => {
+                statTotal.innerText = items.length;
+                listContainer.innerHTML = '';
+
+                if (items.length === 0) {
+                    listContainer.innerHTML = `
+                        <div class="col-span-full flex flex-col items-center justify-center py-20 opacity-50">
+                            <div class="bg-gray-800/50 p-6 rounded-full mb-4">
+                                <i data-lucide="ghost" class="h-10 w-10 text-gray-400"></i>
+                            </div>
+                            <h3 class="text-xl font-bold text-gray-300">It's quiet here...</h3>
+                            <p class="text-sm text-gray-500">Add your first secure account to get started.</p>
+                        </div>
+                    `;
+                    lucide.createIcons();
+                    return;
+                }
+
+                items.forEach((p, index) => {
+                    // Domain extraction for favicon
+                    let domain = 'google.com'; // fallback
+                    try {
+                        domain = new URL(p.website.startsWith('http') ? p.website : `https://${p.website}`).hostname;
+                    } catch(e) {}
+                    
+                    const favicon = `https://www.google.com/s2/favicons?domain=${domain}&sz=64`;
+
+                    const card = document.createElement('div');
+                    // Add fade-in staggered animation
+                    card.style.animation = `fadeIn 0.5s ease-out ${index * 0.05}s forwards`;
+                    card.style.opacity = '0';
+                    card.className = 'glass-panel rounded-2xl p-5 hover:border-indigo-500/40 transition-all group relative overflow-hidden';
+                    
+                    card.innerHTML = `
+                        <div class="absolute top-0 right-0 p-4 opacity-0 group-hover:opacity-100 transition-opacity flex gap-2">
+                            <button class="p-1.5 rounded-lg bg-gray-700/50 text-gray-300 hover:text-white hover:bg-indigo-600 transition-colors edit-btn" title="Edit">
+                                <i data-lucide="pencil" class="h-4 w-4"></i>
+                            </button>
+                            <button class="p-1.5 rounded-lg bg-gray-700/50 text-red-400 hover:text-white hover:bg-red-600 transition-colors delete-btn" title="Delete">
+                                <i data-lucide="trash-2" class="h-4 w-4"></i>
+                            </button>
+                        </div>
+
+                        <div class="flex items-center gap-4 mb-5">
+                            <div class="h-12 w-12 rounded-xl bg-gradient-to-br from-indigo-900 to-slate-800 flex items-center justify-center border border-white/10 shadow-lg">
+                                <img src="${favicon}" alt="" class="h-6 w-6 opacity-80" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+                                <i data-lucide="globe" class="h-6 w-6 text-gray-400 hidden"></i>
+                            </div>
+                            <div class="overflow-hidden">
+                                <h3 class="font-bold text-white text-lg truncate pr-14" title="${p.website}">${p.website}</h3>
+                                <p class="text-xs text-gray-400 uppercase tracking-wider font-semibold">Login Details</p>
+                            </div>
+                        </div>
+
+                        <div class="space-y-3">
+                            <div class="bg-black/30 rounded-lg p-2.5 flex items-center justify-between border border-white/5 hover:border-white/10 transition-colors">
+                                <div class="flex items-center gap-3 overflow-hidden">
+                                    <i data-lucide="user" class="h-4 w-4 text-gray-500 flex-shrink-0"></i>
+                                    <span class="text-sm text-gray-300 truncate font-mono">${p.username}</span>
+                                </div>
+                                <button class="text-gray-500 hover:text-emerald-400 transition-colors copy-btn" data-val="${p.username}">
+                                    <i data-lucide="copy" class="h-4 w-4"></i>
+                                </button>
+                            </div>
+
+                            <div class="bg-black/30 rounded-lg p-2.5 flex items-center justify-between border border-white/5 hover:border-white/10 transition-colors">
+                                <div class="flex items-center gap-3 overflow-hidden">
+                                    <i data-lucide="lock" class="h-4 w-4 text-gray-500 flex-shrink-0"></i>
+                                    <span class="text-sm text-gray-300 truncate font-mono password-hidden tracking-widest">••••••••••</span>
+                                </div>
+                                <button class="text-gray-500 hover:text-emerald-400 transition-colors copy-btn" data-val="${p.password}">
+                                    <i data-lucide="copy" class="h-4 w-4"></i>
+                                </button>
+                            </div>
+                        </div>
+                    `;
+
+                    // Attach Event Listeners to buttons inside card
+                    const copyBtns = card.querySelectorAll('.copy-btn');
+                    copyBtns.forEach(btn => {
+                        btn.addEventListener('click', (e) => {
+                            const val = btn.getAttribute('data-val');
+                            navigator.clipboard.writeText(val);
+                            
+                            // Visual feedback on button
+                            const originalHTML = btn.innerHTML;
+                            btn.innerHTML = `<i data-lucide="check" class="h-4 w-4"></i>`;
+                            btn.classList.add('text-emerald-400');
+                            lucide.createIcons();
+                            
+                            showToast('Copied', 'Copied to clipboard');
+                            
+                            setTimeout(() => {
+                                btn.innerHTML = originalHTML;
+                                btn.classList.remove('text-emerald-400');
+                                lucide.createIcons();
+                            }, 1500);
+                        });
+                    });
+
+                    card.querySelector('.delete-btn').addEventListener('click', () => handleDelete(p.id));
+                    card.querySelector('.edit-btn').addEventListener('click', () => {
+                        document.getElementById('entry-id').value = p.id;
+                        document.getElementById('entry-website').value = p.website;
+                        document.getElementById('entry-username').value = p.username;
+                        document.getElementById('entry-password').value = p.password;
+                        document.getElementById('modal-title').innerText = 'Edit Item';
+                        // Update strength indicator for existing password
+                        const hasUpper = /[A-Z]/.test(p.password);
+                        const hasLower = /[a-z]/.test(p.password);
+                        const hasNum = /[0-9]/.test(p.password);
+                        const hasSym = /[^A-Za-z0-9]/.test(p.password);
+                        const strength = calculateStrength(p.password, p.password.length, hasUpper, hasLower, hasNum, hasSym);
+                        updateStrengthIndicator(strength);
+                        accountModal.show(true); // Pass isEdit=true
+                    });
+
+                    listContainer.appendChild(card);
+                });
+                
+                // Add keyframes for fade in
+                const styleSheet = document.createElement("style");
+                styleSheet.innerText = `@keyframes fadeIn { to { opacity: 1; } }`;
+                document.head.appendChild(styleSheet);
+                
+                lucide.createIcons();
+            };
+
+            // --- Handlers ---
+            const handleDelete = async (id) => {
+                if(!confirm('Are you sure you want to delete this vault item?')) return;
+                try {
+                    const res = await fetch(`${BASE}/api/passwords/${id}`, {
+                        method: 'DELETE',
+                        headers: {
+                            'X-CSRF-Token': getCookie('csrf_token')
+                        },
+                        credentials: 'same-origin'
+                    });
+                    if (await handleApiError(res)) return;
+                    fetchPasswords();
+                    showToast('Deleted', 'Item removed from vault', 'info');
+                } catch(e) {
+                    showToast('Error', e.message, 'error');
+                }
+            };
+
+            accountModal.form.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const id = document.getElementById('entry-id').value;
+                const data = {
+                    website: document.getElementById('entry-website').value,
+                    username: document.getElementById('entry-username').value,
+                    password: document.getElementById('entry-password').value,
+                };
+
+                const method = id ? 'PUT' : 'POST';
+                const url = id ? `${BASE}/api/passwords/${id}` : `${BASE}/api/passwords`;
+
+                try {
+                    const res = await fetch(url, {
+                        method: method,
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRF-Token': getCookie('csrf_token')
+                        },
+                        credentials: 'same-origin',
+                        body: JSON.stringify(data)
+                    });
+                    if (await handleApiError(res)) return;
+                    
+                    fetchPasswords();
+                    accountModal.hide();
+                    showToast('Success', id ? 'Item updated' : 'New item vaulted');
+                } catch (e) {
+                    showToast('Error', e.message, 'error');
+                }
+            });
+
+            // --- Generator Logic ---
+            const calculateStrength = (pass, len, upper, lower, num, sym) => {
+                let score = 0;
+                const types = [upper, lower, num, sym].filter(Boolean).length;
+                
+                // Length scoring
+                if (len >= 8) score += 1;
+                if (len >= 12) score += 1;
+                if (len >= 16) score += 1;
+                if (len >= 24) score += 1;
+                
+                // Character variety scoring
+                if (types >= 2) score += 1;
+                if (types >= 3) score += 1;
+                if (types >= 4) score += 1;
+                
+                // Normalize to 1-4 scale
+                score = Math.min(Math.max(score, 1), 4);
+                return score;
+            };
+
+            // Updated Strength Indicator for Inline Bar
+            const updateStrengthIndicator = (score) => {
+                const bar = document.getElementById('strength-bar');
+                const txt = document.getElementById('strength-text');
+                if (!bar || !txt) return;
+
+                const colors = ['bg-red-500', 'bg-orange-500', 'bg-yellow-400', 'bg-emerald-500'];
+                const txtColors = ['text-red-400', 'text-orange-400', 'text-yellow-400', 'text-emerald-400'];
+                const widths = ['25%', '50%', '75%', '100%'];
+                const labels = ['Weak', 'Fair', 'Good', 'Strong'];
+
+                // Update Bar
+                bar.className = `h-full transition-all duration-500 ease-out ${colors[score-1] || 'bg-red-500'}`;
+                bar.style.width = widths[score-1] || '10%';
+                
+                // Update Text
+                txt.innerText = labels[score-1] || 'Weak';
+                txt.className = `absolute -bottom-5 right-0 text-[10px] font-medium opacity-0 group-hover/pass:opacity-100 transition-opacity ${txtColors[score-1]}`;
+            };
+
+
+            // Preset configurations
+            const presets = {
+                simple: { length: 12, upper: true, lower: true, num: true, sym: false },
+                strong: { length: 16, upper: true, lower: true, num: true, sym: true },
+                extra: { length: 24, upper: true, lower: true, num: true, sym: true }
+            };
+
+            // Modal-specific password generation
+            const generateModalPassword = (options = {}) => {
+                const len = options.length || parseInt(document.getElementById('modal-length-range')?.value || 16);
+                const upper = options.upper !== undefined ? options.upper : (document.getElementById('modal-opt-upper')?.checked ?? true);
+                const lower = options.lower !== undefined ? options.lower : (document.getElementById('modal-opt-lower')?.checked ?? true);
+                const num = options.num !== undefined ? options.num : (document.getElementById('modal-opt-num')?.checked ?? true);
+                const sym = options.sym !== undefined ? options.sym : (document.getElementById('modal-opt-sym')?.checked ?? true);
+
+                if (!upper && !lower && !num && !sym) {
+                    return null;
+                }
+
+                const chars = {
+                    upper: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+                    lower: 'abcdefghijklmnopqrstuvwxyz',
+                    num: '0123456789',
+                    sym: '!@#$%^&*()_+-=[]{}|;:,.<>?'
+                };
+
+                let validChars = '';
+                if(upper) validChars += chars.upper;
+                if(lower) validChars += chars.lower;
+                if(num) validChars += chars.num;
+                if(sym) validChars += chars.sym;
+
+                // Use crypto.getRandomValues for better randomness
+                const array = new Uint32Array(len);
+                crypto.getRandomValues(array);
+                
+                let pass = '';
+                for(let i = 0; i < len; i++) {
+                    pass += validChars[array[i] % validChars.length];
+                }
+
+                // Update password field
+                const entryPassword = document.getElementById('entry-password');
+                if (entryPassword) {
+                    entryPassword.value = pass;
+                    entryPassword.type = 'text'; // Show generated password
+                    entryPassword.classList.add('gen-animating');
+                    setTimeout(() => {
+                        entryPassword.classList.remove('gen-animating');
+                        entryPassword.select();
+                    }, 300);
+                }
+                
+                // Calculate and update strength
+                const strength = calculateStrength(pass, len, upper, lower, num, sym);
+                updateStrengthIndicator(strength);
+                
+                return pass;
+            };
+
+            const applyModalPreset = (presetName) => {
+                const preset = presets[presetName];
+                if (!preset) return;
+                
+                const lengthRange = document.getElementById('modal-length-range');
+                const lengthVal = document.getElementById('modal-length-val');
+                if (lengthRange && lengthVal) {
+                    lengthRange.value = preset.length;
+                    lengthVal.textContent = preset.length;
+                }
+                
+                const optUpper = document.getElementById('modal-opt-upper');
+                const optLower = document.getElementById('modal-opt-lower');
+                const optNum = document.getElementById('modal-opt-num');
+                const optSym = document.getElementById('modal-opt-sym');
+                
+                if (optUpper) optUpper.checked = preset.upper;
+                if (optLower) optLower.checked = preset.lower;
+                if (optNum) optNum.checked = preset.num;
+                if (optSym) optSym.checked = preset.sym;
+                
+                // Update preset button states
+                document.querySelectorAll('.gen-preset').forEach(btn => {
+                    btn.classList.remove('active');
+                    btn.classList.add('border-transparent', 'text-gray-400');
+                    btn.classList.remove('border-indigo-500/50', 'text-white', 'shadow-indigo-500/10');
+                });
+                
+                const activeBtn = document.querySelector(`[data-preset="${presetName}"]`);
+                if (activeBtn) {
+                    activeBtn.classList.add('active', 'border-indigo-500/50', 'text-white', 'shadow-indigo-500/10');
+                    activeBtn.classList.remove('border-transparent', 'text-gray-400');
+                }
+                
+                generateModalPassword(preset);
+            };
+
+
+            // --- Listeners ---
+            document.getElementById('open-add-modal-btn').addEventListener('click', () => {
+                document.getElementById('modal-title').innerText = 'New Vault Item';
+                // Reset to strong preset
+                applyModalPreset('strong');
+                accountModal.show(false); // New item, not edit
+            });
+            document.getElementById('close-modal').addEventListener('click', accountModal.hide);
+            document.getElementById('cancel-modal').addEventListener('click', accountModal.hide);
+
+            // Toggle Generator Options
+            const toggleGenBtn = document.getElementById('toggle-gen-options');
+            const genOptionsPanel = document.getElementById('gen-options-panel');
+            if(toggleGenBtn && genOptionsPanel) {
+                toggleGenBtn.addEventListener('click', () => {
+                    const isClosed = genOptionsPanel.classList.contains('grid-rows-[0fr]');
+                    if(isClosed) {
+                        genOptionsPanel.classList.remove('grid-rows-[0fr]');
+                        genOptionsPanel.classList.add('grid-rows-[1fr]');
+                        toggleGenBtn.classList.add('text-indigo-300');
+                    } else {
+                        genOptionsPanel.classList.add('grid-rows-[0fr]');
+                        genOptionsPanel.classList.remove('grid-rows-[1fr]');
+                        toggleGenBtn.classList.remove('text-indigo-300');
+                    }
+                });
+            }
+
+            // Modal preset buttons
+            document.querySelectorAll('.gen-preset').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const preset = e.currentTarget.getAttribute('data-preset');
+                    applyModalPreset(preset);
+                });
+            });
+
+            // Modal length slider
+            const modalLengthRange = document.getElementById('modal-length-range');
+            if (modalLengthRange) {
+                modalLengthRange.addEventListener('input', (e) => {
+                    document.getElementById('modal-length-val').textContent = e.target.value;
+                    generateModalPassword();
+                });
+            }
+
+            // Modal character option checkboxes
+            ['modal-opt-upper', 'modal-opt-lower', 'modal-opt-num', 'modal-opt-sym'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) {
+                    el.addEventListener('change', () => {
+                        generateModalPassword();
+                    });
+                }
+            });
+
+            // Modal regenerate button
+            const modalRegenBtn = document.getElementById('modal-regen-btn');
+            if (modalRegenBtn) {
+                modalRegenBtn.addEventListener('click', () => {
+                    generateModalPassword();
+                });
+            }
+
+            // Modal copy password button
+            const modalCopyBtn = document.getElementById('modal-copy-btn');
+            if (modalCopyBtn) {
+                modalCopyBtn.addEventListener('click', async () => {
+                    const pass = document.getElementById('entry-password').value;
+                    if (!pass) return;
+                    
+                    try {
+                        await navigator.clipboard.writeText(pass);
+                        showToast('Copied', 'Password copied to clipboard');
+                    } catch (e) {
+                        showToast('Error', 'Failed to copy password', 'error');
+                    }
+                });
+            }
+
+
+            // Update strength when password is manually typed in modal
+            const entryPassword = document.getElementById('entry-password');
+            if (entryPassword) {
+                entryPassword.addEventListener('input', (e) => {
+                    const pass = e.target.value;
+                    if (pass.length > 0) {
+                        // Estimate strength based on length and character variety
+                        const hasUpper = /[A-Z]/.test(pass);
+                        const hasLower = /[a-z]/.test(pass);
+                        const hasNum = /[0-9]/.test(pass);
+                        const hasSym = /[^A-Za-z0-9]/.test(pass);
+                        const strength = calculateStrength(pass, pass.length, hasUpper, hasLower, hasNum, hasSym);
+                        updateStrengthIndicator(strength);
+                    } else {
+                        updateStrengthIndicator(1);
+                        document.getElementById('strength-bar').style.width = '0%';
+                    }
+                });
+            }
+
+            searchInput.addEventListener('input', (e) => {
+                const term = e.target.value.toLowerCase();
+                const filtered = allPasswords.filter(p => 
+                    p.website.toLowerCase().includes(term) || 
+                    p.username.toLowerCase().includes(term)
+                );
+                renderPasswords(filtered);
+            });
+
+            document.querySelectorAll('.toggle-password').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    // Find the password input - it's in the parent's previous sibling or parent container
+                    const passwordSection = e.currentTarget.closest('.group\\/pass') || e.currentTarget.closest('.relative');
+                    const input = passwordSection?.querySelector('#entry-password');
+                    if (!input) return;
+                    
+                    const isPass = input.type === 'password';
+                    input.type = isPass ? 'text' : 'password';
+                    const icon = e.currentTarget.querySelector('i');
+                    if (icon) {
+                        icon.setAttribute('data-lucide', isPass ? 'eye-off' : 'eye');
+                        lucide.createIcons();
+                    }
+                });
+            });
+
+            // Init
+            fetchPasswords();
+        });
+    </script>
+</body>
+</html>

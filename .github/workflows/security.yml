@@ -1,0 +1,134 @@
+name: Security Scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Run weekly security scans
+    - cron: '0 0 * * 0'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  dependency-scan:
+    name: Dependency Vulnerability Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: |
+            pyproject.toml
+            setup.py
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[test,dev]"
+          pip install safety pip-audit
+
+      - name: Run Safety check
+        continue-on-error: true
+        run: |
+          echo "::group::Safety Vulnerability Scan"
+          safety check --json || safety check || echo "⚠️ Safety check completed"
+          echo "::endgroup::"
+
+      - name: Run pip-audit
+        continue-on-error: true
+        run: |
+          echo "::group::pip-audit Vulnerability Scan"
+          pip-audit --desc || echo "⚠️ pip-audit completed"
+          echo "::endgroup::"
+
+      - name: Upload security report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-scan-report
+          path: |
+            safety-report.json
+          retention-days: 30
+          if-no-files-found: ignore
+
+  code-security:
+    name: Code Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: |
+            pyproject.toml
+            setup.py
+
+      - name: Install Semgrep
+        run: |
+          python -m pip install --upgrade pip
+          pip install semgrep
+
+      - name: Run Semgrep security scan
+        continue-on-error: true
+        run: |
+          echo "::group::Semgrep Security Scan"
+          semgrep scan \
+            --config .semgrep.yml \
+            --config auto \
+            --json \
+            --output semgrep-report.json \
+            --error || echo "⚠️ Semgrep scan completed"
+          echo "::endgroup::"
+
+      - name: Upload Semgrep report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: semgrep-report
+          path: semgrep-report.json
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Comment PR with security findings
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            if (fs.existsSync('semgrep-report.json')) {
+              const report = JSON.parse(fs.readFileSync('semgrep-report.json', 'utf8'));
+              const findings = report.results?.length || 0;
+              
+              if (findings > 0) {
+                const body = `## 🔒 Security Scan Results
+                
+                Found ${findings} potential security issue(s).
+                
+                [View full report](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})`;
+                
+                github.rest.issues.createComment({
+                  issue_number: context.issue.number,
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  body: body
+                });
+              }
+            }

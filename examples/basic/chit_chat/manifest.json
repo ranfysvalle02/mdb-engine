@@ -1,0 +1,207 @@
+{
+  "schema_version": "2.0",
+  "slug": "conversations",
+  "name": "ChitChat - Enterprise AI Chat with Hybrid Memory",
+  "description": "Enterprise-grade AI chat application implementing a Robust Hybrid Memory Architecture (STM + LTM) with MongoDB Atlas Vector Search. Demonstrates parallel retrieval, deterministic context merging, and asynchronous fact extraction.",
+  "status": "active",
+  "developer_id": "developer@example.com",
+  "auth": {
+    "policy": {
+      "provider": "casbin",
+      "required": false,
+      "allow_anonymous": true,
+      "authorization": {
+        "model": "rbac",
+        "policies_collection": "casbin_policies",
+        "link_users_roles": true,
+        "default_roles": ["user", "admin"]
+      }
+    },
+    "users": {
+      "enabled": true,
+      "strategy": "app_users",
+      "collection_name": "users",
+      "session_cookie_name": "conversations_session",
+      "session_ttl_seconds": 86400,
+      "allow_registration": true
+    }
+  },
+  "token_management": {
+    "enabled": true,
+    "access_token_ttl": 900,
+    "refresh_token_ttl": 604800,
+    "token_rotation": true,
+    "max_sessions_per_user": 10,
+    "session_inactivity_timeout": 1800,
+    "security": {
+      "require_https": false,
+      "cookie_secure": "auto",
+      "cookie_samesite": "lax",
+      "cookie_httponly": true,
+      "csrf_protection": true,
+      "rate_limiting": {
+        "login": {"max_attempts": 5, "window_seconds": 300},
+        "register": {"max_attempts": 3, "window_seconds": 600},
+        "refresh": {"max_attempts": 10, "window_seconds": 60}
+      },
+      "password_policy": {
+        "allow_plain_text": false,
+        "min_length": 8,
+        "require_uppercase": true,
+        "require_lowercase": true,
+        "require_numbers": true,
+        "require_special": false
+      },
+      "session_fingerprinting": {
+        "enabled": true,
+        "validate_on_login": true,
+        "validate_on_refresh": true,
+        "validate_on_request": false,
+        "strict_mode": false
+      },
+      "account_lockout": {
+        "enabled": true,
+        "max_failed_attempts": 5,
+        "lockout_duration_seconds": 900,
+        "reset_on_success": true
+      },
+      "ip_validation": {
+        "enabled": false,
+        "strict": false,
+        "allow_ip_change": true
+      },
+      "token_fingerprinting": {
+        "enabled": true,
+        "bind_to_device": true
+      }
+    },
+    "auto_setup": true
+  },
+  "llm_config": {
+    "enabled": true,
+    "providers": {
+      "chat": "openai/gpt-4o"
+    },
+    "litellm_config": {
+      "num_retries": 2,
+      "request_timeout": 60
+    }
+  },
+  "memory_config": {
+    "enabled": true,
+    "provider": "cognitive",
+    "collection_name": "user_memories",
+    "embedding_model": "text-embedding-3-small",
+    "chat_model": "gpt-4o",
+    "memory_llm_model": "openai/gpt-4o",
+    "embedding_model_dims": 1536,
+    "infer": true,
+    "async_mode": true,
+    "enable_cognitive": true,
+    "max_depth": 500,
+    "cognitive": {
+      "enabled": true,
+      "emotion": {
+        "enabled": true,
+        "flashbulb_threshold": 0.7,
+        "max_stability_multiplier": 100
+      },
+      "conflict_resolution": {
+        "enabled": true,
+        "similarity_threshold": 0.85
+      },
+      "pruning": {
+        "enabled": true,
+        "max_capacity": 500,
+        "prune_percentage": 0.1,
+        "strategy": "soft_delete"
+      },
+      "cold_storage": {
+        "enabled": true,
+        "retention_days": 365
+      }
+    },
+    "categories": {
+      "enabled": true,
+      "custom_categories": ["work", "health", "finance", "travel"]
+    },
+    "reflection": {
+      "enabled": true,
+      "interval_hours": 24,
+      "message_threshold": 50,
+      "min_salience_to_keep": 0.3,
+      "store_reflections": true
+    },
+    "graph": {
+      "enabled": false
+    }
+  },
+  "managed_indexes": {
+    "conversations": [
+      {
+        "type": "regular",
+        "keys": {"user_id": 1, "created_at": -1},
+        "name": "user_conversations_idx",
+        "options": {
+          "background": true
+        }
+      },
+      {
+        "type": "regular",
+        "keys": {"created_at": -1},
+        "name": "created_idx",
+        "options": {
+          "background": true
+        }
+      }
+    ],
+    "messages": [
+      {
+        "type": "regular",
+        "keys": {"conversation_id": 1, "created_at": 1},
+        "name": "conversation_messages_idx",
+        "options": {
+          "background": true
+        }
+      },
+      {
+        "type": "regular",
+        "keys": {"user_id": 1, "created_at": -1},
+        "name": "user_messages_idx",
+        "options": {
+          "background": true
+        }
+      }
+    ],
+    "users": [
+      {
+        "type": "regular",
+        "keys": {"email": 1},
+        "name": "email_idx",
+        "options": {
+          "background": true,
+          "unique": true
+        }
+      }
+    ]
+  },
+  "websockets": {
+    "realtime": {
+      "path": "/ws",
+      "description": "Real-time message updates and memory events",
+      "auth": {
+        "required": true,
+        "csrf_required": false
+      },
+      "ping_interval": 30,
+      "ticket_ttl_seconds": 10
+    }
+  },
+  "cors": {
+    "enabled": true,
+    "allow_origins": ["http://localhost:3000", "http://localhost:8000", "http://localhost:8003"],
+    "allow_credentials": true,
+    "allow_methods": ["*"],
+    "allow_headers": ["*"]
+  }
+}

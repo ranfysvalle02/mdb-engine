@@ -1,0 +1,93 @@
+#!/bin/sh
+
+# Pre-push hook - Staff Engineer Level
+# Optimized for performance: incremental checks, better error messages, fast feedback
+
+set -e
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Allow skipping hooks with environment variable
+if [ "$SKIP_HOOKS" = "1" ]; then
+    echo "${YELLOW}⚠️  Skipping pre-push checks (SKIP_HOOKS=1)${NC}"
+    exit 0
+fi
+
+echo "${BLUE}🔍 Running pre-push verification...${NC}"
+
+# Get the directory where the hook is located (project root)
+PROJECT_ROOT="$(git rev-parse --show-toplevel)"
+cd "$PROJECT_ROOT" || exit 1
+
+# Get list of files being pushed (optimization: only check changed files)
+REMOTE="${1:-origin}"
+BRANCH="${2:-$(git rev-parse --abbrev-ref HEAD)}"
+
+# Get files that differ between local and remote
+if git rev-parse --verify "$REMOTE/$BRANCH" >/dev/null 2>&1; then
+    CHANGED_FILES=$(git diff --name-only "$REMOTE/$BRANCH"..HEAD | grep -E '\.(py)$' || echo "")
+else
+    # Branch doesn't exist remotely, check all Python files
+    CHANGED_FILES=$(git diff --name-only HEAD | grep -E '\.(py)$' || echo "")
+fi
+
+# If no Python files changed, skip checks
+if [ -z "$CHANGED_FILES" ]; then
+    echo "${GREEN}✅ No Python files changed, skipping checks${NC}"
+    exit 0
+fi
+
+FILE_COUNT=$(echo "$CHANGED_FILES" | grep -c . || echo "0")
+echo "${BLUE}📝 Verifying ${FILE_COUNT} changed file(s)...${NC}"
+
+# Check if required tools are available
+if ! command -v ruff >/dev/null 2>&1; then
+    echo "${YELLOW}⚠️  Warning: ruff not found. Installing dev dependencies...${NC}"
+    if ! pip install -e ".[dev]" >/dev/null 2>&1; then
+        echo "${RED}❌ Error: Failed to install dev dependencies${NC}"
+        echo "   Run: pip install -e '.[dev]'"
+        exit 1
+    fi
+fi
+
+# Verify formatting on changed files only (performance optimization)
+echo "${BLUE}📝 Verifying code formatting...${NC}"
+if [ -n "$CHANGED_FILES" ]; then
+    if ! echo "$CHANGED_FILES" | xargs ruff format --check 2>&1; then
+        echo "${RED}❌ Error: Code formatting check failed!${NC}"
+        echo "   Some files are not properly formatted."
+        echo "   Run 'make format' and commit the changes."
+        echo ""
+        echo "   Files that need formatting:"
+        echo "$CHANGED_FILES" | xargs ruff format --check 2>&1 | grep "Would reformat" || true
+        exit 1
+    fi
+fi
+
+# Verify linting on changed files only (performance optimization)
+echo "${BLUE}🔍 Verifying code quality...${NC}"
+if [ -n "$CHANGED_FILES" ]; then
+    if ! echo "$CHANGED_FILES" | xargs ruff check 2>&1; then
+        echo "${RED}❌ Error: Code quality check failed!${NC}"
+        echo "   Run 'make lint-local' to see issues and fix them."
+        exit 1
+    fi
+fi
+
+# Run Semgrep on changed files (if available)
+if command -v semgrep >/dev/null 2>&1 && [ -n "$CHANGED_FILES" ]; then
+    echo "${BLUE}🔒 Running security scan...${NC}"
+    if ! echo "$CHANGED_FILES" | xargs semgrep scan --config .semgrep.yml --error --quiet 2>&1; then
+        echo "${YELLOW}⚠️  Security scan found issues (non-blocking)${NC}"
+    fi
+fi
+
+echo "${GREEN}✅ All pre-push checks passed!${NC}"
+echo ""
+echo "${BLUE}💡 Note: Integration tests run in CI/CD, not locally.${NC}"
+exit 0
