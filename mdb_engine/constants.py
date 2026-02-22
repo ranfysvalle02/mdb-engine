@@ -29,6 +29,9 @@ AUTO_INDEX_HINT_THRESHOLD: Final[int] = 3
 MAX_INDEX_FIELDS: Final[int] = 4
 """Maximum number of fields in a compound index (MongoDB best practice)."""
 
+MAX_AUTO_INDEX_PATTERNS: Final[int] = 500
+"""Maximum tracked query patterns in AutoIndexManager before eviction."""
+
 MAX_CACHE_SIZE: Final[int] = 1000
 """Maximum size of authorization and validation caches before eviction."""
 

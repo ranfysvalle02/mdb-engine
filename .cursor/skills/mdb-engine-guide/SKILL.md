@@ -10,7 +10,7 @@ description: Comprehensive development guide for the mdb-engine framework (FastA
 **mdb-engine** is a batteries-included MongoDB runtime for Python. It wraps Motor (async MongoDB driver) with automatic data isolation, manifest-driven configuration, and optional AI services.
 
 **Core dependencies:** FastAPI, Motor, Pydantic V2, PyJWT, bcrypt, cryptography.
-**Python:** >=3.10 | **Version:** 0.7.11 | **License:** MIT
+**Python:** >=3.10 | **Version:** 0.8.0 | **License:** MIT
 
 **Golden rule:** Use the framework's abstractions. Do NOT write raw Motor/pymongo boilerplate, manual JWT parsing, or unscoped database access.
 
@@ -181,7 +181,7 @@ async def create_doc(data: dict, ctx: RequestContext = Depends(get_request_conte
     return {"id": doc_id}
 ```
 
-**Properties:** `engine`, `slug`, `config`, `user`, `user_roles`, `authz`, `memory`, `profile`, `embedding_service`, `llm`, `llm_model`.
+**Properties:** `engine`, `slug`, `config`, `user`, `user_roles`, `authz`, `memory`, `profile`, `embedding_service`, `llm_service`, `llm` (legacy), `llm_model`.
 **Async getters:** `get_db()`, `get_uow()`.
 **Auth helpers:** `require_user()`, `require_role(*roles)`, `check_permission(resource, action)`.
 
@@ -275,12 +275,7 @@ Full manifest with common options:
     "policy": {"provider": "casbin", "required": true},
     "users": {"enabled": true, "allow_registration": true}
   },
-  "memory_config": {
-    "enabled": true,
-    "collection_name": "user_memories",
-    "embedding_model_dims": 1536,
-    "infer": true
-  },
+  "memory_config": true,
   "cors": {
     "enabled": true,
     "allow_origins": ["http://localhost:3000"]
@@ -336,6 +331,55 @@ from mdb_engine.memory import ChatEngine
 
 Override scoring, decay, extraction, importance, persona, or reflection by passing strategy instances to `get_memory_service()`.
 
+### Accessing Embedding and LLM Services
+
+The engine caches the `EmbeddingService` and `LLMService` that were created during memory service initialization. Use these instead of creating your own:
+
+```python
+from mdb_engine.dependencies import get_embedding_service, get_llm_service
+
+@app.post("/embed")
+async def embed(text: str, embedding_svc=Depends(get_embedding_service)):
+    return await embedding_svc.embed([text])
+
+@app.post("/generate")
+async def generate(prompt: str, llm=Depends(get_llm_service)):
+    return await llm.chat_completion(messages=[{"role": "user", "content": prompt}])
+```
+
+Or outside of routes: `engine.get_embedding_service(slug)`, `engine.get_llm_service(slug)`.
+
+### Perfect Brain (Advanced Components)
+
+Enable inside `memory_config` for a unified container of SharedMemory, MemoryVeto, Consolidator, etc.:
+
+```json
+{
+  "memory_config": {
+    "preset": "full",
+    "perfect_brain": {
+      "enabled": true,
+      "memory_veto": true,
+      "shared_memory": true,
+      "timeline_service": true,
+      "consolidator": { "enabled": true, "interval_hours": 6 }
+    }
+  }
+}
+```
+
+```python
+from mdb_engine.dependencies import get_perfect_brain
+
+@app.get("/vetoes")
+async def vetoes(user_id: str, brain=Depends(get_perfect_brain)):
+    return await brain.memory_veto.get_user_vetoes(user_id=user_id)
+```
+
+### Important: `app_id` Auto-Injection in Vector Search Indexes
+
+When the engine creates vector search indexes (via `managed_indexes` or `_ensure_memory_vector_index`), it **automatically adds `app_id` as a filter field**. Do NOT add `app_id` manually to your index definitions — doing so creates duplicates and can cause Atlas errors.
+
 ---
 
 ## 8. Dependency Injection Container
@@ -360,12 +404,89 @@ async def index(svc: MyService = Depends(inject(MyService))):
 
 ---
 
-## 9. File & Module Conventions
+## 9. Framework Base Template (`mdb_base.html`)
+
+mdb-engine ships a Jinja2 base template that all app templates should extend. It guarantees correct script ordering so `BASE`, `MDB`, and `getCookie` are always defined before child scripts run.
+
+### Block hierarchy (render order)
+
+| Block | Purpose | MDB available? |
+|-------|---------|---------------|
+| `title` | Page `<title>` | N/A (server-side) |
+| `head` | `<head>` content (CSS, meta, fonts) | N/A |
+| `body` → `content` | Visual structure + page content | NO (scripts here must not use MDB) |
+| `base_js` | App-level base scripts (logout, nav) | YES |
+| `extra_js` | Page-level scripts | YES |
+
+### JavaScript globals (in `base_js` / `extra_js`)
+
+| Global | Description |
+|--------|-------------|
+| `MDB.BASE` | App mount path (e.g. `"/ai-chat"`) |
+| `MDB.AUTH_HUB` | Auth hub URL (e.g. `"/auth-hub"`) |
+| `MDB.APP_SLUG` | App slug |
+| `MDB.csrfToken()` | Current CSRF token |
+| `getCookie(name)` | Read any cookie |
+| `BASE` | Alias for `MDB.BASE` (backwards-compatible) |
+
+### App base template pattern
+
+```html
+{% extends "mdb_base.html" %}
+
+{% block head %}
+<style>/* app styles */</style>
+{% block extra_css %}{% endblock %}
+{% endblock %}
+
+{% block body %}
+<header>...</header>
+<main>{% block content %}{% endblock %}</main>
+{% endblock %}
+
+{% block base_js %}
+<script>
+async function logout() {
+    await fetch(MDB.BASE + '/logout', {
+        method: 'POST',
+        headers: { 'X-CSRF-Token': MDB.csrfToken() }
+    });
+    window.location.href = MDB.AUTH_HUB + '/login';
+}
+</script>
+{% endblock %}
+```
+
+### Page template pattern
+
+```html
+{% extends "base.html" %}
+{% block content %}<div>Page HTML</div>{% endblock %}
+{% block extra_js %}
+<script>
+// MDB.BASE, getCookie, BASE all available here
+const res = await fetch(BASE + '/api/data');
+</script>
+{% endblock %}
+```
+
+### Rules
+
+- **NEVER** put `<script>` tags that use `BASE`/`MDB` inside `{% block content %}`. They run before `MDB` is defined.
+- **ALWAYS** put scripts in `{% block extra_js %}` (page-level) or `{% block base_js %}` (app-level).
+- The engine auto-registers the framework templates directory in child Jinja2 loaders, so `{% extends "mdb_base.html" %}` works with no configuration.
+
+---
+
+## 10. File & Module Conventions
 
 ```
 my_project/
 ├── manifest.json              # App configuration
 ├── web.py                     # FastAPI app (entry point)
+├── templates/                 # Jinja2 templates
+│   ├── base.html              # App base (extends mdb_base.html)
+│   └── index.html             # Pages (extend base.html)
 ├── models/                    # Entity dataclasses
 │   └── task.py
 ├── routes/                    # APIRouter modules
@@ -375,13 +496,14 @@ my_project/
     └── task_service.py
 ```
 
+- **Templates:** App `base.html` extends `mdb_base.html`. Pages extend app `base.html`. Scripts go in `{% block extra_js %}`.
 - **Routes:** Use `APIRouter` and include in the app.
 - **Models:** Use `@dataclass` with `Entity` base for repositories, or plain Pydantic `BaseModel` for request/response schemas.
 - **Services:** Business logic classes registered in DI or created per-request.
 
 ---
 
-## 10. Creating a New Feature (Golden Path)
+## 11. Creating a New Feature (Golden Path)
 
 When asked to create a CRUD feature, follow this exact pattern.
 
@@ -491,7 +613,7 @@ app.include_router(invoices_router)
 
 ---
 
-## 11. Rules & Anti-Patterns
+## 12. Rules & Anti-Patterns
 
 ### DO NOT
 
@@ -516,7 +638,7 @@ app.include_router(invoices_router)
 
 ---
 
-## 12. Environment Variables
+## 13. Environment Variables
 
 Canonical names use the `MDB_` prefix. Legacy names still work but emit a deprecation warning.
 
@@ -533,7 +655,7 @@ Canonical names use the `MDB_` prefix. Legacy names still work but emit a deprec
 
 ---
 
-## 13. Key Imports Cheat Sheet
+## 14. Key Imports Cheat Sheet
 
 ```python
 # App creation
@@ -546,10 +668,13 @@ from mdb_engine.dependencies import (
     get_request_context,    # RequestContext (all-in-one)
     get_current_user,       # dict | None
     get_memory_service,     # BaseMemoryService
-    get_graph_service,      # GraphServiceProtocol
-    get_embedding_service,  # EmbeddingService
+    get_graph_service,          # GraphService (raises 503 if missing)
+    get_graph_service_optional, # GraphService | None (no 503)
+    get_embedding_service,  # EmbeddingService (shared singleton)
+    get_llm_service,        # LLMService (shared singleton)
+    get_perfect_brain,      # PerfectBrain container
     get_profile_service,    # ProfileService
-    get_llm_client,         # OpenAI | AzureOpenAI
+    get_llm_client,         # OpenAI | AzureOpenAI (legacy)
     get_authz_provider,     # AuthorizationProvider | None
     get_platform_info,      # PlatformInfo (multi-app nav)
     get_app_logger,         # Logger scoped to app slug

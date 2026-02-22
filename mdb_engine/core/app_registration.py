@@ -117,6 +117,7 @@ class AppRegistrationManager:
         create_indexes_callback: Callable[[str, "ManifestDict"], Any] | None = None,
         seed_data_callback: Callable[[str, dict[str, list[dict[str, Any]]]], Any] | None = None,
         initialize_osi_callback: Callable[[str, dict[str, Any]], Any] | None = None,
+        ensure_shared_services_callback: Callable[[str, dict[str, Any]], Any] | None = None,
         initialize_graph_callback: Callable[[str, dict[str, Any]], Any] | None = None,
         initialize_memory_callback: Callable[[str, dict[str, Any]], Any] | None = None,
         initialize_profile_callback: Callable[[str, dict[str, Any]], Any] | None = None,
@@ -243,6 +244,11 @@ class AppRegistrationManager:
             if initialize_osi_callback and osi_config and osi_config.get("enabled", False):
                 await initialize_osi_callback(slug, osi_config)
 
+            # Pre-create shared LLM/embedding services so graph and memory
+            # share the same instances (and the same named providers).
+            if ensure_shared_services_callback:
+                await ensure_shared_services_callback(slug, manifest)
+
             # Initialize Graph service if configured (MUST complete before memory)
             # Graph is enabled by default - users can disable via manifest
             graph_config = manifest.get("graph_config", {})
@@ -251,8 +257,17 @@ class AppRegistrationManager:
                 await initialize_graph_callback(slug, graph_config)
 
             # Initialize Memory service if configured (after graph so it can use graph service)
+            # Supports shorthand: true, "basic"/"smart"/"full", or full dict.
             memory_config = manifest.get("memory_config")
-            if initialize_memory_callback and memory_config and memory_config.get("enabled", False):
+            _mem_enabled = (
+                memory_config is True
+                or isinstance(memory_config, str)
+                or (
+                    isinstance(memory_config, dict)
+                    and (memory_config.get("enabled", False) or "preset" in memory_config)
+                )
+            )
+            if initialize_memory_callback and _mem_enabled:
                 callback_tasks.append(initialize_memory_callback(slug, memory_config))
 
             # Initialize Profile service if configured (after memory + graph)

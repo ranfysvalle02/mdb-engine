@@ -95,7 +95,7 @@ from .repositories import Entity, MongoRepository, Repository, UnitOfWork
 # Utilities
 from .utils import clean_mongo_doc, clean_mongo_docs
 
-__version__ = "0.7.11"
+__version__ = "0.8.0"
 
 
 # ---------------------------------------------------------------------------

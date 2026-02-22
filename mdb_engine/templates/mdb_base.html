@@ -1,0 +1,58 @@
+{#
+    mdb-engine framework base template.
+
+    Provides correct script ordering so MDB.BASE (and friends) are always
+    available in {% block base_js %} and {% block extra_js %}.
+
+    Block hierarchy (in render order):
+      title       — page <title>
+      head        — <head> content (CSS, meta tags, fonts, etc.)
+      body        — full visual structure; scripts here MUST NOT use MDB
+        content   — main page content (nested inside body)
+      base_js     — app-level base scripts (logout, nav helpers) — MDB available
+      extra_js    — page-level scripts — MDB available
+
+    Template globals injected by the engine (always available):
+      {{ base_path }}    — app mount path, e.g. "/ai-chat"
+      {{ auth_hub_url }} — auth hub URL, e.g. "/auth-hub"
+      {{ app_slug }}     — app slug, e.g. "ai-chat"
+
+    JavaScript globals (available in base_js / extra_js):
+      MDB.BASE         — same as {{ base_path }}
+      MDB.AUTH_HUB     — same as {{ auth_hub_url }}
+      MDB.APP_SLUG     — same as {{ app_slug }}
+      MDB.csrfToken()  — current CSRF token from cookie
+      getCookie(name)   — read any cookie by name
+      BASE              — alias for MDB.BASE (backwards-compatible)
+#}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}{% endblock %}</title>
+    {% block head %}{% endblock %}
+</head>
+<body>
+    {% block body %}
+        {% block content %}{% endblock %}
+    {% endblock %}
+
+    <script>
+    function getCookie(name) {
+        const v = `; ${document.cookie}`;
+        const p = v.split(`; ${name}=`);
+        return p.length === 2 ? p.pop().split(';').shift() : '';
+    }
+    const MDB = Object.freeze({
+        BASE: '{{ base_path | default("") }}',
+        AUTH_HUB: '{{ auth_hub_url | default("/auth-hub") }}',
+        APP_SLUG: '{{ app_slug | default("") }}',
+        csrfToken() { return getCookie('csrf_token'); },
+    });
+    const BASE = MDB.BASE;
+    </script>
+    {% block base_js %}{% endblock %}
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

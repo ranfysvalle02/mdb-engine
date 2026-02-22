@@ -19,12 +19,16 @@ async def maybe_await(value: Any) -> Any:
 
 
 async def cursor_to_list(cursor: Any, limit: int | None = None) -> list[Any]:
-    """Convert a Motor async cursor (or plain iterable) to a list.
+    """Convert a Motor async cursor **or** sync PyMongo cursor to a list.
+
+    Handles both async Motor cursors (where ``to_list`` returns a coroutine)
+    and sync PyMongo cursors (where ``to_list`` returns a plain ``list``).
 
     Args:
-        cursor: Motor ``AsyncIOMotorCursor`` or any iterable.
+        cursor: Motor ``AsyncIOMotorCursor``, PyMongo cursor, or any iterable.
         limit: Maximum number of documents to materialise (``None`` = all).
     """
     if hasattr(cursor, "to_list"):
-        return await cursor.to_list(length=limit)
+        result = cursor.to_list(length=limit)
+        return await maybe_await(result)
     return list(cursor)

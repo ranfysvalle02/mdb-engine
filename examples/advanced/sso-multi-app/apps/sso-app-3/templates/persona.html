@@ -241,7 +241,9 @@
         </div>
     </div>
 </div>
+{% endblock %}
 
+{% block extra_js %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script>
 let radarChart = null;
@@ -292,13 +294,11 @@ function renderPersona(persona) {
         
         html += '</div>';
         
-        // Render radar chart
         html += '<div class="radar-chart-container"><canvas id="radar-chart"></canvas></div>';
     }
     
     content.innerHTML = html;
     
-    // Render radar chart if traits exist
     if (persona.traits && Object.keys(persona.traits).length > 0) {
         renderRadarChart(persona.traits);
     }
@@ -363,7 +363,6 @@ function toggleEditForm() {
     form.classList.toggle('active');
     
     if (form.classList.contains('active')) {
-        // Load current persona data into form
         loadPersonaIntoForm();
     }
 }
@@ -426,7 +425,6 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-// Load persona on page load
 loadPersona();
 </script>
 {% endblock %}

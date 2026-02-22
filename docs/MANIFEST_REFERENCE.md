@@ -548,7 +548,7 @@ The Graph Service provides knowledge graph functionality with MongoDB `$graphLoo
 ```json
 {
   "graph_config": {
-    "collection_name": "__kg",
+    "collection_name": "kg",
     "auto_extract": true,
     "llm_model": "openai/gpt-4o",
     "temperature": 0.0,
@@ -563,7 +563,7 @@ The Graph Service provides knowledge graph functionality with MongoDB `$graphLoo
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `enabled` | `boolean` | `true` | Enable Graph Service (enabled by default) |
-| `collection_name` | `string` | `"__kg"` | Collection for graph nodes (prefixed with app slug) |
+| `collection_name` | `string` | `"kg"` | Collection for graph nodes (prefixed with app slug) |
 | `auto_extract` | `boolean` | `true` | Auto-extract nodes/relationships from text |
 | `llm_model` | `string` | (from llm_config) | LLM model for graph extraction |
 | `temperature` | `number` | `0.0` | Temperature for LLM extraction |

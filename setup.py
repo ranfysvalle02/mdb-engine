@@ -14,7 +14,7 @@ if readme_file.exists():
 
 setup(
     name="mdb-engine",
-    version="0.7.11",
+    version="0.8.0",
     description="MongoDB Engine",
     long_description=long_description,
     long_description_content_type="text/markdown",

@@ -305,6 +305,16 @@ class CognitiveMemoryService(
         """Get the injected ProfileService (None if not configured)."""
         return self._profile_service
 
+    @property
+    def embedding_service(self) -> Any | None:
+        """Get the EmbeddingService (or EmbeddingProvider) used by this memory service."""
+        return self._injected_embedding_service
+
+    @property
+    def llm_service(self) -> Any | None:
+        """Get the LLMService used by this memory service (None if not injected)."""
+        return self._injected_llm_service
+
     def set_profile_service(self, service: Any) -> None:
         """Inject the profile service after initialization.
 

@@ -6,7 +6,6 @@ High-level functions for creating and managing indexes based on manifest definit
 This module is part of MDB_ENGINE - MongoDB Engine.
 """
 
-import asyncio
 import json
 import logging
 from typing import Any
@@ -89,41 +88,6 @@ async def _handle_regular_index(
     try:
         created_name = await index_manager.create_index(keys, **options)
         logger.info(f"{log_prefix} Created regular index '{created_name}' " f"(requested: '{index_name}').")
-
-        # Wait for index to be ready and verify it was actually created
-        max_wait = 10  # Wait up to 10 seconds for index to be ready
-        poll_interval = 0.5
-        waited = 0
-
-        while waited < max_wait:
-            await asyncio.sleep(poll_interval)
-            waited += poll_interval
-
-            all_indexes = await index_manager.list_indexes()
-            verify_index = await index_manager.get_index(index_name)
-
-            if verify_index:
-                logger.info(f"{log_prefix} Verified index '{index_name}' exists " f"after {waited:.1f}s.")
-                break
-
-            logger.debug(
-                f"{log_prefix} Waiting for index '{index_name}' to be ready... "
-                f"({waited:.1f}s/{max_wait}s). "
-                f"Available indexes: {[idx.get('name') for idx in all_indexes]}"
-            )
-        else:
-            # Timeout - index still not found
-            all_indexes = await index_manager.list_indexes()
-            logger.error(
-                f"{log_prefix} Index '{index_name}' was NOT found after "
-                f"{max_wait}s! create_index returned '{created_name}' but index "
-                f"is not visible. Available indexes: "
-                f"{[idx.get('name') for idx in all_indexes]}"
-            )
-            raise RuntimeError(
-                f"Index '{index_name}' was not found after {max_wait}s despite "
-                f"create_index returning '{created_name}'"
-            )
     except (
         OperationFailure,
         ConnectionFailure,
@@ -406,14 +370,20 @@ async def _handle_search_index(
                 )
                 logger.info(f"{log_prefix} Index '{index_name}' now ready.")
             elif existing_index.get("status") == "FAILED":
-                logger.error(
-                    f"{log_prefix} Index '{index_name}' is in "
-                    f"FAILED state. "
-                    f"This indicates the index build failed - check "
-                    f"Atlas UI for detailed error messages. "
-                    f"Manual intervention required to resolve the "
-                    f"issue before the index can be used."
-                )
+                try:
+                    await index_manager._attempt_failed_index_recovery(  # noqa: SLF001
+                        index_name, definition, index_type
+                    )
+                    await index_manager._wait_for_search_index_ready(  # noqa: SLF001
+                        index_name, index_manager.DEFAULT_SEARCH_TIMEOUT
+                    )
+                    logger.info(f"{log_prefix} Index '{index_name}' recovered and ready.")
+                except (OperationFailure, ConnectionFailure, ServerSelectionTimeoutError, TimeoutError):
+                    logger.error(
+                        f"{log_prefix} Index '{index_name}' is in FAILED state and "
+                        f"auto-recovery failed. Manual intervention in Atlas UI required.",
+                        exc_info=True,
+                    )
             else:
                 logger.info(f"{log_prefix} Index '{index_name}' is ready.")
         else:
@@ -523,11 +493,20 @@ async def _handle_hybrid_index(
                 )
                 logger.info(f"{log_prefix} Vector index '{vector_index_name}' now ready.")
             elif existing_vector_index.get("status") == "FAILED":
-                logger.error(
-                    f"{log_prefix} Vector index '{vector_index_name}' "
-                    f"is in FAILED state. "
-                    f"Check Atlas UI for detailed error messages."
-                )
+                try:
+                    await index_manager._attempt_failed_index_recovery(  # noqa: SLF001
+                        vector_index_name, vector_definition, "vectorSearch"
+                    )
+                    await index_manager._wait_for_search_index_ready(  # noqa: SLF001
+                        vector_index_name, index_manager.DEFAULT_SEARCH_TIMEOUT
+                    )
+                    logger.info(f"{log_prefix} Vector index '{vector_index_name}' recovered and ready.")
+                except (OperationFailure, ConnectionFailure, ServerSelectionTimeoutError, TimeoutError):
+                    logger.error(
+                        f"{log_prefix} Vector index '{vector_index_name}' is in FAILED state "
+                        f"and auto-recovery failed. Check Atlas UI for details.",
+                        exc_info=True,
+                    )
             else:
                 logger.info(f"{log_prefix} Vector index '{vector_index_name}' is ready.")
         else:
@@ -566,10 +545,20 @@ async def _handle_hybrid_index(
                 )
                 logger.info(f"{log_prefix} Text index '{text_index_name}' now ready.")
             elif existing_text_index.get("status") == "FAILED":
-                logger.error(
-                    f"{log_prefix} Text index '{text_index_name}' is in FAILED "
-                    f"state. Check Atlas UI for detailed error messages."
-                )
+                try:
+                    await index_manager._attempt_failed_index_recovery(  # noqa: SLF001
+                        text_index_name, text_definition, "search"
+                    )
+                    await index_manager._wait_for_search_index_ready(  # noqa: SLF001
+                        text_index_name, index_manager.DEFAULT_SEARCH_TIMEOUT
+                    )
+                    logger.info(f"{log_prefix} Text index '{text_index_name}' recovered and ready.")
+                except (OperationFailure, ConnectionFailure, ServerSelectionTimeoutError, TimeoutError):
+                    logger.error(
+                        f"{log_prefix} Text index '{text_index_name}' is in FAILED state "
+                        f"and auto-recovery failed. Check Atlas UI for details.",
+                        exc_info=True,
+                    )
             else:
                 logger.info(f"{log_prefix} Text index '{text_index_name}' is ready.")
         else:
@@ -628,41 +617,31 @@ async def run_index_creation_for_collection(
 
     try:
         real_collection = db[collection_name]
-        # Ensure collection exists before creating indexes
-        # MongoDB will create the collection if it doesn't exist, but we need to
-        # ensure it exists for index operations. We can do this by inserting and
-        # deleting a dummy document, or by creating the collection explicitly.
+        # Ensure collection exists before creating indexes.
+        # MongoDB will auto-create on first write, but Atlas Search index
+        # operations require the collection to exist beforehand.
         try:
-            # Try to create the collection explicitly
             await db.create_collection(collection_name)
             logger.debug(f"{log_prefix} Created collection '{collection_name}' " f"for index operations.")
         except CollectionInvalid as e:
             if "already exists" in str(e).lower():
-                # Collection already exists, which is fine
                 logger.debug(f"{log_prefix} Collection '{collection_name}' already exists.")
             else:
-                # Some other CollectionInvalid error - log but continue
                 logger.warning(f"{log_prefix} CollectionInvalid when ensuring collection " f"exists: {e}")
-        except (
-            OperationFailure,
-            ConnectionFailure,
-            ServerSelectionTimeoutError,
-        ) as e:
-            # If collection creation fails for other reasons, try to ensure it exists
-            # by doing a no-op operation that will create it
-            logger.debug(
-                f"{log_prefix} Could not create collection explicitly: {e}. " f"Ensuring it exists via insert/delete."
+        except OperationFailure as e:
+            # NamespaceExists (code 48) means collection already exists
+            if getattr(e, "code", None) == 48 or "already exists" in str(e).lower():
+                logger.debug(f"{log_prefix} Collection '{collection_name}' already exists.")
+            else:
+                logger.warning(
+                    f"{log_prefix} Could not create collection explicitly: {e}. "
+                    f"Proceeding — MongoDB will create it lazily on first index operation."
+                )
+        except (ConnectionFailure, ServerSelectionTimeoutError) as e:
+            logger.warning(
+                f"{log_prefix} Could not create collection explicitly: {e}. "
+                f"Proceeding — MongoDB will create it lazily on first index operation."
             )
-            try:
-                # Insert and immediately delete a dummy doc to ensure collection exists
-                dummy_id = await real_collection.insert_one({"_temp": True})
-                await real_collection.delete_one({"_id": dummy_id.inserted_id})
-            except (
-                OperationFailure,
-                ConnectionFailure,
-                ServerSelectionTimeoutError,
-            ) as ensure_error:
-                logger.warning(f"{log_prefix} Could not ensure collection exists: " f"{ensure_error}")
 
         index_manager = AsyncAtlasIndexManager(real_collection)
         logger.info(
@@ -690,14 +669,13 @@ async def run_index_creation_for_collection(
         )
         return
 
+    errors: list[tuple[str | None, str | None, Exception]] = []
     for index_def in index_definitions:
         index_name = index_def.get("name")
         index_type = index_def.get("type")
         try:
             if index_type == INDEX_TYPE_REGULAR:
                 await _handle_regular_index(index_manager, index_def, index_name, log_prefix)
-                # Wait for index to be ready after creation
-                await asyncio.sleep(0.5)  # Give MongoDB time to make index visible
             elif index_type == INDEX_TYPE_TTL:
                 await _handle_ttl_index(index_manager, index_def, index_name, log_prefix)
             elif index_type == "partial":
@@ -734,9 +712,13 @@ async def run_index_creation_for_collection(
                 f"{log_prefix} Error managing index '{index_name}' "
                 f"(type: {index_type}): {e}. "
                 f"Collection: {collection_name}. "
-                f"This index will be skipped, but other indexes may still be "
-                f"created.",
+                f"This index was skipped; remaining indexes will still be attempted.",
                 exc_info=True,
             )
-            # Re-raise to surface the error in tests
-            raise
+            errors.append((index_name, index_type, e))
+
+    if errors:
+        failed_names = [name or "unknown" for name, _, _ in errors]
+        logger.error(f"{log_prefix} {len(errors)} of {len(index_definitions)} index(es) " f"failed: {failed_names}")
+        _, _, first_error = errors[0]
+        raise first_error

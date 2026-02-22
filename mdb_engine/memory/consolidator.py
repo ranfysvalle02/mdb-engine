@@ -84,8 +84,9 @@ class MemoryConsolidator:
         procedural_collection: "ScopedCollectionWrapper | None" = None,
         shared_collection: "ScopedCollectionWrapper | None" = None,
         memory_veto: Any = None,
-        llm_service: "LLMService | None" = None,
-        embedding_service: "EmbeddingService | None" = None,
+        *,
+        llm_service: "LLMService",
+        embedding_service: "EmbeddingService",
         neuroplasticity_engine: Any | None = None,
     ):
         """
@@ -106,22 +107,14 @@ class MemoryConsolidator:
             shared_collection: Optional shared memory collection (ScopedCollectionWrapper)
                               (defaults to db.entity_memory with scope="shared")
             memory_veto: Optional MemoryVeto instance for checking vetoes
-            llm_service: Optional LLMService instance for chat completions.
-                        When provided, all LLM calls go through this service.
-                        Falls back to direct LiteLLM calls (deprecated) if not set.
-            embedding_service: Optional EmbeddingService instance for embeddings.
-                              When provided, all embedding calls go through this service.
-                              Falls back to direct LiteLLM calls (deprecated) if not set.
+            llm_service: LLMService instance for chat completions (required).
+            embedding_service: EmbeddingService instance for embeddings (required).
 
         Note:
             If db_client is a ScopedMongoWrapper, all collections accessed through it
             are automatically scoped with app_id filtering. If it's a raw MongoDB client,
             collections should be ScopedCollectionWrapper instances passed explicitly.
         """
-        if llm_service is None:
-            raise MemoryConsolidatorError("llm_service is required. Pass an LLMService instance.")
-        if embedding_service is None:
-            raise MemoryConsolidatorError("embedding_service is required. Pass an EmbeddingService instance.")
 
         self.db_client = db_client
         # db_client might be ScopedMongoWrapper (preferred) or raw MongoDB client

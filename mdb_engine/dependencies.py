@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from .core.engine import MongoDBEngine
     from .database.scoped_wrapper import ScopedMongoWrapper
     from .embeddings.service import EmbeddingService
+    from .llm.service import LLMService
     from .memory import BaseMemoryService
     from .profile.service import ProfileService
 
@@ -101,25 +102,65 @@ async def get_unit_of_work(request: Request) -> UnitOfWork:
 
 
 async def get_embedding_service(request: Request) -> "EmbeddingService":
-    """Get the EmbeddingService for text embeddings."""
+    """Get the EmbeddingService for text embeddings.
+
+    Returns the shared service created during app initialization.
+
+    Raises:
+        HTTPException(503): If no embedding service is available.
+    """
     engine = await get_engine(request)
     slug = await get_app_slug(request)
 
-    app_config = engine.get_app(slug)
-    if not app_config:
-        raise HTTPException(503, f"App configuration not found for '{slug}'")
+    service = engine.get_embedding_service(slug)
+    if service is not None:
+        return service
 
-    embedding_config = app_config.get("embedding_config", {})
-    if not embedding_config.get("enabled", True):
-        raise HTTPException(503, "Embedding service is disabled")
+    raise HTTPException(
+        503,
+        f"Embedding service not available for app '{slug}'. "
+        "Configure embedding_config or memory_config in your manifest.",
+    )
 
-    from .embeddings.service import EmbeddingServiceError
-    from .embeddings.service import get_embedding_service as create_service
 
-    try:
-        return create_service(config=embedding_config)
-    except (EmbeddingServiceError, ValueError, RuntimeError, ImportError, AttributeError) as e:
-        raise HTTPException(503, f"Failed to initialize embedding service: {e}") from e
+async def get_llm_service(request: Request) -> "LLMService":
+    """Get the LLMService for the current app.
+
+    Returns the cached service from memory/app initialization when available.
+
+    Raises:
+        HTTPException(503): If no LLM service is configured for this app.
+    """
+    engine = await get_engine(request)
+    slug = await get_app_slug(request)
+
+    service = engine.get_llm_service(slug)
+    if service is not None:
+        return service
+
+    raise HTTPException(
+        503,
+        f"LLM service not configured for app '{slug}'. " "Add llm_config with providers to your manifest.",
+    )
+
+
+async def get_perfect_brain(request: Request) -> Any:
+    """Get the PerfectBrain container for the current app.
+
+    Raises:
+        HTTPException(503): If the engine or PerfectBrain is not available.
+    """
+    engine = await get_engine(request)
+    slug = await get_app_slug(request)
+
+    brain = engine.get_perfect_brain(slug)
+    if brain is None:
+        raise HTTPException(
+            503,
+            f"PerfectBrain not configured for app '{slug}'. "
+            "Enable it with perfect_brain.enabled=true in your manifest.",
+        )
+    return brain
 
 
 async def get_memory_service(request: Request) -> "BaseMemoryService":
@@ -188,6 +229,22 @@ async def get_graph_service(request: Request) -> Any:
             "Enable it with graph_config.enabled=true in your manifest.",
         )
     return service
+
+
+async def get_graph_service_optional(request: Request) -> Any | None:
+    """Get the graph service for the current app, or None if unavailable.
+
+    Unlike ``get_graph_service``, this does NOT raise ``HTTPException``
+    when the graph service isn't configured. Use for endpoints where graph
+    enhances results but isn't required.
+    """
+    engine = getattr(request.app.state, "engine", None)
+    if not engine:
+        return None
+    slug = getattr(request.app.state, "app_slug", None)
+    if not slug:
+        return None
+    return engine.get_graph_service(slug)
 
 
 async def get_llm_client(request: Request) -> Union["AzureOpenAI", "OpenAI"]:
@@ -307,6 +364,7 @@ class RequestContext:
         self._slug = None
         self._config = None
         self._embedding_service = None
+        self._llm_service_cached = None
         self._memory = None
         self._profile = None
         self._llm = None
@@ -384,19 +442,9 @@ class RequestContext:
 
     @property
     def embedding_service(self) -> "EmbeddingService | None":
-        """Get the embedding service (None if not configured)."""
+        """Get the shared EmbeddingService (None if not configured)."""
         if self._embedding_service is None:
-            embedding_config = self.config.get("embedding_config", {})
-            if embedding_config.get("enabled", True):
-                try:
-                    from .embeddings.service import (
-                        EmbeddingServiceError,
-                        get_embedding_service,
-                    )
-
-                    self._embedding_service = get_embedding_service(config=embedding_config)
-                except (EmbeddingServiceError, ValueError, RuntimeError, ImportError):
-                    pass
+            self._embedding_service = self.engine.get_embedding_service(self.slug)
         return self._embedding_service
 
     @property
@@ -438,6 +486,17 @@ class RequestContext:
     def llm_model(self) -> str:
         """Get the LLM model/deployment name."""
         return get_llm_model_name()
+
+    @property
+    def llm_service(self) -> "LLMService | None":
+        """Get the high-level LLMService (preferred over raw ``llm`` client).
+
+        Returns the cached service created during memory/app initialization,
+        or ``None`` if not configured.
+        """
+        if self._llm_service_cached is None:
+            self._llm_service_cached = self.engine.get_llm_service(self.slug)
+        return self._llm_service_cached
 
     @property
     def user(self) -> dict[str, Any] | None:

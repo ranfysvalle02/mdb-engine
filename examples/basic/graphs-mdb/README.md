@@ -241,7 +241,7 @@ The `manifest.json` configures the graph service:
 {
   "graph_config": {
     "enabled": true,
-    "collection_name": "__kg",
+    "collection_name": "kg",
     "auto_extract": true,
     "default_max_depth": 2,
     "vector_index_name": "graph_vector_index",

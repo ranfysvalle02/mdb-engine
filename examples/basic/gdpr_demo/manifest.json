@@ -33,25 +33,9 @@
     }
   },
   "memory_config": {
-    "enabled": true,
-    "provider": "cognitive",
-    "collection_name": "user_memories",
-    "embedding_model": "text-embedding-3-small",
-    "memory_llm_model": "openai/gpt-4o",
-    "embedding_model_dims": 1536,
-    "infer": true,
-    "async_mode": true,
-    "enable_cognitive": true,
-    "max_depth": 100,
+    "preset": "smart",
     "cognitive": {
       "enabled": true,
-      "emotion": {
-        "enabled": true,
-        "flashbulb_threshold": 0.7
-      },
-      "conflict_resolution": {
-        "enabled": true
-      },
       "pruning": {
         "max_capacity": 50,
         "strategy": "soft_delete"

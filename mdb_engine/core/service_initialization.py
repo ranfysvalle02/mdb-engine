@@ -120,12 +120,32 @@ class ServiceInitializer:
             existing_index = await index_manager.get_search_index(index_name)
 
             if existing_index:
+                # Guard: if the existing index is NOT a vectorSearch type
+                # (e.g. it's a Lucene "search" index), drop it and recreate.
+                # Trying to update a "search" index with a vectorSearch
+                # definition causes Atlas to reject with
+                # "Attribute mappings missing".
+                existing_type = existing_index.get("type", "").lower()
+                if existing_type and existing_type != "vectorsearch":
+                    contextual_logger.warning(
+                        f"Index '{index_name}' exists but is type '{existing_type}', "
+                        f"not 'vectorSearch'. Dropping and recreating as vectorSearch...",
+                        extra={
+                            "app_slug": slug,
+                            "index_name": index_name,
+                            "existing_type": existing_type,
+                        },
+                    )
+                    await index_manager.drop_search_index(name=index_name, wait_for_drop=True)
+                    existing_index = None  # Fall through to creation path below
+
+            if existing_index:
                 # Check if index definition matches (including user_id filter)
                 current_def = existing_index.get("latestDefinition", existing_index.get("definition", {}))
 
                 # Normalize definitions for comparison
                 try:
-                    from ..indexes.helpers import normalize_json_def
+                    from ..indexes.manager import normalize_json_def
 
                     normalized_current = normalize_json_def(current_def)
                     normalized_expected = normalize_json_def(index_definition)
@@ -157,11 +177,24 @@ class ServiceInitializer:
                         )
                         return
                 elif existing_index.get("status") == "FAILED":
-                    contextual_logger.error(
-                        f"Vector search index '{index_name}' exists but is in FAILED state. "
-                        f"Manual intervention in Atlas UI may be required.",
-                        extra={"app_slug": slug, "index_name": index_name},
-                    )
+                    try:
+                        await index_manager._attempt_failed_index_recovery(  # noqa: SLF001
+                            index_name, index_definition, "vectorSearch"
+                        )
+                        await index_manager._wait_for_search_index_ready(  # noqa: SLF001
+                            index_name, index_manager.DEFAULT_SEARCH_TIMEOUT
+                        )
+                        contextual_logger.info(
+                            f"Vector search index '{index_name}' recovered from FAILED state",
+                            extra={"app_slug": slug, "index_name": index_name},
+                        )
+                    except (OperationFailure, ConnectionFailure, ServerSelectionTimeoutError, TimeoutError):
+                        contextual_logger.error(
+                            f"Vector search index '{index_name}' is in FAILED state and "
+                            f"auto-recovery failed. Manual intervention in Atlas UI may be required.",
+                            extra={"app_slug": slug, "index_name": index_name},
+                            exc_info=True,
+                        )
                     return
                 else:
                     # Index exists but definition doesn't match (missing required filters)
@@ -306,6 +339,10 @@ class ServiceInitializer:
         self._memory_services: dict[str, MemoryServiceProtocol] = {}
         self._procedural_services: dict[str, ProceduralMemoryProtocol] = {}
         self._profile_services: dict[str, Any] = {}  # str -> ProfileService
+        self._embedding_services: dict[str, Any] = {}  # str -> EmbeddingService
+        self._llm_services: dict[str, Any] = {}  # str -> LLMService
+        self._perfect_brain_services: dict[str, Any] = {}  # str -> PerfectBrain
+        self._failed_graph_configs: dict[str, tuple[dict[str, Any], dict[str, Any] | None]] = {}
         self._websocket_configs: dict[str, dict[str, Any]] = {}
         # OSI registries (one per app)
         self._osi_registries: dict[str, Any] = {}  # str -> OsiModelRegistry
@@ -361,10 +398,24 @@ class ServiceInitializer:
                     )
                     return
                 elif existing_index.get("status") == "FAILED":
-                    contextual_logger.error(
-                        f"Graph vector search index '{index_name}' is in FAILED state.",
-                        extra={"app_slug": slug, "index_name": index_name},
-                    )
+                    try:
+                        await index_manager._attempt_failed_index_recovery(  # noqa: SLF001
+                            index_name, index_definition, "vectorSearch"
+                        )
+                        await index_manager._wait_for_search_index_ready(  # noqa: SLF001
+                            index_name, index_manager.DEFAULT_SEARCH_TIMEOUT
+                        )
+                        contextual_logger.info(
+                            f"Graph vector search index '{index_name}' recovered from FAILED state",
+                            extra={"app_slug": slug, "index_name": index_name},
+                        )
+                    except (OperationFailure, ConnectionFailure, ServerSelectionTimeoutError, TimeoutError):
+                        contextual_logger.error(
+                            f"Graph vector search index '{index_name}' is in FAILED state and "
+                            f"auto-recovery failed. Manual intervention in Atlas UI may be required.",
+                            extra={"app_slug": slug, "index_name": index_name},
+                            exc_info=True,
+                        )
                     return
                 else:
                     contextual_logger.info(
@@ -557,6 +608,66 @@ class ServiceInitializer:
         """
         return self._osi_registries.get(slug)
 
+    def _ensure_shared_services(
+        self,
+        slug: str,
+        llm_config: dict[str, Any] | None = None,
+        embedding_config: dict[str, Any] | None = None,
+        memory_config: dict[str, Any] | None = None,
+    ) -> tuple[Any | None, Any | None]:
+        """Create-once LLM and embedding services for an app.
+
+        Called before graph and memory initialization so both subsystems
+        share the same service instances (and the same named providers).
+
+        Returns:
+            ``(llm_service, embedding_service)`` — either or both may be ``None``.
+        """
+        # --- LLM ---
+        llm_service = self._llm_services.get(slug)
+        if llm_service is None and llm_config:
+            try:
+                from ..llm.service import get_llm_service as _create_llm
+
+                llm_service = _create_llm(config=llm_config)
+                self._llm_services[slug] = llm_service
+                contextual_logger.info(
+                    f"Shared LLMService created for '{slug}'",
+                    extra={"app_slug": slug},
+                )
+            except (ImportError, TypeError, ValueError, RuntimeError) as exc:
+                contextual_logger.debug(
+                    f"Could not create shared LLMService for '{slug}': {exc}",
+                    extra={"app_slug": slug},
+                )
+
+        # --- Embedding ---
+        embedding_service = self._embedding_services.get(slug)
+        if embedding_service is None:
+            try:
+                from ..embeddings.service import get_embedding_service as _create_emb
+
+                cfg: dict[str, Any] = {}
+                if embedding_config:
+                    cfg = embedding_config
+                elif memory_config and isinstance(memory_config, dict):
+                    model = memory_config.get("embedding_model", "text-embedding-3-small")
+                    cfg = {"default_embedding_model": model}
+
+                embedding_service = _create_emb(config=cfg if cfg else None)
+                self._embedding_services[slug] = embedding_service
+                contextual_logger.info(
+                    f"Shared EmbeddingService created for '{slug}'",
+                    extra={"app_slug": slug},
+                )
+            except (ImportError, TypeError, ValueError, RuntimeError) as exc:
+                contextual_logger.debug(
+                    f"Could not create shared EmbeddingService for '{slug}': {exc}",
+                    extra={"app_slug": slug},
+                )
+
+        return llm_service, embedding_service
+
     async def initialize_graph_service(
         self,
         slug: str,
@@ -618,9 +729,19 @@ class ServiceInitializer:
                 # Use MDB Engine's scoped collections for proper app_id filtering and scoping
                 scoped_db = await self.get_scoped_db_fn(slug)
                 base_collection_name = graph_config.get("collection_name", "kg")
-                # Normalize legacy "__kg" to "kg" (private attributes are blocked by ScopedMongoWrapper)
-                if base_collection_name == "__kg":
-                    base_collection_name = "kg"
+
+                if base_collection_name.startswith("__"):
+                    contextual_logger.warning(
+                        f"graph_config.collection_name '{base_collection_name}' uses a "
+                        f"double-underscore prefix which is incompatible with "
+                        f"ScopedMongoWrapper (Python name mangling). "
+                        f"Automatically rewriting to '{base_collection_name.lstrip('_')}'. "
+                        f"Please update your manifest to use "
+                        f"'collection_name': '{base_collection_name.lstrip('_')}'.",
+                        extra={"app_slug": slug},
+                    )
+                    base_collection_name = base_collection_name.lstrip("_")
+
                 # Get prefixed collection name for index management (indexes need full name)
                 if base_collection_name.startswith(f"{slug}_"):
                     prefixed_collection_name = base_collection_name
@@ -658,44 +779,40 @@ class ServiceInitializer:
                 )
                 return
 
-            # Try to get LLM and Embedding services (optional for graph service)
-            llm_service = None
-            embedding_service = None
+            # Reuse the shared LLM/embedding services that were created by
+            # _ensure_shared_services (called before graph init).
+            # Fall back to creating graph-specific instances for backward compat.
+            llm_service = self._llm_services.get(slug)
+            embedding_service = self._embedding_services.get(slug)
 
-            try:
-                from ..llm.service import get_llm_service
+            if llm_service is None:
+                try:
+                    from ..llm.service import get_llm_service
 
-                # Use graph_config's llm_config/llm_model if provided,
-                # otherwise fall back to app's llm_config
-                graph_llm_config = graph_config.get("llm_config", {})
-                if graph_config.get("llm_model"):
-                    graph_llm_config["default_model"] = graph_config["llm_model"]
-                elif llm_config and not graph_llm_config:
-                    # Inherit from app's LLM service configuration if not
-                    # explicitly set in graph_config
-                    graph_llm_config = llm_config.copy()
-                    model = llm_config.get("default_model")
-                    contextual_logger.info(
-                        f"Graph service inheriting LLM model from app's " f"llm_config: {model}",
+                    graph_llm_config = graph_config.get("llm_config", {})
+                    if graph_config.get("llm_model"):
+                        graph_llm_config["default_model"] = graph_config["llm_model"]
+                    elif llm_config and not graph_llm_config:
+                        graph_llm_config = llm_config.copy()
+                    if graph_llm_config:
+                        llm_service = get_llm_service(config=graph_llm_config)
+                except (ImportError, RuntimeError, ValueError) as e:
+                    contextual_logger.warning(
+                        f"LLM service not available for graph extraction: {e}",
                         extra={"app_slug": slug},
                     )
-                llm_service = get_llm_service(config=graph_llm_config if graph_llm_config else None)
-            except (ImportError, RuntimeError, ValueError) as e:
-                contextual_logger.warning(
-                    f"LLM service not available for graph extraction: {e}",
-                    extra={"app_slug": slug},
-                )
 
-            try:
-                from ..embeddings.service import get_embedding_service
+            if embedding_service is None:
+                try:
+                    from ..embeddings.service import get_embedding_service
 
-                embedding_config = graph_config.get("embedding_config", {})
-                embedding_service = get_embedding_service(config=embedding_config if embedding_config else None)
-            except (ImportError, RuntimeError, ValueError) as e:
-                contextual_logger.warning(
-                    f"Embedding service not available for graph hybrid search: {e}",
-                    extra={"app_slug": slug},
-                )
+                    emb_cfg = graph_config.get("embedding_config", {})
+                    embedding_service = get_embedding_service(config=emb_cfg if emb_cfg else None)
+                except (ImportError, RuntimeError, ValueError) as e:
+                    contextual_logger.warning(
+                        f"Embedding service not available for graph hybrid search: {e}",
+                        extra={"app_slug": slug},
+                    )
 
             # Update config with collection name for the service
             service_config = graph_config.copy()
@@ -784,8 +901,11 @@ class ServiceInitializer:
             # Remove graph service from dict if it was partially initialized
             if slug in self._graph_services:
                 del self._graph_services[slug]
+            # Store config for lazy retry on next get_graph_service() call
+            self._failed_graph_configs[slug] = (graph_config, llm_config)
             contextual_logger.error(
-                f"Failed to initialize graph service for app '{slug}': {e}",
+                f"Failed to initialize graph service for app '{slug}' "
+                f"(will retry lazily on first get_graph_service call): {e}",
                 extra={"app_slug": slug, "error": str(e)},
                 exc_info=True,
             )
@@ -793,7 +913,7 @@ class ServiceInitializer:
     async def initialize_memory_service(
         self,
         slug: str,
-        memory_config: dict[str, Any] | None,
+        memory_config: dict[str, Any] | str | bool | None,
         llm_config: dict[str, Any] | None = None,
     ) -> None:
         """
@@ -805,14 +925,40 @@ class ServiceInitializer:
 
         Args:
             slug: App slug
-            memory_config: Memory configuration from manifest (already validated).
-                Can be None or empty dict to skip initialization.
+            memory_config: Memory configuration from manifest.  Accepts:
+                - ``True`` — shorthand for ``{"enabled": True}``
+                - A preset name string (``"basic"``, ``"smart"``, ``"full"``)
+                - A dict (optionally with ``"preset"`` key for overrides)
+                - ``None`` or empty dict to skip initialization.
             llm_config: Optional LLM configuration from manifest. If provided, services
                 will use the LLM service's default_model instead of hardcoded defaults.
         """
+        # Normalize shorthand forms: true, "basic", "smart", "full"
+        _resolved_preset = "custom"
+        if memory_config is True:
+            memory_config = {"enabled": True}
+            _resolved_preset = "basic"
+        elif isinstance(memory_config, str):
+            from ..memory.presets import resolve_memory_preset
+
+            _resolved_preset = memory_config
+            memory_config = resolve_memory_preset(memory_config)
+
         # Handle None or empty config
         if not memory_config:
             return
+
+        # Resolve preset+overrides: {"preset": "smart", "embedding_model": "..."}
+        if isinstance(memory_config, dict) and "preset" in memory_config:
+            from ..memory.presets import resolve_memory_preset
+
+            _resolved_preset = memory_config.pop("preset")
+            base = resolve_memory_preset(_resolved_preset)
+            base.update(memory_config)
+            memory_config = base
+
+        # Tag for startup log
+        memory_config["_resolved_preset"] = _resolved_preset
 
         # Check if memory is enabled (must be checked before import)
         if not memory_config.get("enabled", False):
@@ -859,7 +1005,7 @@ class ServiceInitializer:
             # dropped critical keys like enable_cognitive, categories,
             # cognitive, persona, memory_llm_model, extraction_provider,
             # reflection, emotion_weight, etc.
-            _excluded_keys = {"enabled", "provider"}
+            _excluded_keys = {"enabled", "provider", "_resolved_preset"}
 
             service_config = {k: v for k, v in memory_config.items() if k not in _excluded_keys}
 
@@ -939,7 +1085,11 @@ class ServiceInitializer:
 
                 # Automatically ensure vector search index exists (use prefixed name for index ops)
                 index_name = service_config.get("index_name", f"{prefixed_collection_name}_vector_index")
-                embedding_dims = service_config.get("embedding_model_dims", 1536)
+                from ..memory.presets import resolve_embedding_dims
+
+                embedding_model = service_config.get("embedding_model")
+                explicit_dims = service_config.get("embedding_model_dims") or service_config.get("embedding_dims")
+                embedding_dims = resolve_embedding_dims(embedding_model, explicit_dims)
                 await self._ensure_memory_vector_index(
                     slug=slug,
                     collection_name=prefixed_collection_name,
@@ -992,18 +1142,29 @@ class ServiceInitializer:
                         extra={"app_slug": slug, "llm_model": default_model},
                     )
 
-            # Create Memory service using factory function
+            # Create Memory service using factory function.
+            # Pass the shared LLM/embedding services so the builder
+            # reuses them (and their named providers like "extraction").
             memory_service = get_memory_service(
                 app_slug=slug,
                 config=service_config,
                 provider=provider,
                 collection=collection,
                 graph_service=graph_service,
+                llm_service=self._llm_services.get(slug),
+                embedding_service=self._embedding_services.get(slug),
             )
             self._memory_services[slug] = memory_service
 
+            # One-line summary so developers can see resolved config at a glance
+            _emb_model = service_config.get("embedding_model", "text-embedding-3-small")
+            _emb_dims = embedding_dims
+            _llm_model = service_config.get("memory_llm_model", "auto-detect")
+            _cognitive = "on" if service_config.get("enable_cognitive", True) else "off"
+            _preset = _resolved_preset
             contextual_logger.info(
-                f"{provider.capitalize()} memory service initialized for app '{slug}'",
+                f"Memory service for '{slug}': model={_llm_model}, "
+                f"embedding={_emb_model} ({_emb_dims}d), cognitive={_cognitive}, preset={_preset}",
                 extra={"app_slug": slug, "provider": provider},
             )
         except (CognitiveMemoryServiceError, ValueError) as e:
@@ -1555,6 +1716,11 @@ class ServiceInitializer:
         """
         Get graph service for an app.
 
+        If initialization failed at startup, schedules a lazy retry as a
+        background task so the next call will find the service ready.
+        When the retry succeeds the graph service is also re-injected into the
+        memory service (if it was initialized without one).
+
         Args:
             slug: App slug
 
@@ -1563,12 +1729,11 @@ class ServiceInitializer:
             The returned service implements GraphServiceProtocol for type-safe access.
         """
         try:
-            # Try exact match first
             service = self._graph_services.get(slug)
             if service is not None:
                 return service
 
-            # Try case-insensitive lookup (handle case mismatches)
+            # Case-insensitive fallback
             slug_lower = slug.lower()
             for stored_slug, stored_service in self._graph_services.items():
                 if stored_slug.lower() == slug_lower:
@@ -1579,13 +1744,23 @@ class ServiceInitializer:
                     )
                     return stored_service
 
-            available_slugs = list(self._graph_services.keys())
-            contextual_logger.debug(
-                f"Graph service not found for '{slug}' - "
-                f"it may not be initialized yet or graph is disabled. "
-                f"Available services: {available_slugs}",
-                extra={"app_slug": slug, "available_slugs": available_slugs},
-            )
+            # Lazy retry: if startup init failed, try once more as a background task
+            failed = self._failed_graph_configs.pop(slug, None)
+            if failed:
+                graph_config, llm_config = failed
+                contextual_logger.info(
+                    f"Scheduling lazy graph service retry for '{slug}'...",
+                    extra={"app_slug": slug},
+                )
+                import asyncio
+
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        loop.create_task(self._lazy_init_graph(slug, graph_config, llm_config))
+                except RuntimeError:
+                    pass
+
             return None
         except (KeyError, AttributeError, TypeError) as e:
             contextual_logger.error(
@@ -1594,6 +1769,31 @@ class ServiceInitializer:
                 extra={"app_slug": slug, "error": str(e)},
             )
             return None
+
+    async def _lazy_init_graph(
+        self,
+        slug: str,
+        graph_config: dict[str, Any],
+        llm_config: dict[str, Any] | None,
+    ) -> None:
+        """Retry graph initialization and re-inject into memory service."""
+        try:
+            await self.initialize_graph_service(slug, graph_config, llm_config)
+            service = self._graph_services.get(slug)
+            if service:
+                # Re-inject into memory service if it was initialized without a graph
+                memory_svc = self._memory_services.get(slug)
+                if memory_svc and not getattr(memory_svc, "_graph_service", None):
+                    memory_svc._graph_service = service  # noqa: SLF001
+                    contextual_logger.info(
+                        f"Graph service re-injected into memory service for '{slug}' " f"(auto_extract now available)",
+                        extra={"app_slug": slug},
+                    )
+        except (ImportError, AttributeError, TypeError, ValueError, RuntimeError, OSError) as e:
+            contextual_logger.warning(
+                f"Lazy graph service retry failed for '{slug}': {e}",
+                extra={"app_slug": slug, "error": str(e)},
+            )
 
     def get_memory_service(self, slug: str) -> MemoryServiceProtocol | None:
         """
@@ -1680,11 +1880,102 @@ class ServiceInitializer:
             )
             return None
 
+    async def initialize_perfect_brain(
+        self,
+        slug: str,
+        perfect_brain_config: dict[str, Any] | None,
+    ) -> None:
+        """
+        Initialize Perfect Brain subsystem for an app.
+
+        Must be called AFTER memory, embedding, and LLM services are
+        initialized so that shared service instances can be injected.
+
+        Args:
+            slug: App slug
+            perfect_brain_config: ``perfect_brain`` section from manifest
+        """
+        if not perfect_brain_config or not perfect_brain_config.get("enabled", False):
+            return
+
+        try:
+            from ..memory.perfect_brain import PerfectBrain
+
+            scoped_db = await self.get_scoped_db_fn(slug)
+            embedding_service = self._embedding_services.get(slug)
+            llm_service = self._llm_services.get(slug)
+
+            brain = PerfectBrain(
+                slug=slug,
+                scoped_db=scoped_db,
+                embedding_service=embedding_service,
+                llm_service=llm_service,
+                config=perfect_brain_config,
+            )
+            self._perfect_brain_services[slug] = brain
+
+            contextual_logger.info(
+                f"PerfectBrain initialized for app '{slug}': " f"{brain.active_components}",
+                extra={"app_slug": slug},
+            )
+        except (ImportError, AttributeError, TypeError, ValueError, RuntimeError) as e:
+            contextual_logger.error(
+                f"Failed to initialize PerfectBrain for '{slug}': {e}",
+                extra={"app_slug": slug, "error": str(e)},
+                exc_info=True,
+            )
+
+    def get_perfect_brain(self, slug: str) -> Any | None:
+        """
+        Get PerfectBrain container for an app.
+
+        Args:
+            slug: App slug
+
+        Returns:
+            PerfectBrain instance or None
+        """
+        return self._perfect_brain_services.get(slug)
+
+    def get_embedding_service(self, slug: str) -> Any | None:
+        """
+        Get the cached EmbeddingService for an app.
+
+        Returns the service created during memory service initialization,
+        or None if no embedding service was created for this app.
+
+        Args:
+            slug: App slug
+
+        Returns:
+            EmbeddingService instance or None
+        """
+        return self._embedding_services.get(slug)
+
+    def get_llm_service(self, slug: str) -> Any | None:
+        """
+        Get the cached LLMService for an app.
+
+        Returns the service created during memory/app initialization,
+        or None if no LLM service was created for this app.
+
+        Args:
+            slug: App slug
+
+        Returns:
+            LLMService instance or None
+        """
+        return self._llm_services.get(slug)
+
     def clear_services(self) -> None:
         """Clear all service state."""
         self._graph_services.clear()
+        self._failed_graph_configs.clear()
         self._memory_services.clear()
         self._procedural_services.clear()
         self._profile_services.clear()
+        self._embedding_services.clear()
+        self._llm_services.clear()
+        self._perfect_brain_services.clear()
         self._websocket_configs.clear()
         self._osi_registries.clear()

@@ -17,24 +17,13 @@
     }
   },
   "memory_config": {
-    "enabled": true,
-    "provider": "cognitive",
+    "preset": "full",
     "collection_name": "member_memories",
-    "embedding_model": "text-embedding-3-small",
-    "embedding_model_dims": 1536,
     "chat_model": "gemini/gemini-2.5-flash-lite",
     "memory_llm_model": "gemini/gemini-2.5-flash-lite",
     "extraction_provider": "extraction",
-    "infer": true,
-    "enable_cognitive": true,
     "max_depth": 500,
-    "emotion_weight": 0.5,
-    "recency_weight": 0.3,
-    "recency_half_life_hours": 168,
     "spreading_activation": true,
-    "activation_discount": 0.7,
-    "salience_gate": true,
-    "salience_threshold": 0.3,
     "persona": {
       "enabled": true,
       "default_role": "Member Berry - Movie Memory Companion",
@@ -48,67 +37,28 @@
       }
     },
     "cognitive": {
-      "enabled": true,
-      "emotion": {
-        "enabled": true,
-        "flashbulb_threshold": 0.7,
-        "max_stability_multiplier": 100
-      },
-      "conflict_resolution": {
-        "enabled": true,
-        "similarity_threshold": 0.85
-      },
       "pruning": {
-        "enabled": true,
         "max_capacity": 1000,
         "prune_percentage": 0.05,
         "strategy": "soft_delete"
       },
       "cold_storage": {
-        "enabled": true,
         "retention_days": 365
       }
     },
     "categories": {
-      "enabled": true,
       "custom_categories": [
-        "favorites",
-        "reviews",
-        "watchlist",
-        "nostalgia",
-        "preferences",
-        "actors",
-        "directors",
-        "experiences"
+        "favorites", "reviews", "watchlist", "nostalgia",
+        "preferences", "actors", "directors", "experiences"
       ]
     },
-    "reflection": {
-      "enabled": true,
-      "interval_hours": 24,
-      "message_threshold": 50,
-      "min_salience_to_keep": 0.3,
-      "store_reflections": true
-    },
     "memory_types": {
-      "enabled": true,
-      "auto_detect": true,
-      "default_type": "semantic",
-      "episodic_retention_days": 365,
-      "working_ttl_hours": 24
-    },
-    "consolidation": {
-      "extract_entities": true,
-      "route_by_type": true,
-      "link_to_graph": true
-    },
-    "graph": {
-      "enabled": true,
-      "auto_extract": true
+      "episodic_retention_days": 365
     }
   },
   "graph_config": {
     "enabled": true,
-    "collection_name": "__kg",
+    "collection_name": "kg",
     "auto_extract": true,
     "default_max_depth": 2,
     "node_types": [

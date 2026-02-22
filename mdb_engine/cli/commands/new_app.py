@@ -35,25 +35,25 @@ Routes are auto-imported by the engine when mounted via create_multi_app.
 """
 
 import logging
+from pathlib import Path
 
 from fastapi import Depends, Request
-from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
 
 from mdb_engine.dependencies import get_scoped_db
 
 logger = logging.getLogger(__name__)
+templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 
-@app.get("/", response_class=HTMLResponse)
+@app.get("/")
 async def index(request: Request):
     user = getattr(request.state, "user", None)
     if not user:
-        from urllib.parse import quote_plus
         auth_hub_url = getattr(request.state, "auth_hub_url", "/auth-hub")
-        return HTMLResponse(
-            f\'<p>Not logged in. <a href="{{auth_hub_url}}/login">Login</a></p>\'
-        )
-    return HTMLResponse(f"<h1>Welcome to {name}</h1><p>Hello {{user.get(\'email\')}}</p>")
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(auth_hub_url + "/login")
+    return templates.TemplateResponse("index.html", {{"request": request, "user": user}})
 '''
 
 _WEB_PY_MEMORY_TEMPLATE = '''\
@@ -64,24 +64,25 @@ Routes are auto-imported by the engine when mounted via create_multi_app.
 """
 
 import logging
+from pathlib import Path
 
 from fastapi import Depends, Request
-from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
 
 from mdb_engine.dependencies import get_memory_service, get_scoped_db
 
 logger = logging.getLogger(__name__)
+templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 
-@app.get("/", response_class=HTMLResponse)
+@app.get("/")
 async def index(request: Request):
     user = getattr(request.state, "user", None)
     if not user:
         auth_hub_url = getattr(request.state, "auth_hub_url", "/auth-hub")
-        return HTMLResponse(
-            f\'<p>Not logged in. <a href="{{auth_hub_url}}/login">Login</a></p>\'
-        )
-    return HTMLResponse(f"<h1>Welcome to {name}</h1><p>Hello {{user.get(\'email\')}}</p>")
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(auth_hub_url + "/login")
+    return templates.TemplateResponse("index.html", {{"request": request, "user": user}})
 
 
 @app.post("/api/remember")
@@ -101,6 +102,40 @@ async def recall(q: str, memory=Depends(get_memory_service), request: Request = 
     user_id = str(user["_id"]) if user else "anonymous"
     return await memory.search(query=q, user_id=user_id, limit=5)
 '''
+
+_BASE_HTML_TEMPLATE = """\
+{{% extends "mdb_base.html" %}}
+
+{{% block title %}}{name}{{% endblock %}}
+
+{{% block head %}}
+<style>
+    body {{ font-family: system-ui, sans-serif; background: #0f0f12; color: #f4f4f5; }}
+    .container {{ max-width: 800px; margin: 2rem auto; padding: 0 1rem; }}
+    .card {{ background: #1a1a1f; border-radius: 12px; padding: 1.5rem; margin-bottom: 1rem; }}
+</style>
+{{% block extra_css %}}{{% endblock %}}
+{{% endblock %}}
+
+{{% block body %}}
+<main class="container">
+    {{% block content %}}{{% endblock %}}
+</main>
+{{% endblock %}}
+"""
+
+_INDEX_HTML_TEMPLATE = """\
+{{% extends "base.html" %}}
+
+{{% block title %}}{name}{{% endblock %}}
+
+{{% block content %}}
+<div class="card">
+    <h1>Welcome to {name}</h1>
+    <p>Hello, {{{{ user.email }}}}!</p>
+</div>
+{{% endblock %}}
+"""
 
 
 @click.command()
@@ -146,7 +181,7 @@ def new_app(slug: str, mode: str, path_prefix: str | None, services: str, output
     if "graph" in service_list:
         manifest["graph_config"] = {
             "enabled": True,
-            "collection_name": "__kg",
+            "collection_name": "kg",
             "auto_extract": True,
         }
 
@@ -163,9 +198,16 @@ def new_app(slug: str, mode: str, path_prefix: str | None, services: str, output
     template = _WEB_PY_MEMORY_TEMPLATE if "memory" in service_list else _WEB_PY_TEMPLATE
     (app_dir / "web.py").write_text(template.format(name=name))
 
+    templates_dir = app_dir / "templates"
+    templates_dir.mkdir()
+    (templates_dir / "base.html").write_text(_BASE_HTML_TEMPLATE.format(name=name))
+    (templates_dir / "index.html").write_text(_INDEX_HTML_TEMPLATE.format(name=name))
+
     click.echo(click.style(f"Created app '{slug}' in {app_dir}/", fg="green"))
-    click.echo("  manifest.json  — app configuration")
-    click.echo("  web.py         — route handlers")
+    click.echo("  manifest.json        — app configuration")
+    click.echo("  web.py               — route handlers")
+    click.echo("  templates/base.html  — app base template (extends mdb_base.html)")
+    click.echo("  templates/index.html — index page")
     if path_prefix:
         click.echo(f'\nMount with path_prefix="{path_prefix}"')
     else:

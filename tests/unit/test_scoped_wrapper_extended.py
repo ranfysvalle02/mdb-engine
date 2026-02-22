@@ -83,27 +83,25 @@ class TestAsyncAtlasIndexManagerExtended:
 
     @pytest.mark.asyncio
     async def test_handle_existing_index_failed_state(self):
-        """Test handling of index in FAILED state."""
+        """Test handling of index in FAILED state triggers auto-recovery."""
         mock_coll = MagicMock()
-        mock_coll.update_search_index = AsyncMock()  # Required if definition check fails
 
         with patch("mdb_engine.database.scoped_wrapper.AsyncIOMotorCollection", MagicMock):
-            manager = AsyncAtlasIndexManager(mock_coll)
+            with patch.object(
+                AsyncAtlasIndexManager, "_attempt_failed_index_recovery", new_callable=AsyncMock, return_value=False
+            ) as mock_recovery:
+                manager = AsyncAtlasIndexManager(mock_coll)
 
-            # Provide matching definition to avoid update trigger
-            existing = {
-                "status": "FAILED",
-                "queryable": False,
-                "latestDefinition": {"mappings": {"dynamic": True}},
-            }
-            definition = {"mappings": {"dynamic": True}}
+                existing = {
+                    "status": "FAILED",
+                    "queryable": False,
+                    "latestDefinition": {"mappings": {"dynamic": True}},
+                }
+                definition = {"mappings": {"dynamic": True}}
 
-            # Should return False (not ready) and log error
-            with patch("mdb_engine.database.scoped_wrapper.logger") as mock_logger:
                 result = await manager._handle_existing_index(existing, definition, "search", "idx")  # noqa: SLF001
                 assert result is False
-                mock_logger.error.assert_called()
-                assert "FAILED state" in mock_logger.error.call_args[0][0]
+                mock_recovery.assert_awaited_once_with("idx", definition, "search")
 
     @pytest.mark.asyncio
     async def test_handle_existing_index_definition_changed(self):

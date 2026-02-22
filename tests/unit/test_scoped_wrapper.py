@@ -1189,20 +1189,25 @@ class TestAsyncAtlasIndexManager:
 
     @pytest.mark.asyncio
     async def test_handle_existing_index_failed_status(self, mock_mongo_collection):
-        """Test _handle_existing_index when index status is FAILED (lines 210-215)."""
+        """Test _handle_existing_index when index status is FAILED triggers auto-recovery."""
         from mdb_engine.database.scoped_wrapper import AsyncAtlasIndexManager
 
         manager = AsyncAtlasIndexManager(mock_mongo_collection)
 
-        with patch(
-            "mdb_engine.database.scoped_wrapper.AsyncAtlasIndexManager._check_definition_changed",  # noqa: SLF001
-            return_value=(False, None),
+        with (
+            patch(
+                "mdb_engine.database.scoped_wrapper.AsyncAtlasIndexManager._check_definition_changed",  # noqa: SLF001
+                return_value=(False, None),
+            ),
+            patch.object(
+                AsyncAtlasIndexManager, "_attempt_failed_index_recovery", new_callable=AsyncMock, return_value=False
+            ) as mock_recovery,
         ):
             existing_index = {
                 "name": "test_idx",
                 "latestDefinition": {"mappings": {"dynamic": False}},
                 "queryable": False,
-                "status": "FAILED",  # Failed status
+                "status": "FAILED",
             }
             definition = {"mappings": {"dynamic": False}}
 
@@ -1210,7 +1215,8 @@ class TestAsyncAtlasIndexManager:
                 existing_index, definition, "vectorsearch", "test_idx"
             )
 
-            assert result is False  # Will wait below
+            assert result is False
+            mock_recovery.assert_awaited_once_with("test_idx", definition, "vectorsearch")
 
     @pytest.mark.asyncio
     async def test_handle_existing_index_not_queryable(self, mock_mongo_collection):
@@ -1630,6 +1636,9 @@ class TestAutoIndexManager:
             auto_manager._creation_cache[index_name] = False  # noqa: SLF001
             # Ensure pending task is cleaned up
             auto_manager._pending_tasks.pop(index_name, None)  # noqa: SLF001
+
+        # Re-seed query count above threshold (successful creation evicts the count)
+        auto_manager._query_counts[index_name] = 10  # noqa: SLF001
 
         # Second call with same query - should create new task since previous completed
         await auto_manager.ensure_index_for_query({"name": "test"})

@@ -30,21 +30,39 @@ class SearchMixin:
     _community_service: Any | None = None
 
     def _get_community_service(self) -> Any:
-        """Lazily create and cache a CommunityService instance."""
+        """Lazily create and cache a CommunityService instance.
+
+        On first creation, schedules a background ``maybe_rebuild()`` so that
+        community detection happens lazily rather than blocking startup.
+        """
         if self._community_service is None:
             from .community import get_community_service
 
             db = self.collection.database
-            community_collection = db[f"{self._app_slug}__kg_communities"]
+            community_collection = db[f"{self._app_slug}_kg_communities"]
+
+            graphrag_cfg = self.config.get("graphrag_config", {})
+            cd_cfg = graphrag_cfg.get("community_detection", {})
 
             self._community_service = get_community_service(
                 app_slug=self._app_slug,
                 node_collection=self.collection,
                 community_collection=community_collection,
-                config=self.config.get("graphrag_config", {}).get("community_detection", {}),
+                config=cd_cfg,
                 llm_service=self.llm_service,
                 embedding_service=self.embedding_service,
             )
+
+            if cd_cfg.get("enabled", True):
+                import asyncio
+
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        loop.create_task(self._community_service.maybe_rebuild())
+                except RuntimeError:
+                    pass
+
         return self._community_service
 
     async def hybrid_search(

@@ -134,17 +134,31 @@ class AppLifecycleMixin:
 
                 await self._service_initializer.initialize_osi_service(slug, enriched)
 
+        async def ensure_shared_services_callback(slug: str, _manifest: dict[str, Any]) -> None:
+            """Pre-create LLM and embedding services so graph + memory share them."""
+            if self._service_initializer:
+                raw_mem = _manifest.get("memory_config")
+                self._service_initializer._ensure_shared_services(  # noqa: SLF001
+                    slug,
+                    llm_config=_manifest.get("llm_config"),
+                    embedding_config=_manifest.get("embedding_config"),
+                    memory_config=raw_mem if isinstance(raw_mem, dict) else None,
+                )
+
         async def initialize_graph_callback(slug: str, graph_config: dict[str, Any]) -> None:
             if self._service_initializer:
-                # Pass llm_config from manifest so services can inherit the LLM model
                 llm_config = manifest.get("llm_config")
                 await self._service_initializer.initialize_graph_service(slug, graph_config, llm_config=llm_config)
 
-        async def initialize_memory_callback(slug: str, memory_config: dict[str, Any]) -> None:
+        async def initialize_memory_callback(slug: str, memory_config: Any) -> None:
             if self._service_initializer:
                 # Pass llm_config from manifest so services can inherit the LLM model
+                # memory_config may be True, a preset string, or a dict
                 llm_config = manifest.get("llm_config")
-                await self._service_initializer.initialize_memory_service(slug, memory_config, llm_config=llm_config)
+                raw_config = manifest.get("memory_config")
+                await self._service_initializer.initialize_memory_service(
+                    slug, raw_config if raw_config is not None else memory_config, llm_config=llm_config
+                )
 
         async def initialize_profile_callback(slug: str, profile_config: dict[str, Any]) -> None:
             if self._service_initializer:
@@ -169,12 +183,28 @@ class AppLifecycleMixin:
             create_indexes_callback=create_indexes_callback if create_indexes else None,
             seed_data_callback=seed_data_callback,
             initialize_osi_callback=initialize_osi_callback,
+            ensure_shared_services_callback=ensure_shared_services_callback,
             initialize_graph_callback=initialize_graph_callback,
             initialize_memory_callback=initialize_memory_callback,
             initialize_profile_callback=initialize_profile_callback,
             register_websockets_callback=register_websockets_callback,
             setup_observability_callback=setup_observability_callback,
         )
+
+        # Initialize Perfect Brain (nested inside memory_config)
+        slug_for_brain = manifest.get("slug")
+        mem_cfg = manifest.get("memory_config")
+        perfect_brain_config = mem_cfg.get("perfect_brain") if isinstance(mem_cfg, dict) else None
+        if (
+            self._service_initializer
+            and slug_for_brain
+            and isinstance(perfect_brain_config, dict)
+            and perfect_brain_config.get("enabled", False)
+        ):
+            try:
+                await self._service_initializer.initialize_perfect_brain(slug_for_brain, perfect_brain_config)
+            except (ImportError, AttributeError, TypeError, ValueError, RuntimeError) as e:
+                logger.warning(f"Failed to initialize PerfectBrain for '{slug_for_brain}': {e}")
 
         # Configure prompt safety policy from manifest
         prompt_safety_config = manifest.get("prompt_safety")

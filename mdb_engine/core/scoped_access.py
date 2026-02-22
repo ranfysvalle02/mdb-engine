@@ -280,14 +280,14 @@ class ScopedAccessMixin:
         """
         Get EmbeddingService for an app.
 
-        Auto-detects OpenAI or AzureOpenAI from environment variables.
-        Uses embedding_config from manifest.json if available.
+        Returns the shared service created by ``_ensure_shared_services``
+        during app initialization.
 
         Args:
             slug: App slug
 
         Returns:
-            EmbeddingService instance if embedding is enabled for this app, None otherwise
+            EmbeddingService instance or None
 
         Example:
             ```python
@@ -296,6 +296,56 @@ class ScopedAccessMixin:
                 vectors = await embedding_service.embed(["Hello world"])
             ```
         """
-        from ..embeddings.dependencies import get_embedding_service_for_app
+        if self._service_initializer:
+            return self._service_initializer.get_embedding_service(slug)
+        return None
 
-        return get_embedding_service_for_app(slug, self)
+    def get_llm_service(self, slug: str) -> Any | None:
+        """
+        Get LLMService for an app.
+
+        Returns the service created during memory/app initialization,
+        or None if no LLM service was created for this app.
+
+        Args:
+            slug: App slug
+
+        Returns:
+            LLMService instance or None
+
+        Example:
+            ```python
+            llm_service = engine.get_llm_service("my_app")
+            if llm_service:
+                response = await llm_service.chat_completion(
+                    messages=[{"role": "user", "content": "Hello!"}]
+                )
+            ```
+        """
+        if self._service_initializer:
+            return self._service_initializer.get_llm_service(slug)
+        return None
+
+    def get_perfect_brain(self, slug: str) -> Any | None:
+        """
+        Get the PerfectBrain container for an app.
+
+        Returns a ``PerfectBrain`` instance that holds all enabled advanced
+        memory components (SharedMemory, MemoryVeto, Consolidator, etc.).
+
+        Args:
+            slug: App slug
+
+        Returns:
+            PerfectBrain instance or None
+
+        Example:
+            ```python
+            brain = engine.get_perfect_brain("my_app")
+            if brain:
+                vetoes = await brain.memory_veto.get_user_vetoes(user_id)
+            ```
+        """
+        if self._service_initializer:
+            return self._service_initializer.get_perfect_brain(slug)
+        return None

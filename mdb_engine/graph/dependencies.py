@@ -88,9 +88,6 @@ async def get_graph_service_dependency(request: Request) -> GraphService:
                 slug = manifest.get("slug", "default")
                 # Default to "kg", then prefix with slug
                 base_collection_name = graph_config.get("collection_name", "kg")
-                # Normalize legacy "__kg" to "kg" (private attributes are blocked by ScopedMongoWrapper)
-                if base_collection_name == "__kg":
-                    base_collection_name = "kg"
                 if base_collection_name.startswith(f"{slug}_"):
                     collection_name = base_collection_name
                 else:

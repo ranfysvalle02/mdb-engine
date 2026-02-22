@@ -182,7 +182,7 @@ Override defaults by adding `graph_config` to your manifest.json:
   "database_name": "my_database",
   
   "graph_config": {
-    "collection_name": "__kg",
+    "collection_name": "kg",
     "auto_extract": true,
     "llm_model": "gemini/gemini-3-flash-preview",  // Inherits from llm_config.default_model if not set
     "temperature": 0.0,
@@ -207,7 +207,7 @@ Override defaults by adding `graph_config` to your manifest.json:
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `enabled` | boolean | `true` | Enable Graph Service (enabled by default) |
-| `collection_name` | string | `"__kg"` | Collection name (prefixed with app slug) |
+| `collection_name` | string | `"kg"` | Collection name (prefixed with app slug) |
 | `auto_extract` | boolean | `true` | Auto-extract entities from text |
 | `llm_model` | string | (inherits from `llm_config.default_model`) | LLM model for extraction. If not set, automatically uses the app's default LLM model from `llm_config.default_model` |
 | `temperature` | number | `0.0` | LLM temperature for extraction |
@@ -572,7 +572,7 @@ stats = graph.get_stats()
 # {
 #   "enabled": True,
 #   "app_slug": "my_app",
-#   "collection_name": "my_app__kg",
+#   "collection_name": "my_app_kg",
 #   "total_nodes": 150,
 #   "auto_extract": True,
 #   "default_max_depth": 2

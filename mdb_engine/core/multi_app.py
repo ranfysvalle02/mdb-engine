@@ -1266,13 +1266,30 @@ class MultiAppMixin:
                     child_app.state.app_manifest = app_manifest_data
 
                     # Auto-inject template globals (base_path, auth_hub_url, app_slug)
-                    # so child templates can use {{ base_path }} without handlers passing it
+                    # so child templates can use {{ base_path }} without handlers passing it.
+                    # Also add the framework templates dir to the Jinja2 loader
+                    # so apps can {% extends "mdb_base.html" %}.
                     if route_module:
                         child_templates = getattr(route_module, "templates", None)
                         if child_templates and hasattr(child_templates, "env"):
                             child_templates.env.globals["base_path"] = path_prefix
                             child_templates.env.globals["auth_hub_url"] = auth_hub_url
                             child_templates.env.globals["app_slug"] = slug
+
+                            try:
+                                from jinja2 import ChoiceLoader, FileSystemLoader
+
+                                _fw_templates = str(Path(__file__).resolve().parent.parent / "templates")
+                                existing_loader = child_templates.env.loader
+                                if existing_loader is not None:
+                                    child_templates.env.loader = ChoiceLoader(
+                                        [existing_loader, FileSystemLoader(_fw_templates)]
+                                    )
+                                else:
+                                    child_templates.env.loader = FileSystemLoader(_fw_templates)
+                            except (ImportError, TypeError, ValueError, OSError):
+                                logger.debug(f"Could not add framework templates to loader for '{slug}'")
+
                             logger.debug(f"Injected Jinja2 template globals for app '{slug}'")
 
                     # Create middleware factory to properly capture loop variables
@@ -1357,12 +1374,47 @@ class MultiAppMixin:
 
                     await _register_websocket_routes(app, app_manifest_data, slug, path_prefix)
 
-                    memory_config = app_manifest_data.get("memory_config")
-                    if memory_config and memory_config.get("enabled", False):
+                    # Pre-create shared LLM/embedding services for this app
+                    # so graph and memory share the same instances.
+                    if engine._service_initializer:  # noqa: SLF001
+                        raw_mem = app_manifest_data.get("memory_config")
+                        engine._service_initializer._ensure_shared_services(  # noqa: SLF001
+                            slug,
+                            llm_config=app_manifest_data.get("llm_config"),
+                            embedding_config=app_manifest_data.get("embedding_config"),
+                            memory_config=raw_mem if isinstance(raw_mem, dict) else None,
+                        )
+
+                    # Initialize Graph service if configured (MUST complete before memory)
+                    graph_config = app_manifest_data.get("graph_config", {})
+                    if graph_config.get("enabled", True) and engine._service_initializer:  # noqa: SLF001
+                        try:
+                            await engine._service_initializer.initialize_graph_service(  # noqa: SLF001
+                                slug,
+                                graph_config,
+                                llm_config=app_manifest_data.get("llm_config"),
+                            )
+                            logger.info(f"Graph service initialized for mounted app '{slug}'")
+                        except (ImportError, AttributeError, TypeError, ValueError, RuntimeError) as e:
+                            logger.warning(
+                                f"Graph service initialization failed for mounted app '{slug}': {e}",
+                                extra={"app_slug": slug},
+                            )
+
+                    raw_memory_config = app_manifest_data.get("memory_config")
+                    _mem_enabled = (
+                        raw_memory_config is True
+                        or isinstance(raw_memory_config, str)
+                        or (
+                            isinstance(raw_memory_config, dict)
+                            and (raw_memory_config.get("enabled", False) or "preset" in raw_memory_config)
+                        )
+                    )
+                    if _mem_enabled:
                         if engine._service_initializer:  # noqa: SLF001
                             try:
                                 await engine._service_initializer.initialize_memory_service(  # noqa: SLF001
-                                    slug, memory_config
+                                    slug, raw_memory_config, llm_config=app_manifest_data.get("llm_config")
                                 )
                                 logger.info(
                                     f"Memory service initialized for mounted app '{slug}' " f"in multi-app context"
@@ -1399,10 +1451,19 @@ class MultiAppMixin:
                                         exc_info=True,
                                         extra={"app_slug": slug, "error": str(e)},
                                     )
-                        else:
-                            logger.warning(
-                                f"Memory service requested for '{slug}' but " f"service_initializer is not available"
+
+                    # Initialize Perfect Brain (nested inside memory_config)
+                    _mem = app_manifest_data.get("memory_config")
+                    _pb_cfg = _mem.get("perfect_brain") if isinstance(_mem, dict) else None
+                    if (
+                        isinstance(_pb_cfg, dict) and _pb_cfg.get("enabled", False) and engine._service_initializer  # noqa: SLF001
+                    ):
+                        try:
+                            await engine._service_initializer.initialize_perfect_brain(  # noqa: SLF001
+                                slug, _pb_cfg
                             )
+                        except (ImportError, AttributeError, TypeError, ValueError, RuntimeError) as e:
+                            logger.warning(f"Failed to initialize PerfectBrain for '{slug}': {e}")
 
                     # Auto-detect and call on_startup from imported module or app config
                     module_on_startup = getattr(route_module, "on_startup", None) if route_module else None
@@ -1418,6 +1479,13 @@ class MultiAppMixin:
                                 f"on_startup failed for app '{slug}': {e}",
                                 exc_info=True,
                             )
+
+                    # Store initialized services on child app state
+                    if engine.initialized:
+                        child_app.state.memory_service = engine.get_memory_service(slug)
+                        child_app.state.graph_service = engine.get_graph_service(slug)
+                        child_app.state.embedding_service = engine.get_embedding_service(slug)
+                        child_app.state.llm_service = engine.get_llm_service(slug)
 
                     # Mount child app at path prefix (AFTER WebSocket routes are registered)
                     app.mount(path_prefix, child_app)

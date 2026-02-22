@@ -12,12 +12,9 @@
     "tokenizer_model": "gpt-3.5-turbo"
   },
   "memory_config": {
-    "enabled": true,
+    "preset": "basic",
     "collection_name": "call_memories",
-    "embedding_model": "text-embedding-3-small",
-    "chat_model": "gpt-4o",
-    "temperature": 0.3,
-    "infer": true
+    "temperature": 0.3
   },
   "auth": {
     "policy": {

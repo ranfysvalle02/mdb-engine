@@ -1077,7 +1077,7 @@ message=Hello&category=general&reasoning_effort=medium
 
 - **STM**: Stored in `chat_history` collection
 - **LTM**: Stored in `user_memories` collection (with encryption if enabled)
-- **Graph**: Stored in `__kg` collection (if enabled)
+- **Graph**: Stored in `kg` collection (if enabled)
 
 ## Configuration Files
 

@@ -823,6 +823,7 @@ class EmbeddingService:
 def get_embedding_service(
     embedding_provider: BaseEmbeddingProvider | None = None,
     config: dict[str, Any] | None = None,
+    memory_config: dict[str, Any] | None = None,
 ) -> EmbeddingService:
     """
     Create EmbeddingService instance with auto-detected or provided embedding provider.
@@ -836,6 +837,10 @@ def get_embedding_service(
             embedding_config)
             Supports: max_tokens_per_chunk, tokenizer_model (optional,
             defaults to "gpt-3.5-turbo"), default_embedding_model
+        memory_config: Optional shortcut — pass the manifest ``memory_config``
+            section directly and the relevant embedding fields will be
+            extracted automatically (``embedding_model``,
+            ``embedding_model_dims``).  Ignored if ``config`` is provided.
 
     Returns:
         EmbeddingService instance
@@ -850,7 +855,18 @@ def get_embedding_service(
                 "default_embedding_model": "text-embedding-3-small"
             }
         )
+
+        # Or pass memory_config directly (convenience shortcut)
+        embedding_service = get_embedding_service(memory_config=manifest["memory_config"])
     """
+    # Allow callers to pass memory_config as a shortcut instead of
+    # manually extracting embedding fields.
+    if memory_config and not config:
+        config = {
+            "default_embedding_model": memory_config.get("embedding_model", "text-embedding-3-small"),
+        }
+        if "embedding_model_dims" in memory_config:
+            config["embedding_model_dims"] = memory_config["embedding_model_dims"]
     # Platform-level defaults (users don't need to think about these)
     default_max_tokens = 1000
     # Model name for tiktoken (uses cl100k_base encoding internally)

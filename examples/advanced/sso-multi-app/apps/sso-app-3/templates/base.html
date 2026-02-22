@@ -1,196 +1,252 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>{% block title %}orby | OBLIVIO LLC{% endblock %}</title>
-    <style>
-        /* Global Reset and Box Sizing */
-        :root {
-            --glow-color: rgba(138, 43, 226, 0.7);
-            --safe-area-inset-top: env(safe-area-inset-top, 0px);
-            --safe-area-inset-bottom: env(safe-area-inset-bottom, 0px);
-            --mongodb-green: #00ED64;
-            --mongodb-dark-green: #13AA52;
-            --mongodb-bg: #0D1117;
-            --mongodb-bg-secondary: #161B22;
-            --mongodb-bg-tertiary: #21262D;
-            --mongodb-border: #30363D;
-            --mongodb-text: #E6EDF3;
-            --mongodb-text-secondary: #8B949E;
-        }
-        *, *::before, *::after {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-        }
+{% extends "mdb_base.html" %}
 
-        html {
-            -webkit-text-size-adjust: 100%;
-        }
+{% block title %}orby | OBLIVIO LLC{% endblock %}
 
-        body, html {
-            overflow: hidden;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            color: #fff;
-            -webkit-tap-highlight-color: transparent;
-            touch-action: manipulation;
-            width: 100%;
-            height: 100%;
-            position: fixed;
-        }
+{% block head %}
+<style>
+    /* Global Reset and Box Sizing */
+    :root {
+        --glow-color: rgba(138, 43, 226, 0.7);
+        --safe-area-inset-top: env(safe-area-inset-top, 0px);
+        --safe-area-inset-bottom: env(safe-area-inset-bottom, 0px);
+        --mongodb-green: #00ED64;
+        --mongodb-dark-green: #13AA52;
+        --mongodb-bg: #0D1117;
+        --mongodb-bg-secondary: #161B22;
+        --mongodb-bg-tertiary: #21262D;
+        --mongodb-border: #30363D;
+        --mongodb-text: #E6EDF3;
+        --mongodb-text-secondary: #8B949E;
+    }
+    *, *::before, *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+    }
 
-        /* Background & Centering */
-        body {
-            background: #000;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            padding: 20px;
-        }
+    html {
+        -webkit-text-size-adjust: 100%;
+    }
 
-        /* --- INTERACTIVE CANVAS BACKGROUND --- */
-        #interactive-background {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            z-index: -3;
-        }
+    body, html {
+        overflow: hidden;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+        color: #fff;
+        -webkit-tap-highlight-color: transparent;
+        touch-action: manipulation;
+        width: 100%;
+        height: 100%;
+        position: fixed;
+    }
 
-        /* Enhanced Header */
-        .header {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            z-index: 1000;
-            padding: 12px 20px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            background: rgba(0, 0, 0, 0.4);
-            backdrop-filter: blur(15px) saturate(180%);
-            -webkit-backdrop-filter: blur(15px) saturate(180%);
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-        }
+    /* Background & Centering */
+    body {
+        background: #000;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        padding: 20px;
+    }
 
-        .header-left {
-            display: flex;
-            align-items: center;
-            gap: 15px;
-        }
+    /* --- INTERACTIVE CANVAS BACKGROUND --- */
+    #interactive-background {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        z-index: -3;
+    }
 
-        .back-btn {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            color: rgba(255, 255, 255, 0.9);
-            text-decoration: none;
-            padding: 6px 12px;
-            border-radius: 8px;
-            transition: all 0.2s;
-            font-size: 14px;
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-        }
+    /* Enhanced Header */
+    .header {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 1000;
+        padding: 12px 20px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: rgba(0, 0, 0, 0.4);
+        backdrop-filter: blur(15px) saturate(180%);
+        -webkit-backdrop-filter: blur(15px) saturate(180%);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
 
-        .back-btn:hover {
-            background: rgba(255, 255, 255, 0.1);
-            border-color: rgba(138, 43, 226, 0.5);
-            transform: translateX(-2px);
-        }
+    .header-left {
+        display: flex;
+        align-items: center;
+        gap: 15px;
+    }
 
-        .back-btn svg {
-            width: 16px;
-            height: 16px;
-        }
+    .back-btn {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        color: rgba(255, 255, 255, 0.9);
+        text-decoration: none;
+        padding: 6px 12px;
+        border-radius: 8px;
+        transition: all 0.2s;
+        font-size: 14px;
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+    }
 
-        .header h1 {
-            font-size: 18px;
-            font-weight: 600;
-            color: rgba(255, 255, 255, 0.95);
-            margin: 0;
-        }
+    .back-btn:hover {
+        background: rgba(255, 255, 255, 0.1);
+        border-color: rgba(138, 43, 226, 0.5);
+        transform: translateX(-2px);
+    }
 
-        .nav-links {
-            display: flex;
-            gap: 10px;
-            align-items: center;
-        }
+    .back-btn svg {
+        width: 16px;
+        height: 16px;
+    }
 
-        .nav-links a {
-            color: rgba(255, 255, 255, 0.8);
-            text-decoration: none;
-            padding: 6px 14px;
-            border-radius: 8px;
-            transition: all 0.2s;
-            font-size: 13px;
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-        }
+    .header h1 {
+        font-size: 18px;
+        font-weight: 600;
+        color: rgba(255, 255, 255, 0.95);
+        margin: 0;
+    }
 
-        .nav-links a:hover {
-            background: rgba(138, 43, 226, 0.2);
-            border-color: rgba(138, 43, 226, 0.5);
-            color: #fff;
-        }
+    /* --- LOGO --- */
+    .logo-mark {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        text-decoration: none;
+        position: relative;
+    }
 
-        .user-info {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
+    .logo-orb {
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        background: radial-gradient(circle at 35% 35%, #e0c3fc 0%, #8A2BE2 45%, #4a00b4 100%);
+        box-shadow: 0 0 14px rgba(138, 43, 226, 0.6), 0 0 4px rgba(255, 255, 255, 0.3) inset;
+        flex-shrink: 0;
+        animation: logoOrbGlow 4s ease-in-out infinite;
+    }
 
-        .user-email {
-            font-size: 12px;
-            color: rgba(255, 255, 255, 0.7);
-            padding: 4px 10px;
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 6px;
-        }
+    @keyframes logoOrbGlow {
+        0%, 100% { box-shadow: 0 0 14px rgba(138, 43, 226, 0.5), 0 0 4px rgba(255, 255, 255, 0.3) inset; }
+        50%      { box-shadow: 0 0 22px rgba(138, 43, 226, 0.8), 0 0 6px rgba(255, 255, 255, 0.5) inset; }
+    }
 
-        .container {
-            width: 100%;
-            height: 100%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding-top: 60px;
-        }
+    .logo-text {
+        font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+        font-size: 22px;
+        font-weight: 300;
+        letter-spacing: 0.35em;
+        text-transform: lowercase;
+        background: linear-gradient(135deg, #f5f0ff 0%, #c084fc 35%, #8A2BE2 60%, #60a5fa 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        position: relative;
+        padding-right: 0.35em; /* compensate trailing letter-spacing */
+    }
 
-        .btn {
-            padding: 10px 20px;
-            background: #8A2BE2;
-            color: #fff;
-            border: none;
-            border-radius: 6px;
-            font-weight: 600;
-            cursor: pointer;
-            text-decoration: none;
-            display: inline-block;
-            transition: all 0.2s;
-        }
+    .logo-text::after {
+        content: '';
+        position: absolute;
+        bottom: -3px;
+        left: 0;
+        width: 100%;
+        height: 1px;
+        background: linear-gradient(90deg, transparent 0%, rgba(138, 43, 226, 0.5) 30%, rgba(96, 165, 250, 0.4) 70%, transparent 100%);
+    }
 
-        .btn:hover {
-            background: #9932CC;
-            transform: translateY(-2px);
-        }
+    .logo-mark:hover .logo-orb {
+        box-shadow: 0 0 24px rgba(138, 43, 226, 0.9), 0 0 8px rgba(255, 255, 255, 0.5) inset;
+    }
 
-        .btn-secondary {
-            background: rgba(255, 255, 255, 0.1);
-            color: #fff;
-            border: 1px solid rgba(255, 255, 255, 0.2);
-        }
+    .logo-mark:hover .logo-text {
+        filter: brightness(1.15);
+    }
 
-        .btn-secondary:hover {
-            background: rgba(255, 255, 255, 0.15);
-        }
-    </style>
-    {% block extra_css %}{% endblock %}
-</head>
-<body>
+    .nav-links {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+    }
+
+    .nav-links a {
+        color: rgba(255, 255, 255, 0.8);
+        text-decoration: none;
+        padding: 6px 14px;
+        border-radius: 8px;
+        transition: all 0.2s;
+        font-size: 13px;
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .nav-links a:hover {
+        background: rgba(138, 43, 226, 0.2);
+        border-color: rgba(138, 43, 226, 0.5);
+        color: #fff;
+    }
+
+    .user-info {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }
+
+    .user-email {
+        font-size: 12px;
+        color: rgba(255, 255, 255, 0.7);
+        padding: 4px 10px;
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 6px;
+    }
+
+    .container {
+        width: 100%;
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding-top: 60px;
+    }
+
+    .btn {
+        padding: 10px 20px;
+        background: #8A2BE2;
+        color: #fff;
+        border: none;
+        border-radius: 6px;
+        font-weight: 600;
+        cursor: pointer;
+        text-decoration: none;
+        display: inline-block;
+        transition: all 0.2s;
+    }
+
+    .btn:hover {
+        background: #9932CC;
+        transform: translateY(-2px);
+    }
+
+    .btn-secondary {
+        background: rgba(255, 255, 255, 0.1);
+        color: #fff;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+
+    .btn-secondary:hover {
+        background: rgba(255, 255, 255, 0.15);
+    }
+</style>
+{% block extra_css %}{% endblock %}
+{% endblock %}
+
+{% block body %}
     <canvas id="interactive-background"></canvas>
     
     <header class="header">
@@ -203,7 +259,10 @@
                 <span>Back</span>
             </a>
             {% endblock %}
-            <h1>orby</h1>
+            <a href="{{ base_path }}/conversations" class="logo-mark">
+                <span class="logo-orb"></span>
+                <span class="logo-text">orby</span>
+            </a>
         </div>
         <nav class="nav-links">
             {% if user %}
@@ -362,30 +421,22 @@
     window.addEventListener('resize', init);
     init();
     animate();
-    // --- END OF LIVING BACKGROUND SCRIPT ---
-
-    function getCookie(name) {
-        const value = `; ${document.cookie}`;
-        const parts = value.split(`; ${name}=`);
-        if (parts.length === 2) return parts.pop().split(';').shift();
-        return '';
-    }
-    
-    const BASE = '{{ base_path }}';
-    async function logout() {
-        try {
-            await fetch(BASE + '/logout', {
-                method: 'POST',
-                headers: { 'X-CSRF-Token': getCookie('csrf_token') }
-            });
-            window.location.href = '/auth-hub/login';
-        } catch (error) {
-            console.error('Logout error:', error);
-            // Fallback: redirect to auth hub on error
-            window.location.href = '/auth-hub/login';
-        }
-    }
     </script>
-    {% block extra_js %}{% endblock %}
-</body>
-</html>
+{% endblock %}
+
+{% block base_js %}
+<script>
+async function logout() {
+    try {
+        await fetch(MDB.BASE + '/logout', {
+            method: 'POST',
+            headers: { 'X-CSRF-Token': MDB.csrfToken() }
+        });
+        window.location.href = MDB.AUTH_HUB + '/login';
+    } catch (error) {
+        console.error('Logout error:', error);
+        window.location.href = MDB.AUTH_HUB + '/login';
+    }
+}
+</script>
+{% endblock %}

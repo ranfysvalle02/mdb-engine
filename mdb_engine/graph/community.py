@@ -129,6 +129,56 @@ class CommunityService:
         except (PyMongoError, OperationFailure) as e:
             logger.warning(f"Failed to create CommunityService indexes: {e}")
 
+    async def maybe_rebuild(self) -> bool:
+        """Check if communities need rebuilding and trigger if so.
+
+        Rebuilds when either:
+        - No communities exist yet, or
+        - The last rebuild was more than ``rebuild_interval_hours`` ago.
+
+        Returns ``True`` if a rebuild was triggered, ``False`` otherwise.
+        Designed to be called as a fire-and-forget background task.
+        """
+        if not self.enabled:
+            return False
+
+        await self._ensure_ready()
+
+        try:
+            from datetime import datetime, timezone
+
+            latest = await self.community_collection.find_one(
+                {"app_slug": self.app_slug},
+                sort=[("created_at", -1)],
+                projection={"created_at": 1},
+            )
+
+            should_rebuild = False
+            if latest is None:
+                should_rebuild = True
+                logger.info(f"No communities found for '{self.app_slug}' — triggering initial detection")
+            else:
+                created = latest.get("created_at")
+                if created:
+                    from datetime import timedelta
+
+                    age = datetime.now(timezone.utc) - created
+                    if age > timedelta(hours=self.rebuild_interval_hours):
+                        should_rebuild = True
+                        logger.info(
+                            f"Communities for '{self.app_slug}' are {age.total_seconds() / 3600:.1f}h old "
+                            f"(threshold: {self.rebuild_interval_hours}h) — triggering rebuild"
+                        )
+
+            if should_rebuild:
+                await self.detect_communities(level="local")
+                return True
+
+        except (PyMongoError, OperationFailure, AttributeError, TypeError, ValueError, RuntimeError) as e:
+            logger.warning(f"Community maybe_rebuild failed for '{self.app_slug}': {e}")
+
+        return False
+
     async def detect_communities(
         self,
         level: str = "local",

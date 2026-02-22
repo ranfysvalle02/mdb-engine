@@ -514,7 +514,7 @@ result = await cognitive_engine.chat(
 
 ### Node Document
 
-Nodes are stored in the `__kg` collection:
+Nodes are stored in the `kg` collection:
 
 ```json
 {
@@ -810,7 +810,7 @@ Graph configuration is now a **top-level** manifest section:
 {
   "graph_config": {
     "enabled": true,
-    "collection_name": "__kg",
+    "collection_name": "kg",
     "auto_extract": true,
     "llm_model": "openai/gpt-4o",
     "temperature": 0.0,
@@ -833,7 +833,7 @@ Graph configuration is now a **top-level** manifest section:
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `enabled` | boolean | `true` | Enable Graph Service (enabled by default) |
-| `collection_name` | string | `"__kg"` | MongoDB collection for graph nodes (prefixed with app slug) |
+| `collection_name` | string | `"kg"` | MongoDB collection for graph nodes (prefixed with app slug) |
 | `auto_extract` | boolean | `true` | Auto-extract entities/relationships from text |
 | `llm_model` | string | (from llm_config) | LLM model for graph extraction |
 | `temperature` | number | `0.0` | Temperature for LLM extraction |
@@ -891,7 +891,7 @@ The core of GraphRAG is MongoDB's `$graphLookup` aggregation stage:
 ```javascript
 {
   "$graphLookup": {
-    "from": "__kg",                    // Collection to search
+    "from": "kg",                      // Collection to search
     "startWith": "$edges.target",       // Start from direct edges
     "connectFromField": "edges.target", // Field containing next targets
     "connectToField": "_id",           // Field to match against

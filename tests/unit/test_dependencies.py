@@ -212,9 +212,9 @@ class TestGetEmbeddingService:
         assert result is not None
 
     @pytest.mark.asyncio
-    async def test_get_embedding_service_disabled(self, mock_request, mock_engine):
-        """Test embedding service when disabled in config."""
-        mock_engine.get_app.return_value = {"embedding_config": {"enabled": False}}
+    async def test_get_embedding_service_not_available(self, mock_request, mock_engine):
+        """Test embedding service raises 503 when not available."""
+        mock_engine.get_embedding_service.return_value = None
         mock_request.app.state.engine = mock_engine
         mock_request.app.state.app_slug = "test_app"
 
@@ -222,20 +222,7 @@ class TestGetEmbeddingService:
             await get_embedding_service(mock_request)
 
         assert exc_info.value.status_code == 503
-        assert "disabled" in exc_info.value.detail.lower()
-
-    @pytest.mark.asyncio
-    async def test_get_embedding_service_app_not_found(self, mock_request, mock_engine):
-        """Test embedding service when app config not found."""
-        mock_engine.get_app.return_value = None
-        mock_request.app.state.engine = mock_engine
-        mock_request.app.state.app_slug = "nonexistent_app"
-
-        with pytest.raises(HTTPException) as exc_info:
-            await get_embedding_service(mock_request)
-
-        assert exc_info.value.status_code == 503
-        assert "not found" in exc_info.value.detail.lower()
+        assert "not available" in exc_info.value.detail.lower()
 
 
 class TestGetMemoryService:

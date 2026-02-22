@@ -710,7 +710,7 @@ A complete manifest for an SSO client app with memory, graph, profile, and OSI f
 
   "graph_config": {
     "enabled": true,
-    "collection_name": "__kg",
+    "collection_name": "kg",
     "auto_extract": true,
     "node_types": ["actor", "movie", "director", "genre"]
   },

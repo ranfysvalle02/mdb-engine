@@ -226,6 +226,13 @@ class FastAPIAppMixin:
             app.state.is_multi_site = is_multi_site
             app.state.auth_mode = auth_mode
 
+            # Store initialized services so app code can access them directly
+            if engine.initialized:
+                app.state.memory_service = engine.get_memory_service(slug)
+                app.state.graph_service = engine.get_graph_service(slug)
+                app.state.embedding_service = engine.get_embedding_service(slug)
+                app.state.llm_service = engine.get_llm_service(slug)
+
             # Initialize DI container (if not already set)
             from ..di import Container
 
@@ -267,6 +274,16 @@ class FastAPIAppMixin:
         # NOTE: WebSocket ticket endpoint registration is moved to lifespan context manager
         # (after engine.initialize()) because ticket store is only available after initialization.
         # This ensures consistency with create_multi_app() behavior.
+
+        # Auto-register graph stats endpoint when graph is enabled
+        _graph_cfg = pre_manifest.get("graph_config", {})
+        if _graph_cfg.get("enabled", True):
+            try:
+                from ..routing.graph_routes import router as _graph_router
+
+                app.include_router(_graph_router)
+            except ImportError:
+                pass
 
         # Setup all middleware
         self._setup_middleware(app, slug, auth_config, auth_mode, is_sub_app)

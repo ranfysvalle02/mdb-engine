@@ -68,6 +68,7 @@ from ..constants import (
     DEFAULT_DROP_TIMEOUT,
     DEFAULT_POLL_INTERVAL,
     DEFAULT_SEARCH_TIMEOUT,
+    MAX_AUTO_INDEX_PATTERNS,
     MAX_COLLECTION_NAME_LENGTH,
     MAX_INDEX_FIELDS,
     MIN_COLLECTION_NAME_LENGTH,
@@ -358,6 +359,21 @@ class AsyncAtlasIndexManager:
     ) -> bool:
         """Handle existing index - check for changes and update if needed."""
         logger.info(f"Search index '{name}' already exists.")
+
+        # Type mismatch guard: if the caller expects "vectorSearch" but the
+        # existing index is "search" (or vice-versa), an update would send the
+        # wrong definition shape and Atlas rejects it.  Drop and recreate.
+        existing_type = existing_index.get("type", "").lower()
+        expected_type = index_type.lower()
+        if existing_type and expected_type and existing_type != expected_type:
+            logger.warning(
+                f"Index '{name}' type mismatch: existing='{existing_type}', "
+                f"expected='{expected_type}'. Dropping and recreating..."
+            )
+            await self.drop_search_index(name=name, wait_for_drop=True)
+            await self._create_new_search_index(name, definition, index_type)
+            return False  # Will wait for ready
+
         latest_def = existing_index.get("latestDefinition", {})
         definition_changed, change_reason = self._check_definition_changed(definition, latest_def, index_type, name)
 
@@ -373,17 +389,38 @@ class AsyncAtlasIndexManager:
             logger.info(f"Search index '{name}' is already queryable and definition is up-to-date.")
             return True
         elif existing_index.get("status") == "FAILED":
-            logger.error(
-                f"Search index '{name}' exists but is in a FAILED state. "
-                f"Manual intervention in Atlas UI may be required."
-            )
-            return False
+            try:
+                return await self._attempt_failed_index_recovery(name, definition, index_type)
+            except (
+                OperationFailure,
+                ConnectionFailure,
+                ServerSelectionTimeoutError,
+                InvalidOperation,
+                TimeoutError,
+            ):
+                logger.error(
+                    f"Search index '{name}' is in FAILED state and auto-recovery "
+                    f"failed. Manual intervention in Atlas UI may be required.",
+                    exc_info=True,
+                )
+                return False
         else:
             logger.info(
                 f"Search index '{name}' exists and is up-to-date, "
                 f"but not queryable (Status: {existing_index.get('status')}). Waiting..."
             )
             return False  # Will wait below
+
+    async def _attempt_failed_index_recovery(self, name: str, definition: dict[str, Any], index_type: str) -> bool:
+        """Drop a FAILED search index and recreate it.
+
+        Returns False so callers know to wait for the new build.
+        If recovery itself fails, the exception propagates to the caller.
+        """
+        logger.warning(f"Search index '{name}' is in FAILED state. " f"Attempting auto-recovery (drop + recreate)...")
+        await self.drop_search_index(name=name, wait_for_drop=True)
+        await self._create_new_search_index(name, definition, index_type)
+        return False
 
     async def _create_new_search_index(self, name: str, definition: dict[str, Any], index_type: str) -> None:
         """Create a new search index."""
@@ -406,6 +443,7 @@ class AsyncAtlasIndexManager:
         index_type: str = "search",
         wait_for_ready: bool = True,
         timeout: int = DEFAULT_SEARCH_TIMEOUT,
+        force_recreate: bool = False,
     ) -> bool:
         """
         Creates or updates an Atlas Search index.
@@ -414,11 +452,21 @@ class AsyncAtlasIndexManager:
         and definition already exists and is queryable. If it exists but the
         definition has changed, it triggers an update. If it's building,
         it waits. If it doesn't exist, it creates it.
+
+        Args:
+            force_recreate: If True, drop the existing index and create a new
+                one regardless of current state.  Useful when the index type
+                has changed (e.g. from "search" to "vectorSearch").
         """
         await self._ensure_collection_exists()
 
         try:
             existing_index = await self.get_search_index(name)
+
+            if existing_index and force_recreate:
+                logger.warning(f"force_recreate=True: dropping existing index '{name}' before recreation.")
+                await self.drop_search_index(name=name, wait_for_drop=True)
+                existing_index = None
 
             if existing_index:
                 is_ready = await self._handle_existing_index(existing_index, definition, index_type, name)
@@ -873,7 +921,11 @@ class AutoIndexManager:
         "_lock",
         "_query_counts",
         "_pending_tasks",
+        "_index_list_cache",
+        "_index_list_cache_time",
     )
+
+    _INDEX_LIST_CACHE_TTL = 5.0  # seconds
 
     def __init__(self, collection: AsyncIOMotorCollection, index_manager: AsyncAtlasIndexManager):
         self._collection = collection
@@ -886,6 +938,9 @@ class AutoIndexManager:
         self._query_counts: dict[str, int] = {}
         # Track in-flight index creation tasks to prevent duplicates
         self._pending_tasks: dict[str, asyncio.Task] = {}
+        # Short-lived cache for list_indexes to avoid N+1 during burst creation
+        self._index_list_cache: list[dict[str, Any]] | None = None
+        self._index_list_cache_time: float = 0.0
 
     def _extract_index_fields_from_filter(self, filter: Mapping[str, Any] | None) -> list[tuple[str, int]]:
         """
@@ -959,34 +1014,60 @@ class AutoIndexManager:
 
         return f"auto_{'_'.join(parts)}"
 
+    async def _list_indexes_cached(self) -> list[dict[str, Any]]:
+        """Return list_indexes result, reusing a short-lived cache."""
+        now = time.monotonic()
+        if self._index_list_cache is not None and (now - self._index_list_cache_time) < self._INDEX_LIST_CACHE_TTL:
+            return self._index_list_cache
+        result = await self._index_manager.list_indexes()
+        self._index_list_cache = result
+        self._index_list_cache_time = now
+        return result
+
     async def _create_index_safely(self, index_name: str, all_fields: list[tuple[str, int]]) -> None:
         """
         Safely create an index, handling errors gracefully.
+
+        Checks both by *name* and by *key pattern* so we don't attempt to
+        create a duplicate index that already exists under a different name
+        (e.g. MongoDB's default ``user_id_1`` vs our ``auto_user_id_asc``).
 
         Args:
             index_name: Name of the index to create
             all_fields: List of (field, direction) tuples for the index
         """
         try:
-            # Check if index already exists
-            existing_indexes = await self._index_manager.list_indexes()
+            existing_indexes = await self._list_indexes_cached()
+            target_key_pattern = {field: direction for field, direction in all_fields}
+
             for idx in existing_indexes:
                 if idx.get("name") == index_name:
                     async with self._lock:
                         self._creation_cache[index_name] = True
-                    return  # Index already exists
+                        self._query_counts.pop(index_name, None)
+                    return  # Exact name match — already exists
 
-            # Create the index
-            keys = all_fields
-            # MongoDB doesn't allow 'background' option for _id indexes
+                # Check if an index on the same key pattern already exists
+                # under a different name (avoids IndexOptionsConflict).
+                existing_key = idx.get("key")
+                if existing_key is not None and dict(existing_key) == target_key_pattern:
+                    logger.debug(
+                        f"Index on same keys already exists as '{idx.get('name')}', "
+                        f"skipping auto-creation of '{index_name}'"
+                    )
+                    async with self._lock:
+                        self._creation_cache[index_name] = True
+                        self._query_counts.pop(index_name, None)
+                    return
+
             index_options = {"name": index_name}
-            if not (len(keys) == 1 and keys[0][0] == "_id"):
-                index_options["background"] = True
-            await self._index_manager.create_index(keys, **index_options)
+            await self._index_manager.create_index(all_fields, **index_options)
+            self._index_list_cache = None  # invalidate after mutation
             async with self._lock:
                 self._creation_cache[index_name] = True
+                self._query_counts.pop(index_name, None)
             logger.info(
-                f"✨ Auto-created index '{index_name}' on "
+                f"Auto-created index '{index_name}' on "
                 f"{self._collection.name} for fields: "
                 f"{[f[0] for f in all_fields]}"
             )
@@ -997,12 +1078,18 @@ class AutoIndexManager:
             ServerSelectionTimeoutError,
             InvalidOperation,
         ) as e:
-            # Don't fail the query if index creation fails
-            logger.warning(f"Failed to auto-create index '{index_name}': {e}")
-            async with self._lock:
-                self._creation_cache[index_name] = False
+            # IndexOptionsConflict (code 85) means an index on the same keys
+            # already exists under a different name — treat as success.
+            if isinstance(e, OperationFailure) and getattr(e, "code", None) == 85:
+                logger.debug(f"Index on same keys already exists (IndexOptionsConflict): {e}")
+                async with self._lock:
+                    self._creation_cache[index_name] = True
+                    self._query_counts.pop(index_name, None)
+            else:
+                logger.warning(f"Failed to auto-create index '{index_name}': {e}")
+                async with self._lock:
+                    self._creation_cache[index_name] = False
         finally:
-            # Clean up pending task
             async with self._lock:
                 self._pending_tasks.pop(index_name, None)
 
@@ -1056,6 +1143,13 @@ class AutoIndexManager:
         # Track query pattern usage
         pattern_key = index_name
         self._query_counts[pattern_key] = self._query_counts.get(pattern_key, 0) + 1
+
+        # Evict lowest-count patterns when tracker exceeds size cap
+        if len(self._query_counts) > MAX_AUTO_INDEX_PATTERNS:
+            sorted_keys = sorted(self._query_counts, key=self._query_counts.__getitem__)
+            for k in sorted_keys[: len(self._query_counts) - MAX_AUTO_INDEX_PATTERNS]:
+                if k != pattern_key:
+                    del self._query_counts[k]
 
         # Only create index if usage threshold is met
         if self._query_counts[pattern_key] < hint_threshold:

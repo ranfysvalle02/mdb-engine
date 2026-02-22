@@ -6,7 +6,6 @@ This module handles index creation and validation for apps.
 This module is part of MDB_ENGINE - MongoDB Engine.
 """
 
-import asyncio
 import logging
 from typing import TYPE_CHECKING
 
@@ -158,8 +157,6 @@ class IndexManager:
                     collection_name=prefixed_collection_name,
                     index_definitions=prefixed_defs,
                 )
-                # Wait a bit after all indexes are created to ensure they're all ready
-                await asyncio.sleep(1.0)  # Extra wait after all indexes are created
                 logger.info(f"[{slug}] Completed index creation for " f"'{prefixed_collection_name}'")
             except (
                 OperationFailure,

@@ -30,7 +30,7 @@ Configure via `graph_config` in `manifest.json`:
   },
   "graph_config": {
     "enabled": true,
-    "collection_name": "__kg",
+    "collection_name": "kg",
     "auto_extract": true,
     "llm_model": "gemini/gemini-3-flash-preview",  // Inherits from llm_config.default_model if not set
     "temperature": 0.0,
@@ -44,7 +44,7 @@ Configure via `graph_config` in `manifest.json`:
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `enabled` | boolean | `false` | Enable graph service |
-| `collection_name` | string | `"__kg"` | MongoDB collection for graph nodes |
+| `collection_name` | string | `"kg"` | MongoDB collection for graph nodes |
 | `auto_extract` | boolean | `true` | Auto-extract from text |
 | `llm_model` | string | (inherits from `llm_config.default_model`) | LLM for extraction. If not set, automatically uses the app's default LLM model from `llm_config.default_model` |
 | `temperature` | float | `0.0` | LLM temperature |

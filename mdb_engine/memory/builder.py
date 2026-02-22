@@ -243,28 +243,22 @@ class CognitiveMemoryServiceBuilder:
             logger.info("Using injected LLM service")
             return self._llm_service, True
 
-        # Fall back to internal LiteLLM probe (kept for backward compat)
-        from .cognitive import LITELLM_AVAILABLE
+        infer = self._config.get("infer", True)
+        if infer:
+            logger.warning(
+                "No LLM service injected. Memory extraction (infer=True) "
+                "requires an LLMService — configure llm_config in your manifest."
+            )
+        return None, False
 
-        if not LITELLM_AVAILABLE:
-            infer = self._config.get("infer", True)
-            if infer:
-                logger.warning("LiteLLM not available. Memory extraction will fail when infer=True.")
-            return None, False
+    @staticmethod
+    def _resolve_embedding_dims(cfg: dict[str, Any]) -> int:
+        """Resolve embedding dimensions using the known-model lookup table."""
+        from .presets import resolve_embedding_dims
 
-        has_openai = bool(os.getenv("OPENAI_API_KEY"))
-        has_azure = bool(os.getenv("AZURE_OPENAI_API_KEY") and os.getenv("AZURE_OPENAI_ENDPOINT"))
-        has_gemini = bool(os.getenv("GEMINI_API_KEY"))
-        has_anthropic = bool(os.getenv("ANTHROPIC_API_KEY"))
-
-        if not (has_openai or has_azure or has_gemini or has_anthropic):
-            infer = self._config.get("infer", True)
-            if infer:
-                logger.warning("No LLM API keys found. Memory extraction will fail.")
-            return None, False
-
-        logger.info("LLM credentials detected (direct LiteLLM path)")
-        return None, True
+        explicit = cfg.get("embedding_dims") or cfg.get("embedding_model_dims")
+        model = cfg.get("embedding_model", "text-embedding-3-small")
+        return resolve_embedding_dims(model, explicit)
 
     def _setup_embedding(self) -> Any:
         """Resolve embedding provider.  Returns the provider instance."""
@@ -563,7 +557,7 @@ class CognitiveMemoryServiceBuilder:
             embedding_model=cfg.get("embedding_model", "text-embedding-3-small"),
             chat_model=chat_model_raw,
             memory_llm_model=memory_llm_model,
-            embedding_dims=cfg.get("embedding_dims", 1536),
+            embedding_dims=self._resolve_embedding_dims(cfg),
             infer=cfg.get("infer", True),
             extraction_provider=cfg.get("extraction_provider"),
             temperature=temperature,

@@ -27,25 +27,14 @@
     }
   },
     "memory_config": {
-      "enabled": true,
+      "preset": "full",
       "encrypted": true,
-      "provider": "cognitive",
       "collection_name": "user_memories",
-      "embedding_model_dims": 1536,
-      "embedding_model": "text-embedding-3-small",
       "chat_model": "gemini/gemini-2.5-flash-lite",
       "memory_llm_model": "gemini/gemini-2.5-flash-lite",
       "extraction_provider": "extraction",
-      "infer": true,
-      "enable_cognitive": true,
       "max_depth": 1000,
-      "emotion_weight": 0.5,
-      "recency_weight": 0.3,
-      "recency_half_life_hours": 168,
       "spreading_activation": true,
-      "activation_discount": 0.7,
-      "salience_gate": true,
-      "salience_threshold": 0.3,
       "persona": {
         "enabled": true,
         "default_role": "Orby - AI Assistant",
@@ -58,42 +47,17 @@
           "creativity": 0.5
         }
       },
-      "cognitive": {
-      "enabled": true,
-      "emotion": {
-        "enabled": true,
-        "flashbulb_threshold": 0.7,
-        "max_stability_multiplier": 100
+      "categories": {
+        "custom_categories": ["work", "health", "finance", "travel"]
       },
-      "conflict_resolution": {
+      "verification": {
         "enabled": true,
-        "similarity_threshold": 0.85
+        "max_file_size_kb": 500
       }
-    },
-    "categories": {
-      "enabled": true,
-      "custom_categories": [
-        "work",
-        "health",
-        "finance",
-        "travel"
-      ]
-    },
-    "reflection": {
-      "enabled": true,
-      "interval_hours": 24,
-      "message_threshold": 50,
-      "min_salience_to_keep": 0.3,
-      "store_reflections": true
-    },
-    "verification": {
-      "enabled": true,
-      "max_file_size_kb": 500
-    }
   },
   "graph_config": {
     "enabled": true,
-    "collection_name": "__kg",
+    "collection_name": "kg",
     "auto_extract": true,
     "default_max_depth": 2,
     "node_types": [

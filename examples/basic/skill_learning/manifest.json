@@ -6,18 +6,11 @@
   "status": "active",
 
   "memory_config": {
-    "enabled": true,
-    "provider": "cognitive",
-    "collection_name": "memories",
-    "embedding_model": "text-embedding-3-small",
-    "embedding_model_dims": 1536,
+    "preset": "smart",
     "infer": false,
-    "async_mode": true,
-    "enable_cognitive": true,
     "max_depth": 200,
     "similarity_threshold": 0.85,
     "reinforcement_factor": 1.15,
-
     "categories": {
       "enabled": true,
       "custom_categories": [
