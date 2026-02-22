@@ -243,19 +243,14 @@ class GraphService(
             await self.collection.create_index(
                 [("app_slug", ASCENDING), ("type", ASCENDING)],
                 name="app_type_idx",
-                background=True,
             )
-            # Index for user-scoped queries
             await self.collection.create_index(
                 [("app_slug", ASCENDING), ("user_id", ASCENDING)],
                 name="app_user_idx",
-                background=True,
             )
-            # Index for edge traversal
             await self.collection.create_index(
                 [("edges.target", ASCENDING)],
                 name="edge_target_idx",
-                background=True,
             )
             logger.debug("GraphService indexes created")
         except (PyMongoError, OperationFailure) as e:

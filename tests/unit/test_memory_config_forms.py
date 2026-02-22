@@ -169,18 +169,34 @@ class TestMultiAppCodeIntegrity:
         source = inspect.getsource(multi_app)
         assert "initialize_graph_service" in source, "multi_app.py must call initialize_graph_service for mounted apps"
 
-    def test_app_registration_has_preset_check(self):
+    def test_app_registration_uses_is_config_enabled(self):
         import inspect
 
         from mdb_engine.core import app_registration
 
         source = inspect.getsource(app_registration)
-        assert '"preset" in memory_config' in source, "app_registration.py must check for 'preset' key in memory_config"
+        assert "is_config_enabled" in source, "app_registration.py must use is_config_enabled for memory_config checks"
 
-    def test_multiapp_has_preset_check(self):
+    def test_multiapp_uses_is_config_enabled(self):
         import inspect
 
         from mdb_engine.core import multi_app
 
         source = inspect.getsource(multi_app)
-        assert '"preset" in raw_memory_config' in source, "multi_app.py must check for 'preset' key in memory_config"
+        assert "is_config_enabled" in source, "multi_app.py must use is_config_enabled for memory_config checks"
+
+    def test_is_config_enabled_handles_all_forms(self):
+        from mdb_engine.core.manifest import is_config_enabled
+
+        assert is_config_enabled(True) is True
+        assert is_config_enabled("smart") is True
+        assert is_config_enabled("full") is True
+        assert is_config_enabled({"enabled": True}) is True
+        assert is_config_enabled({"preset": "smart"}) is True
+        assert is_config_enabled({"preset": "smart", "enabled": False}) is True
+        assert is_config_enabled(False) is False
+        assert is_config_enabled(None) is False
+        assert is_config_enabled({}) is False
+        assert is_config_enabled({"enabled": False}) is False
+        assert is_config_enabled({"enabled": True}, default=True) is True
+        assert is_config_enabled({}, default=True) is True

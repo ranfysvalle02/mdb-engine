@@ -63,7 +63,7 @@ class IndexManager:
 
         # Check for conflicts with memory service managed indexes
         memory_config = manifest.get("memory_config", {})
-        if memory_config.get("enabled", False):
+        if isinstance(memory_config, dict) and memory_config.get("enabled", False):
             memory_collection_base = memory_config.get("collection_name", "memories")
             # Remove slug prefix if present (it will be added automatically)
             if memory_collection_base.startswith(f"{slug}_"):

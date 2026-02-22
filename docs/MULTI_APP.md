@@ -215,7 +215,7 @@ If your module has a `templates` variable (Jinja2Templates instance), the framew
 
 | Global | Value | Usage in Template |
 |--------|-------|-------------------|
-| `base_path` | `"/my-app"` | `{{ base_path }}` or `const BASE = '{{ base_path }}'` |
+| `base_path` | `"/my-app"` | `{{ base_path }}` in Jinja2, `MDB.BASE` / `BASE` in JS (via `mdb_base.html`) |
 | `auth_hub_url` | `"/auth-hub"` | `{{ auth_hub_url }}` |
 | `app_slug` | `"my-app"` | `{{ app_slug }}` |
 
@@ -423,17 +423,30 @@ Child apps write **bare paths**. The framework adds the prefix.
 
 ### Template Pattern
 
-```html
-<!-- base_path, auth_hub_url, app_slug are auto-injected by the framework -->
-<script>
-    const BASE = '{{ base_path }}';  // e.g., '/my-app'
-</script>
+Extend `mdb_base.html` in your app's base template. The framework provides `MDB.BASE`, `MDB.AUTH_HUB`, `MDB.csrfToken()`, `getCookie()`, and a backwards-compatible `BASE` alias — all guaranteed to be defined before `{% block base_js %}` and `{% block extra_js %}` render.
 
+```html
+<!-- In your app's base.html: -->
+{% extends "mdb_base.html" %}
+{% block body %}
+<header>...</header>
+<main>{% block content %}{% endblock %}</main>
+{% endblock %}
+{% block base_js %}
+<script>/* app-level JS like logout — MDB.BASE available here */</script>
+{% endblock %}
+```
+
+```html
+<!-- In page templates: -->
+{% extends "base.html" %}
+{% block content %}
 <a href="{{ base_path }}/dashboard">Dashboard</a>
 <a href="/auth-hub/login">Login</a>  <!-- cross-app: use absolute path -->
-
+{% endblock %}
+{% block extra_js %}
 <script>
-    // Same-app API call: use BASE
+    // Same-app API call: use BASE (or MDB.BASE)
     const res = await fetch(BASE + '/api/data');
 
     // Parent-level endpoint: use absolute path (no BASE)

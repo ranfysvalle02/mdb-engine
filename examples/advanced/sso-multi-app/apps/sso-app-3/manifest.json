@@ -127,7 +127,6 @@
   "raw_content_config": {
     "enabled": true,
     "collection_name": "raw_content",
-    "embedding_model_dims": 1536,
     "embedding_model": "text-embedding-3-small"
   },
   "managed_indexes": {

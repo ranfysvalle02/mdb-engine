@@ -110,19 +110,14 @@ class CommunityService:
             await self.community_collection.create_index(
                 [("app_slug", ASCENDING), ("level", ASCENDING)],
                 name="app_level_idx",
-                background=True,
             )
-            # Index for parent-child relationships
             await self.community_collection.create_index(
                 [("app_slug", ASCENDING), ("parent_id", ASCENDING)],
                 name="app_parent_idx",
-                background=True,
             )
-            # Index for node membership queries
             await self.community_collection.create_index(
                 [("app_slug", ASCENDING), ("node_ids", ASCENDING)],
                 name="app_nodes_idx",
-                background=True,
             )
             # Vector index will be created separately for embeddings
             logger.debug("CommunityService indexes created")

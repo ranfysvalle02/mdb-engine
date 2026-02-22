@@ -26,7 +26,7 @@ from pymongo.errors import (
 
 from ..observability import clear_app_context, record_operation, set_app_context
 from ..observability import get_logger as get_contextual_logger
-from .manifest import ManifestParser, ManifestValidator
+from .manifest import ManifestParser, ManifestValidator, is_config_enabled
 
 if TYPE_CHECKING:
     from .types import ManifestDict
@@ -259,15 +259,7 @@ class AppRegistrationManager:
             # Initialize Memory service if configured (after graph so it can use graph service)
             # Supports shorthand: true, "basic"/"smart"/"full", or full dict.
             memory_config = manifest.get("memory_config")
-            _mem_enabled = (
-                memory_config is True
-                or isinstance(memory_config, str)
-                or (
-                    isinstance(memory_config, dict)
-                    and (memory_config.get("enabled", False) or "preset" in memory_config)
-                )
-            )
-            if initialize_memory_callback and _mem_enabled:
+            if initialize_memory_callback and is_config_enabled(memory_config):
                 callback_tasks.append(initialize_memory_callback(slug, memory_config))
 
             # Initialize Profile service if configured (after memory + graph)
@@ -315,8 +307,8 @@ class AppRegistrationManager:
                 "App registered successfully",
                 extra={
                     "app_slug": slug,
-                    "graph_enabled": bool(graph_config.get("enabled", True)),
-                    "memory_enabled": bool(memory_config and memory_config.get("enabled", False)),
+                    "graph_enabled": is_config_enabled(graph_config, default=True),
+                    "memory_enabled": is_config_enabled(memory_config),
                     "websockets_configured": bool(websockets_config),
                     "duration_ms": round(duration_ms, 2),
                 },

@@ -293,7 +293,6 @@ class ServiceInitializer:
                     name="episodic_ttl_idx",
                     expireAfterSeconds=episodic_ttl_seconds,
                     partialFilterExpression={"memory_type": "episodic"},
-                    background=True,
                 )
                 contextual_logger.info(
                     f"Created TTL index for episodic memory " f"(retention: {episodic_retention_days} days)",

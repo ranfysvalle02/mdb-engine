@@ -59,6 +59,21 @@ _validation_cache: OrderedDict[str, tuple[bool, str | None, list[str] | None]] =
 _cache_lock = asyncio.Lock()
 
 
+def is_config_enabled(config: Any, *, default: bool = False) -> bool:
+    """Check if a service config is enabled, handling shorthand forms.
+
+    Supports: ``True``, ``"preset_name"``, ``{"enabled": True}``,
+    ``{"preset": "..."}``, and ``None``/``False``.
+    """
+    if config is True:
+        return True
+    if isinstance(config, str):
+        return bool(config)
+    if isinstance(config, dict):
+        return bool(config.get("enabled", default) or "preset" in config)
+    return False
+
+
 def _cache_put(key: str, value: tuple[bool, str | None, list[str] | None]) -> None:
     """Insert into the validation cache, evicting the oldest entry if full."""
     _validation_cache[key] = value

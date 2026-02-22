@@ -2548,7 +2548,7 @@ class ScopedMongoWrapper:
             if not app_id_index_exists:
                 # Create app_id index
                 try:
-                    await index_manager.create_index([("app_id", ASCENDING)], name="auto_app_id_asc", background=True)
+                    await index_manager.create_index([("app_id", ASCENDING)], name="auto_app_id_asc")
                     logger.info(f"Auto-created app_id index on {collection.name}")
                     return True
                 except OperationFailure as e:

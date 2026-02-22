@@ -595,7 +595,7 @@ Want fancier memory? Add more fields:
 |-----------------|-------------|
 | `provider` | Which memory engine to use (`"cognitive"` is the default and only option) |
 | `collection_name` | MongoDB collection name for storing memories |
-| `embedding_model_dims` | Size of the embedding vectors (must match your embedding model) |
+| `embedding_model_dims` | Size of the embedding vectors (auto-detected from model name — only needed for custom models) |
 | `infer` | `true` = AI extracts facts automatically; `false` = you provide facts manually |
 | `enable_cognitive` | Turn on smart features (importance scoring, merging, etc.) |
 | `similarity_threshold` | How similar two facts must be to count as "related" (0.0 to 1.0) |

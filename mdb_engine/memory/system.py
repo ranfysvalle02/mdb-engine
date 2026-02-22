@@ -172,7 +172,6 @@ class CognitiveMemory:
                     "last_accessed",
                     expireAfterSeconds=24 * 3600,  # 24 hours
                     name="working_memory_ttl_idx",
-                    background=True,
                 )
             )
             logger.info("Working memory TTL index created (24h expiration)")

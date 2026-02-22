@@ -1401,16 +1401,10 @@ class MultiAppMixin:
                                 extra={"app_slug": slug},
                             )
 
+                    from .manifest import is_config_enabled
+
                     raw_memory_config = app_manifest_data.get("memory_config")
-                    _mem_enabled = (
-                        raw_memory_config is True
-                        or isinstance(raw_memory_config, str)
-                        or (
-                            isinstance(raw_memory_config, dict)
-                            and (raw_memory_config.get("enabled", False) or "preset" in raw_memory_config)
-                        )
-                    )
-                    if _mem_enabled:
+                    if is_config_enabled(raw_memory_config):
                         if engine._service_initializer:  # noqa: SLF001
                             try:
                                 await engine._service_initializer.initialize_memory_service(  # noqa: SLF001

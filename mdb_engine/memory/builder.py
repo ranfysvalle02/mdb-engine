@@ -295,10 +295,10 @@ class CognitiveMemoryServiceBuilder:
         The ``CognitiveMemoryService`` invokes this lazily on first use.
         """
         try:
-            await collection.create_index("graph_links.derived_from", background=True)
-            await collection.create_index("graph_links.contradicts", background=True)
-            await collection.create_index("metadata.timeline_id", background=True)
-            await collection.create_index("metadata.confidence", background=True)
+            await collection.create_index("graph_links.derived_from")
+            await collection.create_index("graph_links.contradicts")
+            await collection.create_index("metadata.timeline_id")
+            await collection.create_index("metadata.confidence")
             logger.info("Created indexes for graph_links and timeline_id")
         except (PyMongoError, OperationFailure) as e:
             logger.warning(f"Failed to create indexes (may already exist): {e}")

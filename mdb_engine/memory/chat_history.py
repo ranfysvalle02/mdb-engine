@@ -88,7 +88,6 @@ class ChatHistoryService:
                     [("created_at", ASCENDING)],
                     name="working_memory_ttl_idx",
                     expireAfterSeconds=ttl_seconds,
-                    background=True,
                 )
             except (PyMongoError, AttributeError, TypeError) as e:
                 logger.debug(f"TTL index creation: {e}")
