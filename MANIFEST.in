@@ -4,3 +4,4 @@ include pyproject.toml
 recursive-include mdb_engine *.py
 recursive-include mdb_engine *.md
 recursive-include mdb_engine *.json
+recursive-include mdb_engine *.html

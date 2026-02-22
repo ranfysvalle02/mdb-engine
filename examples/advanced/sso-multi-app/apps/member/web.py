@@ -150,6 +150,7 @@ async def on_startup(app_instance, engine_ref, manifest):
         prospective_memory = ProspectiveMemory(
             collection=prospective_col,
             embedding_model=manifest.get("memory_config", {}).get("embedding_model", "text-embedding-3-small"),
+            embedding_service=engine_ref.get_embedding_service(APP_SLUG),
         )
         logger.info("ProspectiveMemory initialized")
     except (ImportError, RuntimeError, OSError) as e:

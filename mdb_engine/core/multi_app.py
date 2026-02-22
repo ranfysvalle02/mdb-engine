@@ -1280,6 +1280,7 @@ class MultiAppMixin:
                                 from jinja2 import ChoiceLoader, FileSystemLoader
 
                                 _fw_templates = str(Path(__file__).resolve().parent.parent / "templates")
+                                _fw_exists = Path(_fw_templates).exists()
                                 existing_loader = child_templates.env.loader
                                 if existing_loader is not None:
                                     child_templates.env.loader = ChoiceLoader(
@@ -1287,10 +1288,29 @@ class MultiAppMixin:
                                     )
                                 else:
                                     child_templates.env.loader = FileSystemLoader(_fw_templates)
-                            except (ImportError, TypeError, ValueError, OSError):
-                                logger.debug(f"Could not add framework templates to loader for '{slug}'")
 
-                            logger.debug(f"Injected Jinja2 template globals for app '{slug}'")
+                                from jinja2.exceptions import TemplateNotFound
+
+                                try:
+                                    child_templates.env.get_template("mdb_base.html")
+                                    logger.info("Framework templates registered for '%s'", slug)
+                                except TemplateNotFound:
+                                    logger.warning(
+                                        "Framework template patching FAILED for '%s': "
+                                        "mdb_base.html not found after ChoiceLoader setup "
+                                        "(dir=%s, exists=%s)",
+                                        slug,
+                                        _fw_templates,
+                                        _fw_exists,
+                                    )
+                            except (ImportError, TypeError, ValueError, OSError) as exc:
+                                logger.warning(
+                                    "Could not add framework templates to loader for '%s': %s",
+                                    slug,
+                                    exc,
+                                )
+
+                            logger.info("Injected Jinja2 template globals for app '%s'", slug)
 
                     # Create middleware factory to properly capture loop variables
                     def create_app_context_middleware(
