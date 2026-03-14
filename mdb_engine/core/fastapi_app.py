@@ -159,7 +159,7 @@ class FastAPIAppMixin:
                 app_manifest = await engine.load_manifest(manifest_path)
             else:
                 # Inline / auto-generated manifest — validate then use directly
-                is_valid, error_msg, _ = engine.validate_manifest(pre_manifest)
+                is_valid, error_msg, _ = await engine.validate_manifest(pre_manifest)
                 if not is_valid:
                     raise ValueError(f"Invalid manifest for '{slug}': {error_msg}")
                 app_manifest = pre_manifest
