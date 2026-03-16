@@ -78,6 +78,15 @@ class TestMongoDBEngineInitialization:
         await mongodb_engine.shutdown()  # Should not raise
 
     @pytest.mark.asyncio
+    async def test_shutdown_logs_timing(self, mongodb_engine):
+        """Test that shutdown emits structured log messages with timing."""
+        with patch("mdb_engine.core.engine.logger") as mock_logger:
+            await mongodb_engine.shutdown()
+            log_messages = [str(call) for call in mock_logger.info.call_args_list]
+            assert any("Shutdown initiated" in m for m in log_messages)
+            assert any("Shutdown complete" in m for m in log_messages)
+
+    @pytest.mark.asyncio
     async def test_engine_context_manager(self, mock_mongo_client, mongodb_engine_config):
         """Test engine as async context manager."""
         with patch(

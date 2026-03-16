@@ -643,27 +643,28 @@ class ServiceInitializer:
         # --- Embedding ---
         embedding_service = self._embedding_services.get(slug)
         if embedding_service is None:
-            try:
-                from ..embeddings.service import get_embedding_service as _create_emb
+            cfg: dict[str, Any] = {}
+            if embedding_config:
+                cfg = embedding_config
+            elif memory_config and isinstance(memory_config, dict):
+                model = memory_config.get("embedding_model", "text-embedding-3-small")
+                cfg = {"default_embedding_model": model}
 
-                cfg: dict[str, Any] = {}
-                if embedding_config:
-                    cfg = embedding_config
-                elif memory_config and isinstance(memory_config, dict):
-                    model = memory_config.get("embedding_model", "text-embedding-3-small")
-                    cfg = {"default_embedding_model": model}
+            if cfg:
+                try:
+                    from ..embeddings.service import get_embedding_service as _create_emb
 
-                embedding_service = _create_emb(config=cfg if cfg else None)
-                self._embedding_services[slug] = embedding_service
-                contextual_logger.info(
-                    f"Shared EmbeddingService created for '{slug}'",
-                    extra={"app_slug": slug},
-                )
-            except (ImportError, TypeError, ValueError, RuntimeError) as exc:
-                contextual_logger.debug(
-                    f"Could not create shared EmbeddingService for '{slug}': {exc}",
-                    extra={"app_slug": slug},
-                )
+                    embedding_service = _create_emb(config=cfg)
+                    self._embedding_services[slug] = embedding_service
+                    contextual_logger.info(
+                        f"Shared EmbeddingService created for '{slug}'",
+                        extra={"app_slug": slug},
+                    )
+                except (ImportError, TypeError, ValueError, RuntimeError) as exc:
+                    contextual_logger.debug(
+                        f"Could not create shared EmbeddingService for '{slug}': {exc}",
+                        extra={"app_slug": slug},
+                    )
 
         return llm_service, embedding_service
 

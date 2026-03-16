@@ -300,6 +300,7 @@ class CognitiveEngine:
         search_filters: dict[str, Any] | None = None,
         search_strategy: str | None = None,
         skill_feedback: dict[str, bool] | None = None,
+        timeline_id: str | None = None,
         **kwargs,
     ) -> dict[str, Any]:
         """
@@ -342,6 +343,9 @@ class CognitiveEngine:
                            exchange.  Maps skill name to success boolean, e.g.
                            ``{"Clear Cache Workflow": True}``.  When provided, updates
                            ``ProceduralMemory.mark_procedure_used()`` for each entry.
+            timeline_id: Optional timeline ID for memory isolation. When None,
+                        auto-resolves from TimelineService (if available) or
+                        defaults to "root".
             **kwargs: Additional arguments passed to LLM provider (e.g., model, temperature)
 
         Returns:
@@ -415,6 +419,12 @@ class CognitiveEngine:
             self._validate_chat_inputs(user_id, session_id, user_query, bucket_id, search_strategy)
             await self._process_skill_feedback(skill_feedback)
 
+            # Resolve timeline_id: explicit > TimelineService > "root"
+            if timeline_id is None and self.ltm and getattr(self.ltm, "timeline_service", None):
+                timeline_id = await self.ltm.timeline_service.get_active_timeline(user_id)
+            if not timeline_id:
+                timeline_id = "root"
+
             # Phase 1: Store user message in STM
             with create_span("chat_engine.chat.save_to_stm"):
                 await self._store_user_message(session_id, user_id, user_query)
@@ -429,6 +439,7 @@ class CognitiveEngine:
                     bucket_type,
                     search_filters,
                     search_strategy,
+                    timeline_id,
                 )
 
             parent_span.set_attribute("chat.ltm_count", len(ltm) if ltm else 0)
@@ -466,6 +477,7 @@ class CognitiveEngine:
                     user_query,
                     bucket_id,
                     bucket_type,
+                    timeline_id,
                 )
 
             parent_span.set_attribute("chat.memories_stored", len(memories_stored) if memories_stored else 0)
@@ -548,6 +560,7 @@ class CognitiveEngine:
         bucket_id: str | None,
         bucket_type: str | None,
         search_filters: dict[str, Any] | None,
+        timeline_id: str = "root",
     ) -> list[dict[str, Any]]:
         """Fetch relevant memories from LTM with optional bucket filtering."""
         try:
@@ -566,6 +579,7 @@ class CognitiveEngine:
                 user_id=user_id,
                 limit=self.ltm_search_limit,
                 filters=ltm_filters if ltm_filters else None,
+                timeline_id=timeline_id,
             )
 
             if not results and bucket_id:
@@ -677,6 +691,7 @@ class CognitiveEngine:
         bucket_type: str | None,
         search_filters: dict[str, Any] | None,
         search_strategy: str | None,
+        timeline_id: str = "root",
     ) -> tuple[
         list[dict[str, Any]],  # LTM memories
         list[dict[str, str]],  # STM messages
@@ -694,7 +709,7 @@ class CognitiveEngine:
         )
 
         fetch_tasks: list[Any] = [
-            self._fetch_ltm(user_query, user_id, bucket_id, bucket_type, search_filters),
+            self._fetch_ltm(user_query, user_id, bucket_id, bucket_type, search_filters, timeline_id),
             self._fetch_stm(session_id, user_id),
         ]
         if self._graph_service:
@@ -1041,6 +1056,7 @@ class CognitiveEngine:
         user_query: str,
         bucket_id: str | None,
         bucket_type: str | None,
+        timeline_id: str = "root",
     ) -> list[dict[str, Any]]:
         """Phase 8: extract facts from the user query and store in LTM."""
         if not extract_facts:
@@ -1058,6 +1074,7 @@ class CognitiveEngine:
                 "source": "chat_session",
                 "session_id": session_id,
                 "associated_bucket_id": storage_bucket_id,
+                "timeline_id": timeline_id,
             }
 
             logger.info(

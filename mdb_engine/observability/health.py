@@ -450,3 +450,69 @@ async def check_graph_health(graph_service: Any | None) -> HealthCheckResult:
         message=message,
         details=stats,
     )
+
+
+# =========================================================================
+# Realtime (Change Stream watcher) health check
+# =========================================================================
+
+
+async def check_realtime_health(watcher: Any | None) -> HealthCheckResult:
+    """Check the Change Stream watcher status.
+
+    Args:
+        watcher: :class:`ChangeStreamWatcher` instance (or ``None``).
+
+    Returns:
+        HealthCheckResult reflecting whether the watcher is running,
+        reconnecting, stopped, or failed.
+    """
+    if watcher is None:
+        return HealthCheckResult(
+            name="realtime",
+            status=HealthStatus.UNKNOWN,
+            message="Realtime watcher not configured",
+        )
+
+    state = getattr(watcher, "state", None)
+    if state is None:
+        return HealthCheckResult(
+            name="realtime",
+            status=HealthStatus.UNKNOWN,
+            message="Unable to determine watcher state",
+        )
+
+    state_str = state.value if hasattr(state, "value") else str(state)
+
+    manager = getattr(watcher, "_manager", None)
+    sub_count = getattr(manager, "subscription_count", 0) if manager else 0
+    details = {"state": state_str, "subscription_count": sub_count}
+
+    if state_str == "running":
+        return HealthCheckResult(
+            name="realtime",
+            status=HealthStatus.HEALTHY,
+            message=f"Change Stream watcher running ({sub_count} subscription(s))",
+            details=details,
+        )
+    if state_str == "reconnecting":
+        return HealthCheckResult(
+            name="realtime",
+            status=HealthStatus.DEGRADED,
+            message="Change Stream watcher reconnecting",
+            details=details,
+        )
+    if state_str == "failed":
+        return HealthCheckResult(
+            name="realtime",
+            status=HealthStatus.UNHEALTHY,
+            message="Change Stream watcher failed (requires replica set)",
+            details=details,
+        )
+
+    return HealthCheckResult(
+        name="realtime",
+        status=HealthStatus.UNKNOWN,
+        message=f"Watcher state: {state_str}",
+        details=details,
+    )

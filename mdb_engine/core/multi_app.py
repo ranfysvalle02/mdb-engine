@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from fastapi import FastAPI
 
     from .connection import ConnectionManager
+    from .engine import MongoDBEngine
 
 try:
     from openai import OpenAIError
@@ -1084,6 +1085,21 @@ class MultiAppMixin:
 
             configure_logging()
 
+            # Register SIGTERM handler so the signal arrival is logged before
+            # uvicorn triggers lifespan shutdown.  signal.signal() only works
+            # from the main thread; skip gracefully in test / worker threads.
+            import signal
+            import threading
+
+            if threading.current_thread() is threading.main_thread():
+
+                def _handle_sigterm(signum: int, frame: Any) -> None:
+                    logger.info("[Engine] SIGTERM received -- initiating graceful shutdown")
+
+                signal.signal(signal.SIGTERM, _handle_sigterm)
+            else:
+                logger.debug("Skipping SIGTERM handler (not main thread)")
+
             # Initialize engine
             await engine.initialize()
 
@@ -1394,6 +1410,13 @@ class MultiAppMixin:
 
                     await _register_websocket_routes(app, app_manifest_data, slug, path_prefix)
 
+                    # Auto-register CRUD endpoints for collections defined in manifest
+                    _collections_cfg = app_manifest_data.get("collections", {})
+                    if _collections_cfg:
+                        from ..routing.auto_crud import mount_auto_crud_routes
+
+                        mount_auto_crud_routes(child_app, _collections_cfg)
+
                     # Pre-create shared LLM/embedding services for this app
                     # so graph and memory share the same instances.
                     if engine._service_initializer:  # noqa: SLF001
@@ -1514,6 +1537,7 @@ class MultiAppMixin:
                             {
                                 "status": "mounted",
                                 "manifest": app_manifest_data,
+                                "app": child_app,
                             }
                         )
                     else:
@@ -1524,6 +1548,7 @@ class MultiAppMixin:
                                 "path_prefix": path_prefix,
                                 "status": "mounted",
                                 "manifest": app_manifest_data,
+                                "app": child_app,
                             }
                         )
                     logger.info(f"Mounted app '{slug}' at path prefix '{path_prefix}'")
@@ -1713,13 +1738,24 @@ class MultiAppMixin:
 
             logger.info("=" * 60)
 
+            # Start shared realtime Change Stream watcher for all apps
+            await self._start_multi_app_realtime(app, engine, apps, mounted_apps)
+
             yield
+
+            # Stop realtime watcher before shutdown
+            await self._stop_multi_app_realtime(app)
 
             # Shutdown is handled by parent app
             await engine.shutdown()
 
         # Create parent FastAPI app
         parent_app = FastAPI(title=title, lifespan=lifespan, root_path=root_path, **fastapi_kwargs)
+
+        # Register structured error handlers for MongoDBEngineError hierarchy
+        from ..observability.error_handlers import register_error_handlers
+
+        register_error_handlers(parent_app)
 
         # Set mounted_apps immediately so get_mounted_apps() works before lifespan runs
         parent_app.state.mounted_apps = mounted_apps
@@ -1971,6 +2007,26 @@ class MultiAppMixin:
                 "apps": mounted_status,
             }
 
+        # Lightweight readiness probe (Kubernetes-style)
+        @parent_app.get("/ready")
+        async def readiness_check():
+            """Lightweight readiness probe -- can this instance accept traffic?"""
+            from starlette.responses import JSONResponse
+
+            from ..observability import check_mongodb_health
+
+            result = await check_mongodb_health(engine.mongo_client)
+            is_ready = result.status.value == "healthy" and engine.initialized
+            status_code = 200 if is_ready else 503
+            return JSONResponse(
+                status_code=status_code,
+                content={
+                    "ready": is_ready,
+                    "mongodb": result.status.value,
+                    "engine_initialized": engine.initialized,
+                },
+            )
+
         # Add metrics endpoint (exposes in-memory operation metrics)
         @parent_app.get("/metrics")
         async def metrics_endpoint():
@@ -2219,6 +2275,82 @@ class MultiAppMixin:
 
         mounted_apps = getattr(app.state, "mounted_apps", [])
         return mounted_apps
+
+    # ------------------------------------------------------------------
+    # Realtime (Change Stream → WebSocket) for multi-app
+    # ------------------------------------------------------------------
+
+    async def _start_multi_app_realtime(
+        self,
+        parent_app: "FastAPI",
+        engine: "MongoDBEngine",
+        apps: list[dict[str, Any]],
+        mounted_apps: list[dict[str, Any]],
+    ) -> None:
+        """Start a shared Change Stream watcher across all mounted apps."""
+        try:
+            from ..realtime import (
+                ChangeStreamWatcher,
+                RealtimeManager,
+                register_realtime,
+            )
+        except ImportError:
+            return
+
+        collection_map: dict[str, tuple[str, str]] = {}
+        watched: dict[str, set[str]] = {}
+
+        for ma in mounted_apps:
+            if ma.get("status") != "mounted":
+                continue
+            slug = ma["slug"]
+            manifest_dict = ma.get("manifest", {})
+            collections_cfg = manifest_dict.get("collections", {})
+            for name, cfg in collections_cfg.items():
+                if cfg.get("realtime", False):
+                    physical = f"{slug}_{name}"
+                    collection_map[physical] = (slug, name)
+                    watched.setdefault(slug, set()).add(physical)
+
+        if not collection_map:
+            return
+
+        manager = RealtimeManager(collection_map)
+        watcher = ChangeStreamWatcher(
+            db=engine.connection_manager.mongo_db,
+            manager=manager,
+            watched_collections=watched,
+        )
+
+        parent_app.state.realtime_manager = manager
+        parent_app.state.realtime_watcher = watcher
+
+        # Register /ws/realtime on each child app that has realtime collections
+        for ma in mounted_apps:
+            if ma.get("status") != "mounted":
+                continue
+            slug = ma["slug"]
+            manifest_dict = ma.get("manifest", {})
+            collections_cfg = manifest_dict.get("collections", {})
+            child_app = ma.get("app")
+            if child_app:
+                register_realtime(child_app, slug, collections_cfg, manager)
+
+        await watcher.start()
+        logger.info(
+            "Multi-app realtime watcher started for %d collection(s)",
+            len(collection_map),
+        )
+
+    @staticmethod
+    async def _stop_multi_app_realtime(parent_app: "FastAPI") -> None:
+        """Stop the shared realtime watcher."""
+        watcher = getattr(parent_app.state, "realtime_watcher", None)
+        if watcher is not None:
+            try:
+                await watcher.stop()
+            except (OSError, RuntimeError) as e:
+                logger.warning(f"Error stopping multi-app realtime watcher: {e}")
 
     async def _initialize_shared_user_pool(
         self,

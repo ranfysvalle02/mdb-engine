@@ -5,6 +5,7 @@ Provides structured logging, metrics collection, distributed tracing,
 and health check capabilities.
 """
 
+from .error_handlers import register_error_handlers
 from .exporters import create_prometheus_endpoint, setup_otel_metrics_bridge
 from .health import (
     HealthChecker,
@@ -74,6 +75,8 @@ __all__ = [
     "check_llm_health",
     "check_embedding_health",
     "check_graph_health",
+    # Error handlers
+    "register_error_handlers",
     # Exporters
     "create_prometheus_endpoint",
     "setup_otel_metrics_bridge",

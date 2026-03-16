@@ -140,14 +140,17 @@ class TestWebSocketMultiAppSessionKeys:
 
     @pytest.mark.asyncio
     async def test_websocket_with_valid_session_key(self, mongodb_connection_string, test_manifests):
-        """
-        Test successful WebSocket connection with valid session key.
+        """Test successful WebSocket connection with valid session key.
 
-        Note: TestClient has event loop limitations with async Motor operations.
-        This test validates the authentication flow works correctly. In production,
-        WebSocket connections run in proper async contexts without these limitations.
+        Motor's ``find_one`` cannot cross the event-loop boundary created by
+        ``TestClient``'s internal ``anyio.BlockingPortal``.  We patch
+        ``validate_session`` at the class level so every instance (including
+        the one created by TestClient's lifespan) returns the expected document
+        without hitting MongoDB.
         """
-        import asyncio
+        from unittest.mock import AsyncMock, patch
+
+        from mdb_engine.auth.websocket_sessions import WebSocketSessionManager
 
         db_name = f"test_ws_session_keys_valid_{os.getpid()}"
         engine = MongoDBEngine(mongo_uri=mongodb_connection_string, db_name=db_name)
@@ -168,41 +171,29 @@ class TestWebSocketMultiAppSessionKeys:
             title="Test Multi-App",
         )
 
-        async with app.router.lifespan_context(app):
-            # Create a session key in the proper async context
-            websocket_session_manager = app.state.websocket_session_manager
-            assert websocket_session_manager is not None
+        mock_session = {
+            "user_id": "test_user_123",
+            "user_email": "test@example.com",
+            "app_slug": "app-3",
+        }
 
-            session_key = await websocket_session_manager.create_session(
-                user_id="test_user_123",
-                user_email="test@example.com",
-                app_slug="app-3",
-            )
-
-            # Test WebSocket connection with valid session key
-            # Use asyncio.to_thread to run TestClient in a separate thread,
-            # which helps avoid event loop conflicts with Motor operations
-            def test_websocket():
-                with TestClient(app) as client:
-                    try:
-                        with client.websocket_connect(f"/app-3/ws?session_key={session_key}") as websocket:
-                            data = websocket.receive_json()
-                            assert data["type"] == "connected"
-                            assert data["app_slug"] == "app-3"
-                            assert data["authenticated"] is True
-                            assert data["user_email"] == "test@example.com"
-                    except WebSocketDisconnect as e:
-                        # If event loop conflict occurs, the connection will be rejected
-                        # This is a TestClient limitation, not a production issue
-                        if e.code == 1008:  # Policy violation (authentication failed)
-                            pytest.skip(
-                                "TestClient event loop conflict with Motor operations. "
-                                "This is a test environment limitation - production WebSocket "
-                                "connections run in proper async contexts without this issue."
-                            )
-                        raise
-
-            await asyncio.to_thread(test_websocket)
+        with patch.object(
+            WebSocketSessionManager,
+            "validate_session",
+            new_callable=AsyncMock,
+            return_value=mock_session,
+        ):
+            with TestClient(app) as client:
+                headers = {"Origin": "http://localhost:3000"}
+                with client.websocket_connect(
+                    "/app-3/ws?session_key=test_session_key_123",
+                    headers=headers,
+                ) as websocket:
+                    data = websocket.receive_json()
+                    assert data["type"] == "connected"
+                    assert data["app_slug"] == "app-3"
+                    assert data["authenticated"] is True
+                    assert data["user_email"] == "test@example.com"
 
     @pytest.mark.asyncio
     async def test_websocket_invalid_session_key(self, mongodb_connection_string, test_manifests):

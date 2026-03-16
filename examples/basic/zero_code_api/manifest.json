@@ -1,0 +1,72 @@
+{
+  "schema_version": "2.0",
+  "slug": "zero_code",
+  "name": "Zero-Code API",
+  "collections": {
+    "tasks": {
+      "auto_crud": true,
+      "soft_delete": true,
+      "schema": {
+        "type": "object",
+        "properties": {
+          "title": { "type": "string" },
+          "status": { "type": "string", "enum": ["pending", "in_progress", "done"] },
+          "assignee": { "type": "string" },
+          "priority": { "type": "integer", "minimum": 1, "maximum": 5 }
+        },
+        "required": ["title"]
+      },
+      "defaults": {
+        "status": "pending",
+        "priority": 3
+      },
+      "scopes": {
+        "active": { "status": { "$ne": "done" } },
+        "done":   { "status": "done" },
+        "high_priority": { "priority": { "$gte": 4 } }
+      },
+      "pipelines": {
+        "by_status": [
+          { "$group": { "_id": "$status", "count": { "$sum": 1 } } },
+          { "$sort": { "count": -1 } }
+        ],
+        "by_assignee": [
+          { "$group": { "_id": "$assignee", "count": { "$sum": 1 } } },
+          { "$sort": { "count": -1 } }
+        ]
+      }
+    },
+    "projects": {
+      "auto_crud": true,
+      "auth": { "required": true },
+      "schema": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "status": { "type": "string" },
+          "owner_id": { "type": "string" },
+          "internal_notes": { "type": "string" }
+        },
+        "required": ["name"]
+      },
+      "policy": {
+        "read":  { "owner_id": "{{user._id}}" },
+        "write": { "owner_id": "{{user._id}}" }
+      },
+      "defaults": {
+        "owner_id": "{{user._id}}",
+        "status": "active"
+      },
+      "default_projection": { "internal_notes": 0 }
+    },
+    "comments": {
+      "auto_crud": true,
+      "bulk_insert": true
+    },
+    "audit_log": {
+      "auto_crud": true,
+      "read_only": true,
+      "timestamps": false
+    }
+  }
+}

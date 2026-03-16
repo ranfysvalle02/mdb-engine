@@ -1,0 +1,31 @@
+{
+  "schema_version": "2.0",
+  "slug": "docker_backend",
+  "name": "Docker Backend",
+  "collections": {
+    "tasks": {
+      "auto_crud": true,
+      "realtime": true,
+      "soft_delete": true,
+      "schema": {
+        "type": "object",
+        "properties": {
+          "title": { "type": "string" },
+          "status": { "type": "string", "enum": ["pending", "in_progress", "done"] },
+          "assignee": { "type": "string" },
+          "priority": { "type": "integer", "minimum": 1, "maximum": 5 }
+        },
+        "required": ["title"]
+      }
+    },
+    "notes": {
+      "auto_crud": true,
+      "bulk_insert": true
+    },
+    "system_log": {
+      "auto_crud": true,
+      "read_only": true,
+      "timestamps": false
+    }
+  }
+}

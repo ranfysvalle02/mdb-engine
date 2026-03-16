@@ -1,0 +1,19 @@
+{
+  "schema_version": "2.0",
+  "slug": "realtime_board",
+  "name": "Realtime Board",
+  "collections": {
+    "tasks": {
+      "auto_crud": true,
+      "realtime": true,
+      "schema": {
+        "type": "object",
+        "properties": {
+          "title": { "type": "string" },
+          "done": { "type": "boolean" }
+        },
+        "required": ["title"]
+      }
+    }
+  }
+}

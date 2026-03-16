@@ -25,6 +25,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -305,6 +306,9 @@ class MongoDBEngine(
 
         This method is idempotent - it's safe to call multiple times.
         """
+        start = time.monotonic()
+        logger.info("[Engine] Shutdown initiated")
+
         if self._service_initializer:
             self._service_initializer.clear_services()
 
@@ -312,6 +316,9 @@ class MongoDBEngine(
             self._app_registration_manager.clear_apps()
 
         await self._connection_manager.shutdown()
+
+        elapsed_ms = int((time.monotonic() - start) * 1000)
+        logger.info("[Engine] Shutdown complete in %dms", elapsed_ms)
 
     # NOTE: Synchronous __enter__/__exit__ intentionally omitted.
     # The engine requires async lifecycle management (initialize/shutdown).

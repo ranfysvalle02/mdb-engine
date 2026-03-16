@@ -10,7 +10,7 @@ description: Comprehensive development guide for the mdb-engine framework (FastA
 **mdb-engine** is a batteries-included MongoDB runtime for Python. It wraps Motor (async MongoDB driver) with automatic data isolation, manifest-driven configuration, and optional AI services.
 
 **Core dependencies:** FastAPI, Motor, Pydantic V2, PyJWT, bcrypt, cryptography.
-**Python:** >=3.10 | **Version:** 0.8.0 | **License:** MIT
+**Python:** >=3.10 | **Version:** 0.8.4 | **License:** MIT
 
 **Golden rule:** Use the framework's abstractions. Do NOT write raw Motor/pymongo boilerplate, manual JWT parsing, or unscoped database access.
 
@@ -285,6 +285,188 @@ Full manifest with common options:
   }
 }
 ```
+
+---
+
+## 6.5. Zero-Code Collections (MQL-as-DSL)
+
+Define collections in the manifest with `auto_crud: true` to generate a full REST API with no Python code. Run with `mdb-engine serve manifest.json`.
+
+**Golden rule:** MQL is the DSL. Every `policy`, `scopes`, `pipelines`, and `defaults` value is a native MongoDB Query Language expression. The manifest speaks the same language as the database.
+
+### Collection Config Keys
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `auto_crud` | boolean | `true` | Generate REST endpoints |
+| `schema` | object | — | JSON Schema for document validation |
+| `read_only` | boolean | `false` | GET endpoints only |
+| `timestamps` | boolean | `true` | Auto-inject `created_at` / `updated_at` |
+| `soft_delete` | boolean | `false` | Soft delete with trash/restore |
+| `bulk_insert` | boolean | `true` | Enable `POST /_bulk` |
+| `auth` | object | — | Per-collection auth (`required`, `roles`) |
+| `realtime` | boolean | `false` | Change Stream WebSocket events |
+| `policy` | object | — | Document-level access policies (MQL filters) |
+| `scopes` | object | — | Named MQL filters activated via `?scope=` |
+| `pipelines` | object | — | Named aggregation endpoints |
+| `defaults` | object | — | Default field values on create |
+| `default_projection` | object | — | Default MongoDB projection for reads |
+
+### Template Placeholders
+
+Policy, scopes, pipelines, and defaults support `{{user.*}}` placeholders resolved at runtime from the authenticated user:
+
+- `"{{user._id}}"` — the user's `_id`
+- `"{{user.team_id}}"` — any top-level user field
+- `"{{user.profile.org}}"` — nested paths (max 3 levels)
+- `"$$NOW"` — current UTC datetime
+
+### Policy — Document-Level Access Control
+
+```json
+{
+  "policy": {
+    "read":   { "team_id": "{{user.team_id}}" },
+    "write":  { "owner_id": "{{user._id}}" },
+    "delete": { "owner_id": "{{user._id}}" }
+  }
+}
+```
+
+- `read` — merged into every list/get/count query
+- `write` — merged into update/replace lookups
+- `delete` — merged into delete lookups (falls back to `write` if omitted)
+
+If a `{{user.*}}` placeholder is used and no user is authenticated, the endpoint returns 401.
+
+### Scopes — Named Query Shortcuts
+
+```json
+{
+  "scopes": {
+    "active":  { "status": { "$ne": "archived" } },
+    "overdue": { "due_date": { "$lt": "$$NOW" }, "status": { "$ne": "done" } },
+    "mine":    { "owner_id": "{{user._id}}" }
+  }
+}
+```
+
+Clients activate scopes via the `?scope=` query parameter:
+
+```
+GET /api/tasks?scope=active
+GET /api/tasks?scope=active,mine
+GET /api/tasks?scope=active&assignee=alice
+GET /api/tasks/_count?scope=active
+```
+
+Multiple scopes are `$and`-merged. Unknown scope names return 400.
+
+### Pipelines — Aggregation Endpoints
+
+```json
+{
+  "pipelines": {
+    "by_status": [
+      { "$group": { "_id": "$status", "count": { "$sum": 1 } } },
+      { "$sort": { "count": -1 } }
+    ],
+    "with_assignee": [
+      { "$lookup": { "from": "users", "localField": "assignee_id", "foreignField": "_id", "as": "assignee" } },
+      { "$unwind": { "path": "$assignee", "preserveNullAndEmptyArrays": true } }
+    ]
+  }
+}
+```
+
+Each pipeline becomes `GET /api/{collection}/_agg/{name}`. The `app_id` `$match` stage is prepended automatically by `ScopedCollectionWrapper`.
+
+### Defaults — Auto-Populated Fields
+
+```json
+{
+  "defaults": {
+    "status": "pending",
+    "priority": 3,
+    "owner_id": "{{user._id}}"
+  }
+}
+```
+
+Applied to new documents via `setdefault` — caller-provided values always take precedence.
+
+### Default Projection — Hide Internal Fields
+
+```json
+{
+  "default_projection": { "internal_notes": 0, "audit_trail": 0 }
+}
+```
+
+Applied to list and get queries when the client does not specify `?fields=`. The `?fields=` parameter overrides the default projection.
+
+### Complete Example
+
+```json
+{
+  "schema_version": "2.0",
+  "slug": "my_app",
+  "name": "My App",
+  "collections": {
+    "tasks": {
+      "auto_crud": true,
+      "soft_delete": true,
+      "schema": {
+        "type": "object",
+        "properties": {
+          "title": { "type": "string" },
+          "status": { "type": "string", "enum": ["pending", "in_progress", "done"] }
+        },
+        "required": ["title"]
+      },
+      "auth": { "required": true },
+      "policy": {
+        "read":  { "team_id": "{{user.team_id}}" },
+        "write": { "owner_id": "{{user._id}}" }
+      },
+      "defaults": {
+        "status": "pending",
+        "owner_id": "{{user._id}}",
+        "team_id": "{{user.team_id}}"
+      },
+      "scopes": {
+        "active": { "status": { "$ne": "done" } },
+        "mine":   { "owner_id": "{{user._id}}" }
+      },
+      "pipelines": {
+        "by_status": [
+          { "$group": { "_id": "$status", "count": { "$sum": 1 } } }
+        ]
+      },
+      "default_projection": { "internal_notes": 0 },
+      "realtime": true
+    }
+  }
+}
+```
+
+### Generated Endpoints
+
+For a collection named `tasks`:
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/tasks` | List (filter, sort, paginate, scope, project) |
+| GET | `/api/tasks/_count` | Count with filter/scope support |
+| GET | `/api/tasks/_trash` | List soft-deleted (if `soft_delete`) |
+| GET | `/api/tasks/_agg/{name}` | Run named pipeline |
+| GET | `/api/tasks/{id}` | Get by ID |
+| POST | `/api/tasks` | Create (with defaults + validation) |
+| POST | `/api/tasks/_bulk` | Bulk create (if `bulk_insert`) |
+| PUT | `/api/tasks/{id}` | Full replace |
+| PATCH | `/api/tasks/{id}` | Partial update |
+| DELETE | `/api/tasks/{id}` | Delete or soft-delete |
+| POST | `/api/tasks/{id}/_restore` | Restore (if `soft_delete`) |
 
 ---
 

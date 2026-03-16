@@ -566,6 +566,20 @@ class CognitiveMemoryService(
                 {"emotion_type": {"$exists": False}},
                 {"$set": {"emotion_type": "neutral"}},
             )
+            # Backfill metadata.confidence for $vectorSearch pre-filter compatibility.
+            # First, copy root-level confidence into metadata for docs that have it.
+            await self.collection.update_many(
+                {
+                    "metadata.confidence": {"$exists": False},
+                    "confidence": {"$exists": True},
+                },
+                [{"$set": {"metadata.confidence": "$confidence"}}],
+            )
+            # Then default remaining docs (no confidence anywhere) to 0.8.
+            await self.collection.update_many(
+                {"metadata.confidence": {"$exists": False}},
+                {"$set": {"metadata.confidence": 0.8}},
+            )
         except (PyMongoError, OperationFailure) as e:
             logger.warning(f"Failed to ensure cognitive fields: {e}")
 
@@ -732,11 +746,12 @@ class CognitiveMemoryService(
         # 4. Store
         vector = await self._get_embedding(memory_content)
 
-        # Extract optional cognitive parameters from kwargs
-        importance = kwargs.get("importance", 0.5)
-        emotion = kwargs.get("emotion", 0.3)
-        emotion_type = kwargs.get("emotion_type", "neutral")
-        confidence = kwargs.get("confidence", 0.8)  # Perfect Recall: explicit confidence
+        # Extract optional cognitive parameters from kwargs, falling back to metadata dict
+        _meta = metadata or {}
+        importance = kwargs.get("importance", _meta.get("importance", 0.5))
+        emotion = kwargs.get("emotion", _meta.get("emotion", 0.3))
+        emotion_type = kwargs.get("emotion_type", _meta.get("emotion_type", "neutral"))
+        confidence = kwargs.get("confidence", _meta.get("confidence", 0.8))
         memory_type = kwargs.get("memory_type")
         timeline_id = kwargs.get("timeline_id", "root")  # Default to root timeline
         derived_from = kwargs.get("derived_from")
@@ -751,6 +766,10 @@ class CognitiveMemoryService(
         # Ensure timeline_id in metadata
         if "timeline_id" not in final_metadata:
             final_metadata["timeline_id"] = timeline_id
+
+        # Store confidence in metadata for $vectorSearch pre-filter compatibility
+        if "confidence" not in final_metadata:
+            final_metadata["confidence"] = confidence
 
         doc = {
             "text": memory_content,
@@ -1252,8 +1271,8 @@ class CognitiveMemoryService(
                     logger.debug("Applied persona filtering to search query")
 
             # 2. Semantic search ranked by similarity * effective_importance
-            timeline_id = kwargs.get("timeline_id", "root")
-            min_confidence = kwargs.get("min_confidence", 0.5)
+            timeline_id = kwargs.get("timeline_id", timeline_id)
+            min_confidence = kwargs.get("min_confidence", min_confidence)
             memories = await self._search(
                 query_vector=query_vector,
                 user_id=user_id,

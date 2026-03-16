@@ -92,10 +92,13 @@ from .memory import ChatEngine, MemoryService
 # Repository pattern
 from .repositories import Entity, MongoRepository, Repository, UnitOfWork
 
+# Auto-CRUD
+from .routing.auto_crud import create_auto_crud_router, mount_auto_crud_routes
+
 # Utilities
 from .utils import clean_mongo_doc, clean_mongo_docs
 
-__version__ = "0.8.2"
+__version__ = "0.8.4"
 
 
 # ---------------------------------------------------------------------------
@@ -200,6 +203,9 @@ __all__ = [
     "AsyncAtlasIndexManager",
     "AutoIndexManager",
     "run_index_creation_for_collection",
+    # Auto-CRUD
+    "create_auto_crud_router",
+    "mount_auto_crud_routes",
     # Utilities
     "clean_mongo_doc",
     "clean_mongo_docs",

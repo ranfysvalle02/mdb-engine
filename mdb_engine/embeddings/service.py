@@ -18,10 +18,12 @@ Dependencies:
     pip install semantic-text-splitter
 """
 
+import hashlib
 import logging
 import os
 import time
 from abc import ABC, abstractmethod
+from collections import OrderedDict
 from datetime import datetime, timezone
 from typing import Any
 
@@ -497,6 +499,7 @@ class EmbeddingService:
         default_max_tokens: int = 1000,
         default_tokenizer_model: str = "gpt-3.5-turbo",
         config: dict[str, Any] | None = None,
+        cache_max_size: int = 10_000,
     ):
         """
         Initialize Embedding Service.
@@ -511,6 +514,8 @@ class EmbeddingService:
                 Must be a valid OpenAI model name (e.g., "gpt-3.5-turbo",
                 "gpt-4").
             config: Optional configuration dict (from manifest.json embedding_config)
+            cache_max_size: Maximum number of cached embeddings (default: 10000).
+                Set to 0 to disable caching.
 
         Raises:
             EmbeddingServiceError: If required dependencies are not available
@@ -528,6 +533,10 @@ class EmbeddingService:
         self.default_max_tokens = default_max_tokens
         self.default_tokenizer_model = default_tokenizer_model
 
+        # Bounded in-memory embedding cache (content hash -> vector)
+        self._cache: OrderedDict[str, list[float]] = OrderedDict()
+        self._cache_max_size = cache_max_size
+
     def _create_splitter(self, max_tokens: int, tokenizer_model: str | None = None) -> TextSplitter:
         """
         Create a TextSplitter instance.
@@ -544,6 +553,21 @@ class EmbeddingService:
         # Use provided tokenizer, or fall back to default (gpt-3.5-turbo)
         model = tokenizer_model or self.default_tokenizer_model
         return TextSplitter.from_tiktoken_model(model, max_tokens)
+
+    @staticmethod
+    def _cache_key(text: str, model: str | None) -> str:
+        """Return a deterministic cache key for a (text, model) pair."""
+        raw = text + "\x00" + (model or "default")
+        return hashlib.sha256(raw.encode()).hexdigest()
+
+    @property
+    def cache_stats(self) -> dict[str, int]:
+        """Return current embedding cache statistics."""
+        return {"size": len(self._cache), "max_size": self._cache_max_size}
+
+    def clear_cache(self) -> None:
+        """Evict all cached embeddings."""
+        self._cache.clear()
 
     async def chunk_text(
         self,
@@ -588,7 +612,8 @@ class EmbeddingService:
         """
         Generate embeddings for text or a list of texts.
 
-        Natural API that works with both single strings and lists.
+        Results are cached in-memory by content hash so repeated texts skip
+        the provider API call entirely.
 
         Args:
             text: A single string or list of strings to embed
@@ -607,17 +632,43 @@ class EmbeddingService:
             vectors = await service.embed(["chunk 1", "chunk 2"], model="text-embedding-3-small")
             # vectors is [[0.1, ...], [0.2, ...]]
         """
-        # Normalize to list
         chunks = [text] if isinstance(text, str) else text
 
         if not chunks:
             return []
 
         try:
-            # Use EmbeddingProvider's embed method (handles retries, logging, etc.)
-            vectors = await self.embedding_provider.embed(chunks, model=model)
-            logger.info(f"Generated {len(vectors)} embedding(s)")
-            return vectors
+            # Fast path: caching disabled
+            if self._cache_max_size <= 0:
+                vectors = await self.embedding_provider.embed(chunks, model=model)
+                logger.info(f"Generated {len(vectors)} embedding(s)")
+                return vectors
+
+            # Partition into cache hits and misses
+            keys = [self._cache_key(c, model) for c in chunks]
+            results: dict[int, list[float]] = {}
+            miss_indices: list[int] = []
+            for i, key in enumerate(keys):
+                if key in self._cache:
+                    self._cache.move_to_end(key)
+                    results[i] = self._cache[key]
+                else:
+                    miss_indices.append(i)
+
+            if miss_indices:
+                miss_texts = [chunks[i] for i in miss_indices]
+                miss_vectors = await self.embedding_provider.embed(miss_texts, model=model)
+                for idx, vec in zip(miss_indices, miss_vectors, strict=False):
+                    results[idx] = vec
+                    self._cache[keys[idx]] = vec
+                    if len(self._cache) > self._cache_max_size:
+                        self._cache.popitem(last=False)
+
+            cache_hits = len(chunks) - len(miss_indices)
+            if cache_hits:
+                logger.debug("Embedding cache: %d hit(s), %d miss(es)", cache_hits, len(miss_indices))
+            logger.info(f"Generated {len(chunks)} embedding(s) ({cache_hits} cached)")
+            return [results[i] for i in range(len(chunks))]
         except (
             AttributeError,
             TypeError,

@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Docker Backend - mdb-engine</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #06060b;
+    --surface: #0d1117;
+    --surface-2: #161b22;
+    --border: #21262d;
+    --text: #e6edf3;
+    --text-muted: #7d8590;
+    --text-dim: #484f58;
+    --accent: #6366f1;
+    --accent-hover: #4f46e5;
+    --green: #3fb950;
+    --green-bg: #0d2117;
+    --yellow: #d29922;
+    --yellow-bg: #2a1f02;
+    --red: #f85149;
+    --red-bg: #2d0b0d;
+    --blue: #58a6ff;
+  }
+
+  body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+  @keyframes slideIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:.3 } }
+
+  .header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 1rem 2rem;
+    display: flex; align-items: center; gap: 1rem;
+  }
+  .logo { font-size: 1.15rem; font-weight: 700; letter-spacing: -0.02em; }
+  .logo span { color: var(--accent); }
+  .header-right { margin-left: auto; display: flex; align-items: center; gap: .75rem; }
+  .badge {
+    display: inline-flex; align-items: center; gap: .3rem;
+    padding: .2rem .6rem; border-radius: 9999px;
+    font-size: .65rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
+  }
+  .badge::before { content:''; width:5px; height:5px; border-radius:50%; }
+  .badge.connected { background: var(--green-bg); color: var(--green); }
+  .badge.connected::before { background: var(--green); }
+  .badge.disconnected { background: var(--red-bg); color: var(--red); }
+  .badge.disconnected::before { background: var(--red); }
+  .badge.connecting { background: var(--yellow-bg); color: var(--yellow); }
+  .badge.connecting::before { background: var(--yellow); animation: pulse 1.5s infinite; }
+  .manifest-badge {
+    background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border);
+    padding: .2rem .6rem; border-radius: .25rem; font-size: .65rem; font-family: monospace;
+  }
+
+  .container { max-width: 1100px; margin: 0 auto; padding: 1.5rem 2rem 3rem; }
+
+  .hero {
+    text-align: center; padding: 1.5rem 0 1.25rem;
+  }
+  .hero h2 { font-size: 1rem; color: var(--text-muted); font-weight: 400; }
+  .hero h2 code { background: var(--surface-2); padding: .15rem .4rem; border-radius: .25rem; font-size: .85rem; color: var(--accent); }
+
+  .stats-row {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: .75rem;
+    margin-bottom: 1.5rem;
+  }
+  .stat-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: .5rem;
+    padding: .65rem .85rem; text-align: center;
+  }
+  .stat-card .val { font-size: 1.5rem; font-weight: 700; }
+  .stat-card .label { font-size: .65rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: .06em; margin-top: .1rem; }
+
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; margin-bottom: 1rem; }
+  .grid-2 { display: grid; grid-template-columns: 2fr 1fr; gap: 1rem; }
+  @media (max-width: 900px) { .grid-3, .grid-2 { grid-template-columns: 1fr; } }
+
+  .panel {
+    background: var(--surface); border: 1px solid var(--border); border-radius: .5rem;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .panel-head {
+    padding: .6rem .85rem; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: .7rem; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted);
+  }
+  .panel-head .count { font-weight: 400; color: var(--text-dim); }
+  .panel-body { padding: .375rem; max-height: 340px; overflow-y: auto; flex: 1; }
+
+  .add-row { display: flex; gap: .4rem; padding: .5rem .5rem; border-bottom: 1px solid var(--border); }
+  .add-row input {
+    flex: 1; padding: .4rem .6rem; border-radius: .375rem;
+    border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
+    font-size: .8rem; outline: none; transition: border-color .15s;
+  }
+  .add-row input:focus { border-color: var(--accent); }
+  .add-row input::placeholder { color: var(--text-dim); }
+  .add-row button {
+    padding: .4rem .7rem; border-radius: .375rem; border: none;
+    background: var(--accent); color: #fff; font-weight: 600; font-size: .75rem;
+    cursor: pointer; white-space: nowrap;
+  }
+  .add-row button:hover { background: var(--accent-hover); }
+
+  .item {
+    display: flex; align-items: center; gap: .4rem;
+    padding: .35rem .5rem; border-radius: .375rem;
+    transition: background .1s; animation: slideIn .2s ease-out;
+    font-size: .8rem;
+  }
+  .item:hover { background: var(--surface-2); }
+  .item .check {
+    width: 16px; height: 16px; border-radius: 3px;
+    border: 2px solid var(--border); cursor: pointer; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    transition: all .15s; font-size: 10px; color: transparent;
+  }
+  .item .check:hover { border-color: var(--accent); }
+  .item.done .check { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .item .title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item.done .title { text-decoration: line-through; color: var(--text-dim); }
+  .item .meta { font-size: .65rem; color: var(--text-dim); font-family: monospace; }
+  .item .actions { display: flex; gap: .2rem; opacity: 0; transition: opacity .1s; }
+  .item:hover .actions { opacity: 1; }
+  .item .btn-sm {
+    border: none; background: none; color: var(--text-dim); cursor: pointer;
+    font-size: .7rem; padding: .15rem .3rem; border-radius: .25rem;
+  }
+  .item .btn-sm:hover { background: var(--surface-2); }
+  .item .btn-sm.restore { color: var(--green); }
+  .item .btn-sm.del:hover { color: var(--red); }
+
+  .note-item {
+    padding: .35rem .5rem; border-radius: .375rem; font-size: .8rem;
+    animation: slideIn .2s ease-out;
+  }
+  .note-item .tag { color: var(--accent); font-size: .7rem; }
+
+  .event-item {
+    padding: .3rem .5rem; border-radius: .375rem; font-size: .75rem;
+    font-family: 'SF Mono', monospace; display: flex; align-items: center; gap: .4rem;
+    animation: slideIn .15s ease-out;
+  }
+  .op-badge {
+    padding: .05rem .35rem; border-radius: .2rem; font-size: .6rem;
+    font-weight: 700; text-transform: uppercase; flex-shrink: 0;
+  }
+  .op-badge.insert { background: var(--green-bg); color: var(--green); }
+  .op-badge.update { background: var(--yellow-bg); color: var(--yellow); }
+  .op-badge.replace { background: var(--yellow-bg); color: var(--yellow); }
+  .op-badge.delete { background: var(--red-bg); color: var(--red); }
+  .event-item .detail { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); }
+  .event-item .ts { color: var(--text-dim); font-size: .65rem; }
+
+  .empty { color: var(--text-dim); font-style: italic; font-size: .8rem; text-align: center; padding: 1.5rem 1rem; }
+
+  .footer { text-align: center; padding: 1.5rem; font-size: .65rem; color: var(--text-dim); }
+  .footer code { background: var(--surface-2); padding: .1rem .3rem; border-radius: .2rem; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="logo"><span>mdb-engine</span> Docker Backend</div>
+  <div class="header-right">
+    <span class="manifest-badge">manifest.json + docker-compose.yml</span>
+    <span id="status" class="badge connecting">connecting</span>
+  </div>
+</div>
+
+<div class="container">
+  <div class="hero">
+    <h2>Your entire backend is <code>docker compose up</code></h2>
+  </div>
+
+  <div class="stats-row">
+    <div class="stat-card"><div class="val" id="s-tasks">0</div><div class="label">Tasks</div></div>
+    <div class="stat-card"><div class="val" id="s-pending">0</div><div class="label">Pending</div></div>
+    <div class="stat-card"><div class="val" id="s-notes">0</div><div class="label">Notes</div></div>
+    <div class="stat-card"><div class="val" id="s-events">0</div><div class="label">Events</div></div>
+  </div>
+
+  <div class="grid-3">
+    <!-- TASKS -->
+    <div class="panel">
+      <div class="panel-head">Tasks <span class="count" id="task-count"></span></div>
+      <div class="add-row">
+        <input type="text" id="task-input" placeholder="New task..." autocomplete="off">
+        <button onclick="addTask()">Add</button>
+      </div>
+      <div class="panel-body" id="task-list"><div class="empty">No tasks yet</div></div>
+    </div>
+
+    <!-- NOTES -->
+    <div class="panel">
+      <div class="panel-head">Notes <span class="count" id="note-count"></span></div>
+      <div class="add-row">
+        <input type="text" id="note-input" placeholder="Quick note..." autocomplete="off">
+        <button onclick="addNote()">Add</button>
+      </div>
+      <div class="panel-body" id="note-list"><div class="empty">No notes yet</div></div>
+    </div>
+
+    <!-- TRASH -->
+    <div class="panel">
+      <div class="panel-head">Trash (Soft Delete) <span class="count" id="trash-count"></span></div>
+      <div class="panel-body" id="trash-list"><div class="empty">Deleted tasks appear here</div></div>
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <!-- REALTIME FEED -->
+    <div class="panel">
+      <div class="panel-head">Realtime Event Feed <span class="count" id="event-count"></span></div>
+      <div class="panel-body" id="event-feed"><div class="empty">Waiting for changes...</div></div>
+    </div>
+
+    <!-- SYSTEM LOG (read-only) -->
+    <div class="panel">
+      <div class="panel-head">System Log (read-only) <span class="count" id="log-count"></span></div>
+      <div class="panel-body" id="log-list"><div class="empty">GET-only collection</div></div>
+    </div>
+  </div>
+</div>
+
+<div class="footer">
+  Powered by <code>mdb-engine</code> &mdash; zero code, pure config. Three collections defined in one <code>manifest.json</code>.
+</div>
+
+<script>
+const API = 'http://localhost:8000';
+const WS  = 'ws://localhost:8000/ws/realtime';
+
+let evtCount = 0;
+let feedCleared = false;
+
+const $ = id => document.getElementById(id);
+
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+// ── Stats ────────────────────────────────────────────────────────────
+
+async function refreshStats() {
+  try {
+    const [tr, nr] = await Promise.all([
+      fetch(`${API}/api/tasks/_count`).then(r => r.json()),
+      fetch(`${API}/api/notes/_count`).then(r => r.json()),
+    ]);
+    $('s-tasks').textContent = tr.count;
+    $('s-notes').textContent = nr.count;
+    const pr = await fetch(`${API}/api/tasks/_count?status=pending`).then(r => r.json());
+    $('s-pending').textContent = pr.count;
+  } catch(e) { /* silent */ }
+}
+
+// ── Tasks ────────────────────────────────────────────────────────────
+
+async function loadTasks() {
+  const res = await fetch(`${API}/api/tasks?sort=-created_at&limit=50`);
+  const body = await res.json();
+  const tasks = body.data || [];
+  $('task-count').textContent = tasks.length ? `(${tasks.length})` : '';
+  if (!tasks.length) { $('task-list').innerHTML = '<div class="empty">No tasks yet</div>'; return; }
+  $('task-list').innerHTML = tasks.map(t => `
+    <div class="item ${t.done ? 'done' : ''}">
+      <div class="check" onclick="toggle('${t._id}',${!t.done})">${t.done ? '&#10003;' : ''}</div>
+      <span class="title">${esc(t.title)}</span>
+      <span class="meta">${t.status || ''}</span>
+      <div class="actions">
+        <button class="btn-sm del" onclick="del('${t._id}')" title="Delete">&times;</button>
+      </div>
+    </div>`).join('');
+}
+
+async function loadTrash() {
+  const res = await fetch(`${API}/api/tasks/_trash?limit=20`);
+  const body = await res.json();
+  const items = body.data || [];
+  $('trash-count').textContent = items.length ? `(${items.length})` : '';
+  if (!items.length) { $('trash-list').innerHTML = '<div class="empty">Deleted tasks appear here</div>'; return; }
+  $('trash-list').innerHTML = items.map(t => `
+    <div class="item">
+      <span class="title" style="text-decoration:line-through;color:var(--text-dim)">${esc(t.title)}</span>
+      <div class="actions" style="opacity:1">
+        <button class="btn-sm restore" onclick="restore('${t._id}')" title="Restore">&#8634;</button>
+      </div>
+    </div>`).join('');
+}
+
+window.addTask = async () => {
+  const v = $('task-input').value.trim(); if (!v) return;
+  $('task-input').value = '';
+  await fetch(`${API}/api/tasks`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({title:v, status:'pending', done:false}) });
+};
+$('task-input').addEventListener('keydown', e => { if(e.key==='Enter'){e.preventDefault();addTask()} });
+
+window.toggle = async (id,done) => {
+  await fetch(`${API}/api/tasks/${id}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({done}) });
+};
+
+window.del = async (id) => {
+  await fetch(`${API}/api/tasks/${id}`, { method:'DELETE' });
+};
+
+window.restore = async (id) => {
+  await fetch(`${API}/api/tasks/${id}/_restore`, { method:'POST' });
+};
+
+// ── Notes ────────────────────────────────────────────────────────────
+
+async function loadNotes() {
+  const res = await fetch(`${API}/api/notes?sort=-created_at&limit=30`);
+  const body = await res.json();
+  const notes = body.data || [];
+  $('note-count').textContent = notes.length ? `(${notes.length})` : '';
+  if (!notes.length) { $('note-list').innerHTML = '<div class="empty">No notes yet</div>'; return; }
+  $('note-list').innerHTML = notes.map(n => `
+    <div class="note-item">
+      ${esc(n.text || JSON.stringify(n))}
+    </div>`).join('');
+}
+
+window.addNote = async () => {
+  const v = $('note-input').value.trim(); if (!v) return;
+  $('note-input').value = '';
+  await fetch(`${API}/api/notes`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({text:v}) });
+};
+$('note-input').addEventListener('keydown', e => { if(e.key==='Enter'){e.preventDefault();addNote()} });
+
+// ── System Log (read-only) ───────────────────────────────────────────
+
+async function loadLogs() {
+  const res = await fetch(`${API}/api/system_log?limit=20`);
+  const body = await res.json();
+  const logs = body.data || [];
+  $('log-count').textContent = logs.length ? `(${logs.length})` : '';
+  if (!logs.length) { $('log-list').innerHTML = '<div class="empty">GET-only collection</div>'; return; }
+  $('log-list').innerHTML = logs.map(l => `
+    <div class="note-item" style="font-size:.75rem;font-family:monospace;color:var(--text-muted)">
+      ${esc(JSON.stringify(l).slice(0,120))}
+    </div>`).join('');
+}
+
+// ── Realtime ─────────────────────────────────────────────────────────
+
+function connect() {
+  $('status').textContent = 'connecting';
+  $('status').className = 'badge connecting';
+  const ws = new WebSocket(WS);
+
+  ws.onopen = () => {
+    $('status').textContent = 'live';
+    $('status').className = 'badge connected';
+    ws.send(JSON.stringify({ type: 'subscribe', collection: 'tasks' }));
+  };
+
+  ws.onmessage = (evt) => {
+    const msg = JSON.parse(evt.data);
+    if (msg.type === 'change') {
+      pushEvent(msg);
+      loadTasks();
+      loadTrash();
+      refreshStats();
+    }
+  };
+
+  ws.onclose = () => {
+    $('status').textContent = 'disconnected';
+    $('status').className = 'badge disconnected';
+    setTimeout(connect, 2000);
+  };
+
+  ws.onerror = () => ws.close();
+}
+
+function pushEvent(msg) {
+  if (!feedCleared) { $('event-feed').innerHTML = ''; feedCleared = true; }
+  evtCount++;
+  $('s-events').textContent = evtCount;
+  $('event-count').textContent = `(${evtCount})`;
+  const time = new Date(msg.timestamp).toLocaleTimeString();
+  const label = msg.operation === 'delete'
+    ? '...' + msg.document_id.slice(-6)
+    : esc(msg.document?.title || msg.document_id.slice(-6));
+  const div = document.createElement('div');
+  div.className = 'event-item';
+  div.innerHTML =
+    `<span class="op-badge ${msg.operation}">${msg.operation}</span>` +
+    `<span class="detail">${label}</span>` +
+    `<span class="ts">${time}</span>`;
+  $('event-feed').prepend(div);
+  if ($('event-feed').children.length > 80) $('event-feed').lastChild.remove();
+}
+
+// ── Init ─────────────────────────────────────────────────────────────
+
+Promise.all([loadTasks(), loadTrash(), loadNotes(), loadLogs(), refreshStats()]);
+connect();
+</script>
+</body>
+</html>

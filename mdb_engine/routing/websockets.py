@@ -674,12 +674,52 @@ async def authenticate_websocket(
                 # If require_auth=True and ticket validation fails, we'll fail below
                 # If require_auth=False, we allow anonymous connection
 
+        # Session key authentication (preferred for multi-app setups)
+        session_key = None
+        try:
+            if hasattr(websocket, "query_params"):
+                session_key = websocket.query_params.get("session_key")
+            if not session_key and hasattr(websocket, "headers"):
+                session_key = websocket.headers.get("X-WebSocket-Session-Key")
+        except (AttributeError, TypeError, KeyError):
+            pass
+
+        if session_key:
+            websocket_session_manager = None
+            ws_app = getattr(websocket, "app", None)
+            for _i in range(10):
+                if ws_app is None:
+                    break
+                websocket_session_manager = getattr(ws_app.state, "websocket_session_manager", None)
+                if websocket_session_manager:
+                    break
+                parent = getattr(ws_app, "app", None)
+                if parent is ws_app or parent is None:
+                    break
+                ws_app = parent
+
+            if websocket_session_manager:
+                try:
+                    session_data = await websocket_session_manager.validate_session(session_key)
+                    if session_data:
+                        user_id = session_data.get("user_id")
+                        user_email = session_data.get("user_email")
+                        logger.info(
+                            f"WebSocket authenticated successfully for app '{app_slug}': {user_email} "
+                            f"(method: session_key, require_auth={require_auth})"
+                        )
+                        return user_id, user_email
+                    logger.warning(f"Session key validation returned no data for app '{app_slug}'")
+                except (ValueError, TypeError, AttributeError, KeyError, RuntimeError, OSError) as e:
+                    logger.warning(f"Session key validation failed for app '{app_slug}': {e}")
+
         # No authentication method succeeded
         # SECURITY: If require_auth=True, we must fail
         if require_auth:
             logger.error(
                 f"WebSocket authentication failed for app '{app_slug}'. "
-                "No valid ticket found. Generate ticket via /auth/ticket endpoint."
+                "No valid ticket or session key found. "
+                "Generate ticket via /auth/ticket or session key via /auth/websocket-session."
             )
             return None, None
 

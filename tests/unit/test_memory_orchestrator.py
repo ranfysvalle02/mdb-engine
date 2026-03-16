@@ -473,6 +473,7 @@ class TestSearchStrategyOverride:
 
         mock_memory_service = MagicMock()
         mock_memory_service.search = AsyncMock(return_value=[])
+        mock_memory_service.timeline_service = None
 
         mock_llm_service = MagicMock()
         mock_llm_service.chat_completion = AsyncMock(return_value="AI response")

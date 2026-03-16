@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Realtime Board - mdb-engine</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+    background: #0a0a0f;
+    color: #e2e8f0;
+    min-height: 100vh;
+  }
+
+  .header {
+    background: linear-gradient(135deg, #1e1b4b 0%, #0f172a 100%);
+    border-bottom: 1px solid #1e293b;
+    padding: 1.25rem 2rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .header h1 { font-size: 1.25rem; font-weight: 700; letter-spacing: -0.02em; }
+  .header h1 span { color: #818cf8; }
+  .badge {
+    display: inline-flex; align-items: center; gap: .35rem;
+    padding: .25rem .75rem; border-radius: 9999px;
+    font-size: .7rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
+  }
+  .badge::before { content: ''; width: 6px; height: 6px; border-radius: 50%; }
+  .badge.connected { background: #052e16; color: #4ade80; }
+  .badge.connected::before { background: #4ade80; }
+  .badge.disconnected { background: #450a0a; color: #f87171; }
+  .badge.disconnected::before { background: #f87171; }
+  .badge.connecting { background: #451a03; color: #fbbf24; }
+  .badge.connecting::before { background: #fbbf24; animation: pulse 1.5s infinite; }
+
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
+  @keyframes slideIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+
+  .container { max-width: 960px; margin: 0 auto; padding: 1.5rem 2rem 3rem; }
+
+  .stats {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: .75rem;
+    margin-bottom: 1.5rem;
+  }
+  .stat {
+    background: #111827; border: 1px solid #1e293b; border-radius: .5rem;
+    padding: .75rem 1rem; text-align: center;
+  }
+  .stat .val { font-size: 1.75rem; font-weight: 700; color: #f1f5f9; }
+  .stat .label { font-size: .7rem; color: #64748b; text-transform: uppercase; letter-spacing: .05em; margin-top: .15rem; }
+
+  form {
+    display: flex; gap: .5rem; margin-bottom: 1.5rem;
+  }
+  input[type="text"] {
+    flex: 1; padding: .625rem 1rem; border-radius: .5rem;
+    border: 1px solid #1e293b; background: #111827; color: #f1f5f9;
+    font-size: .875rem; outline: none; transition: border-color .15s;
+  }
+  input[type="text"]:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,.15); }
+  input[type="text"]::placeholder { color: #475569; }
+  button {
+    padding: .625rem 1.25rem; border-radius: .5rem; border: none;
+    background: #6366f1; color: #fff; font-weight: 600; font-size: .875rem;
+    cursor: pointer; transition: background .15s;
+    white-space: nowrap;
+  }
+  button:hover { background: #4f46e5; }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  @media (max-width: 700px) { .grid { grid-template-columns: 1fr; } }
+
+  .panel {
+    background: #111827; border: 1px solid #1e293b; border-radius: .625rem;
+    overflow: hidden; display: flex; flex-direction: column;
+  }
+  .panel-head {
+    padding: .75rem 1rem; border-bottom: 1px solid #1e293b;
+    font-size: .7rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: .06em; color: #94a3b8;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .panel-head .count { color: #475569; font-weight: 400; }
+  .panel-body { padding: .5rem; flex: 1; max-height: 400px; overflow-y: auto; }
+
+  .task-item {
+    display: flex; align-items: center; gap: .5rem;
+    padding: .5rem .5rem; border-radius: .375rem;
+    transition: background .1s; animation: slideIn .2s ease-out;
+  }
+  .task-item:hover { background: #1e293b; }
+  .task-item .check {
+    width: 18px; height: 18px; border-radius: 4px;
+    border: 2px solid #334155; cursor: pointer; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    transition: all .15s; font-size: 11px; color: transparent;
+  }
+  .task-item .check:hover { border-color: #6366f1; }
+  .task-item.done .check { background: #6366f1; border-color: #6366f1; color: #fff; }
+  .task-item .title { flex: 1; font-size: .875rem; }
+  .task-item.done .title { text-decoration: line-through; color: #64748b; }
+  .task-item .del {
+    opacity: 0; border: none; background: none; color: #64748b;
+    cursor: pointer; font-size: .8rem; padding: .25rem; border-radius: .25rem;
+    transition: all .1s;
+  }
+  .task-item:hover .del { opacity: 1; }
+  .task-item .del:hover { color: #f87171; background: rgba(248,113,113,.1); }
+
+  .event-item {
+    padding: .4rem .5rem; border-radius: .375rem; font-size: .8rem;
+    font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;
+    display: flex; align-items: center; gap: .5rem;
+    animation: slideIn .2s ease-out;
+  }
+  .event-item + .event-item { margin-top: 2px; }
+  .op-badge {
+    padding: .1rem .4rem; border-radius: .25rem; font-size: .65rem;
+    font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+    flex-shrink: 0;
+  }
+  .op-badge.insert { background: #052e16; color: #4ade80; }
+  .op-badge.update { background: #422006; color: #fbbf24; }
+  .op-badge.replace { background: #422006; color: #fbbf24; }
+  .op-badge.delete { background: #450a0a; color: #f87171; }
+  .event-item .detail { color: #cbd5e1; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .event-item .ts { color: #475569; font-size: .7rem; flex-shrink: 0; }
+
+  .empty {
+    color: #334155; font-style: italic; font-size: .875rem;
+    text-align: center; padding: 2rem 1rem;
+  }
+
+  .powered {
+    text-align: center; margin-top: 2rem; font-size: .7rem; color: #334155;
+  }
+  .powered a { color: #6366f1; text-decoration: none; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1><span>mdb-engine</span> Realtime Board</h1>
+  <span id="status" class="badge connecting">connecting</span>
+</div>
+
+<div class="container">
+  <div class="stats">
+    <div class="stat"><div class="val" id="stat-total">0</div><div class="label">Total Tasks</div></div>
+    <div class="stat"><div class="val" id="stat-pending">0</div><div class="label">Pending</div></div>
+    <div class="stat"><div class="val" id="stat-done">0</div><div class="label">Done</div></div>
+  </div>
+
+  <form id="add-form">
+    <input type="text" id="title-input" placeholder="What needs to be done?" autocomplete="off">
+    <button type="submit">Add Task</button>
+  </form>
+
+  <div class="grid">
+    <div class="panel">
+      <div class="panel-head">Tasks <span class="count" id="task-count"></span></div>
+      <div class="panel-body" id="task-list">
+        <div class="empty">Create your first task above</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">Live Event Feed <span class="count" id="event-count"></span></div>
+      <div class="panel-body" id="event-feed">
+        <div class="empty">Waiting for changes...</div>
+      </div>
+    </div>
+  </div>
+
+  <p class="powered">Powered by <a href="https://github.com/NEWERA/mdb-engine">mdb-engine</a> &mdash; manifest.json + MongoDB = instant backend</p>
+</div>
+
+<script>
+const API = 'http://localhost:8000';
+const WS_URL = 'ws://localhost:8000/ws/realtime';
+
+const statusEl  = document.getElementById('status');
+const taskListEl = document.getElementById('task-list');
+const eventFeedEl = document.getElementById('event-feed');
+const form = document.getElementById('add-form');
+const titleInput = document.getElementById('title-input');
+const taskCountEl = document.getElementById('task-count');
+const eventCountEl = document.getElementById('event-count');
+
+let tasks = [];
+let eventCount = 0;
+let feedCleared = false;
+
+function updateStats() {
+  document.getElementById('stat-total').textContent = tasks.length;
+  document.getElementById('stat-pending').textContent = tasks.filter(t => !t.done).length;
+  document.getElementById('stat-done').textContent = tasks.filter(t => t.done).length;
+  taskCountEl.textContent = tasks.length ? `(${tasks.length})` : '';
+}
+
+function renderTasks() {
+  if (!tasks.length) {
+    taskListEl.innerHTML = '<div class="empty">Create your first task above</div>';
+    updateStats();
+    return;
+  }
+  taskListEl.innerHTML = tasks.map(t => `
+    <div class="task-item ${t.done ? 'done' : ''}" data-id="${t._id}">
+      <div class="check" onclick="toggleTask('${t._id}', ${!t.done})">${t.done ? '&#10003;' : ''}</div>
+      <span class="title">${esc(t.title)}</span>
+      <button class="del" onclick="deleteTask('${t._id}')" title="Delete">&times;</button>
+    </div>
+  `).join('');
+  updateStats();
+}
+
+async function loadTasks() {
+  try {
+    const res = await fetch(`${API}/api/tasks?sort=-created_at&limit=100`);
+    const body = await res.json();
+    tasks = body.data || [];
+    renderTasks();
+  } catch (e) { console.error('Load failed:', e); }
+}
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const title = titleInput.value.trim();
+  if (!title) return;
+  titleInput.value = '';
+  titleInput.focus();
+  await fetch(`${API}/api/tasks`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title, done: false }),
+  }).catch(err => console.error('Create failed:', err));
+});
+
+window.toggleTask = async (id, done) => {
+  await fetch(`${API}/api/tasks/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ done }),
+  }).catch(err => console.error('Update failed:', err));
+};
+
+window.deleteTask = async (id) => {
+  await fetch(`${API}/api/tasks/${id}`, { method: 'DELETE' })
+    .catch(err => console.error('Delete failed:', err));
+};
+
+function connect() {
+  statusEl.textContent = 'connecting';
+  statusEl.className = 'badge connecting';
+
+  const ws = new WebSocket(WS_URL);
+
+  ws.onopen = () => {
+    statusEl.textContent = 'live';
+    statusEl.className = 'badge connected';
+    ws.send(JSON.stringify({ type: 'subscribe', collection: 'tasks' }));
+  };
+
+  ws.onmessage = (evt) => {
+    const msg = JSON.parse(evt.data);
+    if (msg.type === 'change') {
+      addEvent(msg);
+      loadTasks();
+    }
+  };
+
+  ws.onclose = () => {
+    statusEl.textContent = 'disconnected';
+    statusEl.className = 'badge disconnected';
+    setTimeout(connect, 2000);
+  };
+
+  ws.onerror = () => ws.close();
+}
+
+function addEvent(msg) {
+  if (!feedCleared) { eventFeedEl.innerHTML = ''; feedCleared = true; }
+  eventCount++;
+  eventCountEl.textContent = `(${eventCount})`;
+  const time = new Date(msg.timestamp).toLocaleTimeString();
+  const label = msg.operation === 'delete'
+    ? msg.document_id.slice(-6)
+    : esc(msg.document?.title || msg.document_id.slice(-6));
+  const div = document.createElement('div');
+  div.className = 'event-item';
+  div.innerHTML =
+    `<span class="op-badge ${msg.operation}">${msg.operation}</span>` +
+    `<span class="detail">${label}</span>` +
+    `<span class="ts">${time}</span>`;
+  eventFeedEl.prepend(div);
+  if (eventFeedEl.children.length > 100) eventFeedEl.lastChild.remove();
+}
+
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+loadTasks();
+connect();
+</script>
+</body>
+</html>

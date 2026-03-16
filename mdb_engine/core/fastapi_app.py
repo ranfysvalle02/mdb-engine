@@ -5,6 +5,7 @@ Provides methods for creating FastAPI applications with proper lifespan manageme
 middleware setup, and authentication initialization.
 """
 
+import asyncio
 import json
 import logging
 from collections.abc import Awaitable, Callable
@@ -240,6 +241,9 @@ class FastAPIAppMixin:
                 app.state.container = Container()
                 logger.debug(f"DI Container initialized for '{slug}'")
 
+            # Start realtime Change Stream watcher (if collections have realtime: true)
+            await self._start_realtime(app, engine, slug, app_manifest)
+
             # Call on_startup callback if provided
             if on_startup:
                 try:
@@ -250,6 +254,9 @@ class FastAPIAppMixin:
                     raise
 
             yield
+
+            # Stop realtime watcher before tearing down services
+            await self._stop_realtime(app)
 
             # Flush pending OTel spans before tearing down services
             from ..observability.tracing import shutdown_tracer_provider
@@ -284,6 +291,13 @@ class FastAPIAppMixin:
                 app.include_router(_graph_router)
             except ImportError:
                 pass
+
+        # Auto-register CRUD endpoints for collections defined in manifest
+        _collections_cfg = pre_manifest.get("collections", {})
+        if _collections_cfg:
+            from ..routing.auto_crud import mount_auto_crud_routes
+
+            mount_auto_crud_routes(app, _collections_cfg)
 
         # Setup all middleware
         self._setup_middleware(app, slug, auth_config, auth_mode, is_sub_app)
@@ -326,6 +340,11 @@ class FastAPIAppMixin:
 
         # Add observability middleware (outermost - correlation IDs + app context)
         self._add_observability_middleware(app, slug)
+
+        # Register structured error handlers for MongoDBEngineError hierarchy
+        from ..observability.error_handlers import register_error_handlers
+
+        register_error_handlers(app)
 
     def _add_request_scope_middleware(self, app: "FastAPI", slug: str) -> None:
         """Add request scope middleware for DI."""
@@ -718,3 +737,58 @@ class FastAPIAppMixin:
             logger.warning(f"OAuth not available for '{slug}': {e}. " "Install with: pip install mdb-engine[oauth]")
         except (ValueError, TypeError, RuntimeError, AttributeError, KeyError) as e:
             logger.exception(f"Failed to initialize OAuth for '{slug}': {e}")
+
+    # ------------------------------------------------------------------
+    # Realtime (Change Stream → WebSocket)
+    # ------------------------------------------------------------------
+
+    async def _start_realtime(
+        self,
+        app: "FastAPI",
+        engine: "MongoDBEngine",
+        slug: str,
+        app_manifest: dict[str, Any],
+    ) -> None:
+        """Start the Change Stream watcher if any collection has ``realtime: true``."""
+        collections_cfg = app_manifest.get("collections", {})
+        realtime_names = [name for name, cfg in collections_cfg.items() if cfg.get("realtime", False)]
+        if not realtime_names:
+            return
+
+        try:
+            from ..realtime import (
+                ChangeStreamWatcher,
+                RealtimeManager,
+                register_realtime,
+            )
+
+            collection_map = {f"{slug}_{name}": (slug, name) for name in realtime_names}
+            manager = RealtimeManager(collection_map)
+
+            watcher = ChangeStreamWatcher(
+                db=engine.connection_manager.mongo_db,
+                manager=manager,
+                watched_collections={slug: set(collection_map.keys())},
+            )
+
+            app.state.realtime_manager = manager
+            app.state.realtime_watcher = watcher
+
+            register_realtime(app, slug, collections_cfg, manager)
+            await watcher.start()
+
+            logger.info(
+                f"Realtime enabled for '{slug}': " f"{len(realtime_names)} collection(s) — {', '.join(realtime_names)}"
+            )
+        except (ImportError, OSError, RuntimeError, ValueError, TypeError) as e:
+            logger.warning(f"Failed to start realtime for '{slug}': {e}")
+
+    @staticmethod
+    async def _stop_realtime(app: "FastAPI") -> None:
+        """Stop the Change Stream watcher if it was started."""
+        watcher = getattr(app.state, "realtime_watcher", None)
+        if watcher is not None:
+            try:
+                await watcher.stop()
+            except (OSError, RuntimeError, asyncio.CancelledError) as e:
+                logger.warning(f"Error stopping realtime watcher: {e}")

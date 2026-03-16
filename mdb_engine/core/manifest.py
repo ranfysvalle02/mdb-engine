@@ -1425,6 +1425,14 @@ MANIFEST_SCHEMA_V2 = {
             "patternProperties": {"^[a-zA-Z0-9_]+$": {"$ref": "#/definitions/collectionSettings"}},
             "description": "Collection name -> collection settings",
         },
+        "collections": {
+            "type": "object",
+            "description": "Collection definitions with auto-CRUD and optional JSON Schema validation",
+            "patternProperties": {
+                "^[a-zA-Z0-9_]+$": {"$ref": "#/definitions/collectionDef"},
+            },
+            "additionalProperties": False,
+        },
         "websockets": {
             "type": "object",
             "patternProperties": {
@@ -3708,6 +3716,158 @@ MANIFEST_SCHEMA_V2 = {
                 },
             ],
         },
+        "collectionDef": {
+            "type": "object",
+            "properties": {
+                "auto_crud": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Generate REST endpoints for this collection",
+                },
+                "schema": {
+                    "type": "object",
+                    "description": "JSON Schema for document validation on insert/update",
+                },
+                "read_only": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Only generate GET endpoints (no POST/PUT/PATCH/DELETE)",
+                },
+                "timestamps": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Auto-inject created_at/updated_at on writes",
+                },
+                "soft_delete": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "DELETE sets deleted_at instead of removing; reads exclude deleted docs",
+                },
+                "bulk_insert": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Enable POST /_bulk endpoint for batch inserts",
+                },
+                "auth": {
+                    "type": "object",
+                    "properties": {
+                        "required": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": (
+                                "Require authentication for this collection's "
+                                "auto-CRUD endpoints. Additive to app-level auth."
+                            ),
+                        },
+                        "roles": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "minItems": 1,
+                            "description": (
+                                "Roles required to access this collection's "
+                                "auto-CRUD endpoints. Implies auth is required."
+                            ),
+                        },
+                    },
+                    "additionalProperties": False,
+                    "description": (
+                        "Per-collection auth requirements. Additive to app-level "
+                        "auth middleware — never weakens app-level security."
+                    ),
+                },
+                "realtime": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": (
+                        "Push insert/update/delete events to WebSocket " "subscribers via MongoDB Change Streams"
+                    ),
+                },
+                "policy": {
+                    "type": "object",
+                    "properties": {
+                        "read": {
+                            "type": "object",
+                            "description": (
+                                "MQL filter merged into every read query. " "Supports {{user.*}} template placeholders."
+                            ),
+                        },
+                        "write": {
+                            "type": "object",
+                            "description": (
+                                "MQL filter merged into update/replace lookups. "
+                                "Supports {{user.*}} template placeholders."
+                            ),
+                        },
+                        "delete": {
+                            "type": "object",
+                            "description": (
+                                "MQL filter merged into delete lookups. "
+                                "Supports {{user.*}} template placeholders. "
+                                "Falls back to write policy if omitted."
+                            ),
+                        },
+                    },
+                    "additionalProperties": False,
+                    "description": (
+                        "Document-level access policies expressed as MQL filters. "
+                        "Resolved at runtime with {{user.*}} placeholders from "
+                        "the authenticated user. Merged into every query via $and."
+                    ),
+                },
+                "scopes": {
+                    "type": "object",
+                    "patternProperties": {
+                        "^[a-zA-Z_][a-zA-Z0-9_]*$": {
+                            "type": "object",
+                            "description": "Named MQL filter activated via ?scope=name",
+                        },
+                    },
+                    "additionalProperties": False,
+                    "description": (
+                        "Named MQL filters that clients activate via the "
+                        "?scope=name query parameter. Multiple scopes can "
+                        "be combined: ?scope=active,mine. Supports {{user.*}} "
+                        "template placeholders."
+                    ),
+                },
+                "pipelines": {
+                    "type": "object",
+                    "patternProperties": {
+                        "^[a-zA-Z_][a-zA-Z0-9_]*$": {
+                            "type": "array",
+                            "items": {"type": "object"},
+                            "description": (
+                                "MongoDB aggregation pipeline stages. " "Exposed as GET /api/{collection}/_agg/{name}."
+                            ),
+                        },
+                    },
+                    "additionalProperties": False,
+                    "description": (
+                        "Named aggregation pipelines exposed as read-only "
+                        "endpoints. app_id scoping is applied automatically "
+                        "by ScopedCollectionWrapper. Supports {{user.*}} "
+                        "template placeholders in pipeline stages."
+                    ),
+                },
+                "defaults": {
+                    "type": "object",
+                    "description": (
+                        "Default field values applied to new documents via "
+                        "setdefault (caller-provided values take precedence). "
+                        "Supports {{user.*}} template placeholders."
+                    ),
+                },
+                "default_projection": {
+                    "type": "object",
+                    "description": (
+                        "MongoDB projection applied to list/get queries when "
+                        "the client does not specify ?fields=. Useful for "
+                        'hiding internal fields (e.g. {"internal_notes": 0}).'
+                    ),
+                },
+            },
+            "additionalProperties": False,
+        },
         "collectionSettings": {
             "type": "object",
             "properties": {
@@ -3856,7 +4016,7 @@ def get_schema_version(manifest_data: dict[str, Any]) -> str:
         return str(version)
 
     # Heuristic: If manifest has new fields, assume 2.0, otherwise 1.0
-    v2_fields = ["auth", "collection_settings", "auth_policy", "prompt_safety"]
+    v2_fields = ["auth", "collection_settings", "collections", "auth_policy", "prompt_safety"]
     if any(field in manifest_data for field in v2_fields):
         return "2.0"
 
