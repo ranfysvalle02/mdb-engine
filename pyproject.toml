@@ -24,10 +24,6 @@ classifiers = [
     "Topic :: Database",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
-
-[project.scripts]
-mdb-engine = "mdb_engine.cli:main"
-
 dependencies = [
     "motor>=3.0.0,<4.0.0",
     "pymongo>=4.0.0,<5.0.0",
@@ -38,6 +34,9 @@ dependencies = [
     "bcrypt>=4.0.0",
     "cryptography>=41.0.0",  # Required for envelope encryption
 ]
+
+[project.scripts]
+mdb-engine = "mdb_engine.cli:main"
 
 [project.optional-dependencies]
 ai = [
