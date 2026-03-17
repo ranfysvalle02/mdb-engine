@@ -49,6 +49,7 @@ from pymongo.errors import (
     AutoReconnect,
     CollectionInvalid,
     ConnectionFailure,
+    DuplicateKeyError,
     InvalidOperation,
     OperationFailure,
     PyMongoError,
@@ -1527,6 +1528,8 @@ class ScopedCollectionWrapper:
                     app_slug=self._write_scope,
                 )
                 return result
+            except DuplicateKeyError:
+                raise
             except (OperationFailure, AutoReconnect) as e:
                 duration_ms = (time.time() - start_time) * 1000
                 record_operation(

@@ -1,5 +1,124 @@
 # Changelog
 
+## 0.8.7
+
+### Fixed
+
+- **Soft-delete restore query** — `POST /{id}/_restore` now correctly finds
+  soft-deleted documents. Previously, `write_filter()` injected
+  `"deleted_at": None` (to exclude deleted docs from normal writes), which
+  contradicted the restore handler's `"deleted_at": {"$ne": None}` requirement
+  when merged via `$and`. The restore endpoint now builds its filter directly,
+  bypassing `write_filter` while still honoring write policies.
+
+### Improved
+
+- **Exception handling hardened across the engine** — Replaced all broad
+  `except Exception` catches with specific exception types (`PyMongoError`,
+  `HTTPException`, `KeyError`, `ValueError`, etc.) in:
+  - App-user session middleware (`app_auth_routes.py`)
+  - Declarative lifecycle hooks (`_hooks.py`)
+  - Index auto-creation at startup (`fastapi_app.py`)
+  - CLI `add-user` command (`cli/commands/add_user.py`)
+
+- **`_register_write_routes` complexity reduced** — Extracted
+  `_register_bulk_insert_route()` and `_register_delete_routes()` from the
+  monolithic write-route factory, bringing cyclomatic complexity from 35 to
+  well under the 25 threshold. No behavioral changes — same route registration
+  order and semantics.
+
+## 0.8.6
+
+### Added — Manifest Power Features
+
+Eight new declarative collection primitives that make manifest-driven backends
+production-grade. Zero Python code required for any of these.
+
+- **`owner_field`** — Automatic ownership enforcement. Declare `"owner_field": "author_id"`
+  and the engine auto-injects `{{user._id}}` as the default value, generates write/delete
+  policies so users can only modify their own documents, and grants admin role a full
+  bypass. Pure syntactic sugar — composable with explicit `policy` if both are set.
+
+- **`immutable_fields`** — Declare fields that cannot be changed after creation.
+  `"immutable_fields": ["author_id", "post_id"]` silently strips those keys from
+  PATCH and PUT request bodies. No error, no leak — the fields simply cannot move.
+
+- **`hooks`** — Declarative lifecycle hooks (`after_create`, `after_update`,
+  `after_delete`). Fire-and-forget side effects that never fail the originating
+  request. Supports `insert` (write a document to another collection) and `update`
+  (run `$set` on matching documents) actions. All template placeholders work:
+  `{{doc.*}}`, `{{user.*}}`, `$$NOW`.
+
+  ```json
+  "hooks": {
+    "after_create": [{
+      "action": "insert", "collection": "audit_log",
+      "document": { "event": "created", "entity_id": "{{doc._id}}", "actor": "{{user.email}}", "timestamp": "$$NOW" }
+    }]
+  }
+  ```
+
+- **`relations` / `?populate=`** — Declarative cross-collection joins. Define
+  relations in the manifest, then request them at read time with `?populate=post`.
+  The engine injects `$lookup` stages into the aggregation pipeline. Handles
+  ObjectId-to-string type coercion automatically when `foreign_field` is `_id`.
+  Supports `"single": true` for `$unwind` to a single object.
+
+- **`computed` / `?computed=`** — Virtual fields computed at read time via
+  aggregation. `?computed=comment_count` injects the configured pipeline stages
+  into the query. Two forms: expression (injected as `$addFields`) or pipeline
+  (stages injected inline). Combinable with `?populate=` in the same request.
+
+- **`x-unique`** — Schema-driven unique constraints. Add `"x-unique": true` to
+  any property in your JSON Schema and the engine auto-creates a unique index at
+  startup. Duplicate inserts/updates return `409 Conflict` with a clear message
+  identifying the violating field(s).
+
+- **`ttl`** — Collection-level TTL shorthand. `"ttl": {"field": "timestamp", "expire_after": "90d"}`
+  auto-creates a MongoDB TTL index at startup. Supports `s` (seconds), `m` (minutes),
+  `h` (hours), `d` (days) duration units.
+
+- **Extended template resolver** — `resolve_template()` now supports three
+  placeholder families:
+  - `{{user.*}}` — authenticated user context (existing)
+  - `{{doc.*}}` — the document being created/updated (new — used by hooks)
+  - `{{env.*}}` — environment variables, restricted to `^[A-Z_][A-Z0-9_]*$` (new)
+  - `$$NOW` — current UTC datetime (existing)
+
+### Changed
+
+- **`DuplicateKeyError` passthrough** — `ScopedCollectionWrapper.insert_one()`
+  now lets `pymongo.errors.DuplicateKeyError` propagate instead of wrapping it
+  in `MongoDBEngineError`. This enables auto-CRUD's 409 handling and any
+  user-level duplicate-key logic.
+
+- **Query parser** — `populate` and `computed` are now reserved query parameters.
+  `ParsedQuery` includes `populate: list[str] | None` and `computed: list[str] | None`.
+
+### Examples
+
+- **Zero-Code Blog (updated)** — The `examples/basic/zero_code_api` manifest now
+  showcases every new feature:
+  - `posts`: `owner_field`, `immutable_fields`, `hooks` (audit trail), `computed` (comment count)
+  - `comments`: `owner_field`, `immutable_fields`, `relations` (`?populate=post`), `hooks`
+  - `categories`: `x-unique` on name
+  - `audit_log`: `read_only`, `ttl` (90-day auto-expiry), auto-populated via hooks
+  - Frontend updated with `?computed=comment_count` on feed, audit log panel in admin view
+
+## 0.8.5
+
+### Added
+
+- **`public/` directory convention** -- `mdb-engine serve` now automatically serves static files from a `public/` directory if it exists next to the manifest. `public/index.html` is served at `/`. This enables zero-config single-origin frontend hosting for manifest-based apps.
+- **CORS support for `create_app`** -- The `cors` manifest configuration is now respected by `create_app()` (single-app mode), not just `create_multi_app()`. This fixes CORS issues for standalone apps and the CLI serve command.
+
+### Examples
+
+- **Zero-Code Blog** -- Completely redesigned `examples/basic/zero_code_api` as a blog platform.
+  - Zero Python code (manifest + HTML only).
+  - Uses the new `public/` convention to serve a single-file React-less frontend explorer.
+  - Showcases all zero-code features: schema validation, soft delete, scopes (`published`, `drafts`), pipelines (`by_author`), bulk insert, and read-only collections.
+
 ## 0.8.4
 
 ### Added

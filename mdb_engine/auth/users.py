@@ -14,6 +14,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import uuid
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
@@ -497,8 +498,6 @@ async def create_app_user(
         Created user dict, or None if creation failed
     """
     try:
-        import datetime
-
         from bson.objectid import ObjectId
 
         # Validate email format
@@ -617,8 +616,6 @@ async def get_or_create_anonymous_user(
     user = await collection.find_one({"email": anonymous_id})
 
     if not user:
-        import datetime
-
         user_doc = {
             "email": anonymous_id,
             "role": "anonymous",
@@ -710,7 +707,6 @@ async def _link_platform_demo_user(
     db, slug_id: str, collection_name: str, connection_manager=None
 ) -> dict[str, Any] | None:
     """Link platform demo user to app demo user."""
-    import datetime
 
     try:
         logger.debug(f"ensure_demo_users_exist: Auto-linking platform demo user for '{slug_id}'")
@@ -772,22 +768,50 @@ async def _link_platform_demo_user(
         return None
 
 
+_ENV_PLACEHOLDER_RE = re.compile(r"^\{\{env\.([A-Z_][A-Z0-9_]{0,63})\}\}$")
+
+
+def _resolve_env_placeholders(obj: Any) -> Any:
+    """Recursively resolve ``{{env.KEY}}`` placeholders in *obj*.
+
+    Only uppercase env-var names matching ``^[A-Z_][A-Z0-9_]*$`` are
+    accepted (same constraint as the routing template resolver).
+    Unset variables are left as the original placeholder string so that
+    downstream validation can surface a clear error.
+    """
+    if isinstance(obj, str):
+        m = _ENV_PLACEHOLDER_RE.match(obj)
+        if m:
+            val = os.environ.get(m.group(1))
+            if val is not None:
+                return val
+            logger.warning("Environment variable %s is not set (used in demo_users config)", m.group(1))
+        return obj
+    if isinstance(obj, dict):
+        return {k: _resolve_env_placeholders(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_resolve_env_placeholders(item) for item in obj]
+    return obj
+
+
 def _validate_demo_user_config(demo_user_config: Any, slug_id: str) -> tuple[dict[str, Any] | None, str | None]:
     """Validate demo user configuration."""
     if not isinstance(demo_user_config, dict):
         return None, f"Invalid demo_user_config entry (not a dict): {demo_user_config}"
 
-    extra_data = demo_user_config.get("extra_data", {})
+    resolved = _resolve_env_placeholders(demo_user_config)
+
+    extra_data = resolved.get("extra_data", {})
     if not isinstance(extra_data, dict):
         logger.warning(f"Invalid extra_data for demo user config (not a dict): {extra_data}")
         extra_data = {}
 
     return {
-        "email": demo_user_config.get("email"),
-        "password": demo_user_config.get("password"),
-        "role": demo_user_config.get("role", "user"),
-        "auto_create": demo_user_config.get("auto_create", True),
-        "link_to_platform": demo_user_config.get("link_to_platform", False),
+        "email": resolved.get("email"),
+        "password": resolved.get("password"),
+        "role": resolved.get("role", "user"),
+        "auto_create": resolved.get("auto_create", True),
+        "link_to_platform": resolved.get("link_to_platform", False),
         "extra_data": extra_data,
     }, None
 
@@ -849,7 +873,6 @@ async def _create_demo_user_from_config(
     connection_manager=None,
 ) -> dict[str, Any] | None:
     """Create a demo user from configuration."""
-    import datetime
 
     # Hash password with bcrypt
     try:

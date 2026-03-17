@@ -25,7 +25,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-_RESERVED_PARAMS = frozenset({"sort", "limit", "skip", "fields", "scope"})
+_RESERVED_PARAMS = frozenset({"sort", "limit", "skip", "fields", "scope", "populate", "computed"})
 
 _OPERATORS = {
     "gt": "$gt",
@@ -52,6 +52,8 @@ class ParsedQuery:
     limit: int = DEFAULT_LIMIT
     projection: dict[str, int] | None = None
     scope: list[str] | None = None
+    populate: list[str] | None = None
+    computed: list[str] | None = None
 
 
 def _coerce_value(raw: str) -> str | int | float | bool:
@@ -147,6 +149,12 @@ def parse_query_params(params: dict[str, str]) -> ParsedQuery:
         elif key == "scope":
             names = [s.strip() for s in value.split(",") if s.strip()]
             result.scope = names or None
+        elif key == "populate":
+            names = [s.strip() for s in value.split(",") if s.strip()]
+            result.populate = names or None
+        elif key == "computed":
+            names = [s.strip() for s in value.split(",") if s.strip()]
+            result.computed = names or None
         elif _is_safe_field(key):
             result.filter[key] = _parse_filter_value(value)
 

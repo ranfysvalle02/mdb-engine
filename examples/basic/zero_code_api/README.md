@@ -1,221 +1,405 @@
-# Zero-Code API
+# Zero-Code Blog
 
-A complete REST API from a single JSON file. No Python code required.
+A production-grade blog API from a single JSON file. No Python code required.
 
-The manifest defines four collections with different feature profiles:
+```
+zero_code_api/
+├── manifest.json        # the entire API — auth, CRUD, hooks, relations, TTL
+├── public/
+│   └── index.html       # blog explorer (auto-served at /)
+├── docker-compose.yml   # one-command setup
+└── README.md
+```
 
-| Collection   | Features                                                       |
-|--------------|----------------------------------------------------------------|
-| `tasks`      | Full CRUD, schema validation, soft delete, defaults, scopes, pipelines |
-| `projects`   | Full CRUD, document-level policy, defaults with user context, default projection |
-| `comments`   | Full CRUD, bulk insert, schemaless                             |
-| `audit_log`  | Read-only (GET only, no writes)                                |
+## What the manifest defines
 
-## Run with Docker (easiest)
+| Collection   | Features |
+|--------------|----------|
+| `posts`      | Schema validation, soft delete, defaults, scopes, pipelines, timestamps, **owner_field**, **immutable_fields**, **hooks** (audit trail), **computed** (comment count) |
+| `comments`   | Authenticated create, admin-only moderation, **owner_field**, **immutable_fields**, **relations** (`?populate=post`), **hooks** |
+| `categories` | Schema with **`x-unique`** constraint on name (409 on duplicates) |
+| `audit_log`  | Read-only, no timestamps, **TTL** (90-day auto-expiry), auto-populated via hooks |
+
+Auth is configured with `auth.users`:
+
+- **Secure-by-default** — because `auth.users.enabled` is `true`, every collection endpoint requires authentication automatically unless `public_read` is set.
+- **Public reads** — `posts` and `comments` have `"public_read": true` so anyone can browse without signing in. Writes still require auth.
+- Admin seeded via `{{env.ADMIN_EMAIL}}` / `{{env.ADMIN_PASSWORD}}` (no plaintext secrets in the manifest)
+- Self-registered users get role `reader` (`registration_role`)
+- Post/category/comment mutation requires admin role (`write_roles`)
+
+## Run with Docker
 
 ```bash
 docker compose up
 ```
 
-Open http://localhost:8000/docs -- your API is live.
+Override admin credentials with env vars:
+
+```bash
+ADMIN_EMAIL=me@corp.com ADMIN_PASSWORD=supersecret docker compose up
+```
+
+Open **http://localhost:8000** — the blog explorer is live.
+Swagger docs at **http://localhost:8000/docs**.
 
 ## Run locally
 
-### Prerequisites
-
-- Python 3.10+
-- MongoDB running (localhost:27017, Atlas, or set `MDB_MONGO_URI`)
-
 ```bash
 pip install mdb-engine uvicorn
-mdb-engine serve manifest.json --reload
+ADMIN_EMAIL=admin@example.com ADMIN_PASSWORD=admin123 mdb-engine serve manifest.json --reload
 ```
 
-Open the interactive docs at **http://localhost:8000/docs**.
-
-## Test
-
-### Create a task (schema-validated, defaults applied)
+Or provision an admin without any secrets in files or env vars:
 
 ```bash
-curl -s -X POST http://localhost:8000/api/tasks \
-  -H "Content-Type: application/json" \
-  -d '{"title": "Ship v1", "assignee": "alice"}' | python -m json.tool
+mdb-engine add-user manifest.json --email admin@example.com --role admin
+# prompts for password interactively
 ```
 
-The `status` and `priority` fields are auto-populated from `defaults`:
+> **How does the frontend work?** `mdb-engine serve` auto-detects the `public/`
+> directory next to the manifest and serves `public/index.html` at `/`.
+> No CORS, no extra config — same origin.
+
+## What the frontend shows
+
+- **Read mode** — clean public blog feed with computed comment counts
+- **Auth UX** — register/login/logout in-app (guest + admin)
+- **Comment gate** — guests must authenticate before commenting
+- **Comment moderation** — admin approves pending comments
+- **Admin authoring** — write/manage views only visible to admin
+- **Soft delete** — admin trash + restore workflow for posts
+- **Audit log** — admin panel shows all events auto-populated by hooks
+
+---
+
+## Power Features Showcase
+
+Every feature below is configured entirely in `manifest.json`. Zero Python.
+
+### Secure-by-default — auth enforced automatically
+
+When `auth.users.enabled` is `true` in the manifest, **every collection endpoint
+requires authentication** — reads, writes, deletes, everything. You don't need
+to add `"auth": {"required": true}` to each collection. The engine enforces it.
+
+Per-collection `auth` config can only *tighten* access (e.g. `write_roles: ["admin"]`),
+never loosen it. There is no way to make a collection publicly accessible when
+app-level auth is on. This prevents accidental data exposure in zero-code apps.
+
+Additional hardening (all automatic when `auth.users.enabled` is true):
+
+- **Users collection blocked** -- the auth users collection (default `"users"`) is
+  never exposed via auto-CRUD. Users are managed exclusively through `/auth/*` endpoints.
+- **Protected fields** -- `role`, `roles`, `password`, `password_hash`, and `is_admin`
+  are automatically immutable on every collection. No client can escalate privileges
+  via PATCH/PUT.
+- **`writable_fields` allowlist** -- explicitly declare which fields clients can write.
+  Everything else is silently stripped. Allowlist > denylist.
+- **`public_read`** -- per-collection opt-in to anonymous read access. Writes still
+  require auth. Perfect for blogs, docs, catalogs.
+- **Login rate limiting** -- `max_login_attempts` (default 5) and `login_lockout_seconds`
+  (default 15 minutes) protect against brute-force attacks. Returns 429 with `Retry-After`.
+- **Restore policy enforced** -- soft-delete `_restore` endpoints respect ownership
+  policies. Non-owners cannot restore documents they don't own.
+- **Bulk insert hooks** -- `after_create` hooks fire for every document in a bulk insert,
+  ensuring audit trails have no blind spots.
+
+### Computed fields — `?computed=comment_count`
+
+Posts can include a live comment count computed via aggregation at read time:
+
+```bash
+curl -s "http://localhost:8000/api/posts?scope=published&computed=comment_count"
+```
 
 ```json
-{"status": "pending", "priority": 3}
+{
+  "data": [{
+    "_id": "...",
+    "title": "Hello World",
+    "comment_count": 3,
+    ...
+  }]
+}
 ```
 
-### Reject an invalid task (missing required `title`)
+The manifest declares the pipeline that computes this:
+
+```json
+"computed": {
+  "comment_count": {
+    "pipeline": [
+      { "$lookup": { "from": "comments", "let": { "pid": { "$toString": "$_id" } },
+        "pipeline": [{ "$match": { "$expr": { "$eq": ["$post_id", "$$pid"] }}}], "as": "_comments" }},
+      { "$addFields": { "comment_count": { "$size": "$_comments" } } },
+      { "$project": { "_comments": 0 } }
+    ]
+  }
+}
+```
+
+### Relations — `?populate=post`
+
+Comments can include the full post they belong to:
 
 ```bash
-curl -s -X POST http://localhost:8000/api/tasks \
+curl -s "http://localhost:8000/api/comments?scope=approved&populate=post"
+```
+
+```json
+{
+  "data": [{
+    "_id": "...",
+    "body": "Great post!",
+    "post": {
+      "_id": "...",
+      "title": "Hello World",
+      "body": "..."
+    }
+  }]
+}
+```
+
+Declared in the manifest as:
+
+```json
+"relations": {
+  "post": { "from": "posts", "local_field": "post_id", "foreign_field": "_id", "single": true }
+}
+```
+
+### Hooks — automatic audit trail
+
+Every create, update, and delete on posts and comments fires a hook that inserts
+a document into `audit_log`. No application code, no event bus — just config:
+
+```json
+"hooks": {
+  "after_create": [{
+    "action": "insert", "collection": "audit_log",
+    "document": {
+      "event": "post_created",
+      "entity_id": "{{doc._id}}",
+      "actor": "{{user.email}}",
+      "timestamp": "$$NOW"
+    }
+  }]
+}
+```
+
+```bash
+# View the audit trail (admin only in the UI, but API is public read)
+curl -s "http://localhost:8000/api/audit_log?sort=-timestamp&limit=5"
+```
+
+### Unique constraints — `x-unique`
+
+Category names are unique. The engine auto-creates a unique index at startup:
+
+```bash
+curl -s -X POST http://localhost:8000/api/categories \
+  -H "Content-Type: application/json" -d '{"name":"Tech"}'
+# -> 201 Created
+
+curl -s -X POST http://localhost:8000/api/categories \
+  -H "Content-Type: application/json" -d '{"name":"Tech"}'
+# -> 409 {"detail": "Duplicate value for unique field(s): name"}
+```
+
+Declared in the schema with a single extension keyword:
+
+```json
+"name": { "type": "string", "x-unique": true }
+```
+
+### Owner field — automatic ownership
+
+Posts have `"owner_field": "author_id"`. The engine auto-injects the creator's
+user ID as a default and generates write/delete policies:
+
+```bash
+# Login as admin and create a post (use your ADMIN_EMAIL / ADMIN_PASSWORD)
+curl -s -c cookies -X POST http://localhost:8000/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"status": "pending"}'
-# -> 422 Validation error
-```
+  -d '{"email":"admin@example.com","password":"admin123"}'
 
-### Defaults do not overwrite caller-provided values
-
-```bash
-curl -s -X POST http://localhost:8000/api/tasks \
+curl -s -b cookies -X POST http://localhost:8000/api/posts \
   -H "Content-Type: application/json" \
-  -d '{"title": "Urgent fix", "status": "in_progress", "priority": 5}' | python -m json.tool
-# status stays "in_progress", priority stays 5
+  -d '{"title":"My Post","status":"published"}'
+# -> author_id is auto-set to the admin's user ID
 ```
 
-### Scopes -- named MQL filters activated via query parameter
+Admin bypasses ownership checks. Non-admin users can only modify documents they own.
+
+### Immutable fields — tamper-proof
+
+`"immutable_fields": ["author_id"]` on posts means even if a client sends
+`author_id` in a PATCH body, the engine silently strips it:
 
 ```bash
-# Active tasks only (status != "done")
-curl -s "http://localhost:8000/api/tasks?scope=active" | python -m json.tool
-
-# Completed tasks only
-curl -s "http://localhost:8000/api/tasks?scope=done" | python -m json.tool
-
-# High priority tasks (priority >= 4)
-curl -s "http://localhost:8000/api/tasks?scope=high_priority" | python -m json.tool
-
-# Combine scopes (AND logic): active AND high priority
-curl -s "http://localhost:8000/api/tasks?scope=active,high_priority" | python -m json.tool
-
-# Combine scopes with filters
-curl -s "http://localhost:8000/api/tasks?scope=active&assignee=alice" | python -m json.tool
-```
-
-### Pipelines -- named aggregation endpoints
-
-```bash
-# Task count grouped by status
-curl -s "http://localhost:8000/api/tasks/_agg/by_status" | python -m json.tool
-
-# Task count grouped by assignee
-curl -s "http://localhost:8000/api/tasks/_agg/by_assignee" | python -m json.tool
-```
-
-### List with filtering, sorting, pagination, and field selection
-
-```bash
-# Filter by status
-curl -s "http://localhost:8000/api/tasks?status=pending" | python -m json.tool
-
-# Sort by newest first
-curl -s "http://localhost:8000/api/tasks?sort=-created_at" | python -m json.tool
-
-# Paginate (page 2, 5 per page)
-curl -s "http://localhost:8000/api/tasks?limit=5&skip=5" | python -m json.tool
-
-# Only return title and status fields
-curl -s "http://localhost:8000/api/tasks?fields=title,status" | python -m json.tool
-
-# Combine them
-curl -s "http://localhost:8000/api/tasks?status=pending&sort=-created_at&limit=5&fields=title,status" | python -m json.tool
-```
-
-### Count
-
-```bash
-curl -s "http://localhost:8000/api/tasks/_count" | python -m json.tool
-curl -s "http://localhost:8000/api/tasks/_count?status=done" | python -m json.tool
-curl -s "http://localhost:8000/api/tasks/_count?scope=active" | python -m json.tool
-```
-
-### Bulk insert comments
-
-```bash
-curl -s -X POST http://localhost:8000/api/comments/_bulk \
+curl -s -b cookies -X PATCH http://localhost:8000/api/posts/{id} \
   -H "Content-Type: application/json" \
-  -d '[
-    {"text": "Looks good!", "author": "bob"},
-    {"text": "Ship it", "author": "alice"},
-    {"text": "+1", "author": "carol"}
-  ]' | python -m json.tool
+  -d '{"author_id":"hacked","title":"New Title"}'
+# -> title updates, author_id unchanged
 ```
 
-### Soft delete lifecycle
+### TTL — auto-expiring documents
 
-```bash
-# Delete a task (sets deleted_at instead of removing)
-TASK_ID="<paste an _id from the list response>"
-curl -s -X DELETE "http://localhost:8000/api/tasks/$TASK_ID" | python -m json.tool
+The `audit_log` collection has `"ttl": {"field": "timestamp", "expire_after": "90d"}`.
+MongoDB automatically deletes documents older than 90 days. No cron jobs, no cleanup code.
 
-# It disappears from normal listings
-curl -s "http://localhost:8000/api/tasks" | python -m json.tool
+### Env-var admin seeding — `{{env.*}}` in demo_users
 
-# But it shows up in the trash
-curl -s "http://localhost:8000/api/tasks/_trash" | python -m json.tool
+No more plaintext passwords in `manifest.json`. Admin credentials are resolved
+from environment variables at startup:
 
-# Restore it
-curl -s -X POST "http://localhost:8000/api/tasks/$TASK_ID/_restore" | python -m json.tool
-
-# It's back in the normal listing
-curl -s "http://localhost:8000/api/tasks" | python -m json.tool
+```json
+"demo_users": [
+  {
+    "email": "{{env.ADMIN_EMAIL}}",
+    "password": "{{env.ADMIN_PASSWORD}}",
+    "role": "admin"
+  }
+]
 ```
 
-### Document-level policy (projects collection)
+Set `ADMIN_EMAIL` and `ADMIN_PASSWORD` in your environment (or `.env` file for
+Docker Compose). The engine resolves `{{env.*}}` placeholders before seeding.
 
-The `projects` collection uses `policy` to restrict access to documents owned
-by the authenticated user. All queries are automatically filtered by
-`owner_id == user._id`.
+### Registration role control — `registration_role`
 
-```bash
-# Requires authentication -- anonymous requests return 401
-curl -s "http://localhost:8000/api/projects"
-# -> 401
+Self-registered users default to a configurable role instead of hardcoded `"guest"`:
 
-# With auth, only your projects are returned
-# (owner_id is auto-set from defaults on create)
+```json
+"users": {
+  "allow_registration": true,
+  "registration_role": "reader"
+}
 ```
 
-### Default projection (projects collection)
+### Invite-only registration — `allow_registration: "invite_only"`
 
-The `internal_notes` field is hidden from list/get responses by default.
-Clients can override by specifying `?fields=name,internal_notes` explicitly.
+Restrict registration to holders of a valid invite code:
 
-### Read-only collection
+```json
+"users": {
+  "allow_registration": "invite_only",
+  "invite_codes": ["{{env.INVITE_CODE}}", "beta-tester-2025"]
+}
+```
+
+Clients include `"invite_code"` in the registration body. Codes support `{{env.*}}`
+placeholders so they can be rotated without changing the manifest.
+
+### CLI admin provisioning — `mdb-engine add-user`
+
+Create users directly from the command line, no secrets in files:
 
 ```bash
-# GET works fine
-curl -s "http://localhost:8000/api/audit_log" | python -m json.tool
+mdb-engine add-user manifest.json --email admin@corp.com --role admin
+# Password: ********
+# Confirm: ********
+# User admin@corp.com created with role 'admin'.
+```
 
-# POST is blocked -> 405
-curl -s -X POST http://localhost:8000/api/audit_log \
+---
+
+## Try with curl
+
+```bash
+# Login as admin first (all endpoints require auth)
+# (use your ADMIN_EMAIL / ADMIN_PASSWORD values)
+curl -s -c cookies -X POST http://localhost:8000/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"event": "nope"}'
+  -d '{"email":"admin@example.com","password":"admin123"}'
+
+# Now all authenticated endpoints work:
+
+# List published posts (with computed comment count)
+curl -s -b cookies "http://localhost:8000/api/posts?scope=published&computed=comment_count"
+
+# Get a single post
+curl -s -b cookies "http://localhost:8000/api/posts/{id}"
+
+# Pipeline: posts by author
+curl -s -b cookies "http://localhost:8000/api/posts/_agg/by_author"
+
+# List approved comments (with populated post)
+curl -s -b cookies "http://localhost:8000/api/comments?scope=approved&populate=post"
+
+# Create a post (admin only)
+curl -s -b cookies -X POST http://localhost:8000/api/posts \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Hello World","body":"# Markdown works","status":"published"}'
+
+# Register a reader (registration_role: "reader")
+curl -s -c guest -X POST http://localhost:8000/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email":"guest@example.com","password":"guest123"}'
+
+# Post a comment as guest (auto-defaults: approved=false, author={{user.email}})
+curl -s -b guest -X POST http://localhost:8000/api/comments \
+  -H "Content-Type: application/json" \
+  -d '{"post_id":"{id}","body":"Great post!"}'
+
+# Approve comment as admin
+curl -s -b cookies -X PATCH http://localhost:8000/api/comments/{comment_id} \
+  -H "Content-Type: application/json" -d '{"approved":true}'
+
+# View audit log (requires auth — use admin cookies)
+curl -s -b cookies "http://localhost:8000/api/audit_log?sort=-timestamp"
+
+# Read-only collection — POST blocked
+curl -s -b cookies -X POST http://localhost:8000/api/audit_log \
+  -H "Content-Type: application/json" -d '{"event":"nope"}'
+# -> 405 Method Not Allowed
+
+# Unauthenticated access is blocked (secure-by-default)
+curl -s "http://localhost:8000/api/posts"
+# -> 401 {"detail": "Authentication required"}
 ```
 
 ## What you get automatically
 
-- **Auto-CRUD** -- GET, POST, PUT, PATCH, DELETE from a manifest definition
-- **JSON Schema validation** -- rejects bad documents before they hit the database
-- **Document-level policies** -- MQL filters in the manifest restrict read/write/delete per user
-- **Named scopes** -- `?scope=active,mine` activates predefined MQL filters
-- **Aggregation pipelines** -- `GET /api/{collection}/_agg/{name}` from manifest config
-- **Document defaults** -- auto-populate fields on create (supports `{{user.*}}` templates)
-- **Default projection** -- hide internal fields from API responses by default
-- **Filtering** -- `?field=value`, `?field=gt:18`, `?field=in:a,b,c`
-- **Sorting** -- `?sort=-created_at,name`
-- **Pagination** -- `?limit=10&skip=20`
-- **Field selection** -- `?fields=title,status`
-- **Timestamps** -- `created_at` and `updated_at` injected automatically
-- **Soft delete** -- delete, trash, restore lifecycle
-- **Bulk insert** -- batch up to 1000 documents in one request
-- **Read-only mode** -- GET-only collections for logs, audit trails, etc.
-- **Data isolation** -- all queries scoped by `app_id` automatically
-- **OpenAPI docs** -- Swagger UI at `/docs` with every endpoint documented
+| Feature | How |
+|---------|-----|
+| Secure-by-default | All endpoints require auth when `auth.users.enabled` is on |
+| Users collection blocked | Auth users collection never exposed via auto-CRUD |
+| Protected fields | `role`, `password_hash`, etc. auto-immutable on all collections |
+| Writable fields allowlist | `writable_fields` restricts which fields clients can write |
+| Public read | `public_read: true` allows anonymous reads, writes still require auth |
+| Login rate limiting | `max_login_attempts` blocks brute-force with 429 + Retry-After |
+| Auto-CRUD | GET, POST, PUT, PATCH, DELETE from a manifest |
+| JSON Schema validation | Rejects bad documents before they hit the database |
+| Named scopes | `?scope=published,drafts` activates predefined MQL filters |
+| Aggregation pipelines | `GET /api/{collection}/_agg/{name}` |
+| Document defaults | Auto-populate fields on create with `{{user.*}}` templates |
+| Owner field | Auto-inject creator ID, enforce write/delete ownership, admin bypass |
+| Immutable fields | Silently strip protected fields from updates |
+| Lifecycle hooks | Fire-and-forget side effects with `{{doc.*}}`, `{{user.*}}`, `$$NOW` |
+| Relations / populate | `?populate=name` injects `$lookup` joins at read time |
+| Computed fields | `?computed=name` injects aggregation pipelines at read time |
+| Unique constraints | `x-unique` in schema auto-creates indexes, returns 409 on duplicates |
+| TTL | `"ttl": {"field":"ts","expire_after":"90d"}` auto-creates TTL indexes |
+| Soft delete | Delete, trash, restore lifecycle |
+| Bulk insert | Batch up to 1000 documents in one request |
+| Read-only mode | GET-only collections for logs, audit trails |
+| Timestamps | `created_at` and `updated_at` injected automatically |
+| Filtering | `?field=value`, `?field=gt:18`, `?field=in:a,b,c` |
+| Sorting | `?sort=-created_at,title` |
+| Pagination | `?limit=10&skip=20` |
+| Field selection | `?fields=title,status` |
+| Data isolation | All queries scoped by `app_id` automatically |
+| Env-var seeding | `{{env.*}}` in demo_users — no plaintext secrets in manifest |
+| Registration role | `registration_role` controls what role self-registered users get |
+| Invite-only mode | `allow_registration: "invite_only"` with `invite_codes` |
+| CLI admin provisioning | `mdb-engine add-user` creates users with interactive password prompt |
+| OpenAPI docs | Swagger UI at `/docs` |
 
 ## The design principle
 
-> **MQL is the DSL.** Every `policy`, `scopes`, `pipelines`, and `defaults`
-> value is a native MongoDB Query Language expression written as JSON.
-> The manifest speaks the same language as the database -- no translation
-> layer, no custom syntax, no impedance mismatch.
-
-## Next steps
-
-- Add `"realtime": true` to a collection for live WebSocket updates -- see [realtime_board](../realtime_board/)
-- Add `"auth": {"required": true}` to protect collections
-- See [memory_quickstart](../memory_quickstart/) for adding AI memory
+> **MQL is the DSL.** Every `scopes`, `pipelines`, `defaults`, `hooks`, `relations`,
+> and `computed` value is a native MongoDB Query Language expression. The manifest
+> speaks the same language as the database — no translation layer, no custom syntax.
+> Declare what you want. The engine handles the rest.

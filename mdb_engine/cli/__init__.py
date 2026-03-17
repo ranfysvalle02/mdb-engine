@@ -6,6 +6,7 @@ Entry point for the ``mdb-engine`` command.
 
 import click
 
+from .commands.add_user import add_user
 from .commands.doctor import doctor
 from .commands.migrate import migrate
 from .commands.new_app import new_app
@@ -24,3 +25,4 @@ main.add_command(migrate)
 main.add_command(new_app, name="new-app")
 main.add_command(doctor)
 main.add_command(serve)
+main.add_command(add_user, name="add-user")

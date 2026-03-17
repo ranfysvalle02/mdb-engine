@@ -13,6 +13,8 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from pymongo.errors import PyMongoError
+
 if TYPE_CHECKING:
     from fastapi import FastAPI
 
@@ -170,6 +172,9 @@ class FastAPIAppMixin:
 
             await engine.register_app(app_manifest)
 
+            # Auto-create indexes for collection-level shortcuts (x-unique, ttl)
+            await self._ensure_collection_indexes(engine, slug, app_manifest)
+
             # Auto-detect multi-site mode from manifest
             data_access = app_manifest.get("data_access", {})
             read_scopes = data_access.get("read_scopes", [slug])
@@ -297,10 +302,32 @@ class FastAPIAppMixin:
         if _collections_cfg:
             from ..routing.auto_crud import mount_auto_crud_routes
 
-            mount_auto_crud_routes(app, _collections_cfg)
+            _users_cfg_pre = auth_config.get("users", {})
+            _app_auth_on = bool(_users_cfg_pre.get("enabled"))
+            _auth_col = _users_cfg_pre.get("collection_name", "users") if _app_auth_on else "users"
+            mount_auto_crud_routes(
+                app,
+                _collections_cfg,
+                app_auth_enabled=_app_auth_on,
+                auth_users_collection=_auth_col,
+            )
+
+        # Auto-register JSON auth routes when auth.users is enabled
+        _users_cfg = auth_config.get("users", {})
+        if _users_cfg.get("enabled"):
+            from ..auth.app_auth_routes import create_app_auth_router
+
+            _auth_router = create_app_auth_router(
+                engine=engine,
+                slug=slug,
+                manifest_data=pre_manifest,
+                users_config=_users_cfg,
+            )
+            app.include_router(_auth_router)
+            logger.info(f"App-user auth routes mounted for '{slug}' (/auth/*)")
 
         # Setup all middleware
-        self._setup_middleware(app, slug, auth_config, auth_mode, is_sub_app)
+        self._setup_middleware(app, slug, auth_config, auth_mode, is_sub_app, pre_manifest)
 
         logger.debug(f"FastAPI app created for '{slug}'")
 
@@ -313,6 +340,7 @@ class FastAPIAppMixin:
         auth_config: dict[str, Any],
         auth_mode: str,
         is_sub_app: bool,
+        manifest: dict[str, Any] | None = None,
     ) -> None:
         """Setup all middleware for the FastAPI app."""
         # Add request scope middleware (innermost layer - runs first on request)
@@ -325,6 +353,22 @@ class FastAPIAppMixin:
         if auth_mode == "shared":
             self._add_shared_auth_middleware(app, slug, auth_config)
 
+        # Add app-user session middleware when auth.users is enabled in app mode.
+        # Populates request.state.user / request.state.user_roles so that
+        # require_user() / require_role() and per-collection auth config work.
+        if auth_mode != "shared":
+            _users_cfg = auth_config.get("users", {})
+            if _users_cfg.get("enabled"):
+                from ..auth.app_auth_routes import create_app_user_session_middleware
+
+                _mw_cls = create_app_user_session_middleware(
+                    engine=self,
+                    slug=slug,
+                    manifest_data=manifest or {},
+                )
+                app.add_middleware(_mw_cls)
+                logger.info(f"AppUserSessionMiddleware added for '{slug}'")
+
         # Add CSRF middleware (after auth - auto-enabled for shared mode)
         self._add_csrf_middleware(app, slug, auth_config, auth_mode, is_sub_app)
 
@@ -334,6 +378,10 @@ class FastAPIAppMixin:
         # Add Starlette SessionMiddleware if OAuth is configured
         # (Authlib stores OIDC state/nonce in the session during redirects)
         self._add_oauth_session_middleware(app, slug, auth_config)
+
+        # Add CORS middleware if configured in manifest
+        if manifest:
+            self._add_cors_middleware(app, slug, manifest)
 
         # Add OpenTelemetry instrumentation (outermost - captures full request lifecycle)
         self._add_otel_middleware(app, slug)
@@ -704,6 +752,42 @@ class FastAPIAppMixin:
         app.add_middleware(SessionMiddleware, secret_key=session_secret)
         logger.info(f"SessionMiddleware (OAuth) added for '{slug}'")
 
+    def _add_cors_middleware(
+        self,
+        app: "FastAPI",
+        slug: str,
+        manifest: dict[str, Any],
+    ) -> None:
+        """Add CORS middleware when ``cors.enabled`` is set in the manifest."""
+        cors_cfg = manifest.get("cors", {})
+        if not cors_cfg.get("enabled"):
+            return
+
+        from ..auth.config_helpers import CORS_DEFAULTS, merge_config_with_defaults
+
+        merged = merge_config_with_defaults(cors_cfg, CORS_DEFAULTS)
+
+        from starlette.middleware.cors import CORSMiddleware
+
+        kwargs: dict[str, Any] = {
+            "allow_origins": merged.get("allow_origins", ["*"]),
+            "allow_credentials": merged.get("allow_credentials", False),
+            "allow_methods": merged.get("allow_methods", ["*"]),
+            "allow_headers": merged.get("allow_headers", ["*"]),
+            "max_age": merged.get("max_age", 3600),
+        }
+        expose = merged.get("expose_headers")
+        if expose:
+            kwargs["expose_headers"] = expose
+
+        app.add_middleware(CORSMiddleware, **kwargs)
+        app.state.cors_config = merged
+        logger.info(
+            f"CORSMiddleware added for '{slug}': "
+            f"origins={merged.get('allow_origins')}, "
+            f"credentials={merged.get('allow_credentials')}"
+        )
+
     async def _initialize_oauth_service(
         self,
         engine: "MongoDBEngine",
@@ -792,3 +876,97 @@ class FastAPIAppMixin:
                 await watcher.stop()
             except (OSError, RuntimeError, asyncio.CancelledError) as e:
                 logger.warning(f"Error stopping realtime watcher: {e}")
+
+    # ------------------------------------------------------------------
+    # Collection-level index shortcuts (x-unique, ttl)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    async def _ensure_collection_indexes(
+        engine: Any,
+        slug: str,
+        manifest: dict[str, Any],
+    ) -> None:
+        """Create indexes declared via collection-level shortcuts.
+
+        * ``x-unique`` in schema properties -> unique index
+        * ``ttl`` in collection config -> TTL index
+        """
+        collections_cfg = manifest.get("collections", {})
+        if not collections_cfg:
+            return
+
+        _TIME_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+
+        try:
+            db = await engine.get_scoped_db(slug)
+        except (PyMongoError, KeyError, ValueError) as exc:
+            logger.warning("Could not get scoped db for index creation: %s", exc)
+            return
+
+        for col_name, col_cfg in collections_cfg.items():
+            collection = db[col_name]
+            raw_col = getattr(collection, "_collection", collection)
+
+            # x-unique indexes
+            schema = col_cfg.get("schema")
+            if schema and isinstance(schema.get("properties"), dict):
+                for prop_name, prop_def in schema["properties"].items():
+                    if isinstance(prop_def, dict) and prop_def.get("x-unique"):
+                        idx_name = f"auto_unique_{prop_name}"
+                        try:
+                            await raw_col.create_index(
+                                prop_name,
+                                unique=True,
+                                name=idx_name,
+                                background=True,
+                            )
+                            logger.info(
+                                "Created unique index '%s' on %s.%s",
+                                idx_name,
+                                col_name,
+                                prop_name,
+                            )
+                        except PyMongoError as exc:
+                            logger.warning(
+                                "Failed to create unique index on %s.%s: %s",
+                                col_name,
+                                prop_name,
+                                exc,
+                            )
+
+            # TTL index
+            ttl_cfg = col_cfg.get("ttl")
+            if ttl_cfg:
+                ttl_field = ttl_cfg.get("field")
+                expire_raw = ttl_cfg.get("expire_after", "")
+                if ttl_field and expire_raw:
+                    unit = expire_raw[-1]
+                    try:
+                        num = int(expire_raw[:-1])
+                    except (ValueError, IndexError):
+                        logger.warning("Invalid ttl expire_after: %s", expire_raw)
+                        continue
+                    seconds = num * _TIME_UNITS.get(unit, 1)
+                    idx_name = f"auto_ttl_{ttl_field}"
+                    try:
+                        await raw_col.create_index(
+                            ttl_field,
+                            expireAfterSeconds=seconds,
+                            name=idx_name,
+                            background=True,
+                        )
+                        logger.info(
+                            "Created TTL index '%s' on %s.%s (%ds)",
+                            idx_name,
+                            col_name,
+                            ttl_field,
+                            seconds,
+                        )
+                    except PyMongoError as exc:
+                        logger.warning(
+                            "Failed to create TTL index on %s.%s: %s",
+                            col_name,
+                            ttl_field,
+                            exc,
+                        )

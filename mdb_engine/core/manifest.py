@@ -539,11 +539,54 @@ MANIFEST_SCHEMA_V2 = {
                             ),
                         },
                         "allow_registration": {
-                            "type": "boolean",
+                            "oneOf": [
+                                {"type": "boolean"},
+                                {"type": "string", "enum": ["invite_only"]},
+                            ],
                             "default": False,
                             "description": (
-                                "Allow users to self-register in the app " "(when strategy is 'app_users')."
+                                "Allow users to self-register. "
+                                "true = open, false = disabled, "
+                                "'invite_only' = requires invite code."
                             ),
+                        },
+                        "registration_role": {
+                            "type": "string",
+                            "default": "guest",
+                            "description": ("Role assigned to self-registered users " "(default: 'guest')."),
+                        },
+                        "invite_codes": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "Valid invite codes for 'invite_only' registration. " "Supports {{env.*}} placeholders."
+                            ),
+                        },
+                        "max_login_attempts": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "default": 5,
+                            "description": ("Max failed login attempts before lockout " "(default: 5). Returns 429."),
+                        },
+                        "login_lockout_seconds": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "default": 900,
+                            "description": (
+                                "Lockout window in seconds after max login " "attempts (default: 900 = 15 minutes)."
+                            ),
+                        },
+                        "max_registration_attempts": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "default": 5,
+                            "description": ("Max registrations per IP within window " "(default: 5). Returns 429."),
+                        },
+                        "registration_window_seconds": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "default": 3600,
+                            "description": ("Registration rate limit window in seconds " "(default: 3600 = 1 hour)."),
                         },
                         "link_platform_users": {
                             "type": "boolean",
@@ -578,11 +621,10 @@ MANIFEST_SCHEMA_V2 = {
                                 "properties": {
                                     "email": {
                                         "type": "string",
-                                        "format": "email",
                                         "description": (
-                                            "Email address for demo user "
-                                            "(defaults to platform demo email "
-                                            "if not specified)"
+                                            "Email address or {{env.*}} placeholder "
+                                            "for demo user (defaults to platform "
+                                            "demo email if not specified)"
                                         ),
                                     },
                                     "password": {
@@ -3751,6 +3793,15 @@ MANIFEST_SCHEMA_V2 = {
                 "auth": {
                     "type": "object",
                     "properties": {
+                        "public_read": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": (
+                                "Allow anonymous read access to this collection "
+                                "even when app-level auth is enabled. "
+                                "Writes still require authentication."
+                            ),
+                        },
                         "required": {
                             "type": "boolean",
                             "default": False,
@@ -3766,6 +3817,41 @@ MANIFEST_SCHEMA_V2 = {
                             "description": (
                                 "Roles required to access this collection's "
                                 "auto-CRUD endpoints. Implies auth is required."
+                            ),
+                        },
+                        "create_roles": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "minItems": 1,
+                            "description": (
+                                "Roles required for the POST (create) endpoint. "
+                                "Overrides write_roles for creation only."
+                            ),
+                        },
+                        "create_required": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": (
+                                "Require authentication for the POST (create) "
+                                "endpoint. Overrides write_required for creation."
+                            ),
+                        },
+                        "write_roles": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "minItems": 1,
+                            "description": (
+                                "Roles required for mutation endpoints "
+                                "(PUT/PATCH/DELETE). Also applies to POST "
+                                "unless create_roles is set. Read endpoints "
+                                "remain public."
+                            ),
+                        },
+                        "write_required": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": (
+                                "Require authentication for mutation endpoints " "only. Read endpoints remain public."
                             ),
                         },
                     },
@@ -3819,15 +3905,19 @@ MANIFEST_SCHEMA_V2 = {
                     "patternProperties": {
                         "^[a-zA-Z_][a-zA-Z0-9_]*$": {
                             "type": "object",
-                            "description": "Named MQL filter activated via ?scope=name",
+                            "description": (
+                                'Plain MQL filter: {"status": "published"}  '
+                                "or extended format with auth: "
+                                '{"filter": {...}, "auth": {"roles": ["admin"]}}'
+                            ),
                         },
                     },
                     "additionalProperties": False,
                     "description": (
-                        "Named MQL filters that clients activate via the "
-                        "?scope=name query parameter. Multiple scopes can "
-                        "be combined: ?scope=active,mine. Supports {{user.*}} "
-                        "template placeholders."
+                        "Named scopes activated via ?scope=name. Can be a plain "
+                        "MQL filter or extended format with auth requirements: "
+                        '{"filter": {...}, "auth": {"roles": ["admin"]}}. '
+                        "Supports {{user.*}} template placeholders."
                     ),
                 },
                 "pipelines": {
@@ -3865,7 +3955,179 @@ MANIFEST_SCHEMA_V2 = {
                         'hiding internal fields (e.g. {"internal_notes": 0}).'
                     ),
                 },
+                "owner_field": {
+                    "type": "string",
+                    "description": (
+                        "Field name that stores the document owner's user ID. "
+                        "Auto-generates defaults ({{user._id}}) and write/delete "
+                        "policies so users can only modify their own documents. "
+                        "Admin role bypasses ownership checks."
+                    ),
+                },
+                "immutable_fields": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Fields that cannot be changed after document creation. "
+                        "Silently stripped from PATCH/PUT request bodies."
+                    ),
+                },
+                "writable_fields": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Allowlist of fields that clients can write. "
+                        "If set, all other fields are silently stripped from request bodies. "
+                        "More secure than immutable_fields (allowlist > denylist)."
+                    ),
+                },
+                "max_body_bytes": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": (
+                        "Maximum request body size in bytes for write endpoints. "
+                        "Defaults to 1048576 (1 MB). Returns 413 if exceeded."
+                    ),
+                },
+                "hooks": {
+                    "type": "object",
+                    "properties": {
+                        "after_create": {
+                            "type": "array",
+                            "items": {"$ref": "#/definitions/hookAction"},
+                            "description": "Actions to run after a document is created",
+                        },
+                        "after_update": {
+                            "type": "array",
+                            "items": {"$ref": "#/definitions/hookAction"},
+                            "description": "Actions to run after a document is updated",
+                        },
+                        "after_delete": {
+                            "type": "array",
+                            "items": {"$ref": "#/definitions/hookAction"},
+                            "description": "Actions to run after a document is deleted",
+                        },
+                    },
+                    "additionalProperties": False,
+                    "description": (
+                        "Declarative lifecycle hooks. Fire-and-forget side effects "
+                        "that run after CRUD operations. Supports {{doc.*}}, "
+                        "{{user.*}}, and $$NOW template placeholders."
+                    ),
+                },
+                "relations": {
+                    "type": "object",
+                    "patternProperties": {
+                        "^[a-zA-Z_][a-zA-Z0-9_]*$": {
+                            "type": "object",
+                            "properties": {
+                                "from": {
+                                    "type": "string",
+                                    "description": "Target collection name (logical, without app prefix)",
+                                },
+                                "local_field": {
+                                    "type": "string",
+                                    "description": "Field on this collection that references the target",
+                                },
+                                "foreign_field": {
+                                    "type": "string",
+                                    "default": "_id",
+                                    "description": "Field on the target collection to match against",
+                                },
+                                "as": {
+                                    "type": "string",
+                                    "description": "Output field name (defaults to relation name)",
+                                },
+                                "single": {
+                                    "type": "boolean",
+                                    "default": False,
+                                    "description": "Unwind to single object instead of array",
+                                },
+                            },
+                            "required": ["from", "local_field"],
+                            "additionalProperties": False,
+                        },
+                    },
+                    "additionalProperties": False,
+                    "description": (
+                        "Declarative cross-collection joins activated via "
+                        "?populate=name query parameter. Injects $lookup "
+                        "stages into read queries."
+                    ),
+                },
+                "computed": {
+                    "type": "object",
+                    "patternProperties": {
+                        "^[a-zA-Z_][a-zA-Z0-9_]*$": {
+                            "type": "object",
+                            "description": (
+                                "Computed field definition. Either a MongoDB "
+                                "expression (injected as $addFields) or an object "
+                                'with "pipeline" key containing aggregation stages.'
+                            ),
+                        },
+                    },
+                    "additionalProperties": False,
+                    "description": (
+                        "Virtual fields computed at read time via aggregation. "
+                        "Activated via ?computed=name query parameter."
+                    ),
+                },
+                "ttl": {
+                    "type": "object",
+                    "properties": {
+                        "field": {
+                            "type": "string",
+                            "description": "Date field to use for TTL expiration",
+                        },
+                        "expire_after": {
+                            "type": "string",
+                            "pattern": "^[0-9]+(s|m|h|d)$",
+                            "description": (
+                                "Duration after which documents expire. "
+                                "Format: number + unit (s/m/h/d). Example: 24h, 90d"
+                            ),
+                        },
+                    },
+                    "required": ["field", "expire_after"],
+                    "additionalProperties": False,
+                    "description": (
+                        "Auto-expiring documents via MongoDB TTL index. "
+                        "Creates an index on the specified field that removes "
+                        "documents after the given duration."
+                    ),
+                },
             },
+            "additionalProperties": False,
+        },
+        "hookAction": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["insert", "update"],
+                    "description": "Hook action type",
+                },
+                "collection": {
+                    "type": "string",
+                    "description": "Target collection for the side effect",
+                },
+                "document": {
+                    "type": "object",
+                    "description": (
+                        "Document to insert (for insert action). " "Supports {{doc.*}}, {{user.*}}, $$NOW placeholders."
+                    ),
+                },
+                "filter": {
+                    "type": "object",
+                    "description": "Filter for update action",
+                },
+                "update": {
+                    "type": "object",
+                    "description": "Fields to $set for update action",
+                },
+            },
+            "required": ["action", "collection"],
             "additionalProperties": False,
         },
         "collectionSettings": {

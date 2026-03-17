@@ -69,6 +69,9 @@ def serve(
         click.echo(f"  Auto-CRUD: {crud_count} collection(s)")
     click.echo(f"  Server   : http://{host}:{port}")
     click.echo(f"  Docs     : http://{host}:{port}/docs")
+    public_dir = manifest_path.parent / "public"
+    if public_dir.is_dir() and (public_dir / "index.html").exists():
+        click.echo(f"  Frontend : http://{host}:{port}")
     click.echo()
 
     os.environ["_MDB_SERVE_MANIFEST"] = str(manifest_path)

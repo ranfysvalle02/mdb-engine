@@ -34,6 +34,7 @@ class ScopedAccessMixin:
     _app_secrets_manager: "AppSecretsManager | None"
     _app_read_scopes: dict[str, list[str]]
     _service_initializer: "ServiceInitializer | None"
+    _app_token_cache: dict[str, str]
 
     async def _get_scoped_db_impl(
         self,
@@ -46,6 +47,10 @@ class ScopedAccessMixin:
         """Shared implementation for scoped database access."""
         if not self._initialized:
             raise RuntimeError("MongoDBEngine not initialized. Call initialize() first.")
+
+        # Auto-resolve token from cache when caller didn't provide one
+        if app_token is None:
+            app_token = getattr(self, "_app_token_cache", {}).get(app_slug)
 
         # Verify app token if secrets manager is available
         if self._app_secrets_manager:

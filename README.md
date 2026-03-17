@@ -145,14 +145,74 @@ app = engine.create_app(slug="my_app", manifest=Path("manifest.json"))
 
 **Learn more**: [Manifest Reference](docs/MANIFEST_REFERENCE.md) | [Quick Start Guide](docs/QUICK_START.md)
 
+### 4. Zero-Code Manifest (no Python at all)
+
+A single `manifest.json` defines a production-grade REST API — auth, CRUD, hooks,
+relations, computed fields, unique constraints, TTL — without writing a line of Python.
+
+```bash
+mdb-engine serve manifest.json
+```
+
+Thirteen declarative collection primitives:
+
+| Primitive | What it does |
+|-----------|-------------|
+| `schema` | JSON Schema validation on every write |
+| `defaults` | Auto-populate fields on create (`{{user.*}}`, `$$NOW`) |
+| `owner_field` | Auto-inject creator ID, enforce ownership, admin bypass |
+| `immutable_fields` | Silently strip protected fields from updates |
+| `hooks` | Fire-and-forget side effects (`after_create`, `after_update`, `after_delete`) |
+| `relations` | Declarative joins via `?populate=name` |
+| `computed` | Virtual fields via `?computed=name` (aggregation at read time) |
+| `scopes` | Named MQL filters via `?scope=name` (with optional auth gates) |
+| `pipelines` | Named aggregation endpoints at `/_agg/{name}` |
+| `policy` | Document-level read/write/delete access policies |
+| `x-unique` | Schema-driven unique indexes (409 on duplicates) |
+| `ttl` | Auto-expiring documents (`"expire_after": "90d"`) |
+| `auth` | Role-based access for reads, creates, and mutations |
+
+**Real-world example** — a blog post collection with audit trail, computed comment
+counts, and ownership enforcement:
+
+```json
+{
+  "posts": {
+    "auto_crud": true,
+    "soft_delete": true,
+    "owner_field": "author_id",
+    "immutable_fields": ["author_id"],
+    "auth": { "write_roles": ["admin"] },
+    "defaults": { "status": "draft", "author": "{{user.email}}" },
+    "scopes": { "published": { "status": "published" } },
+    "hooks": {
+      "after_create": [{ "action": "insert", "collection": "audit_log", "document": {
+        "event": "post_created", "entity_id": "{{doc._id}}", "actor": "{{user.email}}", "timestamp": "$$NOW"
+      }}]
+    },
+    "computed": {
+      "comment_count": { "pipeline": [
+        { "$lookup": { "from": "comments", "let": { "pid": { "$toString": "$_id" } },
+          "pipeline": [{ "$match": { "$expr": { "$eq": ["$post_id", "$$pid"] }}}], "as": "_c" }},
+        { "$addFields": { "comment_count": { "$size": "$_c" } } },
+        { "$project": { "_c": 0 } }
+      ]}
+    }
+  }
+}
+```
+
+**See it in action**: [zero_code_api](examples/basic/zero_code_api/) — a complete blog with auth, comments, categories, and audit log.
+
 ---
 
 ## Examples Ladder
 
 Start simple, add complexity when you need it.
 
-| Example | What it shows | Lines of code |
+| Example | What it shows | Lines of Python |
 |---------|---------------|:---:|
+| [zero_code_api](examples/basic/zero_code_api/) | Blog with auth, hooks, relations, computed fields, unique, TTL — **all manifest** | **0** |
 | [hello_world](examples/basic/hello_world/) | Zero-config CRUD, no manifest | ~15 |
 | [memory_quickstart](examples/basic/memory_quickstart/) | AI memory with semantic search | ~25 |
 | [chit_chat](examples/basic/chit_chat/) | Full AI chat with ChatEngine, auth, WebSockets | ~2400 |

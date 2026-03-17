@@ -1,16 +1,49 @@
+# Zero-Code Blog — Docker Compose
+#
+# Quick start:
+#   docker compose up
+#
+# Production-ready overrides:
+#   ADMIN_EMAIL=ceo@corp.com ADMIN_PASSWORD=<strong> MDB_JWT_SECRET=<random-64-chars> docker compose up
+#
+# All secrets are passed via environment variables — never in manifest.json.
+# The manifest uses {{env.ADMIN_EMAIL}} / {{env.ADMIN_PASSWORD}} placeholders
+# which the engine resolves at startup.
+
 services:
   api:
     image: python:3.11-slim
     working_dir: /app
     volumes:
       - ./manifest.json:/app/manifest.json
+      - ./public:/app/public
+      # Mount local mdb_engine source for development
+      - ../../../mdb_engine:/engine_src/mdb_engine
+      - ../../../pyproject.toml:/engine_src/pyproject.toml
+      - ../../../README.md:/engine_src/README.md
     environment:
+      # --- Database ---
       - MONGODB_URI=mongodb://mongo:27017/?directConnection=true
       - MDB_DB_NAME=mdb_engine
+
+      # --- Security (CHANGE THESE in production) ---
+      # JWT signing secret — used for session tokens. Must be >=32 chars.
+      - MDB_JWT_SECRET=${MDB_JWT_SECRET:-dev_zero_code_blog_jwt_secret_change_me_please_32_chars}
+      # Master encryption key — required for app-level auth to work.
+      # In production, use a strong random 32+ char key.
+      - MDB_ENGINE_MASTER_KEY=${MDB_ENGINE_MASTER_KEY:-dev_master_key_change_me_in_production_32ch}
+
+      # --- Admin seeding ---
+      # These are resolved by {{env.ADMIN_EMAIL}} / {{env.ADMIN_PASSWORD}}
+      # in the manifest's demo_users array. Override for production.
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@example.com}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin123}
+
+      # --- Internal (do not change) ---
       - _MDB_SERVE_MANIFEST=/app/manifest.json
     command: >
-      bash -c "pip install mdb-engine uvicorn -q &&
-               uvicorn mdb_engine.cli._serve_app:app --host 0.0.0.0 --port 8000"
+      bash -c "pip install -e /engine_src uvicorn -q &&
+               uvicorn mdb_engine.cli._serve_app:app --host 0.0.0.0 --port 8000 --reload"
     ports:
       - "8000:8000"
     depends_on:
