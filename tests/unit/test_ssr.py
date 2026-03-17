@@ -26,6 +26,10 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+import pytest
+
+pytest.importorskip("jinja2", reason="SSR tests require jinja2")
+
 from bson import ObjectId
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
