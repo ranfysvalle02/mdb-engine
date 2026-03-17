@@ -170,6 +170,7 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
 "tests/**/*.py" = [
+    "E402",   # Module-level import order (pytest.importorskip must precede imports)
     "F841",   # Unused variables (common in test assertions)
     "B018",   # Useless expressions (common in test assertions)
     "BLE001", # Blind exception catching (acceptable in test mocks)
