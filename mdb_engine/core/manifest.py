@@ -555,6 +555,27 @@ MANIFEST_SCHEMA_V2 = {
                             "default": "guest",
                             "description": ("Role assigned to self-registered users " "(default: 'guest')."),
                         },
+                        "roles_field": {
+                            "type": "string",
+                            "default": "roles",
+                            "description": (
+                                "Field name for the user's roles array "
+                                "(default: 'roles'). Supports multi-role users."
+                            ),
+                        },
+                        "role_hierarchy": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "description": (
+                                "Role inheritance map. Each key is a role, "
+                                "each value is a list of roles it inherits. "
+                                'E.g. {"admin": ["editor", "reader"], '
+                                '"editor": ["reader"]}.'
+                            ),
+                        },
                         "invite_codes": {
                             "type": "array",
                             "items": {"type": "string"},
@@ -1472,6 +1493,238 @@ MANIFEST_SCHEMA_V2 = {
             "description": "Collection definitions with auto-CRUD and optional JSON Schema validation",
             "patternProperties": {
                 "^[a-zA-Z0-9_]+$": {"$ref": "#/definitions/collectionDef"},
+            },
+            "additionalProperties": False,
+        },
+        "ssr": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": (
+                        "Enable server-side rendering. Requires a templates/ " "directory next to the manifest."
+                    ),
+                },
+                "site_name": {
+                    "type": "string",
+                    "description": "Site name for SEO meta tags and JSON-LD.",
+                },
+                "site_description": {
+                    "type": "string",
+                    "description": "Default meta description when not overridden per route.",
+                },
+                "base_url": {
+                    "type": "string",
+                    "description": (
+                        "Base URL for sitemap generation (e.g. 'https://myblog.com'). "
+                        "If omitted, uses the request's base URL."
+                    ),
+                },
+                "sitemap": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": (
+                        "Auto-generate /sitemap.xml from public SSR routes. " "Auth-gated routes are excluded."
+                    ),
+                },
+                "routes": {
+                    "type": "object",
+                    "description": (
+                        "SSR route definitions. Keys are URL patterns "
+                        "(e.g. '/', '/posts/{id}'). Values define template, "
+                        "data sources, SEO, caching, and auth."
+                    ),
+                    "patternProperties": {
+                        "^/": {
+                            "type": "object",
+                            "properties": {
+                                "template": {
+                                    "type": "string",
+                                    "description": (
+                                        "Jinja2 template file name relative to "
+                                        "templates/ directory. Can extend mdb_base.html."
+                                    ),
+                                },
+                                "data": {
+                                    "type": "object",
+                                    "description": (
+                                        "Named data sources. Each key becomes a "
+                                        "template variable. List results also get "
+                                        "a {name}_pagination context object."
+                                    ),
+                                    "additionalProperties": {
+                                        "type": "object",
+                                        "properties": {
+                                            "collection": {
+                                                "type": "string",
+                                                "description": "Source collection name.",
+                                            },
+                                            "id_param": {
+                                                "type": "string",
+                                                "description": (
+                                                    "Path parameter to use as document _id "
+                                                    "(for single-document routes)."
+                                                ),
+                                            },
+                                            "scope": {
+                                                "type": "string",
+                                                "description": (
+                                                    "Named scope to apply (must be defined "
+                                                    "in the collection's scopes)."
+                                                ),
+                                            },
+                                            "filter": {
+                                                "type": "object",
+                                                "description": (
+                                                    "MQL filter. Supports {{params.*}} "
+                                                    "placeholders for path parameters."
+                                                ),
+                                            },
+                                            "sort": {
+                                                "type": "object",
+                                                "description": 'Sort specification (e.g. {"created_at": -1}).',
+                                            },
+                                            "limit": {
+                                                "type": "integer",
+                                                "minimum": 1,
+                                                "maximum": 1000,
+                                                "default": 20,
+                                                "description": "Documents per page (default: 20).",
+                                            },
+                                            "populate": {
+                                                "type": "array",
+                                                "items": {"type": "string"},
+                                                "description": (
+                                                    "Relations to populate via $lookup "
+                                                    "(must be defined in collection's relations)."
+                                                ),
+                                            },
+                                            "computed": {
+                                                "type": "array",
+                                                "items": {"type": "string"},
+                                                "description": (
+                                                    "Computed fields to include "
+                                                    "(must be defined in collection's computed)."
+                                                ),
+                                            },
+                                        },
+                                        "required": ["collection"],
+                                    },
+                                },
+                                "seo": {
+                                    "type": "object",
+                                    "properties": {
+                                        "title": {
+                                            "type": "string",
+                                            "description": (
+                                                "Page title. Supports {{var.field}} " "placeholders from data context."
+                                            ),
+                                        },
+                                        "description": {
+                                            "type": "string",
+                                            "description": "Meta description. Supports placeholders.",
+                                        },
+                                        "og_image": {
+                                            "type": "string",
+                                            "description": "Open Graph image URL. Supports placeholders.",
+                                        },
+                                        "og_type": {
+                                            "type": "string",
+                                            "default": "website",
+                                            "description": "Open Graph type (default: website).",
+                                        },
+                                        "json_ld": {
+                                            "type": "object",
+                                            "description": (
+                                                "JSON-LD structured data template. "
+                                                "All string values support {{var.field}} "
+                                                "placeholders. Auto-serialized and injected "
+                                                "as seo.json_ld in the template context."
+                                            ),
+                                        },
+                                    },
+                                    "additionalProperties": False,
+                                },
+                                "auth": {
+                                    "type": "boolean",
+                                    "default": False,
+                                    "description": "Require authentication for this SSR route.",
+                                },
+                                "cache": {
+                                    "type": "object",
+                                    "properties": {
+                                        "ttl": {
+                                            "type": "string",
+                                            "pattern": "^[0-9]+(s|m|h|d)$",
+                                            "description": "Cache TTL (e.g. '5m', '1h').",
+                                        },
+                                        "stale_while_revalidate": {
+                                            "type": "string",
+                                            "pattern": "^[0-9]+(s|m|h|d)$",
+                                            "description": "Stale-while-revalidate duration.",
+                                        },
+                                    },
+                                    "additionalProperties": False,
+                                    "description": "Cache-Control headers for this SSR route.",
+                                },
+                            },
+                            "required": ["template"],
+                            "additionalProperties": False,
+                        },
+                    },
+                    "additionalProperties": False,
+                },
+            },
+            "additionalProperties": False,
+            "description": (
+                "Server-side rendering configuration. When enabled with a "
+                "templates/ directory, routes are rendered server-side with "
+                "data from MongoDB — including relations ($lookup), computed "
+                "fields, pagination, policy enforcement, caching, JSON-LD, "
+                "auto-sitemap, and custom error pages."
+            ),
+        },
+        "jobs": {
+            "type": "object",
+            "description": (
+                "Declarative scheduled jobs. Each key is a job name, "
+                "each value defines the schedule, action, and target."
+            ),
+            "patternProperties": {
+                "^[a-zA-Z0-9_-]+$": {
+                    "type": "object",
+                    "properties": {
+                        "schedule": {
+                            "type": "string",
+                            "description": (
+                                "Cron expression, shortcut (@hourly, @daily, @weekly), "
+                                "or interval string (30m, 6h, 1d)."
+                            ),
+                        },
+                        "action": {
+                            "type": "string",
+                            "enum": ["update", "delete"],
+                            "description": "Job action type (default: update)",
+                        },
+                        "collection": {
+                            "type": "string",
+                            "description": "Target collection for the job",
+                        },
+                        "filter": {
+                            "type": "object",
+                            "description": (
+                                "MongoDB filter. Supports $$NOW and " "$$NOW_MINUS_<N><D|H|M> time variables."
+                            ),
+                        },
+                        "update": {
+                            "type": "object",
+                            "description": "MongoDB update document (for update action)",
+                        },
+                    },
+                    "required": ["schedule", "collection"],
+                    "additionalProperties": False,
+                },
             },
             "additionalProperties": False,
         },
@@ -3973,12 +4226,29 @@ MANIFEST_SCHEMA_V2 = {
                     ),
                 },
                 "writable_fields": {
-                    "type": "array",
-                    "items": {"type": "string"},
+                    "oneOf": [
+                        {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Flat allowlist applied to all authenticated users.",
+                        },
+                        {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "description": (
+                                "Per-role allowlist. Keys are role names, values are lists of "
+                                "writable fields for that role. Admin bypasses the allowlist."
+                            ),
+                        },
+                    ],
                     "description": (
                         "Allowlist of fields that clients can write. "
-                        "If set, all other fields are silently stripped from request bodies. "
-                        "More secure than immutable_fields (allowlist > denylist)."
+                        "Accepts a flat list (all users) or a role map "
+                        '(e.g. {"editor": ["title", "body"], "reader": ["body"]}). '
+                        "Admin users bypass role-map restrictions."
                     ),
                 },
                 "max_body_bytes": {
@@ -3992,6 +4262,16 @@ MANIFEST_SCHEMA_V2 = {
                 "hooks": {
                     "type": "object",
                     "properties": {
+                        "transactional": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": (
+                                "Wrap the primary write and all hook actions in a "
+                                "MongoDB multi-document transaction. Requires a "
+                                "replica set. If any hook fails, the entire "
+                                "operation rolls back."
+                            ),
+                        },
                         "after_create": {
                             "type": "array",
                             "items": {"$ref": "#/definitions/hookAction"},
@@ -4012,7 +4292,9 @@ MANIFEST_SCHEMA_V2 = {
                     "description": (
                         "Declarative lifecycle hooks. Fire-and-forget side effects "
                         "that run after CRUD operations. Supports {{doc.*}}, "
-                        "{{user.*}}, and $$NOW template placeholders."
+                        "{{user.*}}, {{prev.*}}, and $$NOW template placeholders. "
+                        "Set transactional: true to wrap writes + hooks in a "
+                        "MongoDB multi-document transaction (requires replica set)."
                     ),
                 },
                 "relations": {
@@ -4073,6 +4355,73 @@ MANIFEST_SCHEMA_V2 = {
                         "Activated via ?computed=name query parameter."
                     ),
                 },
+                "cache": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "object",
+                        "properties": {
+                            "ttl": {
+                                "type": "string",
+                                "pattern": "^[0-9]+(s|m|h|d)$",
+                                "description": "Cache TTL (e.g. '5m', '30s', '1h')",
+                            },
+                            "stale_while_revalidate": {
+                                "type": "string",
+                                "pattern": "^[0-9]+(s|m|h|d)$",
+                                "description": "Stale-while-revalidate duration",
+                            },
+                        },
+                        "additionalProperties": False,
+                    },
+                    "description": (
+                        "Cache directives per scope or 'default'. "
+                        "Keys: 'default', 'scope:<name>'. "
+                        "Values: {ttl, stale_while_revalidate}."
+                    ),
+                },
+                "cascade": {
+                    "type": "object",
+                    "properties": {
+                        "on_delete": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "collection": {"type": "string"},
+                                    "match_field": {"type": "string"},
+                                    "action": {
+                                        "type": "string",
+                                        "enum": ["delete", "soft_delete"],
+                                        "default": "delete",
+                                    },
+                                },
+                                "required": ["collection", "match_field"],
+                                "additionalProperties": False,
+                            },
+                            "description": "Cascade rules to execute on hard delete.",
+                        },
+                        "on_soft_delete": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "collection": {"type": "string"},
+                                    "match_field": {"type": "string"},
+                                    "action": {
+                                        "type": "string",
+                                        "enum": ["delete", "soft_delete"],
+                                        "default": "soft_delete",
+                                    },
+                                },
+                                "required": ["collection", "match_field"],
+                                "additionalProperties": False,
+                            },
+                            "description": "Cascade rules to execute on soft delete.",
+                        },
+                    },
+                    "additionalProperties": False,
+                    "description": "Declarative cascade behavior on delete.",
+                },
                 "ttl": {
                     "type": "object",
                     "properties": {
@@ -4105,12 +4454,12 @@ MANIFEST_SCHEMA_V2 = {
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["insert", "update"],
+                    "enum": ["insert", "update", "delete", "http"],
                     "description": "Hook action type",
                 },
                 "collection": {
                     "type": "string",
-                    "description": "Target collection for the side effect",
+                    "description": "Target collection for the side effect (not required for http)",
                 },
                 "document": {
                     "type": "object",
@@ -4120,14 +4469,70 @@ MANIFEST_SCHEMA_V2 = {
                 },
                 "filter": {
                     "type": "object",
-                    "description": "Filter for update action",
+                    "description": "Filter for update/delete actions",
                 },
                 "update": {
                     "type": "object",
-                    "description": "Fields to $set for update action",
+                    "description": (
+                        "Update specification. Supports MongoDB update operators "
+                        "($set, $inc, $push, $pull, $addToSet, $unset, $min, $max, etc.). "
+                        "If no operator keys are present, the value is wrapped in $set."
+                    ),
+                },
+                "if": {
+                    "type": "object",
+                    "description": (
+                        "Conditional expression (MQL match). Hook fires only when "
+                        "the condition matches. Supports doc.* and prev.* field paths "
+                        "and operators: $ne, $in, $nin, $exists, $gt, $lt, $gte, $lte."
+                    ),
+                },
+                "url": {
+                    "type": "string",
+                    "description": "URL for http action. Supports {{doc.*}}, {{user.*}} placeholders.",
+                },
+                "method": {
+                    "type": "string",
+                    "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"],
+                    "description": "HTTP method for http action (default: POST)",
+                },
+                "body": {
+                    "type": "object",
+                    "description": "JSON body for http action. Supports template placeholders.",
+                },
+                "headers": {
+                    "type": "object",
+                    "description": "HTTP headers for http action. Supports template placeholders.",
+                },
+                "timeout": {
+                    "type": "number",
+                    "minimum": 1,
+                    "maximum": 60,
+                    "description": "Timeout in seconds for http action (default: 10)",
+                },
+                "background": {
+                    "type": "boolean",
+                    "description": "Run this hook in the background with retry (default: false)",
+                },
+                "retry": {
+                    "type": "object",
+                    "properties": {
+                        "attempts": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 10,
+                            "description": "Number of retry attempts (default: 3)",
+                        },
+                        "backoff": {
+                            "type": "string",
+                            "enum": ["exponential", "linear", "fixed"],
+                            "description": "Backoff strategy (default: exponential)",
+                        },
+                    },
+                    "additionalProperties": False,
                 },
             },
-            "required": ["action", "collection"],
+            "required": ["action"],
             "additionalProperties": False,
         },
         "collectionSettings": {

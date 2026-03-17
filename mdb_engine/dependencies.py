@@ -319,6 +319,38 @@ def require_user() -> Callable:
     return _require_user
 
 
+def get_effective_roles(
+    user: dict[str, Any],
+    hierarchy: dict[str, list[str]] | None = None,
+) -> set[str]:
+    """Compute the full set of roles a user holds, expanding hierarchy.
+
+    A user's roles come from ``user["role"]`` (string) and
+    ``user["roles"]`` (list).  If a *hierarchy* mapping is provided,
+    each role is expanded transitively (e.g. admin -> [editor, reader]).
+    """
+    roles: set[str] = set()
+    single = user.get("role")
+    if single:
+        roles.add(str(single))
+    roles |= set(user.get("roles", []))
+
+    if not hierarchy:
+        return roles
+
+    expanded: set[str] = set()
+    queue = list(roles)
+    while queue:
+        r = queue.pop()
+        if r in expanded:
+            continue
+        expanded.add(r)
+        for child in hierarchy.get(r, []):
+            if child not in expanded:
+                queue.append(child)
+    return expanded
+
+
 def require_role(*roles: str) -> Callable:
     """Dependency that requires specific roles."""
 
@@ -326,7 +358,10 @@ def require_role(*roles: str) -> Callable:
         user = await get_current_user(request)
         if not user:
             raise HTTPException(401, "Authentication required")
-        user_roles = set(await get_user_roles(request))
+        hierarchy = getattr(request.app.state, "role_hierarchy", None)
+        user_roles = get_effective_roles(user, hierarchy)
+        state_roles = set(await get_user_roles(request))
+        user_roles |= state_roles
         if not any(role in user_roles for role in roles):
             raise HTTPException(403, f"Required role: {' or '.join(roles)}")
         return user
@@ -526,8 +561,10 @@ class RequestContext:
     def require_role(self, *roles: str) -> dict[str, Any]:
         """Require specific roles, raising 403 if not authorized."""
         user = self.require_user()
-        user_roles = set(self.user_roles)
-        if not any(role in user_roles for role in roles):
+        hierarchy = getattr(self.request.app.state, "role_hierarchy", None)
+        effective = get_effective_roles(user, hierarchy)
+        effective |= set(self.user_roles)
+        if not any(role in effective for role in roles):
             roles_str = " or ".join(roles)
             raise HTTPException(403, f"Required role: {roles_str}")
         return user

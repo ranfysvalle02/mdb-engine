@@ -669,6 +669,107 @@ class TestWritableFields:
         doc = db["items"]._docs[0]
         assert doc.get("extra") == "allowed"
 
+    def test_role_map_editor_gets_editor_fields(self):
+        """Editor role should get editor-specific writable fields."""
+        user = {"_id": "u1", "email": "editor@b.com", "role": "editor"}
+        client, db = _build_crud_app(
+            {
+                "writable_fields": {
+                    "editor": ["title", "body", "tags", "status"],
+                    "reader": ["body"],
+                },
+            },
+            app_auth_enabled=True,
+            user=user,
+        )
+        resp = client.post(
+            "/api/items",
+            json={"title": "ok", "body": "text", "tags": ["a"], "status": "draft", "secret": "nope"},
+        )
+        assert resp.status_code == 201
+        doc = db["items"]._docs[0]
+        assert doc.get("title") == "ok"
+        assert doc.get("body") == "text"
+        assert "secret" not in doc
+
+    def test_role_map_reader_gets_reader_fields(self):
+        """Reader role should only get reader-specific writable fields."""
+        user = {"_id": "u1", "email": "reader@b.com", "role": "reader"}
+        client, db = _build_crud_app(
+            {
+                "writable_fields": {
+                    "editor": ["title", "body", "tags"],
+                    "reader": ["body"],
+                },
+            },
+            app_auth_enabled=True,
+            user=user,
+        )
+        resp = client.post(
+            "/api/items",
+            json={"title": "blocked", "body": "ok"},
+        )
+        assert resp.status_code == 201
+        doc = db["items"]._docs[0]
+        assert doc.get("body") == "ok"
+        assert "title" not in doc
+
+    def test_role_map_admin_bypasses_allowlist(self):
+        """Admin role should bypass the per-role allowlist."""
+        user = {"_id": "u1", "email": "admin@b.com", "role": "admin"}
+        client, db = _build_crud_app(
+            {
+                "writable_fields": {
+                    "editor": ["title", "body"],
+                    "reader": ["body"],
+                },
+            },
+            app_auth_enabled=True,
+            user=user,
+        )
+        resp = client.post(
+            "/api/items",
+            json={"title": "ok", "body": "ok", "anything": "goes"},
+        )
+        assert resp.status_code == 201
+        doc = db["items"]._docs[0]
+        assert doc.get("anything") == "goes"
+
+    def test_role_map_backward_compat_list(self):
+        """When writable_fields is a flat list, old behavior should be preserved."""
+        user = {"_id": "u1", "email": "user@b.com", "role": "editor"}
+        client, db = _build_crud_app(
+            {"writable_fields": ["title", "body"]},
+            app_auth_enabled=True,
+            user=user,
+        )
+        resp = client.post(
+            "/api/items",
+            json={"title": "ok", "body": "ok", "secret": "nope"},
+        )
+        assert resp.status_code == 201
+        doc = db["items"]._docs[0]
+        assert doc.get("title") == "ok"
+        assert "secret" not in doc
+
+    def test_role_map_unknown_role_gets_empty_fields(self):
+        """A role not in the map should have all fields stripped."""
+        user = {"_id": "u1", "email": "nobody@b.com", "role": "viewer"}
+        client, db = _build_crud_app(
+            {
+                "writable_fields": {
+                    "editor": ["title", "body"],
+                },
+            },
+            app_auth_enabled=True,
+            user=user,
+        )
+        resp = client.post("/api/items", json={"title": "nope", "body": "nope"})
+        assert resp.status_code == 201
+        doc = db["items"]._docs[0]
+        assert "title" not in doc
+        assert "body" not in doc
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # #5 Bulk insert fires hooks

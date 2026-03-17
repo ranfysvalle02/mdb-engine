@@ -68,12 +68,13 @@ from typing import Any
 
 from bson import ObjectId
 from bson.errors import InvalidId
-from fastapi import APIRouter, Depends, HTTPException, Request
-from pymongo.errors import DuplicateKeyError
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from pymongo.errors import DuplicateKeyError, PyMongoError
 
 from ..dependencies import get_scoped_db, require_role, require_user
 from ._hooks import HookExecutor
 from ._serialization import serialize_doc
+from ._validators import validate_schema_extensions
 from .query_parser import parse_query_params
 from .template_resolver import merge_filters, resolve_template
 
@@ -212,11 +213,13 @@ class _CollectionCtx:
     default_projection: dict[str, int] | None = None
     owner_field: str | None = None
     immutable_fields: list[str] = field(default_factory=list)
-    writable_fields: list[str] | None = None
+    writable_fields: list[str] | dict[str, list[str]] | None = None
     hooks_config: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     relations_config: dict[str, dict[str, Any]] = field(default_factory=dict)
     computed_config: dict[str, Any] = field(default_factory=dict)
     has_unique_fields: bool = False
+    cascade_config: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    cache_config: dict[str, Any] = field(default_factory=dict)
 
     # ── filter helpers ────────────────────────────────────────────────
 
@@ -310,19 +313,37 @@ class _CollectionCtx:
         for key, value in resolved.items():
             body.setdefault(key, value)
 
-    def sanitize_body(self, body: dict[str, Any]) -> None:
+    def sanitize_body(self, body: dict[str, Any], user: dict[str, Any] | None = None) -> None:
         """Strip disallowed fields from a create/update body.
 
         Enforces two layers:
         1. ``writable_fields`` allowlist — if set, only these fields survive.
+           Accepts a flat list (all authenticated users) or a role map
+           (``{"editor": ["title", "body"], "reader": ["body"]}``).
+           Admin users bypass the allowlist when a role map is used.
         2. ``immutable_fields`` denylist — always stripped (includes
            ``_PROTECTED_FIELDS`` when app auth is enabled).
         """
         if self.writable_fields is not None:
-            allowed = set(self.writable_fields)
-            for key in list(body.keys()):
-                if key not in allowed:
-                    body.pop(key)
+            if isinstance(self.writable_fields, dict):
+                if user and _user_is_admin(user):
+                    allowed = None
+                else:
+                    role = user.get("role", "") if user else ""
+                    roles = set(user.get("roles", [])) if user else set()
+                    if role:
+                        roles.add(role)
+                    allowed: set[str] | None = set()
+                    for r in roles:
+                        allowed |= set(self.writable_fields.get(r, []))
+            else:
+                allowed = set(self.writable_fields)
+
+            if allowed is not None:
+                for key in list(body.keys()):
+                    if key not in allowed:
+                        body.pop(key)
+
         for f in self.immutable_fields:
             body.pop(f, None)
 
@@ -330,6 +351,41 @@ class _CollectionCtx:
         if parsed_projection is not None:
             return parsed_projection
         return self.default_projection
+
+    def cache_control_header(self, scope: str | None = None) -> str | None:
+        """Compute the Cache-Control header value for a read request."""
+        if not self.cache_config:
+            return None
+        scope_key = f"scope:{scope}" if scope else "default"
+        directive = self.cache_config.get(scope_key) or self.cache_config.get("default")
+        if not directive:
+            return None
+        ttl = directive.get("ttl", "0")
+        if ttl == "0":
+            return None
+        seconds = _parse_cache_ttl(ttl)
+        if seconds <= 0:
+            return None
+        parts = [f"max-age={seconds}"]
+        swr = directive.get("stale_while_revalidate")
+        if swr:
+            swr_secs = _parse_cache_ttl(swr)
+            if swr_secs > 0:
+                parts.append(f"stale-while-revalidate={swr_secs}")
+        return ", ".join(parts)
+
+
+def _parse_cache_ttl(value: str) -> int:
+    """Parse a cache TTL string like '5m', '30s', '1h' into seconds."""
+    if not value:
+        return 0
+    unit = value[-1].lower()
+    try:
+        num = int(value[:-1])
+    except (ValueError, IndexError):
+        return 0
+    multipliers = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+    return num * multipliers.get(unit, 1)
 
 
 # ── Route registration helpers ───────────────────────────────────────────
@@ -339,13 +395,18 @@ def _register_read_routes(router: APIRouter, ctx: _CollectionCtx) -> None:
     """Register GET endpoints (list, count, trash, get-by-id)."""
 
     @router.get("", summary=f"List {ctx.name}")
-    async def list_documents(request: Request, db=Depends(get_scoped_db)):
+    async def list_documents(request: Request, response: Response, db=Depends(get_scoped_db)):
         params = dict(request.query_params)
         parsed = parse_query_params(params)
         user = _get_user_from_request(request)
         collection = db[ctx.name]
 
         effective_filter = ctx.read_filter(parsed.filter, user, parsed.scope)
+
+        scope_name = parsed.scope[0] if parsed.scope else None
+        cc = ctx.cache_control_header(scope_name)
+        if cc:
+            response.headers["Cache-Control"] = cc
 
         use_agg = bool(parsed.populate or parsed.computed)
 
@@ -486,7 +547,7 @@ def _register_bulk_insert_route(
         for doc in body:
             if not isinstance(doc, dict):
                 raise HTTPException(status_code=400, detail="Each item must be a JSON object")
-            ctx.sanitize_body(doc)
+            ctx.sanitize_body(doc, user)
             _validate_document(doc, ctx.schema)
             doc.pop("_id", None)
             ctx.apply_defaults(doc, user)
@@ -502,6 +563,33 @@ def _register_bulk_insert_route(
                 doc_out = {**doc, "_id": str(inserted_id)}
                 await hook_exec.run("after_create", doc_out, user, db)
         return {"data": {"inserted": len(result.inserted_ids)}}
+
+
+async def _execute_cascade(
+    cascade_rules: list[dict[str, Any]],
+    doc: dict[str, Any],
+    db: Any,
+    *,
+    soft: bool = False,
+) -> None:
+    """Execute cascade rules after a delete/soft-delete."""
+    for rule in cascade_rules:
+        try:
+            target = rule.get("collection", "")
+            match_field = rule.get("match_field", "")
+            action = rule.get("action", "delete")
+            if not target or not match_field:
+                continue
+            doc_id = str(doc.get("_id", ""))
+            target_col = db[target]
+            filt = {match_field: doc_id}
+            if action == "soft_delete" or soft:
+                now = datetime.now(timezone.utc)
+                await target_col.update_many(filt, {"$set": {"deleted_at": now}})
+            else:
+                await target_col.delete_many(filt)
+        except (PyMongoError, OSError, RuntimeError):
+            logger.exception("Cascade rule failed (target=%s)", rule.get("collection", "?"))
 
 
 def _register_delete_routes(
@@ -525,6 +613,10 @@ def _register_delete_routes(
                 raise HTTPException(status_code=404, detail="Document not found")
             now = datetime.now(timezone.utc)
             await collection.update_one({"_id": oid}, {"$set": {"deleted_at": now}})
+            if ctx.cascade_config.get("on_soft_delete"):
+                await _execute_cascade(ctx.cascade_config["on_soft_delete"], doc, db, soft=True)
+            elif ctx.cascade_config.get("on_delete"):
+                await _execute_cascade(ctx.cascade_config["on_delete"], doc, db, soft=True)
             if hook_exec:
                 await hook_exec.run("after_delete", _serialize_doc(doc), user, db)
             return {"data": {"_id": document_id, "deleted": True}}
@@ -536,6 +628,8 @@ def _register_delete_routes(
         result = await collection.delete_one({"_id": oid})
         if result.deleted_count == 0:
             raise HTTPException(status_code=404, detail="Document not found")
+        if ctx.cascade_config.get("on_delete"):
+            await _execute_cascade(ctx.cascade_config["on_delete"], doc, db)
         if hook_exec:
             await hook_exec.run("after_delete", _serialize_doc(doc), user, db)
         return {"data": {"_id": document_id, "deleted": True}}
@@ -574,10 +668,11 @@ def _register_write_routes(
     async def create_document(request: Request, db=Depends(get_scoped_db)):
         await _enforce_body_limit(request, ctx.max_body_bytes)
         body = await request.json()
-        ctx.sanitize_body(body)
-        _validate_document(body, ctx.schema)
-        body.pop("_id", None)
         user = _get_user_from_request(request)
+        ctx.sanitize_body(body, user)
+        _validate_document(body, ctx.schema)
+        await validate_schema_extensions(body, ctx.schema, db)
+        body.pop("_id", None)
         ctx.apply_defaults(body, user)
         if ctx.timestamps:
             _stamp_create(body)
@@ -599,12 +694,13 @@ def _register_write_routes(
         await _enforce_body_limit(request, ctx.max_body_bytes)
         oid = _to_object_id(document_id)
         body = await request.json()
-        ctx.sanitize_body(body)
+        user = _get_user_from_request(request)
+        ctx.sanitize_body(body, user)
         _validate_document(body, ctx.schema)
+        await validate_schema_extensions(body, ctx.schema, db)
         body.pop("_id", None)
         if ctx.timestamps:
             _stamp_update(body)
-        user = _get_user_from_request(request)
         collection = db[ctx.name]
         q = ctx.write_filter(oid, "write", user)
         doc = await collection.find_one(q)
@@ -616,7 +712,8 @@ def _register_write_routes(
             _handle_duplicate_key(exc, ctx.name)
         doc_out = {**body, "_id": document_id}
         if _hook_exec:
-            await _hook_exec.run("after_update", doc_out, user, db)
+            prev_doc = _serialize_doc(doc)
+            await _hook_exec.run("after_update", doc_out, user, db, prev=prev_doc)
         return {"data": {"_id": document_id, "modified": result.modified_count}}
 
     @router.patch("/{document_id}", summary=f"Update {ctx.name}", dependencies=_m_deps)
@@ -624,12 +721,13 @@ def _register_write_routes(
         await _enforce_body_limit(request, ctx.max_body_bytes)
         oid = _to_object_id(document_id)
         body = await request.json()
-        ctx.sanitize_body(body)
+        user = _get_user_from_request(request)
+        ctx.sanitize_body(body, user)
         _validate_document(body, ctx.schema, partial=True)
+        await validate_schema_extensions(body, ctx.schema, db, partial=True)
         body.pop("_id", None)
         if ctx.timestamps:
             _stamp_update(body)
-        user = _get_user_from_request(request)
         collection = db[ctx.name]
         q = ctx.write_filter(oid, "write", user)
         doc = await collection.find_one(q)
@@ -641,7 +739,8 @@ def _register_write_routes(
             _handle_duplicate_key(exc, ctx.name)
         doc_out = {**body, "_id": document_id}
         if _hook_exec:
-            await _hook_exec.run("after_update", doc_out, user, db)
+            prev_doc = _serialize_doc(doc)
+            await _hook_exec.run("after_update", doc_out, user, db, prev=prev_doc)
         return {"data": {"_id": document_id, "modified": result.modified_count}}
 
     _register_delete_routes(router, ctx, _m_deps, _hook_exec)
@@ -863,6 +962,8 @@ def create_auto_crud_router(
         relations_config=config.get("relations", {}),
         computed_config=config.get("computed", {}),
         has_unique_fields=has_unique,
+        cascade_config=config.get("cascade", {}),
+        cache_config=config.get("cache", {}),
     )
 
     auth_config = config.get("auth", {})

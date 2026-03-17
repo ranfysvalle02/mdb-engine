@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ seo.title }}</title>
+  <link rel="stylesheet" href="/public/style.css">
+</head>
+<body>
+  <nav class="nav">
+    <div class="nav-inner">
+      <a href="/" class="nav-brand">
+        <div class="nav-brand-icon">KB</div>
+        Knowledge Base
+      </a>
+      <div class="nav-right">
+        <a href="/dashboard" class="btn btn-ghost btn-sm">Dashboard</a>
+        <div class="avatar" title="{{ user.email }}">{{ user.email[0] | upper }}</div>
+      </div>
+    </div>
+  </nav>
+
+  <main class="container">
+    <div class="page-header">
+      <h1>Activity</h1>
+      <div class="page-tabs">
+        <a href="/dashboard" class="page-tab">Overview</a>
+        <a href="/activity" class="page-tab active">Activity</a>
+      </div>
+    </div>
+
+    {% if notifications %}
+    <section class="section">
+      <div class="section-header">
+        <h2>Notifications</h2>
+        <span class="section-count">{{ notifications | length }} unread</span>
+      </div>
+      {% for n in notifications %}
+      <div class="notification">
+        <div class="notification-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+        </div>
+        <div class="notification-body">
+          <div class="notification-title">{{ n.message }}</div>
+          <div class="notification-sub">Published by {{ n.actor }} &middot; {{ n.timestamp }}</div>
+        </div>
+      </div>
+      {% endfor %}
+    </section>
+    {% endif %}
+
+    <section class="section">
+      <div class="section-header">
+        <h2>Timeline</h2>
+        <span class="section-count">{{ events | length }} events</span>
+      </div>
+
+      {% if events %}
+      <div class="timeline">
+        {% for event in events %}
+        <div class="timeline-item">
+          {% if 'created' in event.event %}
+            <div class="timeline-dot timeline-dot-created"></div>
+          {% elif 'published' in event.event %}
+            <div class="timeline-dot timeline-dot-published"></div>
+          {% elif 'updated' in event.event %}
+            <div class="timeline-dot timeline-dot-updated"></div>
+          {% elif 'deleted' in event.event %}
+            <div class="timeline-dot timeline-dot-deleted"></div>
+          {% else %}
+            <div class="timeline-dot timeline-dot-default"></div>
+          {% endif %}
+          <div class="timeline-content">
+            <span class="timeline-event event-{{ event.event }}">{{ event.event | replace('_', ' ') }}</span>
+            {% if event.title %}
+              <span class="timeline-title">{{ event.title }}</span>
+            {% endif %}
+            <span class="timeline-actor">{{ event.actor }}</span>
+            <span class="timeline-time">{{ event.timestamp }}</span>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="empty">
+        <div class="empty-icon">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        </div>
+        <h3>No activity yet</h3>
+        <p>Create or publish an article to see events appear here.</p>
+      </div>
+      {% endif %}
+
+      {% if events_pagination and events_pagination.total_pages > 1 %}
+      <nav class="pagination">
+        {% if events_pagination.page > 1 %}
+          <a href="/activity?page={{ events_pagination.page - 1 }}" class="btn btn-ghost btn-sm">&larr; Newer</a>
+        {% endif %}
+        <span class="page-info">{{ events_pagination.page }} / {{ events_pagination.total_pages }}</span>
+        {% if events_pagination.page < events_pagination.total_pages %}
+          <a href="/activity?page={{ events_pagination.page + 1 }}" class="btn btn-ghost btn-sm">Older &rarr;</a>
+        {% endif %}
+      </nav>
+      {% endif %}
+    </section>
+  </main>
+
+  <footer class="footer">
+    <p>Built with <a href="https://github.com/NEWERA/mdb-engine">mdb-engine</a></p>
+  </footer>
+</body>
+</html>

@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ seo.title }}</title>
+  <link rel="stylesheet" href="/public/style.css">
+</head>
+<body>
+  <nav class="nav">
+    <div class="nav-inner">
+      <a href="/" class="nav-brand">
+        <div class="nav-brand-icon">KB</div>
+        Knowledge Base
+      </a>
+      <div class="nav-right">
+        <a href="/activity" class="btn btn-ghost btn-sm">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+          Activity
+        </a>
+        <div class="avatar" title="{{ user.email }}">{{ user.email[0] | upper }}</div>
+        <button onclick="logout()" class="btn btn-ghost btn-sm">Sign out</button>
+      </div>
+    </div>
+  </nav>
+
+  <main class="container">
+    <div class="page-header">
+      <h1>Dashboard</h1>
+      <div class="page-tabs">
+        <a href="/dashboard" class="page-tab active">Overview</a>
+        <a href="/activity" class="page-tab">Activity</a>
+      </div>
+    </div>
+
+    <section class="section">
+      <div class="section-header">
+        <h2>My Articles</h2>
+        <span class="section-count">{{ my_articles | length }}</span>
+      </div>
+      {% for article in my_articles %}
+      <div class="list-item">
+        <div class="list-item-content">
+          <div class="list-item-title">
+            <a href="/articles/{{ article._id }}">{{ article.title }}</a>
+          </div>
+          <div class="list-item-sub">Updated {{ article.updated_at }}</div>
+        </div>
+        <div class="list-item-right">
+          <span class="status status-{{ article.status }}">{{ article.status }}</span>
+        </div>
+      </div>
+      {% else %}
+      <p class="empty-sm">You haven't written any articles yet.</p>
+      {% endfor %}
+    </section>
+
+    <section class="section">
+      <div class="section-header">
+        <h2>Bookmarks</h2>
+        <span class="section-count">{{ my_bookmarks | length }}</span>
+      </div>
+      {% for bookmark in my_bookmarks %}
+      <div class="list-item">
+        <div class="list-item-content">
+          <div class="list-item-title">
+            {% if bookmark.article %}
+              <a href="/articles/{{ bookmark.article._id }}">{{ bookmark.article.title }}</a>
+            {% else %}
+              <span style="color:var(--text-muted)">Removed article</span>
+            {% endif %}
+          </div>
+        </div>
+        <div class="list-item-right">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="var(--accent)" stroke="var(--accent)" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+        </div>
+      </div>
+      {% else %}
+      <p class="empty-sm">No bookmarks yet. Browse articles and save your favorites.</p>
+      {% endfor %}
+    </section>
+  </main>
+
+  <footer class="footer">
+    <p>Built with <a href="https://github.com/NEWERA/mdb-engine">mdb-engine</a></p>
+  </footer>
+
+  <script>
+    async function logout() {
+      await fetch('/logout', { method: 'POST' });
+      window.location.href = '/';
+    }
+  </script>
+</body>
+</html>

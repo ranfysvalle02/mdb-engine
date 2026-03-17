@@ -1,0 +1,396 @@
+{
+  "schema_version": "2.0",
+  "slug": "knowledge_base",
+  "name": "Zero-Code Knowledge Base",
+  "auth": {
+    "mode": "app",
+    "users": {
+      "enabled": true,
+      "strategy": "app_users",
+      "allow_registration": true,
+      "registration_role": "reader",
+      "role_hierarchy": {
+        "admin": ["editor", "moderator", "reader"],
+        "editor": ["reader"],
+        "moderator": ["reader"]
+      },
+      "demo_users": [
+        { "email": "{{env.ADMIN_EMAIL}}", "password": "{{env.ADMIN_PASSWORD}}", "role": "admin" },
+        { "email": "editor@example.com", "password": "editor123", "role": "editor" },
+        { "email": "reader@example.com", "password": "reader123", "role": "reader" }
+      ]
+    }
+  },
+  "collections": {
+    "articles": {
+      "auto_crud": true,
+      "soft_delete": true,
+      "auth": { "public_read": true, "write_roles": ["editor"] },
+      "owner_field": "author_id",
+      "immutable_fields": ["author_id"],
+      "writable_fields": {
+        "editor": ["title", "slug", "body", "excerpt", "category_id", "tags", "status", "cover_image"],
+        "moderator": ["status", "tags"]
+      },
+      "schema": {
+        "type": "object",
+        "properties": {
+          "title":       { "type": "string" },
+          "slug":        { "type": "string", "x-unique": true },
+          "body":        { "type": "string" },
+          "excerpt":     { "type": "string" },
+          "author_name": { "type": "string" },
+          "category_id": { "type": "string", "x-references": { "collection": "categories", "field": "_id" } },
+          "tags":        { "type": "array", "items": { "type": "string" }, "x-values-from": { "collection": "tags", "field": "name" } },
+          "status":      { "type": "string", "enum": ["draft", "review", "published", "archived"] },
+          "cover_image": { "type": "string" },
+          "view_count":  { "type": "integer" }
+        },
+        "required": ["title", "body"]
+      },
+      "defaults": {
+        "status": "draft",
+        "tags": [],
+        "view_count": 0,
+        "author_name": "{{user.email}}"
+      },
+      "scopes": {
+        "published": { "status": "published" },
+        "drafts":    { "status": "draft" },
+        "review":    {
+          "filter": { "status": "review" },
+          "auth": { "roles": ["editor", "moderator"] }
+        },
+        "archived":  { "status": "archived" }
+      },
+      "pipelines": {
+        "by_category": [
+          { "$group": { "_id": "$category_id", "count": { "$sum": 1 } } },
+          { "$sort": { "count": -1 } }
+        ],
+        "popular": [
+          { "$match": { "status": "published" } },
+          { "$sort": { "view_count": -1 } },
+          { "$limit": 10 }
+        ]
+      },
+      "relations": {
+        "category": { "from": "categories", "local_field": "category_id", "foreign_field": "_id", "single": true },
+        "author":   { "from": "users", "local_field": "author_id", "foreign_field": "_id", "single": true }
+      },
+      "computed": {
+        "comment_count": {
+          "pipeline": [
+            { "$lookup": {
+              "from": "comments",
+              "let": { "aid": { "$toString": "$_id" } },
+              "pipeline": [ { "$match": { "$expr": { "$and": [
+                { "$eq": ["$article_id", "$$aid"] },
+                { "$eq": ["$approved", true] }
+              ]}}}],
+              "as": "_approved_comments"
+            }},
+            { "$addFields": { "comment_count": { "$size": "$_approved_comments" } } },
+            { "$project": { "_approved_comments": 0 } }
+          ]
+        }
+      },
+      "hooks": {
+        "after_create": [
+          {
+            "action": "insert", "collection": "activity_feed",
+            "document": {
+              "event": "article_created", "entity": "articles",
+              "entity_id": "{{doc._id}}", "actor": "{{user.email}}",
+              "title": "{{doc.title}}", "timestamp": "$$NOW"
+            }
+          }
+        ],
+        "after_update": [
+          {
+            "action": "insert", "collection": "activity_feed",
+            "document": {
+              "event": "article_published", "entity": "articles",
+              "entity_id": "{{doc._id}}", "actor": "{{user.email}}",
+              "title": "{{doc.title}}", "timestamp": "$$NOW"
+            },
+            "if": { "doc.status": "published", "prev.status": { "$ne": "published" } }
+          },
+          {
+            "action": "insert", "collection": "notifications",
+            "document": {
+              "type": "article_published",
+              "message": "{{doc.title}}",
+              "article_id": "{{doc._id}}",
+              "actor": "{{user.email}}",
+              "read": false,
+              "timestamp": "$$NOW"
+            },
+            "if": { "doc.status": "published", "prev.status": { "$ne": "published" } }
+          },
+          {
+            "action": "insert", "collection": "activity_feed",
+            "document": {
+              "event": "article_updated", "entity": "articles",
+              "entity_id": "{{doc._id}}", "actor": "{{user.email}}",
+              "title": "{{doc.title}}", "timestamp": "$$NOW"
+            }
+          }
+        ],
+        "after_delete": [
+          {
+            "action": "insert", "collection": "activity_feed",
+            "document": {
+              "event": "article_deleted", "entity": "articles",
+              "entity_id": "{{doc._id}}", "actor": "{{user.email}}",
+              "timestamp": "$$NOW"
+            }
+          }
+        ]
+      },
+      "cascade": {
+        "on_delete": [
+          { "collection": "comments", "match_field": "article_id", "action": "delete" },
+          { "collection": "bookmarks", "match_field": "article_id", "action": "delete" }
+        ],
+        "on_soft_delete": [
+          { "collection": "comments", "match_field": "article_id", "action": "soft_delete" }
+        ]
+      },
+      "cache": {
+        "scope:published": { "ttl": "5m", "stale_while_revalidate": "30s" },
+        "default": { "ttl": "0s" }
+      }
+    },
+    "comments": {
+      "auto_crud": true,
+      "soft_delete": true,
+      "auth": { "public_read": true, "create_required": true, "write_roles": ["moderator"] },
+      "owner_field": "user_id",
+      "immutable_fields": ["article_id", "user_id"],
+      "schema": {
+        "type": "object",
+        "properties": {
+          "article_id": { "type": "string", "x-references": { "collection": "articles", "field": "_id" } },
+          "body":       { "type": "string" },
+          "user_id":    { "type": "string" },
+          "user_name":  { "type": "string" },
+          "approved":   { "type": "boolean" }
+        },
+        "required": ["article_id", "body"]
+      },
+      "defaults": {
+        "approved": false,
+        "user_name": "{{user.email}}"
+      },
+      "scopes": {
+        "approved": { "approved": true },
+        "pending": {
+          "filter": { "approved": false },
+          "auth": { "roles": ["moderator"] }
+        }
+      },
+      "relations": {
+        "article": { "from": "articles", "local_field": "article_id", "foreign_field": "_id", "single": true }
+      },
+      "hooks": {
+        "after_create": [{
+          "action": "update",
+          "collection": "articles",
+          "filter": { "_id": "{{doc.article_id}}" },
+          "update": { "$inc": { "view_count": 0 } },
+          "if": { "doc.approved": true }
+        }]
+      }
+    },
+    "categories": {
+      "auto_crud": true,
+      "auth": { "public_read": true, "write_roles": ["admin"] },
+      "schema": {
+        "type": "object",
+        "properties": {
+          "name":        { "type": "string", "x-unique": true },
+          "slug":        { "type": "string", "x-unique": true },
+          "description": { "type": "string" },
+          "icon":        { "type": "string" },
+          "sort_order":  { "type": "integer" }
+        },
+        "required": ["name", "slug"]
+      },
+      "defaults": { "sort_order": 0 }
+    },
+    "tags": {
+      "auto_crud": true,
+      "auth": { "public_read": true, "write_roles": ["editor"] },
+      "schema": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "x-unique": true }
+        },
+        "required": ["name"]
+      }
+    },
+    "bookmarks": {
+      "auto_crud": true,
+      "auth": { "required": true },
+      "owner_field": "user_id",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "article_id": { "type": "string", "x-references": { "collection": "articles", "field": "_id" } },
+          "user_id":    { "type": "string" }
+        },
+        "required": ["article_id"]
+      },
+      "relations": {
+        "article": { "from": "articles", "local_field": "article_id", "foreign_field": "_id", "single": true }
+      }
+    },
+    "notifications": {
+      "auto_crud": true,
+      "auth": { "roles": ["editor"] },
+      "schema": {
+        "type": "object",
+        "properties": {
+          "type":       { "type": "string" },
+          "message":    { "type": "string" },
+          "article_id": { "type": "string" },
+          "actor":      { "type": "string" },
+          "read":       { "type": "boolean" }
+        }
+      },
+      "defaults": { "read": false },
+      "scopes": {
+        "unread": { "read": false }
+      },
+      "ttl": { "field": "timestamp", "expire_after": "7d" }
+    },
+    "activity_feed": {
+      "auto_crud": true,
+      "read_only": true,
+      "timestamps": false,
+      "auth": { "roles": ["editor"] },
+      "ttl": { "field": "timestamp", "expire_after": "30d" }
+    }
+  },
+  "ssr": {
+    "enabled": true,
+    "site_name": "Knowledge Base",
+    "site_description": "A zero-code knowledge base built with mdb-engine. Server-rendered, SEO-optimized, and fully declarative.",
+    "base_url": "",
+    "sitemap": true,
+    "routes": {
+      "/": {
+        "template": "index.html",
+        "data": {
+          "articles": {
+            "collection": "articles",
+            "scope": "published",
+            "sort": { "created_at": -1 },
+            "limit": 12,
+            "populate": ["category"],
+            "computed": ["comment_count"]
+          },
+          "categories": {
+            "collection": "categories",
+            "sort": { "sort_order": 1 },
+            "limit": 50
+          }
+        },
+        "seo": {
+          "title": "Knowledge Base",
+          "description": "Browse articles, guides, and documentation."
+        },
+        "cache": { "ttl": "5m", "stale_while_revalidate": "30s" }
+      },
+      "/articles/{id}": {
+        "template": "article.html",
+        "data": {
+          "article": {
+            "collection": "articles",
+            "id_param": "id",
+            "populate": ["category", "author"]
+          },
+          "comments": {
+            "collection": "comments",
+            "filter": { "article_id": "{{params.id}}", "approved": true },
+            "sort": { "created_at": 1 },
+            "limit": 100
+          }
+        },
+        "seo": {
+          "title": "{{article.title}} — Knowledge Base",
+          "description": "{{article.excerpt}}",
+          "og_type": "article",
+          "og_image": "{{article.cover_image}}",
+          "json_ld": {
+            "@context": "https://schema.org",
+            "@type": "Article",
+            "headline": "{{article.title}}",
+            "description": "{{article.excerpt}}",
+            "datePublished": "{{article.created_at}}",
+            "dateModified": "{{article.updated_at}}",
+            "author": { "@type": "Person", "name": "{{article.author_name}}" },
+            "publisher": { "@type": "Organization", "name": "Knowledge Base" },
+            "image": "{{article.cover_image}}"
+          }
+        },
+        "cache": { "ttl": "10m", "stale_while_revalidate": "1m" }
+      },
+      "/dashboard": {
+        "template": "dashboard.html",
+        "auth": true,
+        "data": {
+          "my_articles": {
+            "collection": "articles",
+            "sort": { "updated_at": -1 },
+            "limit": 20
+          },
+          "my_bookmarks": {
+            "collection": "bookmarks",
+            "populate": ["article"],
+            "limit": 20
+          }
+        },
+        "seo": { "title": "Dashboard — Knowledge Base" }
+      },
+      "/activity": {
+        "template": "activity.html",
+        "auth": true,
+        "data": {
+          "events": {
+            "collection": "activity_feed",
+            "sort": { "timestamp": -1 },
+            "limit": 50
+          },
+          "notifications": {
+            "collection": "notifications",
+            "scope": "unread",
+            "sort": { "timestamp": -1 },
+            "limit": 20
+          }
+        },
+        "seo": { "title": "Activity — Knowledge Base" }
+      }
+    }
+  },
+  "jobs": {
+    "archive_stale_drafts": {
+      "schedule": "@daily",
+      "action": "update",
+      "collection": "articles",
+      "filter": { "status": "draft", "updated_at": { "$lt": "$$NOW_MINUS_90D" } },
+      "update": { "$set": { "status": "archived" } }
+    }
+  },
+  "managed_indexes": {
+    "articles": [
+      { "type": "regular", "keys": { "status": 1, "created_at": -1 }, "name": "idx_status_created" },
+      { "type": "regular", "keys": { "category_id": 1 }, "name": "idx_category" },
+      { "type": "regular", "keys": { "tags": 1 }, "name": "idx_tags" }
+    ],
+    "comments": [
+      { "type": "regular", "keys": { "article_id": 1, "approved": 1 }, "name": "idx_article_approved" }
+    ]
+  }
+}

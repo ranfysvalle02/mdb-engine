@@ -1,14 +1,16 @@
 """
 Template resolver for MQL-as-DSL zero-code collections.
 
-Resolves ``{{user.*}}``, ``{{doc.*}}``, and ``{{env.*}}`` placeholders as
-well as ``$$NOW`` in MQL filter objects and aggregation pipelines embedded
-in the manifest.  Provides a generic filter-merge utility that generalises
-the ``$and`` pattern already used by soft-delete scoping.
+Resolves ``{{user.*}}``, ``{{doc.*}}``, ``{{prev.*}}``, and ``{{env.*}}``
+placeholders as well as ``$$NOW`` in MQL filter objects and aggregation
+pipelines embedded in the manifest.  Provides a generic filter-merge
+utility that generalises the ``$and`` pattern already used by soft-delete
+scoping.
 
 Security constraints:
     * ``{{user.<path>}}`` — max depth 3, validated against a strict regex.
     * ``{{doc.<path>}}``  — max depth 3, same traversal rules as user paths.
+    * ``{{prev.<path>}}`` — max depth 3, previous document state (update hooks).
     * ``{{env.<KEY>}}``   — restricted to uppercase env-var names
       matching ``^[A-Z_][A-Z0-9_]*$``.
     * ``$$NOW`` — replaced with current UTC datetime.
@@ -26,6 +28,7 @@ from fastapi import HTTPException
 
 _USER_TEMPLATE_RE = re.compile(r"^\{\{user\.([a-zA-Z_][a-zA-Z0-9_.]{0,63})\}\}$")
 _DOC_TEMPLATE_RE = re.compile(r"^\{\{doc\.([a-zA-Z_][a-zA-Z0-9_.]{0,63})\}\}$")
+_PREV_TEMPLATE_RE = re.compile(r"^\{\{prev\.([a-zA-Z_][a-zA-Z0-9_.]{0,63})\}\}$")
 _ENV_TEMPLATE_RE = re.compile(r"^\{\{env\.([A-Z_][A-Z0-9_]{0,63})\}\}$")
 _MAX_PATH_DEPTH = 3
 
@@ -38,6 +41,7 @@ def resolve_template(
     user: dict[str, Any] | None,
     *,
     doc: dict[str, Any] | None = None,
+    prev: dict[str, Any] | None = None,
     now: datetime | None = None,
 ) -> Any:
     """Deep-copy *mql_obj* and replace all template placeholders.
@@ -49,6 +53,8 @@ def resolve_template(
       to :data:`_MAX_PATH_DEPTH` levels.
     * ``"{{doc.X}}"``  — replaced with the value at key-path *X* in *doc*
       (the document being created/updated).
+    * ``"{{prev.X}}"`` — replaced with the value at key-path *X* in *prev*
+      (the previous document state, available in update hooks).
     * ``"{{env.KEY}}"`` — replaced with the environment variable *KEY*.
     * ``"$$NOW"`` — replaced with the current UTC datetime (or *now* if
       provided).
@@ -60,7 +66,7 @@ def resolve_template(
     """
     if now is None:
         now = datetime.now(timezone.utc)
-    return _resolve(copy.deepcopy(mql_obj), user, doc, now)
+    return _resolve(copy.deepcopy(mql_obj), user, doc, prev, now)
 
 
 def merge_filters(*filters: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -87,14 +93,15 @@ def _resolve(
     obj: Any,
     user: dict[str, Any] | None,
     doc: dict[str, Any] | None,
+    prev: dict[str, Any] | None,
     now: datetime,
 ) -> Any:
     if isinstance(obj, str):
-        return _resolve_string(obj, user, doc, now)
+        return _resolve_string(obj, user, doc, prev, now)
     if isinstance(obj, dict):
-        return {k: _resolve(v, user, doc, now) for k, v in obj.items()}
+        return {k: _resolve(v, user, doc, prev, now) for k, v in obj.items()}
     if isinstance(obj, list):
-        return [_resolve(item, user, doc, now) for item in obj]
+        return [_resolve(item, user, doc, prev, now) for item in obj]
     return obj
 
 
@@ -102,6 +109,7 @@ def _resolve_string(
     value: str,
     user: dict[str, Any] | None,
     doc: dict[str, Any] | None,
+    prev: dict[str, Any] | None,
     now: datetime,
 ) -> Any:
     if value == "$$NOW":
@@ -121,6 +129,12 @@ def _resolve_string(
         if doc is None:
             return value
         return _traverse_dict(doc, match.group(1), "doc")
+
+    match = _PREV_TEMPLATE_RE.match(value)
+    if match:
+        if prev is None:
+            return value
+        return _traverse_dict(prev, match.group(1), "prev")
 
     match = _ENV_TEMPLATE_RE.match(value)
     if match:

@@ -6,8 +6,9 @@ The ``serve`` CLI command sets ``_MDB_SERVE_MANIFEST`` (and optionally
 this module to obtain the ``app`` object.
 
 Everything here is generic — auth, CRUD, scopes, policies, defaults, and
-the ``public/`` static-file convention are all driven by the manifest and
-wired by ``create_app()``.  No application-specific logic belongs here.
+the ``public/`` / ``templates/`` conventions are all driven by the
+manifest and wired by ``create_app()``.  No application-specific logic
+belongs here.
 """
 
 from __future__ import annotations
@@ -44,14 +45,37 @@ _db_name = os.environ.get("MDB_DB_NAME")
 engine = MongoDBEngine(mongo_uri=_mongo_uri, db_name=_db_name)
 app = engine.create_app(slug=_slug, manifest=manifest_path)
 
+# --- templates/ SSR convention ------------------------------------------
+# If a ``templates/`` directory exists next to the manifest and the
+# manifest has ``ssr.enabled: true``, register server-side rendered
+# routes.  SSR routes are mounted BEFORE static files so they take
+# priority over ``public/index.html`` for overlapping paths like ``/``.
+_templates_dir = manifest_path.parent / "templates"
+_ssr_config = _manifest_data.get("ssr", {})
+
+if _templates_dir.is_dir() and _ssr_config.get("enabled"):
+    from mdb_engine.routing._ssr import mount_ssr_routes  # noqa: E402
+
+    mount_ssr_routes(
+        app,
+        _templates_dir,
+        _ssr_config,
+        collections_config=_manifest_data.get("collections", {}),
+    )
+
 # --- public/ convention -------------------------------------------------
 # If a ``public/`` directory exists next to the manifest, auto-serve it.
 # ``public/index.html`` is served at ``/``; all files available under
 # ``/public/``.  Inspired by Rails' ``public/`` directory.
+#
+# When SSR is active and has a ``/`` route, the SSR route takes priority
+# (registered above).  Otherwise ``public/index.html`` is used.
 _public_dir = manifest_path.parent / "public"
 if _public_dir.is_dir():
+    _has_ssr_root = _ssr_config.get("enabled") and "/" in _ssr_config.get("routes", {})
+
     _index = _public_dir / "index.html"
-    if _index.exists():
+    if _index.exists() and not _has_ssr_root:
         from fastapi.responses import HTMLResponse  # noqa: E402
 
         @app.get("/", response_class=HTMLResponse, include_in_schema=False)

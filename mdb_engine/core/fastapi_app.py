@@ -231,6 +231,9 @@ class FastAPIAppMixin:
             app.state.manifest = app_manifest
             app.state.is_multi_site = is_multi_site
             app.state.auth_mode = auth_mode
+            app.state.role_hierarchy = (
+                app_manifest.get("auth", {}).get("users", {}).get("role_hierarchy") if app_manifest else None
+            )
 
             # Store initialized services so app code can access them directly
             if engine.initialized:

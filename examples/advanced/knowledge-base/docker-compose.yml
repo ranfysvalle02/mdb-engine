@@ -1,0 +1,55 @@
+# Knowledge Base — Docker Compose
+#
+# Quick start:
+#   docker compose up
+#
+# Open http://localhost:8000 — server-rendered knowledge base is live.
+# Swagger API docs at http://localhost:8000/docs.
+#
+# Demo accounts:
+#   admin@example.com / admin123      (admin — full access)
+#   editor@example.com / editor123    (editor — create/edit articles)
+#   reader@example.com / reader123    (reader — browse + comment)
+
+services:
+  app:
+    image: python:3.11-slim
+    working_dir: /app
+    volumes:
+      - ./manifest.json:/app/manifest.json
+      - ./templates:/app/templates
+      - ./public:/app/public
+      - ../../../mdb_engine:/engine_src/mdb_engine
+      - ../../../pyproject.toml:/engine_src/pyproject.toml
+      - ../../../README.md:/engine_src/README.md
+    environment:
+      - MONGODB_URI=mongodb://mongo:27017/?directConnection=true
+      - MDB_DB_NAME=mdb_engine
+      - MDB_JWT_SECRET=${MDB_JWT_SECRET:-dev_knowledge_base_jwt_secret_change_me_please_32_chars}
+      - MDB_ENGINE_MASTER_KEY=${MDB_ENGINE_MASTER_KEY:-dev_master_key_change_me_in_production_32ch}
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@example.com}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin123}
+      - _MDB_SERVE_MANIFEST=/app/manifest.json
+    command: >
+      bash -c "pip install -e /engine_src uvicorn jinja2 -q &&
+               uvicorn mdb_engine.cli._serve_app:app --host 0.0.0.0 --port 8000 --reload"
+    ports:
+      - "8000:8000"
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+  mongo:
+    image: mongodb/mongodb-atlas-local:8.0
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  mongo_data:
