@@ -35,7 +35,6 @@ from bson import ObjectId
 from bson.errors import InvalidId
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
-from jinja2.exceptions import TemplateError, TemplateNotFound
 from starlette.responses import Response
 
 from ..dependencies import get_current_user, get_scoped_db
@@ -551,6 +550,8 @@ class _ErrorPageHandler:
         self._has_500 = self._template_exists("500.html")
 
     def _template_exists(self, name: str) -> bool:
+        from jinja2.exceptions import TemplateNotFound
+
         try:
             self._env.get_template(name)
             return True
@@ -646,7 +647,7 @@ def mount_ssr_routes(
     logger.info("Mounted %d SSR route(s)", len(routes))
 
 
-def _register_ssr_route(
+def _register_ssr_route(  # noqa: PLR0913
     router: APIRouter,
     path: str,
     template_name: str,
@@ -661,6 +662,8 @@ def _register_ssr_route(
     error_handler: _ErrorPageHandler,
 ) -> None:
     """Register a single SSR route handler."""
+    from jinja2.exceptions import TemplateError as _TemplateError
+
     cache_header = _build_cache_header(cache_config)
 
     @router.get(path, response_class=HTMLResponse)
@@ -715,7 +718,7 @@ def _register_ssr_route(
                 user=user,
                 **data_context,
             )
-        except TemplateError:
+        except _TemplateError:
             logger.exception("SSR template render failed: %s", template_name)
             err_page = error_handler.render_500(request)
             if err_page:
