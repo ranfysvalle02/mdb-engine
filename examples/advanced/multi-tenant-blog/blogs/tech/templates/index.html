@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ seo.title }}</title>
+  <meta name="description" content="{{ seo.description }}">
+  <meta property="og:title" content="{{ seo.title }}">
+  <meta property="og:description" content="{{ seo.description }}">
+  <link rel="stylesheet" href="{{ base_path }}/public/style.css">
+</head>
+<body>
+  <nav class="nav">
+    <div class="nav-inner">
+      <a href="{{ base_path }}/" class="nav-brand">{{ seo.site_name }}</a>
+      <div class="nav-right">
+        {% if user %}
+          <div class="avatar" title="{{ user.email }}">{{ user.email[0] | upper }}</div>
+        {% else %}
+          <a href="{{ base_path }}/auth/login" class="btn btn-primary btn-sm">Sign in</a>
+        {% endif %}
+      </div>
+    </div>
+  </nav>
+
+  <main class="container">
+    <header class="hero">
+      <h1>{{ seo.site_name }}</h1>
+      <p>{{ seo.description }}</p>
+    </header>
+
+    <div class="grid">
+      {% for post in posts %}
+      <a href="{{ base_path }}/posts/{{ post._id }}" class="card">
+        <div class="card-content">
+          <h2>{{ post.title }}</h2>
+          <p class="excerpt">{{ post.excerpt or post.body[:180] }}</p>
+          {% if post.tags %}
+            <div class="tags">
+              {% for tag in post.tags[:3] %}<span class="tag">{{ tag }}</span>{% endfor %}
+            </div>
+          {% endif %}
+          <div class="card-footer">
+            <span>{{ post.author_name or 'Anonymous' }}</span>
+            <span class="spacer"></span>
+            <time>{{ post.created_at }}</time>
+          </div>
+        </div>
+      </a>
+      {% else %}
+      <div class="empty">
+        <h3>No posts yet</h3>
+        <p>Sign in as an editor to create the first post.</p>
+      </div>
+      {% endfor %}
+    </div>
+  </main>
+
+  <footer class="footer">
+    <p>Built with <a href="https://github.com/NEWERA/mdb-engine">mdb-engine</a> &mdash; zero Python, just JSON + HTML</p>
+  </footer>
+</body>
+</html>

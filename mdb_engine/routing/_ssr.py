@@ -581,6 +581,7 @@ def mount_ssr_routes(
     templates_dir: Path,
     ssr_config: dict[str, Any],
     collections_config: dict[str, Any] | None = None,
+    base_path: str = "",
 ) -> None:
     """Register SSR routes on a FastAPI app from manifest config.
 
@@ -590,6 +591,9 @@ def mount_ssr_routes(
         ssr_config: The ``ssr`` section of the manifest.
         collections_config: The ``collections`` section (for scopes, policy,
             relations, computed, projection resolution).
+        base_path: URL path prefix for the app (e.g. ``/tech-blog``).
+            Injected into templates as ``{{ base_path }}`` so links work
+            correctly in multi-app deployments.  Empty string for single-app.
     """
     from jinja2 import ChoiceLoader, Environment, FileSystemLoader
 
@@ -607,6 +611,7 @@ def mount_ssr_routes(
         loader=ChoiceLoader(loaders),
         autoescape=True,
     )
+    env.globals["base_path"] = base_path
 
     error_handler = _ErrorPageHandler(env)
     router = APIRouter(include_in_schema=False)

@@ -1,0 +1,159 @@
+{
+  "schema_version": "2.0",
+  "slug": "tech-blog",
+  "name": "Tech Blog",
+  "auth": {
+    "mode": "app",
+    "users": {
+      "enabled": true,
+      "strategy": "app_users",
+      "allow_registration": true,
+      "registration_role": "reader",
+      "role_hierarchy": {
+        "admin": ["editor", "reader"],
+        "editor": ["reader"]
+      },
+      "demo_users": [
+        { "email": "admin@tech.example.com", "password": "admin123", "role": "admin" },
+        { "email": "writer@tech.example.com", "password": "writer123", "role": "editor" }
+      ]
+    }
+  },
+  "collections": {
+    "posts": {
+      "auto_crud": true,
+      "soft_delete": true,
+      "auth": { "public_read": true, "write_roles": ["editor"] },
+      "owner_field": "author_id",
+      "immutable_fields": ["author_id"],
+      "schema": {
+        "type": "object",
+        "properties": {
+          "title":       { "type": "string" },
+          "slug":        { "type": "string", "x-unique": true },
+          "body":        { "type": "string" },
+          "excerpt":     { "type": "string" },
+          "author_name": { "type": "string" },
+          "tags":        { "type": "array", "items": { "type": "string" } },
+          "status":      { "type": "string", "enum": ["draft", "published", "archived"] },
+          "cover_image": { "type": "string" },
+          "view_count":  { "type": "integer" }
+        },
+        "required": ["title", "body"]
+      },
+      "defaults": {
+        "status": "draft",
+        "tags": [],
+        "view_count": 0,
+        "author_name": "{{user.email}}"
+      },
+      "scopes": {
+        "published": { "status": "published" },
+        "drafts": {
+          "filter": { "status": "draft" },
+          "auth": { "roles": ["editor"] }
+        }
+      },
+      "hooks": {
+        "after_create": [
+          {
+            "action": "insert",
+            "collection": "activity",
+            "document": {
+              "event": "post_created",
+              "post_id": "{{doc._id}}",
+              "actor": "{{user.email}}",
+              "title": "{{doc.title}}",
+              "timestamp": "$$NOW"
+            }
+          }
+        ]
+      },
+      "cascade": {
+        "on_delete": [
+          { "collection": "comments", "match_field": "post_id", "action": "delete" }
+        ],
+        "on_soft_delete": [
+          { "collection": "comments", "match_field": "post_id", "action": "soft_delete" }
+        ]
+      }
+    },
+    "comments": {
+      "auto_crud": true,
+      "soft_delete": true,
+      "auth": { "public_read": true, "create_required": true },
+      "owner_field": "user_id",
+      "immutable_fields": ["post_id", "user_id"],
+      "schema": {
+        "type": "object",
+        "properties": {
+          "post_id":   { "type": "string", "x-references": { "collection": "posts", "field": "_id" } },
+          "body":      { "type": "string" },
+          "user_id":   { "type": "string" },
+          "user_name": { "type": "string" }
+        },
+        "required": ["post_id", "body"]
+      },
+      "defaults": {
+        "user_name": "{{user.email}}"
+      }
+    },
+    "activity": {
+      "auto_crud": true,
+      "read_only": true,
+      "timestamps": false,
+      "auth": { "roles": ["editor"] },
+      "ttl": { "field": "timestamp", "expire_after": "30d" }
+    }
+  },
+  "ssr": {
+    "enabled": true,
+    "site_name": "Tech Blog",
+    "site_description": "The latest in technology, software, and engineering.",
+    "routes": {
+      "/": {
+        "template": "index.html",
+        "data": {
+          "posts": {
+            "collection": "posts",
+            "scope": "published",
+            "sort": { "created_at": -1 },
+            "limit": 20
+          }
+        },
+        "seo": {
+          "title": "Tech Blog — Latest Posts",
+          "description": "The latest in technology, software, and engineering."
+        }
+      },
+      "/posts/{id}": {
+        "template": "article.html",
+        "data": {
+          "post": {
+            "collection": "posts",
+            "id_param": "id"
+          },
+          "comments": {
+            "collection": "comments",
+            "filter": { "post_id": "{{params.id}}" },
+            "sort": { "created_at": 1 },
+            "limit": 100
+          }
+        },
+        "seo": {
+          "title": "{{post.title}} — Tech Blog",
+          "description": "{{post.excerpt}}"
+        }
+      }
+    }
+  },
+  "managed_indexes": {
+    "posts": [
+      { "type": "regular", "keys": { "status": 1, "created_at": -1 }, "name": "idx_status_created" },
+      { "type": "regular", "keys": { "tags": 1 }, "name": "idx_tags" }
+    ],
+    "comments": [
+      { "type": "regular", "keys": { "post_id": 1 }, "name": "idx_post" }
+    ]
+  }
+}

@@ -16,6 +16,7 @@ This directory contains example applications demonstrating how to use MDB_ENGINE
 | **Production single app** | `engine.create_app()` | [simple_app](./advanced/simple_app/) |
 | **Multiple apps with SSO** | Shared auth mode | [multi_app_shared](./multi_app_shared/) |
 | **Multiple apps (isolated auth)** | Multi-app with `read_scopes` | [multi_app](./multi_app/) |
+| **Multi-tenant (zero-code)** | `serve-multi --apps-dir` | [multi-tenant-blog](./advanced/multi-tenant-blog/) |
 | **Authorization/permissions** | OSO or Casbin from manifest | [oso_hello_world](./oso_hello_world/) |
 | **Vector search/RAG** | EmbeddingService + Atlas Search | [interactive_rag](./interactive_rag/) |
 
@@ -152,6 +153,29 @@ app = engine.create_app(slug="my_app", manifest=Path("manifest.json"))
 ```bash
 cd advanced/simple_app
 docker-compose up --build
+```
+
+### [Multi-Tenant Blog](./advanced/multi-tenant-blog/)
+
+A **zero-code** multi-tenant blog platform — two independent blogs sharing one server:
+
+```bash
+mdb-engine serve-multi --apps-dir ./blogs/ --port 8000
+# Tech blog at    http://localhost:8000/tech-blog/
+# Cooking blog at http://localhost:8000/cooking-blog/
+```
+
+- Auto-discovers `manifest.json` files in subdirectories
+- Fully isolated data, auth, and CRUD per tenant
+- Server-side rendered HTML with shared stylesheet
+- Posts, comments, hooks, cascade deletes, indexes — all declarative
+
+**Perfect for:** Multi-tenant SaaS, white-label apps, multi-site deployments
+
+**Run it:**
+```bash
+cd advanced/multi-tenant-blog
+docker-compose up
 ```
 
 ### [OSO Hello World](./oso_hello_world/)

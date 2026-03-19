@@ -1,0 +1,53 @@
+# Multi-Tenant Blog — Docker Compose
+#
+# Quick start:
+#   docker compose up
+#
+# Tech blog at    http://localhost:8000/tech-blog/
+# Cooking blog at http://localhost:8000/cooking-blog/
+# Swagger docs at http://localhost:8000/docs
+#
+# Demo accounts (each blog has its own user pool):
+#   Tech:    admin@tech.example.com / admin123  |  writer@tech.example.com / writer123
+#   Cooking: admin@cooking.example.com / admin123  |  chef@cooking.example.com / chef123
+
+services:
+  app:
+    image: python:3.11-slim
+    working_dir: /app
+    volumes:
+      - ./blogs:/app/blogs
+      - ../../../mdb_engine:/engine_src/mdb_engine
+      - ../../../pyproject.toml:/engine_src/pyproject.toml
+      - ../../../README.md:/engine_src/README.md
+    environment:
+      - MONGODB_URI=mongodb://mongo:27017/?directConnection=true
+      - MDB_DB_NAME=mdb_engine
+      - MDB_JWT_SECRET=${MDB_JWT_SECRET:-dev_multi_blog_jwt_secret_change_me_32_chars}
+      - MDB_ENGINE_MASTER_KEY=${MDB_ENGINE_MASTER_KEY:-dev_master_key_change_me_in_production_32ch}
+      - _MDB_SERVE_MULTI_MODE=apps_dir
+      - _MDB_SERVE_MULTI_PATH=/app/blogs
+      - _MDB_SERVE_MULTI_TITLE=Multi-Tenant Blog Platform
+    command: >
+      bash -c "pip install -e /engine_src uvicorn jinja2 -q &&
+               uvicorn mdb_engine.cli._serve_multi_app:app --host 0.0.0.0 --port 8000 --reload"
+    ports:
+      - "8000:8000"
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+  mongo:
+    image: mongodb/mongodb-atlas-local:8.0
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  mongo_data:

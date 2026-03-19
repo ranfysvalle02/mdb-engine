@@ -14,6 +14,7 @@ from .commands.dry_run import dry_run
 from .commands.migrate import migrate
 from .commands.new_app import new_app
 from .commands.serve import serve
+from .commands.serve_multi import serve_multi
 from .commands.validate import validate
 
 
@@ -32,3 +33,4 @@ main.add_command(add_user, name="add-user")
 main.add_command(diff)
 main.add_command(dry_run, name="dry-run")
 main.add_command(codegen)
+main.add_command(serve_multi, name="serve-multi")

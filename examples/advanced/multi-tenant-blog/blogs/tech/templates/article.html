@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ seo.title }}</title>
+  <meta name="description" content="{{ seo.description }}">
+  <meta property="og:title" content="{{ seo.title }}">
+  <meta property="og:description" content="{{ seo.description }}">
+  <link rel="stylesheet" href="{{ base_path }}/public/style.css">
+</head>
+<body>
+  <nav class="nav">
+    <div class="nav-inner">
+      <a href="{{ base_path }}/" class="nav-brand">{{ seo.site_name }}</a>
+      <div class="nav-right">
+        {% if user %}
+          <div class="avatar" title="{{ user.email }}">{{ user.email[0] | upper }}</div>
+        {% else %}
+          <a href="{{ base_path }}/auth/login" class="btn btn-primary btn-sm">Sign in</a>
+        {% endif %}
+      </div>
+    </div>
+  </nav>
+
+  <main class="article-layout">
+    <div class="breadcrumb">
+      <a href="{{ base_path }}/">Home</a>
+      <span>&rsaquo;</span>
+      <span>{{ post.title }}</span>
+    </div>
+
+    <article>
+      <header class="article-header">
+        <h1>{{ post.title }}</h1>
+        <div class="article-meta">
+          <span>{{ post.author_name or 'Anonymous' }}</span>
+          <span class="meta-divider"></span>
+          <time>{{ post.created_at }}</time>
+          {% if post.tags %}
+            <span class="meta-divider"></span>
+            <div class="tags" style="margin:0">
+              {% for tag in post.tags %}<span class="tag">{{ tag }}</span>{% endfor %}
+            </div>
+          {% endif %}
+        </div>
+      </header>
+
+      <div class="article-body">
+        {{ post.body | safe }}
+      </div>
+    </article>
+
+    <section class="comments">
+      <div class="comments-header">
+        <h2>Comments</h2>
+        <span class="comment-count-badge">{{ comments | length }}</span>
+      </div>
+
+      {% for c in comments %}
+      <div class="comment">
+        <div class="comment-body">
+          <div>
+            <span class="comment-author">{{ c.user_name or 'Anonymous' }}</span>
+            <span class="comment-time">{{ c.created_at }}</span>
+          </div>
+          <p class="comment-text">{{ c.body }}</p>
+        </div>
+      </div>
+      {% else %}
+      <p class="empty-sm">No comments yet. Be the first to share your thoughts.</p>
+      {% endfor %}
+
+      {% if user %}
+      <form class="comment-form" id="comment-form">
+        <textarea name="body" placeholder="Share your thoughts..." rows="3" required></textarea>
+        <div class="comment-form-actions">
+          <button type="submit" class="btn btn-primary">Post Comment</button>
+        </div>
+      </form>
+      {% else %}
+      <div class="sign-in-cta">
+        <a href="{{ base_path }}/auth/login">Sign in</a>&nbsp;to join the conversation.
+      </div>
+      {% endif %}
+    </section>
+  </main>
+
+  <footer class="footer">
+    <p>Built with <a href="https://github.com/NEWERA/mdb-engine">mdb-engine</a> &mdash; zero Python, just JSON + HTML</p>
+  </footer>
+
+  {% if user %}
+  <script>
+    document.getElementById('comment-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = e.target.querySelector('button');
+      btn.disabled = true; btn.textContent = 'Posting...';
+      const body = e.target.body.value;
+      const resp = await fetch('{{ base_path }}/api/comments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ post_id: '{{ post._id }}', body }),
+      });
+      if (resp.ok) { location.reload(); }
+      else { btn.disabled = false; btn.textContent = 'Post Comment'; alert('Error posting comment'); }
+    });
+  </script>
+  {% endif %}
+</body>
+</html>
