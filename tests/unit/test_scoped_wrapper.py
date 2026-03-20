@@ -680,12 +680,12 @@ class TestScopedCollectionWrapperAdditionalOperations:
             assert match_filter == {"app_id": {"$in": ["test_app"]}}
 
     @pytest.mark.asyncio
-    async def test_scoped_replace_one_passes_through(self, mock_mongo_collection):
-        """Test that replace_one passes through to underlying collection.
+    async def test_scoped_replace_one_is_blocked(self, mock_mongo_collection):
+        """Test that replace_one is blocked because it bypasses tenant scoping.
 
-        replace_one is not an explicitly scoped operation on ScopedCollectionWrapper.
-        It delegates to the underlying collection via __getattr__.
-        Use the abstraction layer (MongoCollection) for scoped replace_one behavior.
+        replace_one is not an explicitly scoped operation and would hit the raw
+        collection via __getattr__. It is now blocked to prevent tenant isolation
+        bypass. Use update_one with $set instead.
         """
         wrapper = ScopedCollectionWrapper(
             real_collection=mock_mongo_collection,
@@ -693,19 +693,8 @@ class TestScopedCollectionWrapperAdditionalOperations:
             write_scope="test_app",
         )
 
-        filter_doc = {"_id": "123"}
-        replacement = {"name": "Updated", "value": 200}
-        await wrapper.replace_one(filter_doc, replacement)
-
-        call_args = mock_mongo_collection.replace_one.call_args
-        assert call_args is not None
-        passed_filter = call_args[0][0]
-        passed_replacement = call_args[0][1]
-
-        # replace_one passes through directly (not scoped at this layer)
-        assert passed_filter == {"_id": "123"}
-        assert passed_replacement["name"] == "Updated"
-        assert passed_replacement["value"] == 200
+        with pytest.raises(AttributeError, match="bypasses tenant scoping"):
+            wrapper.replace_one
 
 
 class TestScopedCollectionWrapperErrorHandling:

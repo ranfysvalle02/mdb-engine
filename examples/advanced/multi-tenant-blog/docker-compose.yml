@@ -1,4 +1,4 @@
-# Multi-Tenant Blog — Docker Compose
+# Multi-Tenant Blog — Docker Compose (with OSO Authorization)
 #
 # Quick start:
 #   docker compose up
@@ -12,6 +12,19 @@
 #   Cooking: admin@cooking.example.com / admin123  |  chef@cooking.example.com / chef123
 
 services:
+  oso-dev:
+    image: public.ecr.aws/osohq/dev-server:latest
+    ports:
+      - "${OSO_PORT:-8080}:8080"
+    volumes:
+      - ./blogs/main.polar:/policies/main.polar:ro
+    command: ["--watch-for-changes", "/policies/main.polar"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   app:
     image: python:3.11-slim
     working_dir: /app
@@ -25,16 +38,20 @@ services:
       - MDB_DB_NAME=mdb_engine
       - MDB_JWT_SECRET=${MDB_JWT_SECRET:-dev_multi_blog_jwt_secret_change_me_32_chars}
       - MDB_ENGINE_MASTER_KEY=${MDB_ENGINE_MASTER_KEY:-dev_master_key_change_me_in_production_32ch}
+      - OSO_URL=http://oso-dev:8080
+      - OSO_AUTH=e_0123456789_12345_osotesttoken000000
       - _MDB_SERVE_MULTI_MODE=apps_dir
       - _MDB_SERVE_MULTI_PATH=/app/blogs
       - _MDB_SERVE_MULTI_TITLE=Multi-Tenant Blog Platform
     command: >
-      bash -c "pip install -e /engine_src uvicorn jinja2 -q &&
+      bash -c "pip install -e '/engine_src[oso]' uvicorn jinja2 -q &&
                uvicorn mdb_engine.cli._serve_multi_app:app --host 0.0.0.0 --port 8000 --reload"
     ports:
       - "8000:8000"
     depends_on:
       mongo:
+        condition: service_healthy
+      oso-dev:
         condition: service_healthy
 
   mongo:

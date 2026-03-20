@@ -18,6 +18,7 @@ from typing import Any
 
 from ..constants import (
     DANGEROUS_OPERATORS,
+    DANGEROUS_PIPELINE_STAGES,
     MAX_PIPELINE_STAGES,
     MAX_QUERY_DEPTH,
     MAX_REGEX_COMPLEXITY,
@@ -138,10 +139,45 @@ class QueryValidator:
                     path=f"$[{idx}]",
                 )
 
+            # Block dangerous pipeline stages ($out, $merge, $unionWith)
+            # that can write to or read from arbitrary collections,
+            # bypassing tenant scoping.
+            stage_keys = set(stage.keys())
+            for blocked in DANGEROUS_PIPELINE_STAGES:
+                if blocked in stage_keys:
+                    logger.warning(f"Security: Dangerous pipeline stage '{blocked}' " f"detected at index {idx}")
+                    raise QueryValidationError(
+                        f"Pipeline stage '{blocked}' is not allowed for "
+                        f"security reasons (cross-tenant data risk). "
+                        f"Found at stage index {idx}",
+                        query_type="pipeline",
+                        operator=blocked,
+                        path=f"$[{idx}]",
+                    )
+
             # Check for dangerous operators in each stage
             stage_path = f"$[{idx}]"
             self._check_dangerous_operators(stage, stage_path)
             self._check_query_depth(stage, stage_path, depth=0)
+
+            # Recurse into nested subpipelines ($lookup, $facet, etc.)
+            self._validate_nested_pipelines(stage, stage_path)
+
+    def _validate_nested_pipelines(self, stage: dict[str, Any], parent_path: str) -> None:
+        """Recursively validate subpipelines inside $lookup, $facet, etc."""
+        for key, value in stage.items():
+            if key == "$lookup" and isinstance(value, dict):
+                sub = value.get("pipeline")
+                if isinstance(sub, list):
+                    self.validate_pipeline(sub)
+            elif key == "$facet" and isinstance(value, dict):
+                for _facet_name, facet_pipeline in value.items():
+                    if isinstance(facet_pipeline, list):
+                        self.validate_pipeline(facet_pipeline)
+            elif key == "$unionWith" and isinstance(value, dict):
+                sub = value.get("pipeline")
+                if isinstance(sub, list):
+                    self.validate_pipeline(sub)
 
     def validate_regex(self, pattern: str, path: str = "") -> None:
         """

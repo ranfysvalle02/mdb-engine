@@ -2041,3 +2041,126 @@ class TestHardDeleteWithPolicy:
         resp = client.delete(f"/api/tasks/{oid}")
         assert resp.status_code == 200
         assert resp.json()["data"]["deleted"] is True
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Unified AuthZ — authz_provider integration
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class _FakeAuthzProvider:
+    """Mock AuthorizationProvider that records check() calls."""
+
+    def __init__(self, allow: bool = True):
+        self._allow = allow
+        self.checks: list[tuple[str, str, str]] = []
+
+    async def check(self, subject, resource, action, user_object=None):
+        self.checks.append((subject, resource, action))
+        return self._allow
+
+
+def _build_authz_provider_app(
+    auth_config: dict,
+    seed_data: dict | None = None,
+    user: dict | None = None,
+    authz_allow: bool = True,
+) -> tuple[FastAPI, TestClient, _FakeAuthzProvider]:
+    """Build an app with a mock authz_provider on app.state."""
+    from starlette.middleware.base import BaseHTTPMiddleware
+
+    provider = _FakeAuthzProvider(allow=authz_allow)
+    collections_config = {"tasks": {"auth": auth_config}}
+    app = FastAPI()
+    app.state.authz_provider = provider
+    app.state.role_hierarchy = None
+
+    fake_db = _FakeScopedDB(seed_data)
+
+    async def _override_db():
+        return fake_db
+
+    app.dependency_overrides[get_scoped_db] = _override_db
+
+    _user = user
+
+    class InjectUserMiddleware(BaseHTTPMiddleware):
+        async def dispatch(self, request, call_next):
+            request.state.user = _user
+            request.state.user_roles = []
+            return await call_next(request)
+
+    app.add_middleware(InjectUserMiddleware)
+
+    for name, config in collections_config.items():
+        router = create_auto_crud_router(name, config)
+        app.include_router(router)
+
+    return app, TestClient(app), provider
+
+
+class TestAuthzProviderIntegration:
+    """Verify auto-CRUD routes delegate to authz_provider.check()."""
+
+    def test_write_roles_delegates_to_provider(self):
+        oid = ObjectId()
+        _, client, provider = _build_authz_provider_app(
+            auth_config={"write_roles": ["editor"], "public_read": True},
+            seed_data={"tasks": [{"_id": oid, "title": "t1"}]},
+            user={"_id": "u1", "email": "alice@example.com"},
+        )
+        resp = client.post("/api/tasks", json={"title": "new"})
+        assert resp.status_code == 201
+        assert any(c[2] == "create" and c[1] == "tasks" for c in provider.checks)
+
+    def test_write_roles_denied_by_provider(self):
+        _, client, provider = _build_authz_provider_app(
+            auth_config={"write_roles": ["editor"], "public_read": True},
+            user={"_id": "u1", "email": "alice@example.com"},
+            authz_allow=False,
+        )
+        resp = client.post("/api/tasks", json={"title": "new"})
+        assert resp.status_code == 403
+
+    def test_public_read_with_provider_allows_anonymous(self):
+        oid = ObjectId()
+        _, client, provider = _build_authz_provider_app(
+            auth_config={"public_read": True, "write_roles": ["editor"]},
+            seed_data={"tasks": [{"_id": oid, "title": "t1"}]},
+            user=None,
+            authz_allow=True,
+        )
+        resp = client.get("/api/tasks")
+        assert resp.status_code == 200
+
+    def test_roles_delegates_read_to_provider(self):
+        oid = ObjectId()
+        _, client, provider = _build_authz_provider_app(
+            auth_config={"roles": ["editor"]},
+            seed_data={"tasks": [{"_id": oid, "title": "t1"}]},
+            user={"_id": "u1", "email": "bob@example.com"},
+        )
+        resp = client.get("/api/tasks")
+        assert resp.status_code == 200
+        assert any(c[2] == "read" and c[1] == "tasks" for c in provider.checks)
+
+    def test_mql_scoping_still_applies_with_provider(self):
+        """owner_field MQL filter should apply even when authz_provider allows."""
+        oid_mine = ObjectId()
+        oid_other = ObjectId()
+        _, client, provider = _build_authz_provider_app(
+            auth_config={"write_roles": ["editor"], "public_read": True},
+            seed_data={
+                "tasks": [
+                    {"_id": oid_mine, "title": "mine", "owner_id": "u1"},
+                    {"_id": oid_other, "title": "other", "owner_id": "u2"},
+                ]
+            },
+            user={"_id": "u1", "email": "alice@example.com"},
+            authz_allow=True,
+        )
+        resp = client.get("/api/tasks")
+        assert resp.status_code == 200
+        titles = [d["title"] for d in resp.json()["data"]]
+        assert "mine" in titles
+        assert "other" in titles

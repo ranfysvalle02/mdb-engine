@@ -10,7 +10,7 @@ INTEGRATION_TEST_DIR := tests/integration
 EXAMPLES_TEST_FILE := tests/integration/test_examples_validation.py
 COV_ARGS := --cov=mdb_engine/core --cov=mdb_engine/database --cov-fail-under=$(COV_FAIL_UNDER)
 
-.PHONY: help install install-dev test test-unit test-integration test-examples test-examples-fast test-coverage test-coverage-html update-badges lint-local lint-ci fix format clean clean-pyc clean-cache check _check-tools _lint-exceptions build build-check publish typecheck typecheck-strict docs-serve docs-build
+.PHONY: help install install-dev test test-unit test-integration test-examples test-examples-fast test-coverage test-coverage-html update-badges lint-local lint-ci fix format clean clean-pyc clean-cache check _check-tools _lint-exceptions build build-check publish typecheck typecheck-strict docs-serve docs-build test-security
 
 # Default target
 help:
@@ -36,6 +36,7 @@ help:
 	@echo "  make clean-cache      - Remove pytest cache"
 	@echo "  make typecheck        - Run mypy type checking"
 	@echo "  make typecheck-strict - Run mypy with --strict mode"
+	@echo "  make test-security    - Run full security test suite (semgrep + bandit + tests)"
 	@echo "  make docs-serve       - Serve documentation locally (http://127.0.0.1:8000)"
 	@echo "  make docs-build       - Build documentation (strict mode)"
 	@echo "  make build            - Build distribution packages (wheel + sdist)"
@@ -97,6 +98,40 @@ test-coverage-html:
 	@echo ""
 	@echo "Coverage report generated in htmlcov/index.html"
 
+# Security testing
+SECURITY_TEST_DIR := tests/security
+SECURITY_UNIT_TESTS := tests/unit/test_query_validator.py tests/unit/test_scoped_wrapper_security.py tests/unit/test_auth_hardening.py tests/unit/test_multi_app_security.py tests/unit/test_prompt_safety.py
+
+test-security: _check-tools
+	@echo ""
+	@echo "======================================================================"
+	@echo "  MDB Engine — Security Test Suite"
+	@echo "======================================================================"
+	@echo ""
+	@echo "=== Step 1: Semgrep (mdb-engine security rules) ==="
+	@semgrep scan --config .semgrep-security.yml --error --quiet mdb_engine/ || (echo "❌ Semgrep security rules failed" && exit 1)
+	@echo "✅ Custom security rules passed"
+	@echo ""
+	@echo "=== Step 2: Semgrep (exception handling rules) ==="
+	@semgrep scan --config .semgrep.yml --error --quiet mdb_engine/ || (echo "❌ Semgrep exception rules failed" && exit 1)
+	@echo "✅ Exception handling rules passed"
+	@echo ""
+	@echo "=== Step 3: Bandit (Python security linter) ==="
+	@bandit -r mdb_engine/ -c pyproject.toml --severity-level medium -q 2>/dev/null || echo "⚠️  Bandit completed with findings (review output above)"
+	@echo ""
+	@echo "=== Step 4: Dependency vulnerability scan ==="
+	@pip-audit --desc 2>/dev/null || echo "⚠️  pip-audit skipped or completed with findings"
+	@echo ""
+	@echo "=== Step 5: Security test suite ==="
+	@$(PYTEST) $(SECURITY_TEST_DIR) -v --tb=short -m "not integration"
+	@echo ""
+	@echo "=== Step 6: Existing security-related unit tests ==="
+	@$(PYTEST) $(SECURITY_UNIT_TESTS) -v --tb=short
+	@echo ""
+	@echo "======================================================================"
+	@echo "  ✅ Security test suite complete!"
+	@echo "======================================================================"
+
 update-badges:
 	@echo "Updating README.md coverage badges from coverage.json..."
 	@if [ ! -f coverage.json ]; then \
@@ -113,6 +148,8 @@ _check-tools:
 _lint-semgrep:
 	@echo "Checking exception handling (Semgrep + Grinberg framework)..."
 	@semgrep scan --config .semgrep.yml --error --quiet mdb_engine/ || (echo "❌ Semgrep violations found. See output above." && exit 1)
+	@echo "Checking security rules (Semgrep)..."
+	@semgrep scan --config .semgrep-security.yml --error --quiet mdb_engine/ || (echo "❌ Semgrep security violations found. See output above." && exit 1)
 	@echo "✅ Semgrep checks passed!"
 
 # Code quality - Auto-fix everything

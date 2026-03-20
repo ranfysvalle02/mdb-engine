@@ -86,12 +86,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install semgrep
 
-      - name: Run Semgrep security scan
+      - name: Run Semgrep security scan (custom rules)
         continue-on-error: true
         run: |
           echo "::group::Semgrep Security Scan"
           semgrep scan \
             --config .semgrep.yml \
+            --config .semgrep-security.yml \
             --config auto \
             --json \
             --output semgrep-report.json \
@@ -132,3 +133,102 @@ jobs:
                 });
               }
             }
+
+  framework-security:
+    name: Framework Security Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: |
+            pyproject.toml
+            setup.py
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[test,dev,ai]"
+
+      - name: Run Semgrep security rules
+        run: |
+          echo "::group::Semgrep Custom Security Rules"
+          semgrep scan --config .semgrep-security.yml --error mdb_engine/ || echo "⚠️ Semgrep security rules completed"
+          echo "::endgroup::"
+
+      - name: Run Bandit
+        continue-on-error: true
+        run: |
+          echo "::group::Bandit Security Scan"
+          bandit -r mdb_engine/ -c pyproject.toml --severity-level medium \
+            -f json -o bandit-report.json || echo "⚠️ Bandit completed"
+          echo "::endgroup::"
+
+      - name: Run security tests
+        run: |
+          echo "::group::Security Test Suite"
+          pytest tests/security/ -v --tb=short \
+            --junit-xml=junit-security.xml \
+            -m "not integration"
+          echo "::endgroup::"
+
+      - name: Run security-related unit tests
+        run: |
+          echo "::group::Security Unit Tests"
+          pytest tests/unit/test_query_validator.py \
+            tests/unit/test_scoped_wrapper_security.py \
+            tests/unit/test_auth_hardening.py \
+            tests/unit/test_multi_app_security.py \
+            tests/unit/test_prompt_safety.py \
+            -v --tb=short \
+            --junit-xml=junit-security-unit.xml
+          echo "::endgroup::"
+
+      - name: Upload security test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-test-results
+          path: |
+            junit-security.xml
+            junit-security-unit.xml
+            bandit-report.json
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Comment PR with security test results
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let body = '## 🔒 Framework Security Test Results\n\n';
+            
+            if (fs.existsSync('junit-security.xml')) {
+              const xml = fs.readFileSync('junit-security.xml', 'utf8');
+              const tests = xml.match(/tests="(\d+)"/)?.[1] || '0';
+              const failures = xml.match(/failures="(\d+)"/)?.[1] || '0';
+              body += `**Security tests:** ${tests} total, ${failures} failures\n`;
+            }
+            
+            if (fs.existsSync('bandit-report.json')) {
+              const report = JSON.parse(fs.readFileSync('bandit-report.json', 'utf8'));
+              const issues = report.results?.length || 0;
+              body += `**Bandit findings:** ${issues} issue(s)\n`;
+            }
+            
+            body += `\n[View full results](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });

@@ -32,6 +32,26 @@ _PREV_TEMPLATE_RE = re.compile(r"^\{\{prev\.([a-zA-Z_][a-zA-Z0-9_.]{0,63})\}\}$"
 _ENV_TEMPLATE_RE = re.compile(r"^\{\{env\.([A-Z_][A-Z0-9_]{0,63})\}\}$")
 _MAX_PATH_DEPTH = 3
 
+# Env vars that must never be exposed through template resolution.
+_ENV_DENYLIST: frozenset[str] = frozenset(
+    {
+        "MDB_JWT_SECRET",
+        "MDB_ENGINE_JWT_SECRET",
+        "SECRET_KEY",
+        "FLASK_SECRET_KEY",
+        "OPENAI_API_KEY",
+        "AZURE_OPENAI_API_KEY",
+        "AZURE_OPENAI_ENDPOINT",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_SESSION_TOKEN",
+        "DATABASE_URL",
+        "PYPI_API_TOKEN",
+        "MONGO_URI",
+        "MONGODB_URI",
+        "MDB_MONGO_URI",
+    }
+)
+
 
 # ── Public API ───────────────────────────────────────────────────────────
 
@@ -139,6 +159,11 @@ def _resolve_string(
     match = _ENV_TEMPLATE_RE.match(value)
     if match:
         key = match.group(1)
+        if key in _ENV_DENYLIST:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Access to environment variable '{key}' is denied for security reasons",
+            )
         env_val = os.environ.get(key)
         if env_val is None:
             raise HTTPException(

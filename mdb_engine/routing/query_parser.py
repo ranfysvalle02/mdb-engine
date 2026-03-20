@@ -67,7 +67,10 @@ def _coerce_value(raw: str) -> str | int | float | bool:
     except ValueError:
         pass
     try:
-        return float(raw)
+        f = float(raw)
+        if f != f or f == float("inf") or f == float("-inf"):
+            return raw
+        return f
     except ValueError:
         pass
     return raw

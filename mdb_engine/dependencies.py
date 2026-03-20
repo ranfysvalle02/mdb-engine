@@ -333,7 +333,11 @@ def get_effective_roles(
     single = user.get("role")
     if single:
         roles.add(str(single))
-    roles |= set(user.get("roles", []))
+    multi = user.get("roles")
+    if isinstance(multi, list | tuple | set | frozenset):
+        roles |= {str(r) for r in multi if r}
+    elif isinstance(multi, str) and multi:
+        roles.add(multi)
 
     if not hierarchy:
         return roles
@@ -367,6 +371,55 @@ def require_role(*roles: str) -> Callable:
         return user
 
     return _require_role
+
+
+def require_collection_permission(
+    collection: str,
+    action: str,
+    *,
+    fallback_roles: list[str] | None = None,
+) -> Callable:
+    """Dependency that delegates to ``authz_provider.check()`` when available.
+
+    Falls back to the inline ``require_role`` behaviour if no provider is
+    configured, preserving backward compatibility for apps that haven't
+    opted into a Casbin/OSO provider.
+
+    Args:
+        collection: Collection name (Casbin resource / OSO resource).
+        action: CRUD action (``read``, ``write``, ``create``, ``delete``).
+        fallback_roles: Roles to enforce via legacy ``require_role`` check
+            when no ``authz_provider`` is present on ``app.state``.
+    """
+
+    async def _check(request: Request) -> dict[str, Any] | None:
+        user = await get_current_user(request)
+        authz = getattr(request.app.state, "authz_provider", None)
+
+        if authz is not None:
+            subject = user.get("email", "anonymous") if user else "*"
+            allowed = await authz.check(subject, collection, action, user_object=user)
+            if not allowed:
+                if user is None:
+                    raise HTTPException(401, "Authentication required")
+                raise HTTPException(403, f"Permission denied: {action} on {collection}")
+            return user
+
+        # Fallback: no provider configured
+        if user is None:
+            raise HTTPException(401, "Authentication required")
+
+        if fallback_roles:
+            hierarchy = getattr(request.app.state, "role_hierarchy", None)
+            user_roles = get_effective_roles(user, hierarchy)
+            state_roles = set(await get_user_roles(request))
+            user_roles |= state_roles
+            if not any(role in user_roles for role in fallback_roles):
+                raise HTTPException(403, f"Required role: {' or '.join(fallback_roles)}")
+
+        return user
+
+    return _check
 
 
 # =============================================================================

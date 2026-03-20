@@ -227,6 +227,13 @@ DANGEROUS_OPERATORS: Final[tuple[str, ...]] = (
 )
 """MongoDB operators that are blocked for security reasons."""
 
+DANGEROUS_PIPELINE_STAGES: Final[tuple[str, ...]] = (
+    "$out",  # Writes results to a collection, bypassing tenant scoping
+    "$merge",  # Merges results into a collection, bypassing tenant scoping
+    "$unionWith",  # Reads from another collection, potential cross-tenant leak
+)
+"""Aggregation pipeline stages blocked to prevent cross-tenant data exfiltration."""
+
 # ============================================================================
 # CLIENT-SIDE FIELD LEVEL ENCRYPTION (CSFLE) CONSTANTS
 # ============================================================================

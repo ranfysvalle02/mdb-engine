@@ -1450,6 +1450,35 @@ class ScopedCollectionWrapper:
                 f"This method is explicitly implemented and should be accessed directly."
             )
 
+        # Block write-capable Motor methods that bypass tenant scoping.
+        # These operations would hit the raw collection without app_id
+        # injection, breaking data isolation.
+        _blocked_forwarded_methods = {
+            "bulk_write",
+            "replace_one",
+            "find_one_and_replace",
+            "find_one_and_update",
+            "find_one_and_delete",
+            "rename",
+            "drop",
+            "distinct",
+            "watch",
+            "find_raw_batches",
+            "aggregate_raw_batches",
+            "estimated_document_count",
+        }
+
+        if name in _blocked_forwarded_methods:
+            logger.warning(
+                f"Security: Attempted call to '{name}' which bypasses "
+                "tenant scoping. Use the scoped equivalents instead."
+            )
+            raise AttributeError(
+                f"'{name}' is blocked on ScopedCollectionWrapper because it "
+                f"bypasses tenant scoping. Use the scoped equivalents "
+                f"(update_one, delete_one, etc.) instead."
+            )
+
         # Proxy other attributes to underlying collection
         real_collection = super().__getattribute__("_collection")
         return getattr(real_collection, name)
@@ -1477,6 +1506,28 @@ class ScopedCollectionWrapper:
 
         # If filter exists, combine them robustly with $and
         return {"$and": [filter, scope_filter]}
+
+    _SCOPE_FIELDS: frozenset[str] = frozenset({"app_id"})
+
+    def _validate_update_no_scope_tampering(self, update: Mapping[str, Any] | list) -> None:
+        """Block update operators that would modify the tenant scope field.
+
+        Handles both operator-style updates (dict) and pipeline-style updates
+        (list of aggregation stages).
+        """
+        stages: list[Mapping[str, Any]] = update if isinstance(update, list) else [update]
+        for stage in stages:
+            if not isinstance(stage, dict):
+                continue
+            for op_key, op_value in stage.items():
+                if not isinstance(op_value, dict):
+                    continue
+                for field in op_value:
+                    if field in self._SCOPE_FIELDS:
+                        raise ValueError(
+                            f"Cannot modify tenant scope field '{field}' via "
+                            f"'{op_key}'. This would break tenant isolation."
+                        )
 
     async def insert_one(self, document: Mapping[str, Any], *args, **kwargs) -> InsertOneResult:
         """
@@ -1707,13 +1758,15 @@ class ScopedCollectionWrapper:
             scoped_filter = self._inject_read_filter(filter)
             return self._collection.find(scoped_filter, *args, **kwargs_for_find)
 
-    async def update_one(self, filter: Mapping[str, Any], update: Mapping[str, Any], *args, **kwargs) -> UpdateResult:
+    async def update_one(
+        self, filter: Mapping[str, Any], update: Mapping[str, Any] | list, *args, **kwargs
+    ) -> UpdateResult:
         """
-        Applies the read scope to the filter.
-        Note: This only scopes the *filter*, not the update operation.
+        Applies the read scope to the filter and validates the update
+        body cannot tamper with tenant scope fields.
         """
-        # Validate query filter for security
         self._query_validator.validate_filter(filter)
+        self._validate_update_no_scope_tampering(update)
 
         # Enforce query timeout
         kwargs = self._resource_limiter.enforce_query_timeout(kwargs)
@@ -1756,13 +1809,15 @@ class ScopedCollectionWrapper:
                 span.set_attribute("error", True)
                 raise
 
-    async def update_many(self, filter: Mapping[str, Any], update: Mapping[str, Any], *args, **kwargs) -> UpdateResult:
+    async def update_many(
+        self, filter: Mapping[str, Any], update: Mapping[str, Any] | list, *args, **kwargs
+    ) -> UpdateResult:
         """
-        Applies the read scope to the filter.
-        Note: This only scopes the *filter*, not the update operation.
+        Applies the read scope to the filter and validates the update
+        body cannot tamper with tenant scope fields.
         """
-        # Validate query filter for security
         self._query_validator.validate_filter(filter)
+        self._validate_update_no_scope_tampering(update)
 
         # Enforce query timeout
         kwargs = self._resource_limiter.enforce_query_timeout(kwargs)

@@ -1,0 +1,190 @@
+# MDB-Engine Security Rules
+#
+# Framework-specific Semgrep rules that detect code patterns bypassing
+# mdb-engine's data governance, tenant scoping, and security controls.
+#
+# Run with: semgrep scan --config .semgrep-security.yml --error mdb_engine/
+
+rules:
+  # ===========================================================================
+  # TENANT SCOPING BYPASS DETECTION
+  # ===========================================================================
+
+  - id: mdb-no-raw-mongo-db
+    pattern: $X.connection_manager.mongo_db
+    paths:
+      exclude:
+        - "mdb_engine/core/*"
+        - "mdb_engine/database/*"
+        - "mdb_engine/indexes/*"
+        - "mdb_engine/gdpr/*"
+        - "mdb_engine/auth/*"
+        - "mdb_engine/observability/*"
+        - "tests/*"
+    message: |
+      Raw mongo_db access bypasses tenant scoping and data governance.
+      Use get_scoped_db() or get_unit_of_work() dependencies instead.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      category: security
+      subcategory: tenant-bypass
+
+  - id: mdb-no-private-db-access
+    pattern: $ENGINE._db
+    paths:
+      exclude:
+        - "mdb_engine/*"
+        - "tests/*"
+    message: |
+      Accessing engine._db directly bypasses ScopedMongoWrapper.
+      Use get_scoped_db() or engine.get_scoped_db(slug) instead.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      category: security
+      subcategory: tenant-bypass
+
+  # ===========================================================================
+  # NOSQL INJECTION PREVENTION
+  # ===========================================================================
+
+  - id: mdb-no-raw-request-body-to-insert
+    pattern: |
+      await $COLL.insert_one(await $REQUEST.json())
+    message: |
+      Raw request body passed directly to MongoDB insert without sanitization.
+      Validate with a Pydantic model or use auto_crud sanitize_body() first.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      category: security
+      subcategory: injection
+
+  - id: mdb-no-raw-request-body-to-update
+    patterns:
+      - pattern: |
+          await $COLL.update_one($FILTER, await $REQUEST.json())
+    message: |
+      Raw request body passed directly to MongoDB update without sanitization.
+      Validate with a Pydantic model or use auto_crud sanitize_body() first.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      category: security
+      subcategory: injection
+
+  # ===========================================================================
+  # DANGEROUS OPERATOR LITERALS
+  # ===========================================================================
+
+  - id: mdb-no-dangerous-operator-literals
+    pattern-regex: '"\$(where|eval|function|accumulator)"'
+    paths:
+      exclude:
+        - "mdb_engine/database/query_validator.py"
+        - "mdb_engine/constants.py"
+        - "tests/*"
+        - ".semgrep*"
+    message: |
+      Dangerous MongoDB operator found in code. These enable server-side
+      JavaScript execution and are blocked by QueryValidator at runtime.
+      They should never appear in application code.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      category: security
+      subcategory: injection
+
+  - id: mdb-no-merge-out-in-app-code
+    pattern-regex: '"\$(out|merge)"'
+    paths:
+      exclude:
+        - "mdb_engine/database/*"
+        - "mdb_engine/constants.py"
+        - "tests/*"
+        - ".semgrep*"
+    message: |
+      $out/$merge in aggregation pipelines can write to arbitrary collections,
+      bypassing tenant scoping. These are blocked by QueryValidator at runtime.
+    severity: WARNING
+    languages: [python]
+    metadata:
+      category: security
+      subcategory: tenant-bypass
+
+  # ===========================================================================
+  # PYTHON SECURITY BASICS
+  # ===========================================================================
+
+  - id: mdb-no-eval
+    pattern-either:
+      - pattern: eval(...)
+      - pattern: exec(...)
+    paths:
+      exclude:
+        - "tests/*"
+    message: |
+      eval()/exec() can execute arbitrary code. Use ast.literal_eval() for
+      safe parsing or find a structured alternative.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      category: security
+      subcategory: code-execution
+
+  - id: mdb-no-hardcoded-secrets
+    patterns:
+      - pattern: $VAR = "..."
+      - metavariable-regex:
+          metavariable: $VAR
+          regex: ".*(secret|password|api_key|apikey|token|private_key).*"
+      - pattern-not: $VAR = ""
+      - pattern-not: $VAR = "..."  # placeholder strings
+    paths:
+      exclude:
+        - "tests/*"
+        - "mdb_engine/constants.py"
+        - ".semgrep*"
+    message: |
+      Potential hardcoded secret. Use environment variables or a secrets
+      manager instead.
+    severity: WARNING
+    languages: [python]
+    metadata:
+      category: security
+      subcategory: secrets
+
+  # ===========================================================================
+  # FRAMEWORK MISUSE
+  # ===========================================================================
+
+  - id: mdb-no-manual-jwt-decode
+    pattern: jwt.decode(...)
+    paths:
+      exclude:
+        - "mdb_engine/auth/*"
+        - "tests/*"
+    message: |
+      Manual JWT decoding outside auth module. Use get_current_user,
+      require_user(), or ctx.user instead of parsing tokens directly.
+    severity: WARNING
+    languages: [python]
+    metadata:
+      category: security
+      subcategory: framework-misuse
+
+  - id: mdb-no-shared-client-for-data
+    pattern: get_shared_mongo_client(...)
+    paths:
+      exclude:
+        - "mdb_engine/*"
+        - "tests/*"
+    message: |
+      get_shared_mongo_client() returns a raw Motor client without tenant
+      scoping. Use engine.get_scoped_db() or get_scoped_db dependency instead.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      category: security
+      subcategory: tenant-bypass

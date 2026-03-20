@@ -8,7 +8,8 @@ import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from fastapi import HTTPException
+from fastapi import Depends, FastAPI, HTTPException
+from fastapi.testclient import TestClient
 
 from mdb_engine.dependencies import (
     RequestContext,
@@ -586,3 +587,126 @@ class TestEmbeddingDependenciesUtility:
         result = get_embedding_service_for_app("test_app", mock_engine)
 
         assert result is None
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# require_collection_permission
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestRequireCollectionPermission:
+    """Tests for the authz_provider-backed collection permission dependency."""
+
+    def test_allows_when_provider_returns_true(self):
+        from mdb_engine.dependencies import require_collection_permission
+
+        app = FastAPI()
+        mock_provider = AsyncMock()
+        mock_provider.check.return_value = True
+        app.state.authz_provider = mock_provider
+
+        dep_fn = require_collection_permission("posts", "write")
+
+        @app.get("/test")
+        async def _route(user=Depends(dep_fn)):
+            return {"ok": True}
+
+        class _InjectUser:
+            async def __call__(self, scope, receive, send):
+                pass
+
+        from starlette.middleware.base import BaseHTTPMiddleware
+
+        class InjectUser(BaseHTTPMiddleware):
+            async def dispatch(self, request, call_next):
+                request.state.user = {"_id": "u1", "email": "a@b.com"}
+                request.state.user_roles = []
+                return await call_next(request)
+
+        app.add_middleware(InjectUser)
+
+        client = TestClient(app)
+        resp = client.get("/test")
+        assert resp.status_code == 200
+        mock_provider.check.assert_called_once()
+        call_args = mock_provider.check.call_args
+        assert call_args[0][1] == "posts"
+        assert call_args[0][2] == "write"
+
+    def test_denies_when_provider_returns_false(self):
+        from mdb_engine.dependencies import require_collection_permission
+
+        app = FastAPI()
+        mock_provider = AsyncMock()
+        mock_provider.check.return_value = False
+        app.state.authz_provider = mock_provider
+
+        dep_fn = require_collection_permission("posts", "write")
+
+        @app.get("/test")
+        async def _route(user=Depends(dep_fn)):
+            return {"ok": True}
+
+        from starlette.middleware.base import BaseHTTPMiddleware
+
+        class InjectUser(BaseHTTPMiddleware):
+            async def dispatch(self, request, call_next):
+                request.state.user = {"_id": "u1", "email": "a@b.com"}
+                request.state.user_roles = []
+                return await call_next(request)
+
+        app.add_middleware(InjectUser)
+
+        client = TestClient(app)
+        resp = client.get("/test")
+        assert resp.status_code == 403
+
+    def test_fallback_requires_auth_when_no_provider(self):
+        from mdb_engine.dependencies import require_collection_permission
+
+        app = FastAPI()
+
+        dep_fn = require_collection_permission("posts", "read")
+
+        @app.get("/test")
+        async def _route(user=Depends(dep_fn)):
+            return {"ok": True}
+
+        from starlette.middleware.base import BaseHTTPMiddleware
+
+        class InjectNoUser(BaseHTTPMiddleware):
+            async def dispatch(self, request, call_next):
+                request.state.user = None
+                request.state.user_roles = []
+                return await call_next(request)
+
+        app.add_middleware(InjectNoUser)
+
+        client = TestClient(app)
+        resp = client.get("/test")
+        assert resp.status_code == 401
+
+    def test_fallback_allows_authenticated_when_no_provider(self):
+        from mdb_engine.dependencies import require_collection_permission
+
+        app = FastAPI()
+
+        dep_fn = require_collection_permission("posts", "read")
+
+        @app.get("/test")
+        async def _route(user=Depends(dep_fn)):
+            return {"ok": True}
+
+        from starlette.middleware.base import BaseHTTPMiddleware
+
+        class InjectUser(BaseHTTPMiddleware):
+            async def dispatch(self, request, call_next):
+                request.state.user = {"_id": "u1", "email": "a@b.com"}
+                request.state.user_roles = []
+                return await call_next(request)
+
+        app.add_middleware(InjectUser)
+
+        client = TestClient(app)
+        resp = client.get("/test")
+        assert resp.status_code == 200

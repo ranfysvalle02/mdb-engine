@@ -80,6 +80,40 @@ Each blog has its own user pool:
 Data isolation is automatic: each app gets its own `ScopedDB` keyed by slug, so
 `tech-blog.posts` and `cooking-blog.posts` are separate MongoDB collections.
 
+## Authorization — Unified AuthZ with OSO
+
+This example demonstrates mdb-engine's **unified authorization architecture**.
+Authorization flows through a single pluggable `AuthorizationProvider` —
+here powered by [OSO](https://www.osohq.com/).
+
+### How the pieces fit together
+
+1. **Manifest DSL** — each blog's `manifest.json` declares roles and
+   collection-level auth (`write_roles`, `public_read`, `role_hierarchy`)
+   in plain JSON.
+
+2. **Policy Compiler** — at startup the engine reads those declarations and
+   compiles them into OSO facts (e.g. `has_role(User:"admin@tech", "admin",
+   Post:"posts")`).  This happens automatically — no manual wiring.
+
+3. **Polar Policy** (`blogs/main.polar`) — defines *what roles mean*.  The
+   `Post` resource declares `"write" if "editor"`, `"editor" if "admin"`,
+   etc.  Combined with the compiled facts, OSO can answer any
+   `authorize(actor, action, resource)` question.
+
+4. **auto-CRUD** — every generated API endpoint delegates its permission
+   gate to `authz_provider.check()`.  MQL data-scoping (`owner_field`,
+   `policy`, `scopes`) still runs after the boolean gate, giving you both
+   coarse-grained *access control* and fine-grained *data filtering* in a
+   single request.
+
+### Swapping providers
+
+To switch from OSO to Casbin, change `"provider": "oso"` to
+`"provider": "casbin"` (or remove the `policy` block entirely — Casbin is
+the default).  The manifest DSL, the auto-CRUD routes, and the data-scoping
+layer all stay the same.
+
 ## Adding a New Blog
 
 1. Create a new directory under `blogs/` (e.g., `blogs/travel/`)

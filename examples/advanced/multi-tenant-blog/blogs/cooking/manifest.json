@@ -4,6 +4,15 @@
   "name": "Cooking Blog",
   "auth": {
     "mode": "app",
+    "policy": {
+      "provider": "oso",
+      "authorization": {
+        "initial_roles": [
+          {"user": "admin@cooking.example.com", "role": "admin", "resource": "posts"},
+          {"user": "chef@cooking.example.com", "role": "editor", "resource": "posts"}
+        ]
+      }
+    },
     "users": {
       "enabled": true,
       "strategy": "app_users",

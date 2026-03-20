@@ -4,6 +4,15 @@
   "name": "Tech Blog",
   "auth": {
     "mode": "app",
+    "policy": {
+      "provider": "oso",
+      "authorization": {
+        "initial_roles": [
+          {"user": "admin@tech.example.com", "role": "admin", "resource": "posts"},
+          {"user": "writer@tech.example.com", "role": "editor", "resource": "posts"}
+        ]
+      }
+    },
     "users": {
       "enabled": true,
       "strategy": "app_users",

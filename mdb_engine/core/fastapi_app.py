@@ -595,16 +595,22 @@ class FastAPIAppMixin:
         app_manifest: dict[str, Any],
         auth_config: dict[str, Any],
     ) -> None:
-        """Initialize authorization provider from manifest config."""
+        """Initialize authorization provider from manifest config.
+
+        Provider selection order:
+        1. Explicit ``auth.policy.provider`` in manifest → use that.
+        2. ``auth.policy`` present but no provider → default to Casbin.
+        3. No ``auth.policy`` but collections have ``auth`` blocks →
+           auto-create Casbin and compile manifest policies into it.
+        4. Nothing → skip.
+        """
         try:
-            logger.info(f"Checking auth config for '{slug}': " f"auth_config keys={list(auth_config.keys())}")
             auth_policy = auth_config.get("policy", {})
-            logger.info(f"Auth policy for '{slug}': {auth_policy}")
             authz_provider_type = auth_policy.get("provider")
-            logger.info(f"Authz provider type for '{slug}': {authz_provider_type}")
         except (KeyError, AttributeError, TypeError) as e:
             logger.exception(f"Error reading auth config for '{slug}': {e}")
             authz_provider_type = None
+            auth_policy = {}
 
         if authz_provider_type == "oso":
             await self._initialize_oso_provider(engine, app, slug, app_manifest)
@@ -614,8 +620,22 @@ class FastAPIAppMixin:
             await self._initialize_casbin_provider_default(engine, app, slug, app_manifest)
         elif authz_provider_type:
             logger.warning(
-                f"Unknown authz provider type '{authz_provider_type}' for '{slug}' - " f"skipping initialization"
+                f"Unknown authz provider type '{authz_provider_type}' for '{slug}' - skipping initialization"
             )
+        else:
+            # No explicit auth.policy — auto-create Casbin if collections have auth blocks
+            from ..auth.policy_compiler import has_collection_auth
+
+            if has_collection_auth(app_manifest):
+                logger.info(f"Collections with auth detected for '{slug}', auto-creating Casbin provider")
+                await self._initialize_casbin_provider_default(engine, app, slug, app_manifest)
+
+        # After provider is ready, compile manifest collection-auth into policies
+        authz_provider = getattr(app.state, "authz_provider", None)
+        if authz_provider:
+            from ..auth.policy_compiler import compile_manifest_policies
+
+            await compile_manifest_policies(authz_provider, app_manifest, slug)
 
     async def _initialize_oso_provider(
         self,
@@ -653,29 +673,14 @@ class FastAPIAppMixin:
         try:
             from ..auth.casbin_factory import initialize_casbin_from_manifest
 
-            logger.debug(f"Calling initialize_casbin_from_manifest for '{slug}'")
             authz_provider = await initialize_casbin_from_manifest(engine, slug, app_manifest)
-            logger.debug(f"initialize_casbin_from_manifest returned: {authz_provider is not None}")
             if authz_provider:
                 app.state.authz_provider = authz_provider
-                logger.info(f"Casbin provider auto-initialized for '{slug}' " f"and set on app.state")
-                logger.info(
-                    f"Provider type: {type(authz_provider).__name__}, "
-                    f"initialized: {getattr(authz_provider, '_initialized', 'unknown')}"
-                )
-                # Verify it's actually set
-                if hasattr(app.state, "authz_provider") and app.state.authz_provider:
-                    logger.info("Verified: app.state.authz_provider is set and not None")
-                else:
-                    logger.error("CRITICAL: app.state.authz_provider was set but is now " "None or missing!")
+                logger.info(f"Casbin provider auto-initialized for '{slug}'")
             else:
-                logger.error(
-                    f"Casbin provider initialization returned None for '{slug}' - " f"check logs above for errors"
-                )
-                logger.error(f"This means authorization will NOT work for '{slug}'")
-        except ImportError as e:
-            logger.warning(f"Casbin not available for '{slug}': {e}. " "Install with: pip install mdb-engine[casbin]")
+                logger.error(f"Casbin provider initialization returned None for '{slug}'")
         except (
+            ImportError,
             ValueError,
             TypeError,
             RuntimeError,
@@ -685,9 +690,6 @@ class FastAPIAppMixin:
             OSError,
         ) as e:
             logger.exception(f"Failed to initialize Casbin provider for '{slug}': {e}")
-            logger.error(  # noqa: TRY400
-                f"This means authorization will NOT work for '{slug}' - " f"app.state.authz_provider will remain None"
-            )
 
     async def _initialize_casbin_provider_default(
         self,
@@ -697,7 +699,7 @@ class FastAPIAppMixin:
         app_manifest: dict[str, Any],
     ) -> None:
         """Initialize Casbin provider as default when no provider specified."""
-        logger.info(f"No provider specified in auth.policy for '{slug}', " f"defaulting to Casbin")
+        logger.info(f"No provider specified in auth.policy for '{slug}', defaulting to Casbin")
         try:
             from ..auth.casbin_factory import initialize_casbin_from_manifest
 
@@ -706,10 +708,9 @@ class FastAPIAppMixin:
                 app.state.authz_provider = authz_provider
                 logger.info(f"Casbin provider auto-initialized for '{slug}' (default)")
             else:
-                logger.warning(f"Casbin provider not initialized for '{slug}' " f"(default attempt failed)")
-        except ImportError as e:
-            logger.warning(f"Casbin not available for '{slug}': {e}. " "Install with: pip install mdb-engine[casbin]")
+                logger.warning(f"Casbin provider not initialized for '{slug}' (default attempt failed)")
         except (
+            ImportError,
             ValueError,
             TypeError,
             RuntimeError,

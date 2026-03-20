@@ -11,15 +11,14 @@ from __future__ import annotations  # MUST be first import for string type hints
 import asyncio
 import logging
 import time
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import Any, Protocol
+
+import casbin  # type: ignore
 
 from ..constants import AUTHZ_CACHE_TTL, MAX_CACHE_SIZE
 
 # Import base class
 from .base import AuthorizationError, BaseAuthorizationProvider
-
-if TYPE_CHECKING:
-    import casbin
 
 logger = logging.getLogger(__name__)
 
@@ -70,15 +69,6 @@ class CasbinAdapter(BaseAuthorizationProvider):
         Raises:
             AuthorizationError: If Casbin is not available
         """
-        # Lazy import to allow code to exist without Casbin installed
-        # Import check is done via importlib in the factory, not here
-        try:
-            import casbin  # noqa: F401
-        except ImportError as e:
-            raise AuthorizationError(
-                "Casbin library is not installed. " "Install with: pip install mdb-engine[casbin]"
-            ) from e
-
         super().__init__(engine_name="Casbin")
         self._enforcer = enforcer
         # Cache for authorization results: {(subject, resource, action): (result, timestamp)}

@@ -1236,10 +1236,29 @@ class MultiAppMixin:
                             exc_info=True,
                         )
 
+                    # --- authz provider + role_hierarchy for child app ----------
+                    child_app.state.role_hierarchy = auth_config.get("users", {}).get("role_hierarchy")
+                    try:
+                        await self._initialize_auth_provider(
+                            engine,
+                            child_app,
+                            slug,
+                            app_manifest_data,
+                            auth_config,
+                        )
+                    except (
+                        ValueError,
+                        TypeError,
+                        RuntimeError,
+                        AttributeError,
+                        KeyError,
+                        ConnectionError,
+                    ):
+                        logger.exception(f"Failed to initialize authz provider for child '{slug}'")
+
                     # Share user_pool with child app if shared auth is enabled
                     if shared_user_pool_initialized and hasattr(app.state, "user_pool"):
                         child_app.state.user_pool = app.state.user_pool
-                        # Also share audit_log if available
                         if hasattr(app.state, "audit_log"):
                             child_app.state.audit_log = app.state.audit_log
                         logger.debug(f"Shared user_pool with child app '{slug}'")

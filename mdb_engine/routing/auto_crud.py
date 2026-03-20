@@ -71,7 +71,7 @@ from bson.errors import InvalidId
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pymongo.errors import DuplicateKeyError, PyMongoError
 
-from ..dependencies import get_scoped_db, require_role, require_user
+from ..dependencies import get_scoped_db, require_collection_permission, require_role, require_user
 from ._hooks import HookExecutor
 from ._serialization import serialize_doc
 from ._validators import validate_schema_extensions
@@ -346,6 +346,12 @@ class _CollectionCtx:
 
         for f in self.immutable_fields:
             body.pop(f, None)
+
+        # Strip any $-prefixed keys to prevent operator injection via
+        # document field names (prevents storing operator-shaped keys).
+        for key in list(body.keys()):
+            if key.startswith("$"):
+                body.pop(key)
 
     def effective_projection(self, parsed_projection: dict[str, int] | None) -> dict[str, int] | None:
         if parsed_projection is not None:
@@ -974,16 +980,40 @@ def create_auto_crud_router(
     _auth_baseline = app_auth_enabled
     _public_read = bool(auth_config.get("public_read", False))
 
+    # --- auth gate wiring ---------------------------------------------------
+    # When an authz_provider is available (Casbin/OSO), delegates to it via
+    # require_collection_permission.  Falls back to the legacy inline
+    # require_role/require_user path when no provider is configured.
+    _has_roles = bool(auth_config.get("roles"))
+    _has_write_roles = bool(auth_config.get("write_roles"))
+    _has_create_roles = bool(auth_config.get("create_roles"))
+    _use_provider = _has_roles or _has_write_roles or _has_create_roles
+
+    _all_roles = auth_config.get("roles", [])
+    _write_roles_list = auth_config.get("write_roles", [])
+    _create_roles_list = auth_config.get("create_roles", [])
+
     # Router-level auth gates ALL endpoints (reads + writes) by default.
     router_dependencies: list[Any] = []
-    if auth_config.get("roles"):
-        router_dependencies.append(Depends(require_role(*auth_config["roles"])))
+    if _use_provider and _has_roles:
+        router_dependencies.append(
+            Depends(require_collection_permission(collection_name, "read", fallback_roles=_all_roles))
+        )
+    elif _has_roles:
+        router_dependencies.append(Depends(require_role(*_all_roles)))
     elif auth_config.get("required") or _auth_baseline:
         router_dependencies.append(Depends(require_user()))
 
     # public_read: split into two routers — public reads, auth-gated writes.
     if _public_read and _auth_baseline:
-        read_router = APIRouter(prefix=prefix, tags=route_tags)
+        if _use_provider:
+            read_router = APIRouter(
+                prefix=prefix,
+                tags=route_tags,
+                dependencies=[Depends(require_collection_permission(collection_name, "read"))],
+            )
+        else:
+            read_router = APIRouter(prefix=prefix, tags=route_tags)
         write_router = APIRouter(prefix=prefix, tags=route_tags, dependencies=[Depends(require_user())])
     else:
         read_router = APIRouter(prefix=prefix, tags=route_tags, dependencies=router_dependencies)
@@ -992,20 +1022,28 @@ def create_auto_crud_router(
     _register_read_routes(read_router, ctx)
     _register_pipeline_routes(read_router, ctx)
     if not ctx.read_only:
-        # create_roles / create_required gate POST (create) only.
         create_roles = auth_config.get("create_roles")
         create_required = auth_config.get("create_required", False) or _auth_baseline
         create_deps: list[Any] = []
-        if create_roles:
+        _create_fb = _create_roles_list or _write_roles_list or None
+        if _use_provider and (create_roles or _has_write_roles):
+            create_deps.append(
+                Depends(require_collection_permission(collection_name, "create", fallback_roles=_create_fb))
+            )
+        elif create_roles:
             create_deps.append(Depends(require_role(*create_roles)))
         elif create_required:
             create_deps.append(Depends(require_user()))
 
-        # write_roles / write_required gate PUT/PATCH/DELETE.
         write_roles = auth_config.get("write_roles")
         write_required = auth_config.get("write_required", False) or _auth_baseline
         write_deps: list[Any] = []
-        if write_roles:
+        _write_fb = _write_roles_list or _all_roles or None
+        if _use_provider and (_has_write_roles or _has_roles):
+            write_deps.append(
+                Depends(require_collection_permission(collection_name, "write", fallback_roles=_write_fb))
+            )
+        elif write_roles:
             write_deps.append(Depends(require_role(*write_roles)))
         elif write_required:
             write_deps.append(Depends(require_user()))
