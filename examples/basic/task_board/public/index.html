@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Task Board — mdb-engine Actions Demo</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  darkMode: 'class',
+  theme: {
+    extend: {
+      colors: {
+        surface: { 1: '#111113', 2: '#18181b', 3: '#1f1f23' },
+        border: { DEFAULT: '#27272a', h: '#3f3f46' },
+      }
+    }
+  }
+}
+</script>
+</head>
+<body class="bg-[#0a0a0b] text-zinc-100 antialiased min-h-screen font-sans">
+
+<!-- Header -->
+<header class="sticky top-0 z-50 bg-surface-1 border-b border-border backdrop-blur">
+  <div class="max-w-5xl mx-auto px-6 h-14 flex items-center gap-4">
+    <h1 class="text-base font-bold tracking-tight">
+      <span class="text-violet-400">task</span>board
+    </h1>
+    <span class="text-[11px] text-zinc-500 bg-surface-3 px-2 py-0.5 rounded font-medium">actions demo</span>
+  </div>
+</header>
+
+<main class="max-w-5xl mx-auto px-6 py-8 space-y-8">
+
+  <!-- Stats Bar -->
+  <section id="statsBar" class="grid grid-cols-2 sm:grid-cols-5 gap-3">
+    <div class="bg-surface-1 border border-border rounded-xl p-4 text-center">
+      <div class="text-2xl font-bold text-violet-400" id="sTodo">-</div>
+      <div class="text-[10px] uppercase tracking-wider text-zinc-500 font-semibold mt-1">Todo</div>
+    </div>
+    <div class="bg-surface-1 border border-border rounded-xl p-4 text-center">
+      <div class="text-2xl font-bold text-amber-400" id="sProgress">-</div>
+      <div class="text-[10px] uppercase tracking-wider text-zinc-500 font-semibold mt-1">In Progress</div>
+    </div>
+    <div class="bg-surface-1 border border-border rounded-xl p-4 text-center">
+      <div class="text-2xl font-bold text-emerald-400" id="sDone">-</div>
+      <div class="text-[10px] uppercase tracking-wider text-zinc-500 font-semibold mt-1">Done</div>
+    </div>
+    <div class="bg-surface-1 border border-border rounded-xl p-4 text-center">
+      <div class="text-2xl font-bold text-zinc-400" id="sArchived">-</div>
+      <div class="text-[10px] uppercase tracking-wider text-zinc-500 font-semibold mt-1">Archived</div>
+    </div>
+    <div class="bg-surface-1 border border-border rounded-xl p-4 text-center col-span-2 sm:col-span-1">
+      <div class="text-2xl font-bold text-zinc-100" id="sTotal">-</div>
+      <div class="text-[10px] uppercase tracking-wider text-zinc-500 font-semibold mt-1">Active Total</div>
+    </div>
+  </section>
+
+  <!-- Create Task -->
+  <section class="bg-surface-1 border border-border rounded-xl p-5">
+    <form id="createForm" class="flex gap-3">
+      <input
+        id="newTitle"
+        type="text"
+        placeholder="What needs to be done?"
+        autocomplete="off"
+        class="flex-1 bg-surface-2 border border-border rounded-lg px-4 py-2.5 text-sm text-zinc-100 placeholder-zinc-500 outline-none focus:border-violet-500 transition"
+      >
+      <button type="submit" class="bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium px-5 py-2.5 rounded-lg transition shrink-0">
+        Add Task
+      </button>
+    </form>
+  </section>
+
+  <!-- Task Columns -->
+  <section class="grid grid-cols-1 md:grid-cols-3 gap-5">
+    <!-- Todo Column -->
+    <div>
+      <div class="flex items-center gap-2 mb-3">
+        <span class="w-2.5 h-2.5 rounded-full bg-violet-500"></span>
+        <h2 class="text-sm font-semibold text-zinc-300">Todo</h2>
+        <span class="text-xs text-zinc-500 ml-auto" id="cTodo">0</span>
+      </div>
+      <div id="colTodo" class="space-y-2 min-h-[60px]"></div>
+    </div>
+
+    <!-- In Progress Column -->
+    <div>
+      <div class="flex items-center gap-2 mb-3">
+        <span class="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
+        <h2 class="text-sm font-semibold text-zinc-300">In Progress</h2>
+        <span class="text-xs text-zinc-500 ml-auto" id="cProgress">0</span>
+      </div>
+      <div id="colProgress" class="space-y-2 min-h-[60px]"></div>
+    </div>
+
+    <!-- Done Column -->
+    <div>
+      <div class="flex items-center gap-2 mb-3">
+        <span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+        <h2 class="text-sm font-semibold text-zinc-300">Done</h2>
+        <span class="text-xs text-zinc-500 ml-auto" id="cDone">0</span>
+      </div>
+      <div id="colDone" class="space-y-2 min-h-[60px]"></div>
+    </div>
+  </section>
+
+  <!-- Archive Panel -->
+  <section>
+    <div class="flex items-center gap-2 mb-3">
+      <svg class="w-4 h-4 text-zinc-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"/>
+      </svg>
+      <h2 class="text-sm font-semibold text-zinc-300">Archive</h2>
+      <span class="text-[11px] text-zinc-500 bg-surface-3 px-2 py-0.5 rounded font-medium">
+        tasks move here daily via scheduled action
+      </span>
+    </div>
+    <div id="archiveList" class="bg-surface-1 border border-border rounded-xl divide-y divide-border overflow-hidden">
+      <div class="p-8 text-center text-zinc-500 text-sm">No archived tasks yet.</div>
+    </div>
+  </section>
+
+</main>
+
+<!-- Toast Container -->
+<div id="toasts" class="fixed bottom-5 right-5 flex flex-col gap-2 z-[9999]"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const BASE = location.origin;
+
+const STATUS_CYCLE = { todo: 'in_progress', in_progress: 'done', done: 'todo' };
+
+async function api(method, path, body) {
+  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  if (body !== undefined) opts.body = JSON.stringify(body);
+  else delete opts.headers['Content-Type'];
+  const res = await fetch(BASE + path, opts);
+  let data = null;
+  try { data = await res.json(); } catch {}
+  return { ok: res.ok, status: res.status, data };
+}
+
+function toast(msg, type = 'ok') {
+  const el = document.createElement('div');
+  const colors = { ok: 'bg-emerald-600', err: 'bg-red-600', info: 'bg-violet-600' };
+  el.className = `${colors[type] || colors.ok} text-white text-sm font-medium px-5 py-2.5 rounded-lg shadow-lg animate-[slideUp_0.25s_ease]`;
+  el.textContent = msg;
+  $('#toasts').appendChild(el);
+  setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity .3s'; setTimeout(() => el.remove(), 300); }, 2500);
+}
+
+function esc(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
+
+function taskCard(task) {
+  const statusColors = {
+    todo: 'border-l-violet-500',
+    in_progress: 'border-l-amber-500',
+    done: 'border-l-emerald-500',
+  };
+  const num = task.number != null ? `<span class="text-xs text-zinc-500 font-mono">#${task.number}</span>` : '';
+  return `
+    <div class="bg-surface-2 border border-border ${statusColors[task.status] || ''} border-l-2 rounded-lg p-3.5 group flex items-start gap-3" data-id="${task._id}">
+      <button onclick="cycleStatus('${task._id}', '${task.status}')" title="Click to advance status"
+        class="mt-0.5 w-5 h-5 rounded-full border-2 border-zinc-600 hover:border-violet-400 flex items-center justify-center shrink-0 transition ${task.status === 'done' ? 'bg-emerald-500/20 border-emerald-500' : ''}">
+        ${task.status === 'done' ? '<svg class="w-3 h-3 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/></svg>' : ''}
+      </button>
+      <div class="flex-1 min-w-0">
+        <div class="text-sm font-medium ${task.status === 'done' ? 'line-through text-zinc-500' : 'text-zinc-200'}">${esc(task.title)}</div>
+        <div class="flex items-center gap-2 mt-1">
+          ${num}
+          <span class="text-[10px] text-zinc-600">${new Date(task.created_at || Date.now()).toLocaleDateString()}</span>
+        </div>
+      </div>
+      <button onclick="deleteTask('${task._id}')" title="Delete"
+        class="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-red-400 transition p-1">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>`;
+}
+
+function archiveRow(task) {
+  return `
+    <div class="px-4 py-3 flex items-center gap-3">
+      <span class="text-xs text-zinc-500 font-mono shrink-0">${task.number != null ? '#' + task.number : ''}</span>
+      <span class="text-sm text-zinc-400 flex-1 truncate">${esc(task.title)}</span>
+      <span class="text-[10px] text-zinc-600 shrink-0">${task.archived_at ? new Date(task.archived_at).toLocaleDateString() : ''}</span>
+    </div>`;
+}
+
+async function loadStats() {
+  const r = await api('GET', '/actions/v1/stats');
+  if (!r.ok) return;
+  const d = r.data;
+  $('#sTodo').textContent = d.todo;
+  $('#sProgress').textContent = d.in_progress;
+  $('#sDone').textContent = d.done;
+  $('#sArchived').textContent = d.archived;
+  $('#sTotal').textContent = d.total;
+}
+
+async function loadTasks() {
+  const r = await api('GET', '/api/tasks?sort=-created_at&limit=200');
+  const tasks = r.data?.data || [];
+
+  const buckets = { todo: [], in_progress: [], done: [] };
+  tasks.forEach(t => { if (buckets[t.status]) buckets[t.status].push(t); });
+
+  $('#colTodo').innerHTML = buckets.todo.length
+    ? buckets.todo.map(taskCard).join('')
+    : '<div class="text-zinc-600 text-xs text-center py-6">No tasks</div>';
+  $('#colProgress').innerHTML = buckets.in_progress.length
+    ? buckets.in_progress.map(taskCard).join('')
+    : '<div class="text-zinc-600 text-xs text-center py-6">No tasks</div>';
+  $('#colDone').innerHTML = buckets.done.length
+    ? buckets.done.map(taskCard).join('')
+    : '<div class="text-zinc-600 text-xs text-center py-6">No tasks</div>';
+
+  $('#cTodo').textContent = buckets.todo.length;
+  $('#cProgress').textContent = buckets.in_progress.length;
+  $('#cDone').textContent = buckets.done.length;
+}
+
+async function loadArchive() {
+  const r = await api('GET', '/api/archive?sort=-archived_at&limit=50');
+  const items = r.data?.data || [];
+  $('#archiveList').innerHTML = items.length
+    ? items.map(archiveRow).join('')
+    : '<div class="p-8 text-center text-zinc-500 text-sm">No archived tasks yet.</div>';
+}
+
+async function refresh() {
+  await Promise.all([loadStats(), loadTasks(), loadArchive()]);
+}
+
+$('#createForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const title = $('#newTitle').value.trim();
+  if (!title) return;
+  const r = await api('POST', '/api/tasks', { title });
+  if (r.ok) {
+    $('#newTitle').value = '';
+    toast('Task created');
+    await refresh();
+  } else {
+    toast(r.data?.detail || 'Failed to create task', 'err');
+  }
+});
+
+async function cycleStatus(id, current) {
+  const next = STATUS_CYCLE[current] || 'todo';
+  const r = await api('PATCH', `/api/tasks/${id}`, { status: next });
+  if (r.ok) {
+    await refresh();
+  } else {
+    toast('Update failed', 'err');
+  }
+}
+
+async function deleteTask(id) {
+  const r = await api('DELETE', `/api/tasks/${id}`);
+  if (r.ok) {
+    toast('Task deleted');
+    await refresh();
+  } else {
+    toast('Delete failed', 'err');
+  }
+}
+
+refresh();
+</script>
+
+<style>
+@keyframes slideUp {
+  from { transform: translateY(12px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+</style>
+</body>
+</html>

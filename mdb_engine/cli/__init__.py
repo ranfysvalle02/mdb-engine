@@ -6,6 +6,7 @@ Entry point for the ``mdb-engine`` command.
 
 import click
 
+from .commands.actions import actions
 from .commands.add_user import add_user
 from .commands.codegen import codegen
 from .commands.diff import diff
@@ -34,3 +35,4 @@ main.add_command(diff)
 main.add_command(dry_run, name="dry-run")
 main.add_command(codegen)
 main.add_command(serve_multi, name="serve-multi")
+main.add_command(actions)

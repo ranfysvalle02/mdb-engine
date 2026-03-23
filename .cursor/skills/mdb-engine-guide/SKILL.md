@@ -885,6 +885,10 @@ from mdb_engine.auth import validate_jwt_token_format, get_cookie_settings
 # Testing
 from mdb_engine.testing import create_test_client, mock_scoped_db, mock_user
 
+# Actions
+from mdb_engine.actions import ActionContext, ActionResponse
+from mdb_engine.actions.discovery import mount_actions, discover_actions
+
 # Background tasks
 from mdb_engine.tasks import recurring_task
 
@@ -902,6 +906,180 @@ from mdb_engine.exceptions import (
 
 # Utilities
 from mdb_engine.utils import clean_mongo_doc, clean_mongo_docs
+```
+
+---
+
+## 15. Actions (Manifest-Driven Handlers)
+
+Actions are single-file Python handlers in an `actions/` directory next to the manifest. Each file exports an async `handler(ctx)` function. Three trigger types are supported: **HTTP**, **schedule**, and **event**.
+
+### Directory Convention
+
+```
+my_app/
+├── manifest.json
+├── web.py                     # Custom routes (optional)
+├── actions/
+│   ├── send-email.py          # HTTP trigger (POST /actions/v1/send-email)
+│   ├── cleanup-sessions.py    # Scheduled trigger
+│   └── on-user-signup.py      # Event trigger (after_create on users)
+```
+
+Files prefixed with `_` are skipped. Each `.py` file must export an `async def handler(ctx: ActionContext)`.
+
+### HTTP Action Example
+
+```python
+# actions/send-email.py
+from mdb_engine.actions import ActionContext
+
+async def handler(ctx: ActionContext):
+    user = ctx.require_user()
+    body = await ctx.json()
+    db = await ctx.get_db()
+    await db.email_queue.insert_one({"to": body["email"], "user_id": user["_id"]})
+    return ctx.json_response({"queued": True})
+```
+
+Mounted at `POST /actions/v1/send-email` automatically.
+
+### Scheduled Action Example
+
+```python
+# actions/cleanup-sessions.py
+from mdb_engine.actions import ActionContext
+
+__trigger__ = "schedule"
+__interval_seconds__ = 3600  # every hour
+
+async def handler(ctx: ActionContext):
+    db = await ctx.get_db()
+    from datetime import datetime, timezone
+    await db.sessions.delete_many({"expires_at": {"$lt": datetime.now(timezone.utc)}})
+```
+
+### Event Action Example
+
+```python
+# actions/on-user-signup.py
+from mdb_engine.actions import ActionContext
+
+__trigger__ = "event"
+__event__ = "after_create"
+__collection__ = "users"
+
+async def handler(ctx: ActionContext):
+    doc = ctx.event_doc  # the created document
+    db = await ctx.get_db()
+    await db.welcome_emails.insert_one({"user_id": doc["_id"]})
+```
+
+Event actions are injected as hooks into the target collection's auto-CRUD pipeline.
+
+### Module-Level Metadata
+
+Actions can declare metadata via module-level constants (manifest config overrides these):
+
+| Constant | Type | Default | Description |
+|----------|------|---------|-------------|
+| `__trigger__` | str | `"http"` | `"http"`, `"schedule"`, or `"event"` |
+| `__method__` | str | `"POST"` | HTTP method (http triggers) |
+| `__timeout__` | int | `10` | Max execution seconds (1–300) |
+| `__schedule__` | str | `""` | Cron expression (schedule triggers, requires `croniter`) |
+| `__interval_seconds__` | float | `0` | Simple interval (schedule triggers) |
+| `__event__` | str | `""` | `"after_create"`, `"after_update"`, `"after_delete"` |
+| `__collection__` | str | `""` | Target collection (event triggers) |
+| `__auth__` | dict | `{}` | `{"required": True, "roles": ["admin"]}` |
+
+### Manifest Configuration
+
+```json
+{
+  "actions": {
+    "send-email": {
+      "trigger": "http",
+      "method": "POST",
+      "auth": { "required": true, "roles": ["editor"] },
+      "timeout": 30
+    },
+    "cleanup-sessions": {
+      "trigger": "schedule",
+      "interval_seconds": 3600
+    },
+    "on-user-signup": {
+      "trigger": "event",
+      "event": "after_create",
+      "collection": "users"
+    }
+  }
+}
+```
+
+Manifest config always overrides module-level metadata.
+
+### ActionContext API
+
+`ActionContext` provides access to all engine services:
+
+**Request helpers** (HTTP triggers only):
+- `await ctx.json()` — parse request body as JSON
+- `await ctx.text()` — read request body as text
+- `ctx.method` — HTTP method string
+- `ctx.headers` — request headers dict
+- `ctx.query_params` — query parameters dict
+
+**Event helpers** (event triggers only):
+- `ctx.event_doc` — the document that triggered the event
+- `ctx.event_prev` — previous document state (updates only)
+- `ctx.event_name` — event name (`"after_create"`, etc.)
+
+**Auth:**
+- `ctx.user` — current user dict or `None`
+- `ctx.require_user()` — raises 401 if not authenticated
+- `ctx.require_role("admin")` — raises 403 if missing role
+
+**Database:**
+- `await ctx.get_db()` — scoped database wrapper
+- `await ctx.get_uow()` — Unit of Work
+
+**AI services** (None when not configured):
+- `ctx.memory` — MemoryService
+- `ctx.llm` — LLMService
+- `ctx.embedding` — EmbeddingService
+
+**Response helpers:**
+- `ctx.json_response(data, status=200)` — JSONResponse
+- `ctx.text_response(text, status=200)` — plain text Response
+- `ctx.error(status, detail)` — HTTPException (raise the return value)
+
+### CLI Commands
+
+```bash
+# Scaffold a new action
+mdb-engine actions new send-email
+mdb-engine actions new cleanup --trigger schedule --interval 3600
+mdb-engine actions new on-signup --trigger event --event after_create --collection users
+
+# List discovered actions
+mdb-engine actions list manifest.json
+```
+
+### Programmatic Usage
+
+```python
+from mdb_engine.actions.discovery import mount_actions
+
+# Mount actions manually (for inline-dict manifests without a file path)
+mount_actions(
+    app,
+    actions_dir=Path("./actions"),
+    actions_config=manifest.get("actions", {}),
+    engine=engine,
+    slug="my_app",
+    app_auth_enabled=True,
+    collections_config=manifest.get("collections", {}),
+)
 ```
 
 ---

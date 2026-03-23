@@ -14,6 +14,9 @@ Supported actions:
   directly; otherwise the value is wrapped in ``$set`` for backward compat.
 * ``delete`` — delete documents from another collection.
 * ``http`` — send an HTTP request to an external URL (webhook).
+* ``run_action`` — invoke a registered Python action handler from the
+  ``actions/`` directory.  The handler receives an ``ActionContext`` with
+  the triggering document, user, and full engine access.
 
 All template placeholders (``{{user.*}}``, ``{{doc.*}}``, ``{{prev.*}}``,
 ``$$NOW``) are resolved before execution.
@@ -175,7 +178,9 @@ class HookExecutor:
     ) -> None:
         action = action_def.get("action")
         target_collection = action_def.get("collection")
-        if not action or not target_collection:
+        if not action:
+            return
+        if not target_collection and action != "run_action":
             return
 
         condition = action_def.get("if")
@@ -208,6 +213,45 @@ class HookExecutor:
 
         elif action == "http":
             await self._execute_http_action(action_def, doc, user)
+
+        elif action == "run_action":
+            await self._execute_run_action(action_def, doc, user, prev=prev)
+
+    async def _execute_run_action(
+        self,
+        action_def: dict[str, Any],
+        doc: dict[str, Any],
+        user: dict[str, Any] | None,
+        *,
+        prev: dict[str, Any] | None = None,
+    ) -> None:
+        """Invoke a registered Python action handler as a hook side effect."""
+        action_name = action_def.get("action_name", "")
+        if not action_name:
+            logger.warning("run_action hook missing 'action_name'")
+            return
+
+        from ..actions.discovery import get_registered_action
+
+        adef, engine, slug = get_registered_action(action_name)
+        if adef is None or engine is None:
+            logger.warning("run_action: action '%s' not found in registry", action_name)
+            return
+
+        from ..actions import ActionContext
+
+        ctx = ActionContext.from_event(
+            engine=engine,
+            slug=slug,
+            doc=doc,
+            user=user,
+            event=action_def.get("event", adef.event),
+            prev=prev,
+        )
+        try:
+            await adef.handler(ctx)
+        except _HOOK_ACTION_ERRORS:
+            logger.exception("run_action '%s' handler failed", action_name)
 
     async def _execute_http_action(
         self,

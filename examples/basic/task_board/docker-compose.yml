@@ -1,0 +1,46 @@
+# Task Board — Docker Compose
+#
+# Quick start:
+#   docker compose up
+#
+# No auth, no secrets — just MongoDB and the manifest.
+
+services:
+  api:
+    image: python:3.11-slim
+    working_dir: /app
+    volumes:
+      - ./manifest.json:/app/manifest.json
+      - ./public:/app/public
+      - ./actions:/app/actions
+      # Mount local mdb_engine source for development
+      - ../../../mdb_engine:/engine_src/mdb_engine
+      - ../../../pyproject.toml:/engine_src/pyproject.toml
+      - ../../../README.md:/engine_src/README.md
+    environment:
+      - MONGODB_URI=mongodb://mongo:27017/?directConnection=true
+      - MDB_DB_NAME=mdb_engine
+      - _MDB_SERVE_MANIFEST=/app/manifest.json
+    command: >
+      bash -c "pip install -e /engine_src uvicorn -q &&
+               uvicorn mdb_engine.cli._serve_app:app --host 0.0.0.0 --port 8000 --reload"
+    ports:
+      - "8000:8000"
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+  mongo:
+    image: mongodb/mongodb-atlas-local:8.0
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  mongo_data:

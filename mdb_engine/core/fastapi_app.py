@@ -261,7 +261,17 @@ class FastAPIAppMixin:
                     logger.exception(f"on_startup callback failed for '{slug}': {e}")
                     raise
 
+            # Start scheduled actions (registered during mount_actions)
+            from ..actions.scheduler import start_scheduled_actions
+
+            _action_handles = start_scheduled_actions()
+
             yield
+
+            # Stop scheduled actions
+            from ..actions.scheduler import stop_scheduled_actions
+
+            await stop_scheduled_actions()
 
             # Stop realtime watcher before tearing down services
             await self._stop_realtime(app)
@@ -300,13 +310,37 @@ class FastAPIAppMixin:
             except ImportError:
                 pass
 
-        # Auto-register CRUD endpoints for collections defined in manifest
+        # Resolve auth flags used by both actions and auto-CRUD
+        _users_cfg_pre = auth_config.get("users", {})
+        _app_auth_on = bool(_users_cfg_pre.get("enabled"))
+
+        # Auto-discover and mount actions from actions/ directory.
+        # Must run BEFORE auto-CRUD so event actions can inject hooks
+        # into the collections config.
         _collections_cfg = pre_manifest.get("collections", {})
+        _actions_cfg = pre_manifest.get("actions", {})
+        _actions_dir: Path | None = None
+        if manifest_path is not None:
+            _candidate = Path(manifest_path).parent / "actions"
+            if _candidate.is_dir():
+                _actions_dir = _candidate
+        if _actions_dir is not None:
+            from ..actions.discovery import mount_actions
+
+            mount_actions(
+                app,
+                _actions_dir,
+                _actions_cfg,
+                engine,
+                slug,
+                app_auth_enabled=_app_auth_on,
+                collections_config=_collections_cfg if _collections_cfg else None,
+            )
+
+        # Auto-register CRUD endpoints for collections defined in manifest
         if _collections_cfg:
             from ..routing.auto_crud import mount_auto_crud_routes
 
-            _users_cfg_pre = auth_config.get("users", {})
-            _app_auth_on = bool(_users_cfg_pre.get("enabled"))
             _auth_col = _users_cfg_pre.get("collection_name", "users") if _app_auth_on else "users"
             mount_auto_crud_routes(
                 app,

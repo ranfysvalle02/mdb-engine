@@ -41,6 +41,9 @@ if TYPE_CHECKING:
     from fastapi import FastAPI
 
 # Authentication
+# Actions
+from .actions import ActionContext
+from .actions.discovery import mount_actions
 from .auth import AuthorizationProvider, require_admin
 from .auth import get_current_user as auth_get_current_user  # noqa: F401
 
@@ -203,6 +206,9 @@ __all__ = [
     "AsyncAtlasIndexManager",
     "AutoIndexManager",
     "run_index_creation_for_collection",
+    # Actions
+    "ActionContext",
+    "mount_actions",
     # Auto-CRUD
     "create_auto_crud_router",
     "mount_auto_crud_routes",

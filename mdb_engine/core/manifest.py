@@ -3805,6 +3805,74 @@ MANIFEST_SCHEMA_V2 = {
                 "patterns, and input length limits."
             ),
         },
+        "actions": {
+            "type": "object",
+            "description": (
+                "Manifest-driven actions. Each key is an action name matching "
+                "a file in the actions/ directory. Actions support three trigger "
+                "types: 'http' (default), 'schedule', and 'event'."
+            ),
+            "additionalProperties": {
+                "type": "object",
+                "properties": {
+                    "trigger": {
+                        "type": "string",
+                        "enum": ["http", "schedule", "event"],
+                        "default": "http",
+                        "description": "How the action is invoked.",
+                    },
+                    "method": {
+                        "type": "string",
+                        "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"],
+                        "default": "POST",
+                        "description": "HTTP method (trigger=http only).",
+                    },
+                    "auth": {
+                        "type": "object",
+                        "properties": {
+                            "required": {
+                                "type": "boolean",
+                                "description": "Require authentication.",
+                            },
+                            "roles": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Require one of these roles.",
+                            },
+                        },
+                        "additionalProperties": False,
+                    },
+                    "timeout": {
+                        "type": "number",
+                        "default": 10,
+                        "minimum": 1,
+                        "maximum": 300,
+                        "description": "Max execution time in seconds.",
+                    },
+                    "schedule": {
+                        "type": "string",
+                        "description": (
+                            "Cron expression for trigger=schedule " "(requires croniter). Example: '0 */6 * * *'."
+                        ),
+                    },
+                    "interval_seconds": {
+                        "type": "number",
+                        "minimum": 1,
+                        "description": ("Simple interval for trigger=schedule " "(alternative to cron expression)."),
+                    },
+                    "event": {
+                        "type": "string",
+                        "enum": ["after_create", "after_update", "after_delete"],
+                        "description": "Hook event name (trigger=event only).",
+                    },
+                    "collection": {
+                        "type": "string",
+                        "description": "Target collection (trigger=event only).",
+                    },
+                },
+                "additionalProperties": False,
+            },
+        },
         "developer_id": {
             "type": "string",
             "format": "email",
