@@ -50,8 +50,8 @@ from .service import (
     EmbeddingProvider,
     EmbeddingService,
     EmbeddingServiceError,
-    LiteLLMEmbeddingProvider,
     OpenAIEmbeddingProvider,
+    VoyageAIEmbeddingProvider,
     get_embedding_service,
 )
 
@@ -64,7 +64,7 @@ __all__ = [
     "BaseEmbeddingProvider",
     "OpenAIEmbeddingProvider",
     "AzureOpenAIEmbeddingProvider",
-    "LiteLLMEmbeddingProvider",
+    "VoyageAIEmbeddingProvider",
     # Factory function
     "get_embedding_service",
     # Utility for standalone usage

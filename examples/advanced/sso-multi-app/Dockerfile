@@ -39,7 +39,7 @@ RUN echo "=== Installing mdb-engine with Casbin support ===" && \
     echo "=== Installing file processing libraries ===" && \
     pip install --no-cache-dir python-docx pypdf openpyxl && \
     echo "=== Installing AI/LLM dependencies ===" && \
-    pip install --no-cache-dir google-genai openai anthropic mem0ai aiohttp litellm semantic-text-splitter && \
+    pip install --no-cache-dir google-genai voyageai openai anthropic mem0ai aiohttp semantic-text-splitter && \
     echo "=== Installation complete ===" && \
     pip show mdb-engine && \
     echo "=== Verifying Casbin installation ===" && \

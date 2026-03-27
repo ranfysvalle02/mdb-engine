@@ -28,7 +28,7 @@ For GraphRAG (knowledge graph with $graphLookup traversal), see:
     from mdb_engine.graph import GraphService, get_graph_service
 
 Dependencies:
-    pip install pymongo openai litellm
+    pip install pymongo openai google-genai
 """
 
 # ---------------------------------------------------------------------------

@@ -12,23 +12,19 @@ import logging
 from collections.abc import Callable, Coroutine
 from typing import Any
 
+from ..exceptions import (
+    LLMAPIError as APIError,
+)
+from ..exceptions import (
+    LLMAuthenticationError as AuthenticationError,
+)
+from ..exceptions import (
+    LLMNotFoundError as NotFoundError,
+)
+from ..exceptions import (
+    LLMRateLimitError as RateLimitError,
+)
 from ..llm.temperature import adjust_temperature_for_model
-
-try:
-    from litellm.exceptions import (
-        APIError,
-        AuthenticationError,
-        NotFoundError,
-        RateLimitError,
-    )
-
-    LITELLM_AVAILABLE = True
-except ImportError:
-    LITELLM_AVAILABLE = False
-    APIError = RuntimeError
-    AuthenticationError = RuntimeError
-    NotFoundError = RuntimeError
-    RateLimitError = RuntimeError
 
 logger = logging.getLogger(__name__)
 

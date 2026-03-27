@@ -54,7 +54,7 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-# Suppress LiteLLM coroutine warnings
+# Suppress coroutine warnings from LLM SDK async logging
 import warnings
 
 warnings.filterwarnings(

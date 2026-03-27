@@ -1,6 +1,6 @@
 # LLM Service
 
-The LLM service provides a unified interface to 100+ LLM providers via LiteLLM, with streaming support, structured output, and automatic provider detection.
+The LLM service provides a unified interface to **OpenAI**, **Azure OpenAI**, and **Google Gemini** via their native SDKs (`openai`, `google-genai`), with streaming support, structured output, and automatic provider detection from environment variables or manifest `llm_config`.
 
 ## LLMService
 

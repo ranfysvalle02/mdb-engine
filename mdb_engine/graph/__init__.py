@@ -13,7 +13,7 @@ Key Features:
 - **Standalone Service**: Can be used independently or with MemoryService
 
 Dependencies:
-    pip install pymongo litellm
+    pip install pymongo google-genai
 
 Usage:
     # Standalone usage

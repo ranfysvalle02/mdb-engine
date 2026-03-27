@@ -143,7 +143,7 @@ class TestCognitiveEngineIntegration:
                     # Disable memory type detection to avoid sync/async issues in tests
                     memory_service.auto_detect_memory_type = False
 
-                    # Mock LiteLLM completion for fact extraction (fallback)
+                    # Mock LLM completion for fact extraction (fallback)
                     mock_completion_response = MagicMock()
                     mock_completion_response.choices = [MagicMock()]
                     mock_completion_response.choices[0].message = MagicMock()
@@ -152,7 +152,7 @@ class TestCognitiveEngineIntegration:
                     )
                     mock_completion_response.choices[0].message.content = fact_json
 
-                    # NOTE: We no longer patch LiteLLM's `completion()` here; the memory
+                    # NOTE: We no longer patch LLM completion directly here; the memory
                     # service calls the injected `LLMService.chat_completion()` via
                     # `CognitiveMemoryService._llm_completion`.
 
@@ -277,7 +277,7 @@ class TestCognitiveEngineIntegration:
                     mock_embedding_provider = MockEmbeddingProvider()
                     memory_service.embedding_provider = mock_embedding_provider
 
-                    # Mock LiteLLM completion for fact extraction
+                    # Mock LLM completion for fact extraction
                     # (even though extract_facts=False, the memory service might still use it)
                     mock_completion_response = MagicMock()
                     mock_completion_response.choices = [MagicMock()]
@@ -491,7 +491,7 @@ class TestMultiAppMemoryIsolation:
                     memory_service_app2.llm_available = True
                     memory_service_app2.auto_detect_memory_type = False
 
-                    # Mock LiteLLM completion for fact extraction
+                    # Mock LLM completion for fact extraction
                     mock_completion_response = MagicMock()
                     mock_completion_response.choices = [MagicMock()]
                     mock_completion_response.choices[0].message = MagicMock()
@@ -686,7 +686,7 @@ class TestSSOMemoryIntegration:
                     # Disable memory type detection to avoid sync/async issues in tests
                     memory_service.auto_detect_memory_type = False
 
-                    # Mock LiteLLM completion for fact extraction (fallback)
+                    # Mock LLM completion for fact extraction (fallback)
                     mock_completion_response = MagicMock()
                     mock_completion_response.choices = [MagicMock()]
                     mock_completion_response.choices[0].message = MagicMock()
@@ -808,7 +808,7 @@ class TestSSOMemoryIntegration:
                             traits={"technical_focus": 0.9, "humor": 0.2, "formality": 0.8},
                         )
 
-                    # Mock LiteLLM completion for fact extraction (fallback)
+                    # Mock LLM completion for fact extraction (fallback)
                     mock_completion_response = MagicMock()
                     mock_completion_response.choices = [MagicMock()]
                     mock_completion_response.choices[0].message = MagicMock()

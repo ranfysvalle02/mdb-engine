@@ -39,7 +39,7 @@ Debugging environment issues (wrong MongoDB URI, missing optional deps, misconfi
 
 - Check MongoDB connectivity (using the configured URI or `MONGODB_URI` env var)
 
-- Verify all required and optional dependencies are installed (e.g., `openai`, `litellm`, `pyyaml`, `tiktoken`)
+- Verify all required and optional dependencies are installed (e.g., `openai`, `google-genai`, `voyageai`, `pyyaml`, `tiktoken`)
 
 - Validate the manifest if one is found in the current directory
 

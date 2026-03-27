@@ -204,7 +204,7 @@ class TestMemoryCategories:
     @pytest.mark.asyncio
     async def test_extract_facts_never_assigns_general(self, memory_service):
         """Test that fact extraction never assigns 'general' category."""
-        # Mock _llm_completion to return a LiteLLM-like response
+        # Mock _llm_completion to return an OpenAI-compatible response
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message = MagicMock()

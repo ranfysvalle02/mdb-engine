@@ -1,6 +1,6 @@
 """
 Cognitive Memory System Core
-Multi-tier memory architecture using LiteLLM and MongoDB.
+Multi-tier memory architecture using native LLM SDKs and MongoDB.
 
 This module implements the core CognitiveMemory class that distinguishes between:
 - Working Memory: Short-term, TTL-indexed active context
@@ -9,7 +9,7 @@ This module implements the core CognitiveMemory class that distinguishes between
 - Procedural Memory: Executable skills, tools, and workflows
 
 Architecture:
-- Uses LiteLLM for model abstraction (supports 100+ providers)
+- Uses native SDKs for model abstraction (OpenAI, Azure, Gemini)
 - MongoDB as unified storage engine
 - Vector search for semantic/episodic retrieval
 - TTL indexes for automatic working memory eviction
@@ -58,8 +58,8 @@ class CognitiveMemory:
     3. Semantic Memory: Structured entity facts and relationships
     4. Procedural Memory: Skills, tools, and executable workflows
 
-    The system uses LiteLLM for model abstraction, allowing seamless switching
-    between OpenAI, Anthropic, local models (Llama, Mistral), etc.
+    The system uses native SDKs for model abstraction, allowing seamless switching
+    between OpenAI, Azure OpenAI, and Google Gemini.
 
     All public methods are async and should be awaited.
 
@@ -113,10 +113,10 @@ class CognitiveMemory:
             embed_model: Embedding model for vectors (default: "text-embedding-3-small")
             embedding_service: Optional EmbeddingService for generating embeddings.
                               When provided, ``_get_vector`` routes through this service
-                              instead of calling LiteLLM directly.
+                              instead of calling provider SDKs directly.
 
         Raises:
-            CognitiveMemoryError: If neither embedding_service nor LiteLLM is available,
+            CognitiveMemoryError: If embedding_service is not available,
                 or if collection is invalid
 
         Note:

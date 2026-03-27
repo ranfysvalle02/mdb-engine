@@ -46,7 +46,7 @@ MDB-Engine is a sophisticated MongoDB runtime engine designed for building multi
 - **Vector Search**: MongoDB Atlas Vector Search
 - **Authentication**: JWT, Casbin, OSO Cloud
 - **Encryption**: Cryptography (AES-256-GCM envelope encryption)
-- **AI/ML**: OpenAI, LiteLLM (100+ providers)
+- **AI/ML**: OpenAI, Azure OpenAI, Google Gemini (native SDKs in `LLMService`)
 
 ---
 

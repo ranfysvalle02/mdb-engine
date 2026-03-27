@@ -19,10 +19,6 @@
     "enabled": true,
     "providers": {
       "chat": "openai/gpt-4o"
-    },
-    "litellm_config": {
-      "num_retries": 2,
-      "request_timeout": 60
     }
   },
 

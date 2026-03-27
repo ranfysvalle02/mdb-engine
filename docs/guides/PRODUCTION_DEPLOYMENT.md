@@ -326,23 +326,20 @@ MDB-Engine auto-detects your embedding provider from environment variables:
 |---|---|---|
 | OpenAI | `OPENAI_API_KEY` | `text-embedding-3-small` |
 | Azure OpenAI | `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT` | `text-embedding-3-small` |
-| Cohere (via LiteLLM) | `COHERE_API_KEY` | `cohere/embed-english-v3.0` |
-| Voyage AI (via LiteLLM) | `VOYAGE_API_KEY` | `voyage/voyage-02` |
-| HuggingFace (via LiteLLM) | `HF_TOKEN` | `huggingface/BAAI/bge-large-en` |
-| Mistral (via LiteLLM) | `MISTRAL_API_KEY` | `mistral/mistral-embed` |
+| Voyage AI | `VOYAGE_API_KEY` | `voyage-3`, `voyage-3-lite`, etc. |
 
-For LiteLLM providers, set the model in your manifest's `embedding_config.default_embedding_model`.
+Set the model in your manifest's `embedding_config.default_embedding_model` (and install `openai` and/or `voyageai` as needed).
 
 ### LLM Providers
 
-Configure via `llm_config` in the manifest. LiteLLM supports 100+ providers:
+Configure via `llm_config` in the manifest. **LLMService** uses native SDKs for **OpenAI**, **Azure OpenAI**, and **Google Gemini** (`pip install openai google-genai`). Use `provider/model` strings (for example `openai/gpt-4o`, `azure/your-deployment`, `gemini/gemini-2.5-flash`).
 
 ```json
 {
   "llm_config": {
-    "model": "gpt-4o",
-    "temperature": 0.7,
-    "max_tokens": 4096
+    "enabled": true,
+    "default_model": "openai/gpt-4o",
+    "temperature": 0.7
   }
 }
 ```
@@ -438,8 +435,8 @@ When running with `--workers > 1`:
 | `OPENAI_API_KEY` | For AI | None | OpenAI API key |
 | `AZURE_OPENAI_API_KEY` | For Azure AI | None | Azure OpenAI key |
 | `AZURE_OPENAI_ENDPOINT` | For Azure AI | None | Azure OpenAI endpoint |
-| `COHERE_API_KEY` | For Cohere | None | Cohere API key (via LiteLLM) |
-| `VOYAGE_API_KEY` | For Voyage | None | Voyage AI key (via LiteLLM) |
+| `GEMINI_API_KEY` / `GOOGLE_API_KEY` | For Gemini LLM | None | Google Gemini API key |
+| `VOYAGE_API_KEY` | For Voyage embeddings | None | Voyage AI API key |
 | `LOG_LEVEL` | No | `INFO` | Logging level |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | For tracing | None | OTLP collector endpoint |
 

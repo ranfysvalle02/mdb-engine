@@ -48,11 +48,13 @@ The Graph Service is included in `mdb-engine`:
 pip install mdb-engine
 ```
 
-For LLM-based extraction, ensure you have LiteLLM:
+For LLM-based extraction, install the SDKs for your configured models plus Pydantic:
 
 ```bash
-pip install litellm pydantic
+pip install openai google-genai pydantic
 ```
+
+You only need `openai` and/or `google-genai` depending on whether you use OpenAI/Azure or Gemini in `llm_config`.
 
 ## LLM Model Inheritance
 

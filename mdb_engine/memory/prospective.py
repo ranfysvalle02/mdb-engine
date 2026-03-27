@@ -95,7 +95,7 @@ class ProspectiveMemory:
             embedding_model: Embedding model for condition vectors (default: text-embedding-3-small)
             embedding_dims: Embedding dimensions (default: 1536)
             embedding_service: Optional EmbeddingService for vector generation.
-                When provided, takes priority over direct LiteLLM calls.
+                When provided, takes priority over direct API calls.
         """
         self.collection = collection
         self.embedding_model = embedding_model

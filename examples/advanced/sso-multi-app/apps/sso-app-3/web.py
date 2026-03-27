@@ -95,8 +95,7 @@ from mdb_engine.memory.reflection import ReflectionService
 load_dotenv()
 logger = logging.getLogger(__name__)
 
-# Suppress RuntimeWarning from LiteLLM's async logging (coroutine not awaited)
-# This is a known issue in LiteLLM where async_success_handler is not properly awaited
+# Suppress RuntimeWarning from LLM SDK async logging (coroutine not awaited)
 import warnings
 warnings.filterwarnings("ignore", message="coroutine.*was never awaited", category=RuntimeWarning)
 
@@ -536,8 +535,8 @@ async def extract_global_metadata(
         if not llm_service:
             raise ValueError("LLM service not initialized")
         
-        # Use LiteLLM for metadata extraction with Pydantic structured output
-        # Pass DocumentMetadata directly - LiteLLM will handle schema conversion
+        # Use LLM service for metadata extraction with Pydantic structured output
+        # Pass DocumentMetadata directly — the service handles schema conversion
         messages = [{"role": "user", "content": prompt}]
         response_text = await llm_service.chat_completion(
             messages=messages,
@@ -547,7 +546,7 @@ async def extract_global_metadata(
         )
         
         # Parse and validate using Pydantic
-        # LiteLLM returns JSON string that matches the Pydantic schema
+        # Response is JSON text matching the Pydantic schema
         return DocumentMetadata.model_validate_json(response_text)
     except (PyMongoError, ValueError):
         logger.exception("Metadata extraction failed")
@@ -609,8 +608,8 @@ async def extract_facts_from_chunk(
                 logger.warning(f"LLM service not initialized for chunk {chunk_index}")
                 return []
             
-            # Use LiteLLM for fact extraction with Pydantic structured output
-            # Pass ChunkInsights directly - LiteLLM will handle schema conversion
+            # Use LLM service for fact extraction with Pydantic structured output
+            # Pass ChunkInsights directly — the service handles schema conversion
             messages = [{"role": "user", "content": prompt}]
             response_text = await llm_service.chat_completion(
                 messages=messages,
@@ -620,7 +619,7 @@ async def extract_facts_from_chunk(
             )
             
             # Parse and validate using Pydantic
-            # LiteLLM returns JSON string that matches the Pydantic schema
+            # Response is JSON text matching the Pydantic schema
             insights = ChunkInsights.model_validate_json(response_text)
             
             # Return the facts from the validated model

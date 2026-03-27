@@ -2,7 +2,7 @@
 LLM Service Module
 
 Provides LLMService for chat completions and text generation.
-Powered by LiteLLM - supports 100+ LLM providers.
+Supports OpenAI, Azure OpenAI, and Google Gemini via native SDKs.
 
 FastAPI Dependency Injection:
     # RECOMMENDED: Use request-scoped dependencies

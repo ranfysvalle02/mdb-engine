@@ -38,7 +38,7 @@ class LLMServiceProtocol(Protocol):
     - GraphService (entity extraction)
     - CognitiveMemoryService (fact extraction, importance assessment)
 
-    Standalone: Yes - only requires litellm package and API keys
+    Standalone: Yes - only requires provider SDKs and API keys
     """
 
     async def chat_completion(

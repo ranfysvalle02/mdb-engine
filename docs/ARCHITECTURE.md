@@ -368,7 +368,7 @@ MDB-Engine is designed with modularity in mind. Each service can be used standal
 ├────────────────────────┬─────────────────────────────────────────────────────┤
 │ Service                │ Required Dependencies      │ Optional Dependencies  │
 ├────────────────────────┼──────────────────────────────┼──────────────────────┤
-│ LLMService             │ litellm, API keys          │ (none)                │
+│ LLMService             │ openai, google-genai, keys │ (none)                │
 │ EmbeddingService       │ semantic-text-splitter,    │ (none)                │
 │                        │ openai/voyageai            │                       │
 │ GraphService           │ MongoDB Collection         │ LLMService, Embedding │
@@ -401,7 +401,7 @@ Services implement Python Protocols (`mdb_engine.core.protocols`) for:
 ```python
 from mdb_engine.llm import LLMService
 
-# LLMService only requires litellm and API keys
+# LLMService requires the matching SDK(s) (openai and/or google-genai) and API keys
 llm = LLMService(config={"default_model": "openai/gpt-4o"})
 
 # Sync call

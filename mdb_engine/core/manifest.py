@@ -1935,7 +1935,7 @@ MANIFEST_SCHEMA_V2 = {
                     "description": (
                         "Enable LLM service for this app. When enabled, "
                         "LLMService will be available for chat completions and text generation. "
-                        "Powered by LiteLLM - supports 100+ LLM providers. "
+                        "Supports OpenAI, Azure OpenAI, and Google Gemini via native SDKs. "
                         "Auto-detects provider from environment variables or uses configured model."
                     ),
                 },
@@ -1943,12 +1943,10 @@ MANIFEST_SCHEMA_V2 = {
                     "type": "string",
                     "default": "openai/gpt-4o",
                     "description": (
-                        "Default LiteLLM model string for chat completions. "
+                        "Default model string for chat completions. "
                         "Format: 'provider/model' "
                         "(e.g., 'openai/gpt-4o', 'gemini/gemini-3-flash-preview', "
                         "'anthropic/claude-sonnet-4-20250514', 'azure/gpt-4o'). "
-                        "Supports 100+ providers via LiteLLM. "
-                        "See: https://docs.litellm.ai/docs/providers"
                     ),
                 },
                 "fallbacks": {
@@ -1957,26 +1955,13 @@ MANIFEST_SCHEMA_V2 = {
                     "description": (
                         "List of fallback models to try if the primary model fails. "
                         "If the primary model returns an error (rate limit, timeout, etc.), "
-                        "LiteLLM will automatically try the next model in the list. "
+                        "the engine will automatically try the next model in the list. "
                         "Example: ['gpt-4o-mini', 'claude-3-5-haiku-20241022']. "
-                        "Models should be in LiteLLM format "
+                        "Models should be in provider/model format "
                         "(e.g., 'openai/gpt-4o-mini' or just 'gpt-4o-mini'). "
                         "This provides redundancy and automatic failover "
                         "without manual error handling."
                     ),
-                },
-                "litellm_config": {
-                    "type": "object",
-                    "description": (
-                        "LiteLLM configuration options passed directly to LiteLLM. "
-                        "Common options include: "
-                        "- 'num_retries': Number of retries per request (default: 0) "
-                        "- 'request_timeout': Request timeout in seconds (default: 600) "
-                        "- 'max_budget': Maximum budget per request "
-                        "- 'drop_params': Drop unsupported parameters "
-                        "See: https://docs.litellm.ai/docs/completion/configuration for full list."
-                    ),
-                    "additionalProperties": True,
                 },
                 "temperature": {
                     "type": "number",
@@ -2003,9 +1988,9 @@ MANIFEST_SCHEMA_V2 = {
                     "type": "object",
                     "additionalProperties": {"type": "string"},
                     "description": (
-                        "Named providers mapping provider names to LiteLLM model strings. "
+                        "Named providers mapping provider names to model strings in provider/model format. "
                         "Each key is a provider name (e.g., 'chat', 'analysis', 'code') "
-                        "and each value is a LiteLLM model string (e.g., 'openai/gpt-4o', "
+                        "and each value is a model string in provider/model format (e.g., 'openai/gpt-4o', "
                         "'gemini/gemini-3-flash-preview'). "
                         "Use provider_name parameter in chat_completion() to select a provider. "
                         "The system auto-detects provider from model string and uses "
@@ -2016,8 +2001,8 @@ MANIFEST_SCHEMA_V2 = {
                     "type": "string",
                     "description": (
                         "DEPRECATED: Legacy provider format (e.g., 'openai', 'azure', 'gemini'). "
-                        "Use 'default_model' with LiteLLM format instead (e.g., 'openai/gpt-4o'). "
-                        "This will be converted to LiteLLM format automatically."
+                        "Use 'default_model' with provider/model format instead (e.g., 'openai/gpt-4o'). "
+                        "This will be converted to provider/model format automatically."
                     ),
                 },
                 "resilience": {
@@ -2066,17 +2051,11 @@ MANIFEST_SCHEMA_V2 = {
             },
             "additionalProperties": False,
             "description": (
-                "LLM service configuration. Powered by LiteLLM - "
-                "provides unified interface for chat completions "
-                "across 100+ providers "
-                "(OpenAI, Azure OpenAI, Anthropic, Google Gemini, Cohere, "
-                "HuggingFace, Bedrock, Vertex AI, Ollama, Groq, Together AI, "
-                "and 90+ more). "
+                "LLM service configuration. Provides chat completions via native SDKs "
+                "for OpenAI, Azure OpenAI, and Google Gemini. "
                 "Auto-detects provider from environment variables if not specified. "
-                "Supports fallback models for automatic failover "
-                "and LiteLLM configuration options. "
-                "Perfect for chat applications, RAG pipelines, and text generation. "
-                "See: https://docs.litellm.ai/docs/providers for complete provider list."
+                "Supports fallback models for automatic failover. "
+                "Perfect for chat applications, RAG pipelines, and text generation."
             ),
         },
         "memory_config": {

@@ -102,10 +102,6 @@
     "providers": {
       "chat": "gemini/gemini-2.5-flash-lite",
       "extraction": "gemini/gemini-2.5-flash-lite"
-    },
-    "litellm_config": {
-      "num_retries": 2,
-      "request_timeout": 60
     }
   },
   "embedding_config": {

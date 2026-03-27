@@ -7,7 +7,7 @@ into structured knowledge (semantic) and executable skills (procedural).
 
 The consolidation process:
 1. Scans recent episodic memories that haven't been processed
-2. Uses LiteLLM to identify "Permanent Facts" vs. "Temporary Context"
+2. Uses LLM to identify "Permanent Facts" vs. "Temporary Context"
 3. Extracts entities and their attributes
 4. Identifies successful procedures and workflows
 5. Updates semantic entity memory and procedural memory

@@ -43,22 +43,6 @@ from .scoring import ScoringMixin
 from .storage import StorageMixin
 from .verification import VerificationMixin
 
-try:
-    from litellm.exceptions import (
-        APIError,
-        AuthenticationError,
-        NotFoundError,
-        RateLimitError,
-    )
-
-    LITELLM_AVAILABLE = True
-except ImportError:
-    LITELLM_AVAILABLE = False
-    APIError = RuntimeError
-    AuthenticationError = RuntimeError
-    NotFoundError = RuntimeError
-    RateLimitError = RuntimeError
-
 if TYPE_CHECKING:
     from mdb_engine.core.protocols import GraphServiceProtocol
     from mdb_engine.database.scoped_wrapper import (
@@ -425,52 +409,37 @@ class CognitiveMemoryService(
 
     def _init_llm_client(self):
         """
-        Initialize LiteLLM for LLM fact extraction
-        (fact extraction, importance assessment, merging).
+        Check LLM availability for fact extraction, importance assessment, merging.
 
-        Uses LiteLLM to support 100+ LLM providers.
-        Auto-detects from environment variables.
-        Model format: "provider/model"
-        (e.g., "openai/gpt-4o", "azure/gpt-4o", "gemini/gemini-3-flash-preview")
+        Requires an injected LLMService (set via the memory builder).
+        If no LLMService is injected but ``infer=True``, a warning is logged.
         """
-        if not LITELLM_AVAILABLE:
-            if self.infer:
-                logger.warning(
-                    "LiteLLM not available. Memory extraction will fail when infer=True. "
-                    "Install with: pip install litellm"
-                )
-            self.llm_available = False
+        if self._injected_llm_service is not None:
+            self.llm_available = True
+            logger.info(f"LLM service available for memory operations (model: {self.memory_llm_model})")
             return
 
-        # Check if any LLM credentials are available
+        # No injected service — check for credentials as a hint
         has_openai = bool(os.getenv("OPENAI_API_KEY"))
         has_azure = bool(os.getenv("AZURE_OPENAI_API_KEY") and os.getenv("AZURE_OPENAI_ENDPOINT"))
         has_gemini = bool(os.getenv("GEMINI_API_KEY"))
-        has_anthropic = bool(os.getenv("ANTHROPIC_API_KEY"))
 
-        if not (has_openai or has_azure or has_gemini or has_anthropic):
+        if not (has_openai or has_azure or has_gemini):
             if self.infer:
                 logger.warning(
-                    "No LLM API keys found. Set OPENAI_API_KEY, AZURE_OPENAI_API_KEY, "
-                    "GEMINI_API_KEY, ANTHROPIC_API_KEY, or other provider keys. "
+                    "No LLM service injected and no API keys found. "
+                    "Set OPENAI_API_KEY, AZURE_OPENAI_API_KEY, or GEMINI_API_KEY. "
                     "Memory extraction will fail when infer=True."
                 )
             self.llm_available = False
             return
 
-        try:
-            self.llm_available = True
-            logger.info(f"Using LiteLLM for memory operations (model: {self.memory_llm_model})")
-        except (
-            ValueError,
-            TypeError,
-            AttributeError,
-            RuntimeError,
-            ImportError,
-        ) as e:
-            # Catch specific exceptions that can occur during LiteLLM initialization
-            logger.exception(f"Failed to initialize LiteLLM: {e}")
-            self.llm_available = False
+        if self.infer:
+            logger.warning(
+                "No LLM service injected but API keys are present. "
+                "Memory extraction requires an injected LLMService."
+            )
+        self.llm_available = False
 
     async def _llm_completion(
         self,
@@ -494,7 +463,7 @@ class CognitiveMemoryService(
             **kwargs: Additional arguments passed to LLM service
 
         Returns:
-            LiteLLM-style response object (wrapped from LLMService string response)
+            Response object with ``choices[0].message.content`` (wrapped from LLMService string)
 
         Raises:
             MemoryServiceError: If LLM service is not available
@@ -516,7 +485,7 @@ class CognitiveMemoryService(
                 **kwargs,
             )
 
-            # Wrap result in a LiteLLM-like response object
+            # Wrap result in an OpenAI-compatible response object
             from types import SimpleNamespace
 
             return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=result))])

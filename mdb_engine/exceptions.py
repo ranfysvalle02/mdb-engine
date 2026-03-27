@@ -213,6 +213,30 @@ class QueryValidationError(MongoDBEngineError):
         self.path = path
 
 
+class LLMAPIError(MongoDBEngineError):
+    """Raised when an LLM provider returns an API-level error."""
+
+    pass
+
+
+class LLMAuthenticationError(MongoDBEngineError):
+    """Raised when LLM provider authentication fails (invalid or missing API key)."""
+
+    pass
+
+
+class LLMNotFoundError(MongoDBEngineError):
+    """Raised when a requested LLM model or deployment is not found."""
+
+    pass
+
+
+class LLMRateLimitError(MongoDBEngineError):
+    """Raised when an LLM provider rate-limits a request."""
+
+    pass
+
+
 class ResourceLimitExceeded(MongoDBEngineError):
     """
     Raised when a resource limit is exceeded.

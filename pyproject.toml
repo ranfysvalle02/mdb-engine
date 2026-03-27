@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mdb-engine"
-version = "0.9.0"
+version = "0.10.0"
 description = "MongoDB Engine"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -43,7 +43,8 @@ mdb-engine = "mdb_engine.cli:main"
 [project.optional-dependencies]
 ai = [
     "openai>=1.0.0,<3.0.0",  # Embedding providers and memory service
-    "litellm>=1.0.0,<3.0.0",  # LLM service (supports 100+ providers)
+    "google-genai>=1.0.0",  # Google Gemini LLM support
+    "voyageai>=0.3.0",  # VoyageAI embeddings
     "semantic-text-splitter>=0.9.0",  # Text chunking for memory extraction
 ]
 tokens = [
@@ -94,7 +95,8 @@ docs = [
 ]
 all = [
     "openai>=1.0.0,<3.0.0",
-    "litellm>=1.0.0,<3.0.0",
+    "google-genai>=1.0.0",
+    "voyageai>=0.3.0",
     "semantic-text-splitter>=0.9.0",
     "casbin>=1.0.0",
     "casbin-motor-adapter>=0.1.0",
@@ -218,7 +220,9 @@ module = [
     "casbin.*",
     "casbin_motor_adapter.*",
     "oso_cloud.*",
-    "litellm.*",
+    "google.*",
+    "voyageai.*",
+    "genai.*",
     "semantic_text_splitter.*",
     "testcontainers.*",
     "semgrep.*",

@@ -211,7 +211,7 @@ class CognitiveMemoryServiceBuilder:
     # ------------------------------------------------------------------
 
     def _resolve_model(self) -> str:
-        """Resolve ``memory_llm_model`` to LiteLLM ``provider/model`` format."""
+        """Resolve ``memory_llm_model`` to ``provider/model`` format."""
         chat_model_raw = self._config.get("chat_model", "gpt-4o")
         memory_llm_model_raw = self._config.get("memory_llm_model", chat_model_raw)
 
@@ -233,7 +233,7 @@ class CognitiveMemoryServiceBuilder:
             logger.info(f"[Memory Config] Resolved model: {memory_llm_model_raw} → {resolved}")
         else:
             resolved = memory_llm_model_raw
-            logger.info(f"[Memory Config] Using LiteLLM format model as-is: {resolved}")
+            logger.info(f"[Memory Config] Using provider/model format as-is: {resolved}")
 
         return resolved
 

@@ -64,10 +64,6 @@
     "providers": {
       "chat": "openai/gpt-4o",
       "extraction": "openai/gpt-4o-mini"
-    },
-    "litellm_config": {
-      "num_retries": 2,
-      "request_timeout": 60
     }
   },
 

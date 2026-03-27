@@ -218,7 +218,7 @@ graph_service = engine.get_graph_service("my_app")
 ## Dependencies
 
 - **Required**: `pymongo`
-- **For Extraction**: `litellm`, `pydantic`
+- **For Extraction**: `openai`, `google-genai` (as required by your `llm_config` models), `pydantic`
 - **For Hybrid Search**: Embedding service configured
 
 ## See Also

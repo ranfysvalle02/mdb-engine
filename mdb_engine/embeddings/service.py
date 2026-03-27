@@ -39,14 +39,14 @@ except ImportError:
     AsyncOpenAI = None
     AsyncAzureOpenAI = None
 
-# Optional LiteLLM import
+# Optional VoyageAI import
 try:
-    import litellm
+    import voyageai
 
-    LITELLM_AVAILABLE = True
+    VOYAGEAI_AVAILABLE = True
 except ImportError:
-    LITELLM_AVAILABLE = False
-    litellm = None  # type: ignore[assignment]
+    VOYAGEAI_AVAILABLE = False
+    voyageai = None  # type: ignore[assignment]
 
 # Optional dependencies
 try:
@@ -222,57 +222,53 @@ class AzureOpenAIEmbeddingProvider(BaseEmbeddingProvider):
             raise EmbeddingServiceError(f"Azure OpenAI embedding failed: {str(e)}") from e
 
 
-class LiteLLMEmbeddingProvider(BaseEmbeddingProvider):
+class VoyageAIEmbeddingProvider(BaseEmbeddingProvider):
     """
-    LiteLLM embedding provider — supports 20+ embedding providers through a unified API.
+    VoyageAI embedding provider.
 
-    LiteLLM routes to the correct provider based on the model string prefix:
-        - "text-embedding-3-small"          → OpenAI
-        - "cohere/embed-english-v3.0"       → Cohere
-        - "bedrock/amazon.titan-embed-text-v1" → AWS Bedrock
-        - "vertex_ai/textembedding-gecko"   → Google Vertex AI
-        - "huggingface/BAAI/bge-large-en"   → HuggingFace
-        - "voyage/voyage-02"                → Voyage AI
-        - "mistral/mistral-embed"           → Mistral
+    Uses the VoyageAI SDK for high-quality text embeddings.
+    Requires ``VOYAGE_API_KEY`` environment variable.
 
-    Requires ``pip install mdb-engine[ai]`` (litellm is included).
-    Provider-specific API keys must be set as environment variables
-    (e.g., ``OPENAI_API_KEY``, ``COHERE_API_KEY``).
+    Supported models include:
+        - ``"voyage-3"`` (1024 dims)
+        - ``"voyage-3-lite"`` (512 dims)
+        - ``"voyage-code-3"`` (1024 dims)
 
-    See https://docs.litellm.ai/docs/embedding/supported_embedding for the full list.
+    See https://docs.voyageai.com/docs/embeddings for the full list.
     """
 
     def __init__(
         self,
-        default_model: str = "text-embedding-3-small",
-        **litellm_kwargs: Any,
+        api_key: str | None = None,
+        default_model: str = "voyage-3",
     ):
         """
-        Initialize LiteLLM embedding provider.
+        Initialize VoyageAI embedding provider.
 
         Args:
-            default_model: Default embedding model string. Use the LiteLLM model
-                format with a provider prefix (e.g., ``"cohere/embed-english-v3.0"``).
-                Defaults to ``"text-embedding-3-small"`` (OpenAI).
-            **litellm_kwargs: Additional keyword arguments passed to every
-                ``litellm.aembedding()`` call (e.g., ``api_key``, ``api_base``).
+            api_key: VoyageAI API key (defaults to ``VOYAGE_API_KEY`` env var)
+            default_model: Default embedding model (default: ``"voyage-3"``)
         """
-        if not LITELLM_AVAILABLE:
-            raise EmbeddingServiceError("LiteLLM not available. Install with: pip install mdb-engine[ai]")
+        if not VOYAGEAI_AVAILABLE:
+            raise EmbeddingServiceError("VoyageAI SDK not available. Install with: pip install voyageai")
+
+        api_key = api_key or os.getenv("VOYAGE_API_KEY")
+        if not api_key:
+            raise EmbeddingServiceError("VoyageAI API key not found. Set VOYAGE_API_KEY environment variable.")
+
+        self.client = voyageai.AsyncClient(api_key=api_key)
         self.default_model = default_model
-        self._litellm_kwargs = litellm_kwargs
 
     async def embed(self, text: str | list[str], model: str | None = None) -> list[list[float]]:
-        """Generate embeddings using LiteLLM (supports 20+ providers)."""
+        """Generate embeddings using VoyageAI."""
         model = model or self.default_model
 
         if isinstance(text, str):
             text = [text]
 
         try:
-            response = await litellm.aembedding(model=model, input=text, **self._litellm_kwargs)
-            vectors = [item["embedding"] for item in response.data]
-            return vectors
+            result = await self.client.embed(text, model=model)
+            return result.embeddings
         except (
             ImportError,
             AttributeError,
@@ -283,8 +279,8 @@ class LiteLLMEmbeddingProvider(BaseEmbeddingProvider):
             OSError,
             KeyError,
         ) as e:
-            logger.exception(f"LiteLLM embedding failed: {e}")
-            raise EmbeddingServiceError(f"LiteLLM embedding failed: {str(e)}") from e
+            logger.exception(f"VoyageAI embedding failed: {e}")
+            raise EmbeddingServiceError(f"VoyageAI embedding failed: {str(e)}") from e
 
 
 def _detect_provider_from_env() -> str:
@@ -294,30 +290,18 @@ def _detect_provider_from_env() -> str:
     Detection order:
         1. Azure OpenAI — if ``AZURE_OPENAI_API_KEY`` **and** ``AZURE_OPENAI_ENDPOINT`` are set.
         2. OpenAI — if ``OPENAI_API_KEY`` is set.
-        3. LiteLLM — if ``litellm`` is installed and *any* common provider key is set
-           (``COHERE_API_KEY``, ``VOYAGE_API_KEY``, ``MISTRAL_API_KEY``,
-           ``HF_TOKEN``, ``ANTHROPIC_API_KEY``, ``GEMINI_API_KEY``).
+        3. VoyageAI — if ``VOYAGE_API_KEY`` is set.
         4. Falls back to ``"openai"`` (will fail at init if no key is present).
 
     Returns:
-        One of ``"azure"``, ``"openai"``, or ``"litellm"``.
+        One of ``"azure"``, ``"openai"``, or ``"voyage"``.
     """
     if os.getenv("AZURE_OPENAI_API_KEY") and os.getenv("AZURE_OPENAI_ENDPOINT"):
         return "azure"
     elif os.getenv("OPENAI_API_KEY"):
         return "openai"
-    elif LITELLM_AVAILABLE and any(
-        os.getenv(k)
-        for k in (
-            "COHERE_API_KEY",
-            "VOYAGE_API_KEY",
-            "MISTRAL_API_KEY",
-            "HF_TOKEN",
-            "ANTHROPIC_API_KEY",
-            "GEMINI_API_KEY",
-        )
-    ):
-        return "litellm"
+    elif VOYAGEAI_AVAILABLE and os.getenv("VOYAGE_API_KEY"):
+        return "voyage"
     else:
         return "openai"
 
@@ -326,8 +310,7 @@ class EmbeddingProvider:
     """
     Standalone embedding provider wrapper.
 
-    Auto-detects OpenAI, AzureOpenAI, or LiteLLM from environment variables.
-    Supports OpenAI, AzureOpenAI, and LiteLLM (20+ providers).
+    Auto-detects OpenAI, AzureOpenAI, or VoyageAI from environment variables.
 
     Example:
         # Auto-detects from environment variables
@@ -337,10 +320,10 @@ class EmbeddingProvider:
         from mdb_engine.embeddings import OpenAIEmbeddingProvider
         provider = EmbeddingProvider(embedding_provider=OpenAIEmbeddingProvider())
 
-        # Use LiteLLM for Cohere, Voyage, HuggingFace, etc.
-        from mdb_engine.embeddings import LiteLLMEmbeddingProvider
+        # Use VoyageAI
+        from mdb_engine.embeddings import VoyageAIEmbeddingProvider
         provider = EmbeddingProvider(
-            embedding_provider=LiteLLMEmbeddingProvider(default_model="cohere/embed-english-v3.0")
+            embedding_provider=VoyageAIEmbeddingProvider(default_model="voyage-3")
         )
     """
 
@@ -375,9 +358,9 @@ class EmbeddingProvider:
             if provider_type == "azure":
                 self.embedding_provider = AzureOpenAIEmbeddingProvider(default_model=default_model)
                 logger.info(f"Auto-detected Azure OpenAI embedding provider (model: {default_model})")
-            elif provider_type == "litellm":
-                self.embedding_provider = LiteLLMEmbeddingProvider(default_model=default_model)
-                logger.info(f"Auto-detected LiteLLM embedding provider (model: {default_model})")
+            elif provider_type == "voyage":
+                self.embedding_provider = VoyageAIEmbeddingProvider(default_model=default_model)
+                logger.info(f"Auto-detected VoyageAI embedding provider (model: {default_model})")
             else:
                 self.embedding_provider = OpenAIEmbeddingProvider(default_model=default_model)
                 logger.info(f"Auto-detected OpenAI embedding provider (model: {default_model})")

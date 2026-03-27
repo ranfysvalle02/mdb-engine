@@ -1,35 +1,35 @@
 # LLM Service Module
 
 Unified LLM service for chat completions and text generation across MDB_ENGINE applications.
-Powered by [LiteLLM](https://github.com/BerriAI/litellm) - supports 100+ LLM providers.
+Uses **native SDKs**: [OpenAI](https://github.com/openai/openai-python) (OpenAI and Azure OpenAI) and [Google Gen AI](https://github.com/googleapis/python-genai) (Gemini). Supports **OpenAI, Azure OpenAI, and Google Gemini**.
 
 ## Features
 
-- **100+ Provider Support**: OpenAI, Azure OpenAI, Anthropic, Google Gemini, Cohere, HuggingFace, Bedrock, Vertex AI, Ollama, Groq, Together AI, and 90+ more
+- **Three backends**: OpenAI, Azure OpenAI, and Google Gemini via their official SDKs
 - **Auto-Detection**: Automatically detects provider from environment variables or manifest config
-- **Unified API**: Same OpenAI-compatible interface across all providers
+- **Unified API**: Same chat completion interface across all supported providers
 - **Manifest Configuration**: Configure via `llm_config` in manifest.json
 - **FastAPI Integration**: Clean dependency injection support
 - **Memory Service Integration**: Works seamlessly with cognitive memory service
-- **Exception Mapping**: LiteLLM maps all provider exceptions to OpenAI-compatible exceptions
+- **Resilience**: Optional retry, backoff, timeout, and circuit breaker via `llm_config.resilience`
 
 ## Installation
 
 ```bash
-pip install litellm
+pip install openai google-genai
 ```
+
+Install only the SDKs you need (e.g. `openai` if you use OpenAI/Azure only; add `google-genai` for Gemini).
 
 ## Configuration
 
-The LLM service uses LiteLLM model format: `provider/model` (e.g., `openai/gpt-4o`, `gemini/gemini-3-flash-preview`).
+The LLM service uses model strings in **`provider/model`** form (for example `openai/gpt-4o`, `gemini/gemini-3-flash-preview`, `azure/your-deployment-name`).
 
 Auto-detects from environment variables or configure via manifest:
 
-- **OpenAI**: Requires `OPENAI_API_KEY` → uses `openai/gpt-4o`
-- **Azure OpenAI**: Requires `AZURE_OPENAI_API_KEY` and `AZURE_OPENAI_ENDPOINT` → uses `azure/{deployment_name}`
-- **Gemini**: Requires `GEMINI_API_KEY` → uses `gemini/gemini-3-flash-preview`
-- **Anthropic**: Requires `ANTHROPIC_API_KEY` → uses `anthropic/claude-sonnet-4-20250514`
-- **And 95+ more providers** - see [LiteLLM docs](https://docs.litellm.ai/docs/providers)
+- **OpenAI**: `OPENAI_API_KEY` → default such as `openai/gpt-4o`
+- **Azure OpenAI**: `AZURE_OPENAI_API_KEY` and `AZURE_OPENAI_ENDPOINT` → `azure/{deployment_name}`
+- **Gemini**: `GEMINI_API_KEY` or `GOOGLE_API_KEY` → `gemini/gemini-3-flash-preview`
 
 Enable LLM service in your `manifest.json`:
 
@@ -44,56 +44,49 @@ Enable LLM service in your `manifest.json`:
 
 ### Fallback Models (Automatic Failover)
 
-LiteLLM supports automatic failover to backup models if the primary model fails. This provides redundancy without manual error handling:
+If the primary model fails, `LLMService` tries each entry in `fallbacks` in order (each must use a supported `provider/model` and the matching env credentials):
 
 ```json
 {
   "llm_config": {
     "enabled": true,
     "default_model": "gemini/gemini-3-flash-preview",
-    "fallbacks": ["gpt-4o-mini"]
+    "fallbacks": ["openai/gpt-4o-mini"]
   }
 }
 ```
 
 **How it works:**
-1. Primary attempt: Tries `gemini/gemini-3-flash-preview`
-2. Automatic switch: If Gemini returns `429 (Rate Limit)` or `500 (Server Error)`, LiteLLM automatically tries `gpt-4o-mini`
-3. Further fallbacks: If that fails, tries `claude-3-5-haiku-20241022`
-4. Uniform output: Regardless of which model responds, you get the same response format
+
+1. Primary attempt: uses `default_model`
+2. On failure: tries the next model in `fallbacks` (cross-provider fallbacks use the correct SDK per model prefix)
+3. Uniform output: string content from the first model that succeeds
 
 **Benefits:**
-- **Redundancy**: No single point of failure
-- **Timeouts**: Automatically switches if a model is hanging
-- **Cost optimization**: Put cheapest model first, most expensive last
-- **Zero code changes**: Works automatically with existing code
 
-### LiteLLM Configuration Options
+- **Redundancy**: Alternate provider when one is rate-limited or down
+- **Cost**: Prefer a fast/cheap model as primary and a stronger one as fallback (or the reverse)
+- **Zero extra code**: Configured in the manifest
 
-Pass LiteLLM configuration options directly through `litellm_config`:
+### Resilience (Retries, Timeout, Circuit Breaker)
+
+Tune retries, backoff, timeouts, and circuit breaking with `llm_config.resilience` (see manifest schema for all fields):
 
 ```json
 {
   "llm_config": {
     "enabled": true,
     "default_model": "gemini/gemini-3-flash-preview",
-    "fallbacks": ["gpt-4o-mini"],
-    "litellm_config": {
-      "num_retries": 2,
-      "request_timeout": 60,
-      "max_budget": 0.01
+    "fallbacks": ["openai/gpt-4o-mini"],
+    "resilience": {
+      "max_retries": 2,
+      "timeout": 60,
+      "backoff_base": 1.0,
+      "backoff_max": 30.0
     }
   }
 }
 ```
-
-Common options:
-- `num_retries`: Number of retries per request (default: 0)
-- `request_timeout`: Request timeout in seconds (default: 600)
-- `max_budget`: Maximum budget per request
-- `drop_params`: Drop unsupported parameters
-
-See [LiteLLM Configuration Docs](https://docs.litellm.ai/docs/completion/configuration) for full list.
 
 Or for Gemini without fallbacks:
 
@@ -106,7 +99,7 @@ Or for Gemini without fallbacks:
 }
 ```
 
-Or for Azure OpenAI (use your deployment name, not model name):
+Or for Azure OpenAI (use your **deployment** name, not the public model name):
 
 ```json
 {
@@ -120,16 +113,9 @@ Or for Azure OpenAI (use your deployment name, not model name):
 > [!NOTE]
 > For Azure OpenAI, the model string uses your **deployment name** (what you named it in Azure AI Studio), not the underlying model name. If you deployed `gpt-4o` as `my-gpt4-deployment`, use `azure/my-gpt4-deployment`.
 
-Or for Anthropic:
+### Named providers (`providers`)
 
-```json
-{
-  "llm_config": {
-    "enabled": true,
-    "default_model": "anthropic/claude-sonnet-4-20250514"
-  }
-}
-```
+For multiple logical models (e.g. chat vs extraction), use `providers` and pass `provider_name` in code—each value is still `provider/model`. See the manifest schema for `llm_config.providers`.
 
 ## Usage
 
@@ -152,7 +138,7 @@ async def chat_endpoint(
 ):
     response = await llm_service.chat_completion(
         messages=messages,
-        model="gpt-4o"  # Optional, uses default from config if not specified
+        model="openai/gpt-4o"  # Optional; uses default from config if omitted
     )
     return {"response": response}
 ```
@@ -162,8 +148,8 @@ async def chat_endpoint(
 ```python
 from mdb_engine.llm import LLMService, get_llm_service
 
-# Initialize - auto-detects provider from environment variables
-llm_service = get_llm_service(config={"default_model": "gpt-4o"})
+# Initialize — auto-detects provider from environment variables
+llm_service = get_llm_service(config={"default_model": "openai/gpt-4o"})
 
 # Generate completion
 response = await llm_service.chat_completion(
@@ -180,27 +166,24 @@ print(response)  # "The capital of France is Paris."
 ```python
 from mdb_engine.llm import get_llm_service
 
-# Override model per request
 llm_service = get_llm_service(config={"default_model": "openai/gpt-4o"})
 
 response = await llm_service.chat_completion(
     messages=[{"role": "user", "content": "Hello!"}],
-    model="anthropic/claude-sonnet-4-20250514"  # Override for this request
+    model="gemini/gemini-3-flash-preview"  # Override for this request
 )
 ```
 
 ### 4. Integration with Memory Service
 
-The LLM service integrates seamlessly with the cognitive memory service:
+The LLM service integrates with the cognitive memory service:
 
 ```python
 from mdb_engine.llm import get_llm_service
 from mdb_engine.memory.orchestrator import CognitiveEngine
 
-# Get LLM service
-llm_service = get_llm_service(config={"default_model": "gpt-4o"})
+llm_service = get_llm_service(config={"default_model": "openai/gpt-4o"})
 
-# Use with CognitiveEngine
 cognitive_engine = CognitiveEngine(
     app_slug="my-app",
     memory_service=memory_service,
@@ -211,53 +194,36 @@ cognitive_engine = CognitiveEngine(
 
 ## Supported Providers
 
-LiteLLM supports 100+ providers. Common examples:
-
-- **OpenAI**: `openai/gpt-4o`, `openai/gpt-4-turbo`, `openai/gpt-3.5-turbo`
-- **Azure OpenAI**: `azure/gpt-4o`, `azure/gpt-35-turbo` (uses deployment names)
-- **Anthropic**: `anthropic/claude-sonnet-4-20250514`, `anthropic/claude-opus-3`
-- **Gemini**: `gemini/gemini-3-flash-preview`, `gemini/gemini-pro`
-- **Cohere**: `cohere/command-r-plus`, `cohere/command-r`
-- **HuggingFace**: `huggingface/meta-llama/Llama-2-70b-chat-hf`
-- **Bedrock**: `bedrock/anthropic.claude-3-sonnet-20240229-v1:0`
-- **Vertex AI**: `vertex_ai/gemini-pro`
-- **Ollama**: `ollama/llama2`
-- **Groq**: `groq/llama-3.1-70b-versatile`
-- **Together AI**: `together_ai/meta-llama/Llama-3-70b-chat-hf`
-
-See [LiteLLM Supported Providers](https://docs.litellm.ai/docs/providers) for the complete list.
+| Provider        | Example models |
+|----------------|----------------|
+| **OpenAI**     | `openai/gpt-4o`, `openai/gpt-4o-mini`, `openai/gpt-4-turbo` |
+| **Azure OpenAI** | `azure/<deployment-name>` |
+| **Gemini**     | `gemini/gemini-3-flash-preview`, `gemini/gemini-2.5-flash`, etc. |
 
 ## Provider-Specific Notes
 
-### Model Format
-Use LiteLLM's format: `provider/model`. Examples:
+### Model format
+
+Use `provider/model`:
+
 - `openai/gpt-4o`
-- `azure/my-gpt4-deployment` (Azure deployment name - **not** the model name!)
+- `azure/my-gpt4-deployment` (Azure deployment name — **not** the catalog model id alone)
 - `gemini/gemini-3-flash-preview`
-- `anthropic/claude-sonnet-4-20250514`
 
-### Azure OpenAI Important Notes
-- **Deployment Name vs Model Name**: Azure uses deployment names, not model names
-  - ✅ Correct: `azure/my-gpt4-deployment` (your deployment name)
-  - ❌ Wrong: `azure/gpt-4o` (model name - will fail with `DeploymentNotFound`)
-- **Environment Variables**: LiteLLM supports both formats:
-  - `AZURE_OPENAI_API_KEY` + `AZURE_OPENAI_ENDPOINT` (our current format)
-  - `AZURE_API_KEY` + `AZURE_API_BASE` (alternative format)
-- **Deployment Name**: Set via `AZURE_OPENAI_DEPLOYMENT_NAME` env var or specify in model string
+### Azure OpenAI
 
-### Environment Variables
-LiteLLM automatically detects providers from environment variables:
-- `OPENAI_API_KEY` → `openai/*`
-- **Azure OpenAI** (supports both formats):
-  - `AZURE_OPENAI_API_KEY` + `AZURE_OPENAI_ENDPOINT` → `azure/*`
-  - `AZURE_API_KEY` + `AZURE_API_BASE` → `azure/*`
-  - **Important**: Use deployment name, not model name (e.g., `azure/my-gpt4-deployment`)
-- `ANTHROPIC_API_KEY` → `anthropic/*`
-- `GEMINI_API_KEY` → `gemini/*`
-- And many more - see [LiteLLM environment variables](https://docs.litellm.ai/docs/)
+- **Deployment vs model name**: use `azure/<deployment>` only.
+- **Environment**: `AZURE_OPENAI_API_KEY` + `AZURE_OPENAI_ENDPOINT`, or `AZURE_API_KEY` + `AZURE_API_BASE`.
+- Optional: `AZURE_OPENAI_API_VERSION` / `OPENAI_API_VERSION`.
+
+### Environment variables
+
+- `OPENAI_API_KEY` → OpenAI models (`openai/...`)
+- `AZURE_OPENAI_API_KEY` + `AZURE_OPENAI_ENDPOINT` (or `AZURE_API_KEY` + `AZURE_API_BASE`) → `azure/...`
+- `GEMINI_API_KEY` or `GOOGLE_API_KEY` → `gemini/...`
 
 > [!TIP]
-> **Azure OpenAI Deployment Names**: The model string must be `azure/<your_deployment_name>`. The deployment name is what you chose when deploying the model in Azure AI Studio, not the model name itself. For example, if you deployed `gpt-4o` as `my-gpt4-deployment`, use `azure/my-gpt4-deployment` in your config.
+> The Azure model string must be `azure/<your_deployment_name>` — the name from Azure AI Studio, not the raw model name.
 
 ## API Reference
 
@@ -269,69 +235,26 @@ Main service class for LLM operations.
 
 - `chat_completion(messages, model=None, temperature=0.7, max_tokens=None, **kwargs) -> str`
   - Generate a chat completion response
-  - `messages`: List of message dicts with 'role' and 'content' keys
-  - `model`: Optional model identifier (overrides default)
-  - `temperature`: Sampling temperature (0.0-2.0)
-  - `max_tokens`: Maximum tokens to generate
+  - `messages`: list of dicts with `role` and `content`
+  - `model`: optional `provider/model` override
+  - `temperature`, `max_tokens`: passed through (provider-specific rules still apply, e.g. Gemini 3 temperature)
+- `chat_completion_stream(...)` — async iterator of text (and optional reasoning) chunks using the same native SDKs
 
 ### Internal: _LLMProvider
 
-Internal provider wrapper (not part of public API). Auto-detects from environment variables or uses configured LiteLLM model string. Use `LLMService` instead.
+Internal provider wrapper (not public API). Resolves `provider/model`, constructs OpenAI, Azure OpenAI, or Gemini clients, and applies `resilience` when configured. Prefer `LLMService` / `get_llm_service`.
 
 ## Advanced Features
 
-### Automatic Fallback (Built-in)
+### Automatic fallback (manifest)
 
-LiteLLM provides **automatic failover** - no manual error handling needed! Configure fallbacks in your manifest:
+Same behavior as [Fallback Models](#fallback-models-automatic-failover) above: `fallbacks` is tried after the primary model fails.
 
-```json
-{
-  "llm_config": {
-    "enabled": true,
-    "default_model": "gemini/gemini-3-flash-preview",
-    "fallbacks": ["gpt-4o-mini"]
-  }
-}
-```
+### Structured output
 
-**How it works:**
-1. **Primary attempt**: Tries `gemini/gemini-3-flash-preview`
-2. **Automatic switch**: If Gemini returns `429 (Rate Limit)` or `500 (Server Error)`, LiteLLM automatically tries `gpt-4o-mini`
-3. **Further fallbacks**: If that fails, tries `claude-3-5-haiku-20241022`
-4. **Uniform output**: Regardless of which model responds, you get the same response format
+Pass a Pydantic model as `response_format` where supported (see `LLMService.chat_completion` docstring).
 
-**Benefits:**
-- ✅ **Redundancy**: No single point of failure
-- ✅ **Timeouts**: Automatically switches if a model is hanging (configurable via `litellm_config.request_timeout`)
-- ✅ **Cost optimization**: Put cheapest model first, most expensive last
-- ✅ **Zero code changes**: Works automatically with existing code
-
-**Example with Structured Output:**
-
-```python
-from mdb_engine.llm import get_llm_service
-from pydantic import BaseModel
-
-class Recipe(BaseModel):
-    recipe_name: str
-    ingredients: list[str]
-    prep_time_minutes: int
-
-# Service automatically uses fallbacks configured in manifest
-llm_service = get_llm_service()
-
-response_text = await llm_service.chat_completion(
-    messages=[{"role": "user", "content": "Extract recipe info"}],
-    response_format=Recipe  # Pydantic model for structured output
-)
-
-recipe = Recipe.model_validate_json(response_text)
-# Works regardless of which model (primary or fallback) responded!
-```
-
-### Manual Fallback Strategy (Legacy)
-
-If you need manual control, you can still implement fallback by catching exceptions:
+### Manual fallback (application code)
 
 ```python
 from mdb_engine.llm import get_llm_service
@@ -341,59 +264,41 @@ llm_service = get_llm_service(config={"default_model": "gemini/gemini-3-flash-pr
 models = [
     "gemini/gemini-3-flash-preview",
     "openai/gpt-4o",
-    "anthropic/claude-sonnet-4-20250514"
 ]
 
 for model in models:
     try:
         response = await llm_service.chat_completion(
             messages=[{"role": "user", "content": "Hello!"}],
-            model=model
+            model=model,
         )
-        break  # Success, exit loop
+        break
     except Exception as e:
-        logger.warning(f"Model {model} failed: {e}, trying next...")
+        logger.warning("Model %s failed: %s, trying next...", model, e)
         continue
 ```
 
-### Streaming
+### Streaming (native SDKs via `LLMService`)
 
-LiteLLM supports streaming responses. You can use it directly with LiteLLM:
-
-```python
-import litellm
-from litellm import completion
-
-response = completion(
-    model="gemini/gemini-3-flash-preview",
-    messages=[{"role": "user", "content": "Tell me a story"}],
-    stream=True
-)
-
-for chunk in response:
-    if chunk.choices[0].delta.content:
-        print(chunk.choices[0].delta.content, end="", flush=True)
-```
-
-### Temperature Warning for Gemini 3
-
-⚠️ **Important**: Gemini 3 models (like `gemini-3-flash-preview`) work best with `temperature=1.0`. Setting temperature < 1.0 can cause infinite loops, degraded reasoning, and failures on complex tasks.
+Use `chat_completion_stream` on `LLMService` (or the underlying provider) so traffic goes through the same manifest config and clients:
 
 ```python
-# ✅ Recommended for Gemini 3
-response = await llm_service.chat_completion(
-    messages=[{"role": "user", "content": "Hello!"}],
-    model="gemini/gemini-3-flash-preview",
-    temperature=1.0  # Default, recommended
-)
+from mdb_engine.llm import get_llm_service
 
-# ⚠️ Not recommended for Gemini 3
-response = await llm_service.chat_completion(
-    messages=[{"role": "user", "content": "Hello!"}],
-    model="gemini/gemini-3-flash-preview",
-    temperature=0.7  # Can cause issues
-)
+llm_service = get_llm_service(config={"default_model": "gemini/gemini-3-flash-preview"})
+
+async for chunk in llm_service.chat_completion_stream(
+    messages=[{"role": "user", "content": "Tell me a short story"}],
+):
+    if chunk.startswith("__REASONING__:"):
+        # optional reasoning trace from Gemini
+        continue
+    print(chunk, end="", flush=True)
 ```
+
+### Temperature note for Gemini 3
+
+Gemini 3 models (e.g. `gemini-3-flash-preview`) are tuned for `temperature=1.0`. Lower values can cause poor behavior on some tasks. The service applies provider-specific temperature adjustment; see `mdb_engine.llm.temperature`.
 
 ## Examples
 

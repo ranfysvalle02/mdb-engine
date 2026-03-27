@@ -616,7 +616,7 @@ Or via dependency injection in route handlers (see [Dependency Injection](#depen
 | `graph_config.enabled: true` | Graph service | `collection_name`, `auto_extract`, `node_types` |
 | `profile_config.enabled: true` | Profile service | `user_profiles`, `community_profile` |
 | `osi_config.enabled: true` | OSI registry | `models_path`, `entity_resolution` |
-| `llm_config.enabled: true` | LLM service | `providers`, `litellm_config` |
+| `llm_config.enabled: true` | LLM service | `default_model`, `providers`, `fallbacks`, `resilience` |
 | `embedding_config.enabled: true` | Embedding service | `default_embedding_model` |
 
 ---

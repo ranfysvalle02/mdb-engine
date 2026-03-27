@@ -11,7 +11,7 @@ This example demonstrates the **entire** MDB-Engine "Perfect Brain" -- every cog
                        /      |      \
              MemoryService  GraphService  LLMService
                   |             |            |
-           CognitiveMemory   GraphRAG     LiteLLM
+             CognitiveMemory   GraphRAG     LLM (OpenAI / Azure / Gemini SDKs)
            /  |    |    \       |
       Working Episodic Semantic Procedural
                          \

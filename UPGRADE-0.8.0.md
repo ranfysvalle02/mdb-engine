@@ -192,7 +192,7 @@ consolidator = MemoryConsolidator(
 
 ### Memory builder no longer probes environment for LLM credentials
 
-**Before (0.7.x):** If no `LLMService` was injected, the builder checked for `OPENAI_API_KEY`, `AZURE_OPENAI_API_KEY`, `GEMINI_API_KEY` etc. and used LiteLLM directly.
+**Before (0.7.x):** If no `LLMService` was injected, the builder checked for `OPENAI_API_KEY`, `AZURE_OPENAI_API_KEY`, `GEMINI_API_KEY` etc. and invoked the LLM stack directly (without a shared injected `LLMService`).
 
 **After (0.8.0):** The builder expects an injected `LLMService`. The engine provides this automatically via `_ensure_shared_services()` when `llm_config` is present in the manifest.
 
