@@ -59,11 +59,23 @@ def mock_openai_sdk():
 
     mock_genai_client_ctor = MagicMock(return_value=mock_gemini_client)
 
+    # genai may be None when google-genai is not installed, so we patch the
+    # whole module-level name with a stub that has a .Client attribute.
+    mock_genai_module = MagicMock()
+    mock_genai_module.Client = mock_genai_client_ctor
+
+    # genai_types.GenerateContentConfig must store kwargs as attributes so
+    # tests can assert on e.g. config.temperature after the call.
+    mock_genai_types = MagicMock()
+    mock_genai_types.GenerateContentConfig = lambda **kw: SimpleNamespace(**kw)
+    mock_genai_types.ThinkingConfig = lambda **kw: SimpleNamespace(**kw)
+
     with (
         patch("mdb_engine.llm.service.OPENAI_SDK_AVAILABLE", True),
         patch("mdb_engine.llm.service.GENAI_AVAILABLE", True),
         patch("mdb_engine.llm.service.AsyncOpenAI", mock_openai_ctor),
-        patch("mdb_engine.llm.service.genai.Client", mock_genai_client_ctor),
+        patch("mdb_engine.llm.service.genai", mock_genai_module),
+        patch("mdb_engine.llm.service.genai_types", mock_genai_types),
     ):
         yield SimpleNamespace(
             openai_create=mock_create,
