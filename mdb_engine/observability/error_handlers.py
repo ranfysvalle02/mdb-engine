@@ -16,6 +16,10 @@ from starlette.responses import JSONResponse
 from ..exceptions import (
     ConfigurationError,
     InitializationError,
+    LLMAPIError,
+    LLMAuthenticationError,
+    LLMNotFoundError,
+    LLMRateLimitError,
     ManifestValidationError,
     MongoDBEngineError,
     QueryValidationError,
@@ -26,9 +30,13 @@ logger = logging.getLogger(__name__)
 
 _STATUS_MAP: dict[type, int] = {
     QueryValidationError: 400,
+    LLMAuthenticationError: 401,
+    LLMNotFoundError: 404,
     ManifestValidationError: 422,
+    LLMRateLimitError: 429,
     ResourceLimitExceeded: 429,
     ConfigurationError: 500,
+    LLMAPIError: 502,
     InitializationError: 503,
 }
 
@@ -38,6 +46,7 @@ async def handle_engine_error(request: Request, exc: MongoDBEngineError) -> JSON
     status = _STATUS_MAP.get(type(exc), 500)
     body: dict[str, Any] = {
         "error": type(exc).__name__,
+        "code": exc.code,
         "message": str(exc),
     }
     if exc.context:

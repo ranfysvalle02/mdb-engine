@@ -3841,7 +3841,13 @@ MANIFEST_SCHEMA_V2 = {
                     },
                     "event": {
                         "type": "string",
-                        "enum": ["after_create", "after_update", "after_delete"],
+                        "enum": [
+                            "before_create",
+                            "before_update",
+                            "after_create",
+                            "after_update",
+                            "after_delete",
+                        ],
                         "description": "Hook event name (trigger=event only).",
                     },
                     "collection": {
@@ -4306,6 +4312,60 @@ MANIFEST_SCHEMA_V2 = {
                         "Defaults to 1048576 (1 MB). Returns 413 if exceeded."
                     ),
                 },
+                "rate_limits": {
+                    "type": "object",
+                    "properties": {
+                        "reads": {
+                            "type": "object",
+                            "properties": {
+                                "max_attempts": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "description": "Maximum requests allowed in the window.",
+                                },
+                                "window_seconds": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "description": "Sliding window duration in seconds.",
+                                },
+                            },
+                            "required": ["max_attempts", "window_seconds"],
+                            "additionalProperties": False,
+                        },
+                        "writes": {
+                            "type": "object",
+                            "properties": {
+                                "max_attempts": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "description": "Maximum requests allowed in the window.",
+                                },
+                                "window_seconds": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "description": "Sliding window duration in seconds.",
+                                },
+                            },
+                            "required": ["max_attempts", "window_seconds"],
+                            "additionalProperties": False,
+                        },
+                        "per": {
+                            "type": "string",
+                            "enum": ["user", "ip"],
+                            "default": "ip",
+                            "description": (
+                                "Rate-limit key strategy. 'user' tracks by "
+                                "authenticated user ID; 'ip' tracks by client IP."
+                            ),
+                        },
+                    },
+                    "additionalProperties": False,
+                    "description": (
+                        "Per-collection rate limits for auto-CRUD endpoints. "
+                        "Separate limits for reads (GET) and writes "
+                        "(POST/PUT/PATCH/DELETE)."
+                    ),
+                },
                 "hooks": {
                     "type": "object",
                     "properties": {
@@ -4317,6 +4377,24 @@ MANIFEST_SCHEMA_V2 = {
                                 "MongoDB multi-document transaction. Requires a "
                                 "replica set. If any hook fails, the entire "
                                 "operation rolls back."
+                            ),
+                        },
+                        "before_create": {
+                            "type": "array",
+                            "items": {"$ref": "#/definitions/hookAction"},
+                            "description": (
+                                "Actions to run before a document is created. "
+                                "Errors propagate and abort the write. "
+                                "Hooks may mutate the document body in-place for enrichment."
+                            ),
+                        },
+                        "before_update": {
+                            "type": "array",
+                            "items": {"$ref": "#/definitions/hookAction"},
+                            "description": (
+                                "Actions to run before a document is updated. "
+                                "Errors propagate and abort the write. "
+                                "Receives {{prev.*}} for the current document state."
                             ),
                         },
                         "after_create": {
@@ -4337,9 +4415,10 @@ MANIFEST_SCHEMA_V2 = {
                     },
                     "additionalProperties": False,
                     "description": (
-                        "Declarative lifecycle hooks. Fire-and-forget side effects "
-                        "that run after CRUD operations. Supports {{doc.*}}, "
-                        "{{user.*}}, {{prev.*}}, and $$NOW template placeholders. "
+                        "Declarative lifecycle hooks. before_* hooks run before "
+                        "the write and abort on error; after_* hooks are "
+                        "fire-and-forget. Supports {{doc.*}}, {{user.*}}, "
+                        "{{prev.*}}, and $$NOW template placeholders. "
                         "Set transactional: true to wrap writes + hooks in a "
                         "MongoDB multi-document transaction (requires replica set)."
                     ),

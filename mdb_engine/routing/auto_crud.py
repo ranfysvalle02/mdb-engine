@@ -72,7 +72,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pymongo.errors import DuplicateKeyError, PyMongoError
 
 from ..dependencies import get_scoped_db, require_collection_permission, require_role, require_user
-from ._hooks import HookExecutor
+from ._hooks import BackgroundHookExecutor, HookExecutor
+from ._rate_limit import create_collection_rate_limit_dependency
 from ._serialization import serialize_doc
 from ._validators import validate_schema_extensions
 from .query_parser import parse_query_params
@@ -397,10 +398,15 @@ def _parse_cache_ttl(value: str) -> int:
 # ── Route registration helpers ───────────────────────────────────────────
 
 
-def _register_read_routes(router: APIRouter, ctx: _CollectionCtx) -> None:
+def _register_read_routes(
+    router: APIRouter,
+    ctx: _CollectionCtx,
+    read_dependencies: list[Any] | None = None,
+) -> None:
     """Register GET endpoints (list, count, trash, get-by-id)."""
+    _r_deps = read_dependencies or []
 
-    @router.get("", summary=f"List {ctx.name}")
+    @router.get("", summary=f"List {ctx.name}", dependencies=_r_deps)
     async def list_documents(request: Request, response: Response, db=Depends(get_scoped_db)):
         params = dict(request.query_params)
         parsed = parse_query_params(params)
@@ -441,7 +447,7 @@ def _register_read_routes(router: APIRouter, ctx: _CollectionCtx) -> None:
             "limit": parsed.limit,
         }
 
-    @router.get("/_count", summary=f"Count {ctx.name}")
+    @router.get("/_count", summary=f"Count {ctx.name}", dependencies=_r_deps)
     async def count_documents(request: Request, db=Depends(get_scoped_db)):
         params = dict(request.query_params)
         parsed = parse_query_params(params)
@@ -452,7 +458,7 @@ def _register_read_routes(router: APIRouter, ctx: _CollectionCtx) -> None:
 
     if ctx.soft_delete:
 
-        @router.get("/_trash", summary=f"List deleted {ctx.name}")
+        @router.get("/_trash", summary=f"List deleted {ctx.name}", dependencies=_r_deps)
         async def list_trash(request: Request, db=Depends(get_scoped_db)):
             params = dict(request.query_params)
             parsed = parse_query_params(params)
@@ -478,7 +484,7 @@ def _register_read_routes(router: APIRouter, ctx: _CollectionCtx) -> None:
                 "limit": parsed.limit,
             }
 
-    @router.get("/{document_id}", summary=f"Get {ctx.name} by ID")
+    @router.get("/{document_id}", summary=f"Get {ctx.name} by ID", dependencies=_r_deps)
     async def get_document(document_id: str, request: Request, db=Depends(get_scoped_db)):
         oid = _to_object_id(document_id)
         user = _get_user_from_request(request)
@@ -560,6 +566,9 @@ def _register_bulk_insert_route(
             if ctx.timestamps:
                 _stamp_create(doc)
         collection = db[ctx.name]
+        if hook_exec:
+            for doc in body:
+                await hook_exec.run_before("before_create", doc, user, db)
         try:
             result = await collection.insert_many(body)
         except DuplicateKeyError as exc:
@@ -668,7 +677,7 @@ def _register_write_routes(
     """Register POST/PUT/PATCH/DELETE endpoints."""
     _c_deps = create_dependencies or []
     _m_deps = mutate_dependencies or []
-    _hook_exec = HookExecutor(ctx.hooks_config) if ctx.hooks_config else None
+    _hook_exec = BackgroundHookExecutor(ctx.hooks_config) if ctx.hooks_config else None
 
     @router.post("", status_code=201, summary=f"Create {ctx.name}", dependencies=_c_deps)
     async def create_document(request: Request, db=Depends(get_scoped_db)):
@@ -683,6 +692,8 @@ def _register_write_routes(
         if ctx.timestamps:
             _stamp_create(body)
         collection = db[ctx.name]
+        if _hook_exec:
+            await _hook_exec.run_before("before_create", body, user, db)
         try:
             result = await collection.insert_one(body)
         except DuplicateKeyError as exc:
@@ -712,6 +723,8 @@ def _register_write_routes(
         doc = await collection.find_one(q)
         if doc is None:
             raise HTTPException(status_code=404, detail="Document not found")
+        if _hook_exec:
+            await _hook_exec.run_before("before_update", body, user, db, prev=_serialize_doc(doc))
         try:
             result = await collection.update_one({"_id": oid}, {"$set": body})
         except DuplicateKeyError as exc:
@@ -739,6 +752,8 @@ def _register_write_routes(
         doc = await collection.find_one(q)
         if doc is None:
             raise HTTPException(status_code=404, detail="Document not found")
+        if _hook_exec:
+            await _hook_exec.run_before("before_update", body, user, db, prev=_serialize_doc(doc))
         try:
             result = await collection.update_one({"_id": oid}, {"$set": body})
         except DuplicateKeyError as exc:
@@ -1004,6 +1019,13 @@ def create_auto_crud_router(
     elif auth_config.get("required") or _auth_baseline:
         router_dependencies.append(Depends(require_user()))
 
+    # Per-collection rate limiting (reads + writes)
+    _rate_limits_config = config.get("rate_limits", {})
+    _read_rate_dep = create_collection_rate_limit_dependency(collection_name, "reads", _rate_limits_config)
+    _write_rate_dep = create_collection_rate_limit_dependency(collection_name, "writes", _rate_limits_config)
+
+    _read_rate_deps = [Depends(_read_rate_dep)]
+
     # public_read: split into two routers — public reads, auth-gated writes.
     if _public_read and _auth_baseline:
         if _use_provider:
@@ -1019,7 +1041,7 @@ def create_auto_crud_router(
         read_router = APIRouter(prefix=prefix, tags=route_tags, dependencies=router_dependencies)
         write_router = read_router
 
-    _register_read_routes(read_router, ctx)
+    _register_read_routes(read_router, ctx, read_dependencies=_read_rate_deps)
     _register_pipeline_routes(read_router, ctx)
     if not ctx.read_only:
         create_roles = auth_config.get("create_roles")
@@ -1048,11 +1070,12 @@ def create_auto_crud_router(
         elif write_required:
             write_deps.append(Depends(require_user()))
 
+        _wr_dep = [Depends(_write_rate_dep)]
         _register_write_routes(
             write_router,
             ctx,
-            create_dependencies=create_deps or write_deps,
-            mutate_dependencies=write_deps,
+            create_dependencies=(create_deps or write_deps) + _wr_dep,
+            mutate_dependencies=write_deps + _wr_dep,
         )
 
     if read_router is write_router:

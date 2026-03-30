@@ -16,10 +16,13 @@ class MongoDBEngineError(RuntimeError):
     while providing a more specific base class for MDB_ENGINE errors.
 
     Attributes:
+        code: Stable machine-readable error code (e.g. ``"MDB_ERROR"``).
         message: Error message
         context: Optional dictionary with additional context (app_slug,
                  collection_name, etc.)
     """
+
+    code: str = "MDB_ERROR"
 
     def __init__(self, message: str, context: dict[str, Any] | None = None) -> None:
         """
@@ -54,6 +57,8 @@ class InitializationError(MongoDBEngineError):
         db_name: Database name (if available)
         context: Additional context information
     """
+
+    code: str = "MDB_INIT_FAILED"
 
     def __init__(
         self,
@@ -95,6 +100,8 @@ class ManifestValidationError(MongoDBEngineError):
         schema_version: Schema version used for validation (if available)
         context: Additional context information
     """
+
+    code: str = "MDB_MANIFEST_INVALID"
 
     def __init__(
         self,
@@ -141,6 +148,8 @@ class ConfigurationError(MongoDBEngineError):
         context: Additional context information
     """
 
+    code: str = "MDB_CONFIG_ERROR"
+
     def __init__(
         self,
         message: str,
@@ -182,6 +191,8 @@ class QueryValidationError(MongoDBEngineError):
         context: Additional context information
     """
 
+    code: str = "MDB_QUERY_INVALID"
+
     def __init__(
         self,
         message: str,
@@ -216,25 +227,25 @@ class QueryValidationError(MongoDBEngineError):
 class LLMAPIError(MongoDBEngineError):
     """Raised when an LLM provider returns an API-level error."""
 
-    pass
+    code: str = "MDB_LLM_ERROR"
 
 
 class LLMAuthenticationError(MongoDBEngineError):
     """Raised when LLM provider authentication fails (invalid or missing API key)."""
 
-    pass
+    code: str = "MDB_LLM_AUTH_FAILED"
 
 
 class LLMNotFoundError(MongoDBEngineError):
     """Raised when a requested LLM model or deployment is not found."""
 
-    pass
+    code: str = "MDB_LLM_NOT_FOUND"
 
 
 class LLMRateLimitError(MongoDBEngineError):
     """Raised when an LLM provider rate-limits a request."""
 
-    pass
+    code: str = "MDB_LLM_RATE_LIMITED"
 
 
 class ResourceLimitExceeded(MongoDBEngineError):
@@ -251,6 +262,8 @@ class ResourceLimitExceeded(MongoDBEngineError):
         actual_value: The actual value that exceeded the limit
         context: Additional context information
     """
+
+    code: str = "MDB_RATE_LIMITED"
 
     def __init__(
         self,

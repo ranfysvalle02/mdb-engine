@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mdb-engine"
-version = "0.10.0"
+version = "0.11.0"
 description = "MongoDB Engine"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -117,7 +117,7 @@ Repository = "https://github.com/ranfysvalle02/mdb-engine"
 Issues = "https://github.com/ranfysvalle02/mdb-engine/issues"
 
 [tool.setuptools.package-data]
-mdb_engine = ["templates/*.html"]
+mdb_engine = ["templates/*.html", "py.typed"]
 
 [tool.coverage.run]
 source = ["mdb_engine"]

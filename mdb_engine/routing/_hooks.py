@@ -1,9 +1,13 @@
 """
 Declarative lifecycle hooks for auto-CRUD collections.
 
-Hooks are manifest-driven side effects that fire after create, update, or
-delete operations.  They are **fire-and-forget** — errors are logged but
-never fail the originating request.
+Hooks are manifest-driven side effects that fire around create, update, or
+delete operations.
+
+* **after_*** hooks are **fire-and-forget** — errors are logged but never
+  fail the originating request (executed via ``run()``).
+* **before_*** hooks **propagate errors** so a failing hook aborts the
+  write (executed via ``run_before()``).
 
 Supported actions:
 
@@ -129,7 +133,11 @@ def _match_value(actual: Any, expected: Any) -> bool:
 
 
 class HookExecutor:
-    """Execute manifest-declared hooks after CRUD operations."""
+    """Execute manifest-declared hooks for CRUD operations.
+
+    ``run()`` is fire-and-forget (errors logged, never propagated).
+    ``run_before()`` lets errors propagate so the caller can abort the write.
+    """
 
     def __init__(self, hooks_config: dict[str, list[dict[str, Any]]]) -> None:
         self._config = hooks_config
@@ -166,6 +174,30 @@ class HookExecutor:
                     action_def.get("collection", "?"),
                     action_def.get("action", "?"),
                 )
+
+    async def run_before(
+        self,
+        event: str,
+        doc: dict[str, Any],
+        user: dict[str, Any] | None,
+        db: Any,
+        *,
+        prev: dict[str, Any] | None = None,
+    ) -> None:
+        """Run all hooks registered for *event*, letting errors propagate.
+
+        Unlike :meth:`run`, this method does **not** swallow exceptions.
+        If any hook action raises, the exception bubbles up so the caller
+        can abort the originating write.  Intended for ``before_create``
+        and ``before_update`` events where the hook must be able to veto
+        or enrich the document before it is persisted.
+        """
+        actions = self._config.get(event, [])
+        if not actions:
+            return
+
+        for action_def in actions:
+            await self._execute_action(action_def, doc, user, db, prev=prev)
 
     async def _execute_action(
         self,

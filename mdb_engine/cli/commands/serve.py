@@ -20,6 +20,7 @@ import click
 @click.option("--reload", is_flag=True, help="Enable auto-reload (development)")
 @click.option("--mongo-uri", envvar="MONGODB_URI", default=None, help="MongoDB connection URI")
 @click.option("--db-name", envvar="MDB_DB_NAME", default=None, help="Database name")
+@click.option("--debug", is_flag=True, help="Enable debug-level logging")
 def serve(
     manifest_file: Path,
     host: str,
@@ -27,6 +28,7 @@ def serve(
     reload: bool,
     mongo_uri: str | None,
     db_name: str | None,
+    debug: bool,
 ) -> None:
     """Start an API server from a manifest file.
 
@@ -69,6 +71,8 @@ def serve(
         click.echo(f"  Auto-CRUD: {crud_count} collection(s)")
     click.echo(f"  Server   : http://{host}:{port}")
     click.echo(f"  Docs     : http://{host}:{port}/docs")
+    if debug:
+        click.echo(click.style("  Debug    : enabled", fg="yellow"))
     public_dir = manifest_path.parent / "public"
     if public_dir.is_dir() and (public_dir / "index.html").exists():
         click.echo(f"  Frontend : http://{host}:{port}")
@@ -85,5 +89,5 @@ def serve(
         host=host,
         port=port,
         reload=reload,
-        log_level="info",
+        log_level="debug" if debug else "info",
     )

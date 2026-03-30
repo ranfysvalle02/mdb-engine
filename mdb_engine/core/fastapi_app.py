@@ -261,6 +261,10 @@ class FastAPIAppMixin:
                     logger.exception(f"on_startup callback failed for '{slug}': {e}")
                     raise
 
+            # Register /health for standalone deployments (sub-apps
+            # inherit the health route from the multi-app parent).
+            self._register_health_route(app, engine, is_sub_app)
+
             # Start scheduled actions (registered during mount_actions)
             from ..actions.scheduler import start_scheduled_actions
 
@@ -914,6 +918,16 @@ class FastAPIAppMixin:
                 await watcher.stop()
             except (OSError, RuntimeError, asyncio.CancelledError) as e:
                 logger.warning(f"Error stopping realtime watcher: {e}")
+
+    @staticmethod
+    def _register_health_route(app: "FastAPI", engine: Any, is_sub_app: bool) -> None:
+        """Add ``GET /health`` to standalone apps (skipped for sub-apps)."""
+        if is_sub_app:
+            return
+
+        @app.get("/health", tags=["system"])
+        async def health_check():
+            return await engine.get_health_status()
 
     # ------------------------------------------------------------------
     # Collection-level index shortcuts (x-unique, ttl)

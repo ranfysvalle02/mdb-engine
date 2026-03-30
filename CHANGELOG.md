@@ -1,5 +1,74 @@
 # Changelog
 
+## 0.11.0
+
+### Added — Gateway Features
+
+- **`BackgroundHookExecutor` wired into auto-CRUD** — After-event hooks
+  (`after_create`, `after_update`, `after_delete`) now run in the background
+  with configurable retry logic and dead-letter logging to `_hook_failures`.
+  Previously only the base fire-and-forget `HookExecutor` was wired in.
+
+- **`before_create` / `before_update` hooks** — New synchronous hook events
+  that run *before* the write is persisted. Errors propagate and abort the
+  request, letting hooks validate, enrich, or veto documents. Declare them
+  in the manifest alongside the existing `after_*` hooks:
+
+  ```json
+  "hooks": {
+    "before_create": [{
+      "action": "http",
+      "url": "https://validation.example.com/check",
+      "method": "POST"
+    }]
+  }
+  ```
+
+- **Per-collection rate limiting** — Declare `rate_limits` on any collection
+  in the manifest. Separate limits for reads (GET) and writes
+  (POST/PUT/PATCH/DELETE), keyed by authenticated user or client IP:
+
+  ```json
+  "rate_limits": {
+    "reads":  { "max_attempts": 100, "window_seconds": 60 },
+    "writes": { "max_attempts": 20,  "window_seconds": 60 },
+    "per": "user"
+  }
+  ```
+
+  Returns `429` with a `Retry-After` header when exceeded.
+
+### Added — DX Polish
+
+- **`GET /health` for single-app** — Standalone apps (`quickstart()`,
+  `mdb-engine serve`) now expose a `/health` endpoint that calls
+  `engine.get_health_status()`. Sub-apps skip it — the multi-app parent
+  owns the health route.
+
+- **`py.typed` marker (PEP 561)** — Type checkers in strict mode now
+  recognize `mdb-engine` as a typed package.
+
+- **Stable error codes** — Every `MongoDBEngineError` subclass now carries a
+  `code` class attribute (e.g. `MDB_QUERY_INVALID`, `MDB_LLM_AUTH_FAILED`).
+  The JSON error response includes a machine-readable `"code"` field:
+
+  ```json
+  { "error": "QueryValidationError", "code": "MDB_QUERY_INVALID", "message": "..." }
+  ```
+
+  LLM exceptions are now mapped to proper HTTP status codes instead of
+  falling through to 500:
+
+  | Exception              | Code                   | HTTP |
+  | ---------------------- | ---------------------- | ---- |
+  | `LLMAPIError`          | `MDB_LLM_ERROR`        | 502  |
+  | `LLMAuthenticationError` | `MDB_LLM_AUTH_FAILED` | 401  |
+  | `LLMNotFoundError`     | `MDB_LLM_NOT_FOUND`    | 404  |
+  | `LLMRateLimitError`    | `MDB_LLM_RATE_LIMITED` | 429  |
+
+- **`--debug` flag on `mdb-engine serve`** — Pass `--debug` to get
+  debug-level uvicorn logging during development.
+
 ## 0.8.7
 
 ### Fixed
