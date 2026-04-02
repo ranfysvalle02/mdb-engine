@@ -881,3 +881,287 @@ class TestSSREdgeCases:
         )
         resp = client.get("/")
         assert "Default description." in resp.text
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# Auto SEO Meta Tags (mdb_base.html)
+# ═════════════════════════════════════════════════════════════════════════
+
+# Template that extends the framework base — the whole point is that it
+# needs ZERO manual meta tags to get full OG/Twitter/JSON-LD output.
+_BASE_CHILD = """\
+{% extends "mdb_base.html" %}
+{% block content %}<h1>{{ post.title }}</h1>{% endblock %}
+"""
+
+_BASE_CHILD_LIST = """\
+{% extends "mdb_base.html" %}
+{% block content %}<ul>{% for p in posts %}<li>{{ p.title }}</li>{% endfor %}</ul>{% endblock %}
+"""
+
+_BASE_CHILD_CUSTOM_SEO = """\
+{% extends "mdb_base.html" %}
+{% block seo_meta %}
+<meta property="og:title" content="Custom Override">
+{% endblock %}
+{% block content %}<h1>Custom</h1>{% endblock %}
+"""
+
+
+class TestAutoSeoMetaTags:
+    """Verify mdb_base.html automatically renders OG, Twitter Card,
+    and JSON-LD tags from the seo context — zero template boilerplate."""
+
+    def test_og_tags_rendered_with_image(self):
+        oid = ObjectId()
+        client, _ = _build_ssr_app(
+            templates={"post.html": _BASE_CHILD},
+            ssr_config={
+                "enabled": True,
+                "site_name": "My Blog",
+                "routes": {
+                    "/posts/{id}": {
+                        "template": "post.html",
+                        "data": {"post": {"collection": "posts", "id_param": "id"}},
+                        "seo": {
+                            "title": "{{post.title}} — My Blog",
+                            "description": "{{post.excerpt}}",
+                            "og_type": "article",
+                            "og_image": "{{post.cover}}",
+                        },
+                    }
+                },
+            },
+            db_collections={
+                "posts": FakeCollection(
+                    [
+                        {
+                            "_id": oid,
+                            "title": "Test Post",
+                            "excerpt": "A great post",
+                            "cover": "https://img.example.com/hero.jpg",
+                        }
+                    ]
+                ),
+            },
+        )
+        resp = client.get(f"/posts/{oid}")
+        html = resp.text
+        assert resp.status_code == 200
+        assert '<meta property="og:title" content="Test Post — My Blog">' in html
+        assert '<meta property="og:description" content="A great post">' in html
+        assert '<meta property="og:type" content="article">' in html
+        assert '<meta property="og:site_name" content="My Blog">' in html
+        assert '<meta property="og:url"' in html
+        assert '<meta property="og:image" content="https://img.example.com/hero.jpg">' in html
+
+    def test_twitter_card_large_image_when_og_image(self):
+        oid = ObjectId()
+        client, _ = _build_ssr_app(
+            templates={"post.html": _BASE_CHILD},
+            ssr_config={
+                "enabled": True,
+                "site_name": "Blog",
+                "routes": {
+                    "/posts/{id}": {
+                        "template": "post.html",
+                        "data": {"post": {"collection": "posts", "id_param": "id"}},
+                        "seo": {
+                            "title": "{{post.title}}",
+                            "description": "desc",
+                            "og_image": "{{post.img}}",
+                        },
+                    }
+                },
+            },
+            db_collections={
+                "posts": FakeCollection([{"_id": oid, "title": "Img Post", "img": "https://img.example.com/a.jpg"}]),
+            },
+        )
+        html = client.get(f"/posts/{oid}").text
+        assert '<meta name="twitter:card" content="summary_large_image">' in html
+        assert '<meta name="twitter:title" content="Img Post">' in html
+        assert '<meta name="twitter:description" content="desc">' in html
+        assert '<meta name="twitter:image" content="https://img.example.com/a.jpg">' in html
+
+    def test_twitter_card_summary_without_image(self):
+        oid = ObjectId()
+        client, _ = _build_ssr_app(
+            templates={"post.html": _BASE_CHILD},
+            ssr_config={
+                "enabled": True,
+                "site_name": "Blog",
+                "routes": {
+                    "/posts/{id}": {
+                        "template": "post.html",
+                        "data": {"post": {"collection": "posts", "id_param": "id"}},
+                        "seo": {
+                            "title": "{{post.title}}",
+                            "description": "No image here",
+                        },
+                    }
+                },
+            },
+            db_collections={
+                "posts": FakeCollection([{"_id": oid, "title": "Text Post"}]),
+            },
+        )
+        html = client.get(f"/posts/{oid}").text
+        assert '<meta name="twitter:card" content="summary">' in html
+        assert "twitter:image" not in html
+
+    def test_json_ld_rendered_in_base_template(self):
+        oid = ObjectId()
+        client, _ = _build_ssr_app(
+            templates={"post.html": _BASE_CHILD},
+            ssr_config={
+                "enabled": True,
+                "site_name": "Blog",
+                "routes": {
+                    "/posts/{id}": {
+                        "template": "post.html",
+                        "data": {"post": {"collection": "posts", "id_param": "id"}},
+                        "seo": {
+                            "title": "{{post.title}}",
+                            "description": "A post",
+                            "json_ld": {
+                                "@context": "https://schema.org",
+                                "@type": "Article",
+                                "headline": "{{post.title}}",
+                            },
+                        },
+                    }
+                },
+            },
+            db_collections={
+                "posts": FakeCollection([{"_id": oid, "title": "LD Post"}]),
+            },
+        )
+        html = client.get(f"/posts/{oid}").text
+        assert '<script type="application/ld+json">' in html
+        ld = json.loads(html.split('<script type="application/ld+json">')[1].split("</script>")[0])
+        assert ld["@type"] == "Article"
+        assert ld["headline"] == "LD Post"
+
+    def test_title_auto_filled_from_seo(self):
+        oid = ObjectId()
+        client, _ = _build_ssr_app(
+            templates={"post.html": _BASE_CHILD},
+            ssr_config={
+                "enabled": True,
+                "site_name": "Blog",
+                "routes": {
+                    "/posts/{id}": {
+                        "template": "post.html",
+                        "data": {"post": {"collection": "posts", "id_param": "id"}},
+                        "seo": {"title": "{{post.title}} — Blog"},
+                    }
+                },
+            },
+            db_collections={
+                "posts": FakeCollection([{"_id": oid, "title": "Title Test"}]),
+            },
+        )
+        html = client.get(f"/posts/{oid}").text
+        assert "<title>Title Test — Blog</title>" in html
+
+    def test_no_seo_config_still_renders_structural_tags(self):
+        """Routes without explicit seo config still get structural meta tags
+        (the SSR handler always builds a seo context with at least site_name)."""
+        client, _ = _build_ssr_app(
+            templates={"index.html": _BASE_CHILD_LIST},
+            ssr_config={
+                "enabled": True,
+                "site_name": "My Site",
+                "routes": {
+                    "/": {
+                        "template": "index.html",
+                        "data": {"posts": {"collection": "posts", "limit": 10}},
+                    }
+                },
+            },
+            db_collections={"posts": FakeCollection([{"_id": ObjectId(), "title": "A"}])},
+        )
+        html = client.get("/").text
+        assert '<meta property="og:site_name" content="My Site">' in html
+        assert '<meta name="twitter:card" content="summary">' in html
+        assert "og:image" not in html
+
+    def test_seo_meta_block_overridable(self):
+        """Apps can override {% block seo_meta %} for full control."""
+        oid = ObjectId()
+        client, _ = _build_ssr_app(
+            templates={"post.html": _BASE_CHILD_CUSTOM_SEO},
+            ssr_config={
+                "enabled": True,
+                "site_name": "Blog",
+                "routes": {
+                    "/posts/{id}": {
+                        "template": "post.html",
+                        "data": {"post": {"collection": "posts", "id_param": "id"}},
+                        "seo": {
+                            "title": "{{post.title}}",
+                            "description": "Should not appear",
+                        },
+                    }
+                },
+            },
+            db_collections={
+                "posts": FakeCollection([{"_id": oid, "title": "Overridden"}]),
+            },
+        )
+        html = client.get(f"/posts/{oid}").text
+        assert '<meta property="og:title" content="Custom Override">' in html
+        assert "og:description" not in html
+        assert "twitter:card" not in html
+
+    def test_og_type_defaults_to_website(self):
+        oid = ObjectId()
+        client, _ = _build_ssr_app(
+            templates={"post.html": _BASE_CHILD},
+            ssr_config={
+                "enabled": True,
+                "site_name": "Blog",
+                "routes": {
+                    "/posts/{id}": {
+                        "template": "post.html",
+                        "data": {"post": {"collection": "posts", "id_param": "id"}},
+                        "seo": {"title": "{{post.title}}", "description": "d"},
+                    }
+                },
+            },
+            db_collections={
+                "posts": FakeCollection([{"_id": oid, "title": "Default OG"}]),
+            },
+        )
+        html = client.get(f"/posts/{oid}").text
+        assert '<meta property="og:type" content="website">' in html
+
+    def test_empty_og_image_field_no_image_tags(self):
+        """When og_image resolves to empty string, treat as no image."""
+        oid = ObjectId()
+        client, _ = _build_ssr_app(
+            templates={"post.html": _BASE_CHILD},
+            ssr_config={
+                "enabled": True,
+                "site_name": "Blog",
+                "routes": {
+                    "/posts/{id}": {
+                        "template": "post.html",
+                        "data": {"post": {"collection": "posts", "id_param": "id"}},
+                        "seo": {
+                            "title": "{{post.title}}",
+                            "description": "d",
+                            "og_image": "{{post.cover}}",
+                        },
+                    }
+                },
+            },
+            db_collections={
+                "posts": FakeCollection([{"_id": oid, "title": "No Cover"}]),
+            },
+        )
+        html = client.get(f"/posts/{oid}").text
+        assert '<meta name="twitter:card" content="summary">' in html
+        assert "og:image" not in html
+        assert "twitter:image" not in html

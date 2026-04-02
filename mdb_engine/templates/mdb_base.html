@@ -5,12 +5,21 @@
     available in {% block base_js %} and {% block extra_js %}.
 
     Block hierarchy (in render order):
-      title       — page <title>
-      head        — <head> content (CSS, meta tags, fonts, etc.)
+      title       — page <title> (auto-filled from seo.title when present)
+      seo_meta    — Open Graph, Twitter Card, JSON-LD (auto-rendered from seo)
+      head        — <head> content (CSS, extra meta tags, fonts, etc.)
       body        — full visual structure; scripts here MUST NOT use MDB
         content   — main page content (nested inside body)
       base_js     — app-level base scripts (logout, nav helpers) — MDB available
       extra_js    — page-level scripts — MDB available
+
+    SEO context (populated automatically by SSR routes with a "seo" config):
+      {{ seo.title }}       — resolved page title
+      {{ seo.description }} — resolved meta description
+      {{ seo.og_type }}     — Open Graph type (defaults to "website")
+      {{ seo.og_image }}    — Open Graph image URL
+      {{ seo.site_name }}   — site name from manifest
+      {{ seo.json_ld }}     — JSON-LD structured data string
 
     Template globals injected by the engine (always available):
       {{ base_path }}    — app mount path, e.g. "/ai-chat"
@@ -30,7 +39,31 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}{% endblock %}</title>
+    <title>{% block title %}{{ seo.title if seo is defined and seo.title else '' }}{% endblock %}</title>
+    {% block seo_meta %}
+    {% if seo is defined and seo %}
+    <meta name="description" content="{{ seo.description }}">
+    <meta property="og:title" content="{{ seo.title }}">
+    <meta property="og:description" content="{{ seo.description }}">
+    <meta property="og:type" content="{{ seo.og_type or 'website' }}">
+    <meta property="og:site_name" content="{{ seo.site_name }}">
+    <meta property="og:url" content="{{ request.url }}">
+    {% if seo.og_image %}
+    <meta property="og:image" content="{{ seo.og_image }}">
+    <meta name="twitter:card" content="summary_large_image">
+    {% else %}
+    <meta name="twitter:card" content="summary">
+    {% endif %}
+    <meta name="twitter:title" content="{{ seo.title }}">
+    <meta name="twitter:description" content="{{ seo.description }}">
+    {% if seo.og_image %}
+    <meta name="twitter:image" content="{{ seo.og_image }}">
+    {% endif %}
+    {% if seo.json_ld %}
+    <script type="application/ld+json">{{ seo.json_ld | safe }}</script>
+    {% endif %}
+    {% endif %}
+    {% endblock %}
     {% block head %}{% endblock %}
 </head>
 <body>

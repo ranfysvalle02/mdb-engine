@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mdb-engine"
-version = "0.11.0"
+version = "0.11.1"
 description = "MongoDB Engine"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -173,7 +173,7 @@ ignore = [
     "TRY201", # Use raise without exception name (bare raise not always clearer)
     "TRY300", # Move statement to else block (pedantic, minimal benefit)
     "TRY301", # Abstract raise to inner function (over-engineering)
-    "TRY302", # Remove handler with immediate re-raise (useful for logging)
+    "TRY203", # Remove handler with immediate re-raise (useful for logging)
     "TRY401", # Redundant exception in logging.exception (minor style issue)
 ]
 
