@@ -52,31 +52,28 @@ def migrate(
         mdb migrate manifest.json --target-version 2.0 --output manifest.v2.json
         mdb migrate manifest.json --in-place
     """
-    try:
-        # Load manifest
-        manifest = load_manifest_file(manifest_file)
+    # Load manifest
+    manifest = load_manifest_file(manifest_file)
 
-        # Migrate
-        migrated_manifest = migrate_manifest(manifest, target_version=target_version)
+    # Migrate
+    migrated_manifest = migrate_manifest(manifest, target_version=target_version)
 
-        # Determine output
-        if in_place:
-            output_path = manifest_file
-        elif output:
-            output_path = output
-        else:
-            # Output to stdout
-            click.echo(json.dumps(migrated_manifest, indent=2, ensure_ascii=False))
-            sys.exit(0)
-
-        # Save to file
-        save_manifest_file(output_path, migrated_manifest)
-        click.echo(
-            click.style(
-                f"Migrated manifest to version {target_version}: {output_path}",
-                fg="green",
-            )
-        )
+    # Determine output
+    if in_place:
+        output_path = manifest_file
+    elif output:
+        output_path = output
+    else:
+        # Output to stdout
+        click.echo(json.dumps(migrated_manifest, indent=2, ensure_ascii=False))
         sys.exit(0)
-    except click.ClickException:
-        raise
+
+    # Save to file
+    save_manifest_file(output_path, migrated_manifest)
+    click.echo(
+        click.style(
+            f"Migrated manifest to version {target_version}: {output_path}",
+            fg="green",
+        )
+    )
+    sys.exit(0)
