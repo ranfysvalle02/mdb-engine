@@ -62,6 +62,7 @@ Usage (programmatic):
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -193,6 +194,53 @@ def _handle_duplicate_key(exc: DuplicateKeyError, collection_name: str) -> None:
     raise HTTPException(status_code=409, detail=detail) from exc
 
 
+# ── Slug generation ──────────────────────────────────────────────────────
+
+_SLUG_RE = re.compile(r"[^a-z0-9]+")
+
+
+def _generate_slug(text: str) -> str:
+    """Convert text to a URL-safe slug: ``The Shape of Memory`` -> ``the-shape-of-memory``."""
+    import unicodedata
+
+    text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
+    return _SLUG_RE.sub("-", text.lower()).strip("-")
+
+
+async def _ensure_unique_slug(
+    collection: Any,
+    slug_field: str,
+    base_slug: str,
+    exclude_id: ObjectId | None = None,
+) -> str:
+    """Return *base_slug* if available, otherwise append ``-2``, ``-3``, etc."""
+    candidate = base_slug
+    counter = 1
+    while True:
+        q: dict[str, Any] = {slug_field: candidate}
+        if exclude_id is not None:
+            q["_id"] = {"$ne": exclude_id}
+        if not await collection.find_one(q, {"_id": 1}):
+            return candidate
+        counter += 1
+        candidate = f"{base_slug}-{counter}"
+
+
+def _parse_slug_fields(schema: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+    """Extract ``x-slug`` definitions from schema properties.
+
+    Returns a mapping of ``{slug_field_name: {"from": source_field, "unique": bool}}``.
+    """
+    if not schema:
+        return {}
+    props = schema.get("properties", {})
+    result: dict[str, dict[str, Any]] = {}
+    for name, prop_def in props.items():
+        if isinstance(prop_def, dict) and "x-slug" in prop_def:
+            result[name] = prop_def["x-slug"]
+    return result
+
+
 # ── Collection context (holds parsed manifest config) ────────────────────
 
 
@@ -221,6 +269,8 @@ class _CollectionCtx:
     has_unique_fields: bool = False
     cascade_config: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     cache_config: dict[str, Any] = field(default_factory=dict)
+    slug_fields: dict[str, dict[str, Any]] = field(default_factory=dict)
+    computed_on_write: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     # ── filter helpers ────────────────────────────────────────────────
 
@@ -668,6 +718,38 @@ def _register_delete_routes(
             return {"data": {"_id": document_id, "restored": True}}
 
 
+async def _apply_slugs(
+    body: dict[str, Any],
+    slug_fields: dict[str, dict[str, Any]],
+    collection: Any,
+    exclude_id: ObjectId | None = None,
+) -> None:
+    """Generate slug values for all ``x-slug`` fields whose source is present in *body*."""
+    for slug_field, slug_cfg in slug_fields.items():
+        source = slug_cfg.get("from", "")
+        if source and source in body:
+            base = _generate_slug(str(body[source]))
+            if slug_cfg.get("unique", True):
+                body[slug_field] = await _ensure_unique_slug(collection, slug_field, base, exclude_id=exclude_id)
+            else:
+                body[slug_field] = base
+
+
+def _apply_computed(
+    body: dict[str, Any],
+    computed_on_write: dict[str, dict[str, Any]],
+    *,
+    partial: bool = False,
+) -> None:
+    """Apply ``x-computed`` transforms to *body*."""
+    from ._computed import apply_computed_fields, apply_computed_fields_partial
+
+    if partial:
+        apply_computed_fields_partial(body, computed_on_write)
+    else:
+        apply_computed_fields(body, computed_on_write)
+
+
 def _register_write_routes(
     router: APIRouter,
     ctx: _CollectionCtx,
@@ -689,9 +771,11 @@ def _register_write_routes(
         await validate_schema_extensions(body, ctx.schema, db)
         body.pop("_id", None)
         ctx.apply_defaults(body, user)
+        collection = db[ctx.name]
+        await _apply_slugs(body, ctx.slug_fields, collection)
+        _apply_computed(body, ctx.computed_on_write)
         if ctx.timestamps:
             _stamp_create(body)
-        collection = db[ctx.name]
         if _hook_exec:
             await _hook_exec.run_before("before_create", body, user, db)
         try:
@@ -716,9 +800,11 @@ def _register_write_routes(
         _validate_document(body, ctx.schema)
         await validate_schema_extensions(body, ctx.schema, db)
         body.pop("_id", None)
+        collection = db[ctx.name]
+        await _apply_slugs(body, ctx.slug_fields, collection, exclude_id=oid)
+        _apply_computed(body, ctx.computed_on_write)
         if ctx.timestamps:
             _stamp_update(body)
-        collection = db[ctx.name]
         q = ctx.write_filter(oid, "write", user)
         doc = await collection.find_one(q)
         if doc is None:
@@ -745,9 +831,11 @@ def _register_write_routes(
         _validate_document(body, ctx.schema, partial=True)
         await validate_schema_extensions(body, ctx.schema, db, partial=True)
         body.pop("_id", None)
+        collection = db[ctx.name]
+        await _apply_slugs(body, ctx.slug_fields, collection, exclude_id=oid)
+        _apply_computed(body, ctx.computed_on_write, partial=True)
         if ctx.timestamps:
             _stamp_update(body)
-        collection = db[ctx.name]
         q = ctx.write_filter(oid, "write", user)
         doc = await collection.find_one(q)
         if doc is None:
@@ -963,6 +1051,11 @@ def create_auto_crud_router(
         for sf in _SENSITIVE_READ_FIELDS:
             projection.setdefault(sf, 0)
 
+    from ._computed import parse_computed_on_write
+
+    slug_fields = _parse_slug_fields(schema)
+    computed_on_write = parse_computed_on_write(schema)
+
     ctx = _CollectionCtx(
         name=collection_name,
         schema=schema,
@@ -985,6 +1078,8 @@ def create_auto_crud_router(
         has_unique_fields=has_unique,
         cascade_config=config.get("cascade", {}),
         cache_config=config.get("cache", {}),
+        slug_fields=slug_fields,
+        computed_on_write=computed_on_write,
     )
 
     auth_config = config.get("auth", {})

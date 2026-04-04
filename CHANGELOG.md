@@ -1,5 +1,58 @@
 # Changelog
 
+## 0.11.2
+
+### Added — SSR, SEO & Blog Features
+
+- **Computed virtual fields (`x-computed`)** — Schema properties with
+  `x-computed` are automatically derived on every create, replace, and patch.
+  Built-in transforms: `plain_text`, `first_image`, `word_count`, `truncate`.
+
+- **SEO fallback chains** — SEO fields now accept a `{"fallback": [...]}` array
+  in addition to a plain string. The engine evaluates each expression in order
+  and uses the first non-empty result. Placeholder expressions support pipe
+  transforms: `{{post.body | plain_text | truncate(160)}}`.
+
+- **RSS/Atom feed generation** — New `ssr.feeds` manifest key. The engine
+  serves valid RSS 2.0 or Atom 1.0 feeds at configured paths with proper
+  `Content-Type`, `ETag`, and `Cache-Control` headers.
+
+- **Auto `<head>` meta injection** — `mdb_base.html` now auto-injects
+  `<link rel="canonical">`, feed `<link rel="alternate">`, and pagination
+  `<link rel="prev/next">` tags. No template changes needed.
+
+- **Slug-based URLs (`x-slug`)** — Schema properties with `x-slug` get
+  auto-generated URL-safe slugs on create/update with collision suffixing.
+  SSR routes transparently resolve slugs when `id_param` is not a valid
+  ObjectId.
+
+- **Enhanced sitemaps** — `ssr.sitemap` now accepts an object with per-route
+  `lastmod`, `changefreq`, `priority` metadata. Automatic sitemap index
+  splitting at configurable `max_urls_per_file` (default 50,000).
+
+- **`robots.txt` generation** — New `ssr.robots` manifest key with `allow`,
+  `disallow`, and `sitemap` fields. Serves a valid `robots.txt` at `/robots.txt`.
+
+- **Pagination SEO** — SSR routes with paginated data automatically inject
+  `rel="prev"` / `rel="next"` link tags and `Link` HTTP headers.
+
+- **Cache status headers** — Every SSR response now includes
+  `X-Cache-Status: MISS` (and `X-Cache-Age: 0` when `Cache-Control` is set).
+  Templates receive a `cache` context object for future server-side caching.
+
+- **OG image generation** — New `ssr.og_image_fallback` config auto-generates
+  1200×630 social preview PNGs for documents without a cover image. Requires
+  optional `Pillow` dependency (`pip install mdb-engine[og-image]`).
+
+### Added — New Optional Dependency Group
+
+- `mdb-engine[og-image]` — Installs `Pillow>=10.0.0` for OG image generation.
+
+### New Files
+
+- `mdb_engine/routing/_computed.py` — Write-time computed field transform registry.
+- `mdb_engine/routing/_og_image.py` — OG social preview image generator.
+
 ## 0.11.0
 
 ### Added — Gateway Features

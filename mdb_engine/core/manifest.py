@@ -1522,10 +1522,197 @@ MANIFEST_SCHEMA_V2 = {
                     ),
                 },
                 "sitemap": {
-                    "type": "boolean",
+                    "oneOf": [
+                        {"type": "boolean"},
+                        {
+                            "type": "object",
+                            "properties": {
+                                "routes": {
+                                    "type": "object",
+                                    "description": (
+                                        "Per-route sitemap metadata. Keys are route "
+                                        "patterns matching ssr.routes keys."
+                                    ),
+                                    "additionalProperties": {
+                                        "type": "object",
+                                        "properties": {
+                                            "lastmod": {
+                                                "type": "string",
+                                                "description": (
+                                                    "Last modification date. Supports " "{{doc.field}} placeholders."
+                                                ),
+                                            },
+                                            "changefreq": {
+                                                "type": "string",
+                                                "enum": [
+                                                    "always",
+                                                    "hourly",
+                                                    "daily",
+                                                    "weekly",
+                                                    "monthly",
+                                                    "yearly",
+                                                    "never",
+                                                ],
+                                            },
+                                            "priority": {
+                                                "type": "number",
+                                                "minimum": 0.0,
+                                                "maximum": 1.0,
+                                            },
+                                        },
+                                        "additionalProperties": False,
+                                    },
+                                },
+                                "max_urls_per_file": {
+                                    "type": "integer",
+                                    "default": 50000,
+                                    "description": (
+                                        "Max URLs per sitemap file before splitting " "into a sitemap index."
+                                    ),
+                                },
+                            },
+                            "additionalProperties": False,
+                        },
+                    ],
                     "default": True,
                     "description": (
-                        "Auto-generate /sitemap.xml from public SSR routes. " "Auth-gated routes are excluded."
+                        "Sitemap config. Boolean true for auto-generate, or object "
+                        "for per-route lastmod/changefreq/priority and index splitting."
+                    ),
+                },
+                "robots": {
+                    "type": "object",
+                    "properties": {
+                        "allow": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "URL paths to allow in robots.txt.",
+                        },
+                        "disallow": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "URL paths to disallow in robots.txt.",
+                        },
+                        "sitemap": {
+                            "type": "string",
+                            "description": (
+                                "Sitemap URL for robots.txt. Supports "
+                                "{{base_url}} placeholder. Defaults to "
+                                "{{base_url}}/sitemap.xml."
+                            ),
+                        },
+                    },
+                    "additionalProperties": False,
+                    "description": "Generate a robots.txt from allow/disallow rules.",
+                },
+                "feeds": {
+                    "type": "object",
+                    "description": (
+                        "RSS/Atom feed definitions. Keys are URL paths "
+                        "(e.g. '/feed.xml'). Values define format, source "
+                        "collection, and item template."
+                    ),
+                    "patternProperties": {
+                        "^/": {
+                            "type": "object",
+                            "properties": {
+                                "format": {
+                                    "type": "string",
+                                    "enum": ["rss", "atom"],
+                                    "default": "rss",
+                                    "description": "Feed format: RSS 2.0 or Atom 1.0.",
+                                },
+                                "collection": {
+                                    "type": "string",
+                                    "description": "Source collection for feed items.",
+                                },
+                                "scope": {
+                                    "type": "string",
+                                    "description": "Named scope to filter items.",
+                                },
+                                "sort": {
+                                    "type": "object",
+                                    "description": 'Sort spec (e.g. {"created_at": -1}).',
+                                },
+                                "limit": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 100,
+                                    "default": 20,
+                                    "description": "Max items in the feed.",
+                                },
+                                "title": {
+                                    "type": "string",
+                                    "description": "Feed title. Supports {{site_name}} placeholder.",
+                                },
+                                "description": {
+                                    "type": "string",
+                                    "description": "Feed description. Supports placeholders.",
+                                },
+                                "item": {
+                                    "type": "object",
+                                    "description": (
+                                        "Item field templates. Keys are RSS/Atom element "
+                                        "names (title, link, description, pubDate, author). "
+                                        "Values support {{doc.field}} placeholders."
+                                    ),
+                                    "additionalProperties": {"type": "string"},
+                                },
+                            },
+                            "required": ["collection"],
+                            "additionalProperties": False,
+                        },
+                    },
+                    "additionalProperties": False,
+                },
+                "og_image_fallback": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": "Enable auto-generated OG preview images.",
+                        },
+                        "background": {
+                            "type": "string",
+                            "default": "#1a1a2e",
+                            "description": "Background color (hex).",
+                        },
+                        "text_color": {
+                            "type": "string",
+                            "default": "#ffffff",
+                            "description": "Text color (hex).",
+                        },
+                        "font": {
+                            "type": "string",
+                            "description": "TrueType font name or path.",
+                        },
+                        "logo": {
+                            "type": "string",
+                            "description": "Path to logo image to overlay.",
+                        },
+                        "title_field": {
+                            "type": "string",
+                            "default": "title",
+                            "description": "Document field to use as title text.",
+                        },
+                        "author_field": {
+                            "type": "string",
+                            "default": "author",
+                            "description": "Document field to use as author text.",
+                        },
+                        "cover_field": {
+                            "type": "string",
+                            "default": "cover_image",
+                            "description": (
+                                "Document field for existing cover image. "
+                                "If present, redirects instead of generating."
+                            ),
+                        },
+                    },
+                    "additionalProperties": False,
+                    "description": (
+                        "Auto-generate social preview images for documents " "without a cover image. Requires Pillow."
                     ),
                 },
                 "routes": {
@@ -1564,7 +1751,7 @@ MANIFEST_SCHEMA_V2 = {
                                                 "type": "string",
                                                 "description": (
                                                     "Path parameter to use as document _id "
-                                                    "(for single-document routes)."
+                                                    "or slug (for single-document routes)."
                                                 ),
                                             },
                                             "scope": {
@@ -1616,18 +1803,76 @@ MANIFEST_SCHEMA_V2 = {
                                     "type": "object",
                                     "properties": {
                                         "title": {
-                                            "type": "string",
-                                            "description": (
-                                                "Page title. Supports {{var.field}} " "placeholders from data context."
-                                            ),
+                                            "oneOf": [
+                                                {
+                                                    "type": "string",
+                                                    "description": (
+                                                        "Page title. Supports {{var.field}} "
+                                                        "placeholders and pipe transforms."
+                                                    ),
+                                                },
+                                                {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "fallback": {
+                                                            "type": "array",
+                                                            "items": {"type": "string"},
+                                                            "description": (
+                                                                "Ordered fallback templates. "
+                                                                "First non-empty result wins."
+                                                            ),
+                                                        },
+                                                    },
+                                                    "required": ["fallback"],
+                                                    "additionalProperties": False,
+                                                },
+                                            ],
                                         },
                                         "description": {
-                                            "type": "string",
-                                            "description": "Meta description. Supports placeholders.",
+                                            "oneOf": [
+                                                {
+                                                    "type": "string",
+                                                    "description": (
+                                                        "Meta description. Supports placeholders "
+                                                        "and pipe transforms "
+                                                        "(e.g. {{post.body | plain_text | truncate(160)}})."
+                                                    ),
+                                                },
+                                                {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "fallback": {
+                                                            "type": "array",
+                                                            "items": {"type": "string"},
+                                                            "description": (
+                                                                "Ordered fallback templates. "
+                                                                "First non-empty result wins."
+                                                            ),
+                                                        },
+                                                    },
+                                                    "required": ["fallback"],
+                                                    "additionalProperties": False,
+                                                },
+                                            ],
                                         },
                                         "og_image": {
-                                            "type": "string",
-                                            "description": "Open Graph image URL. Supports placeholders.",
+                                            "oneOf": [
+                                                {
+                                                    "type": "string",
+                                                    "description": "Open Graph image URL. Supports placeholders.",
+                                                },
+                                                {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "fallback": {
+                                                            "type": "array",
+                                                            "items": {"type": "string"},
+                                                        },
+                                                    },
+                                                    "required": ["fallback"],
+                                                    "additionalProperties": False,
+                                                },
+                                            ],
                                         },
                                         "og_type": {
                                             "type": "string",
@@ -1682,7 +1927,8 @@ MANIFEST_SCHEMA_V2 = {
                 "templates/ directory, routes are rendered server-side with "
                 "data from MongoDB — including relations ($lookup), computed "
                 "fields, pagination, policy enforcement, caching, JSON-LD, "
-                "auto-sitemap, and custom error pages."
+                "auto-sitemap, RSS/Atom feeds, robots.txt, OG image "
+                "generation, and custom error pages."
             ),
         },
         "jobs": {

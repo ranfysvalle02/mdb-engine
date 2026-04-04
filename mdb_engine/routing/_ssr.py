@@ -43,28 +43,105 @@ from .template_resolver import merge_filters, resolve_template
 
 logger = logging.getLogger(__name__)
 
-_PLACEHOLDER_RE = re.compile(r"\{\{(\w+(?:\.\w+)*)\}\}")
+_PLACEHOLDER_RE = re.compile(r"\{\{(.+?)\}\}")
 _FW_TEMPLATES_DIR = str(Path(__file__).resolve().parent.parent / "templates")
+
+
+# ── SEO text transforms ─────────────────────────────────────────────────
+
+
+def _strip_markdown(text: str) -> str:
+    """Strip common markdown syntax, returning approximate plain text."""
+    text = re.sub(r"!\[.*?\]\(.*?\)", "", text)
+    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+    text = re.sub(r"(`{1,3}).*?\1", "", text, flags=re.DOTALL)
+    text = re.sub(r"^#{1,6}\s+", "", text, flags=re.MULTILINE)
+    text = re.sub(r"(\*{1,2}|_{1,2})(.*?)\1", r"\2", text)
+    text = re.sub(r"^[>\-*+]\s+", "", text, flags=re.MULTILINE)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+_SEO_TRANSFORMS: dict[str, Any] = {
+    "plain_text": lambda val, **_kw: _strip_markdown(str(val)) if val else "",
+    "truncate": lambda val, length=160, **_kw: (
+        (str(val)[: length - 1].rsplit(" ", 1)[0] + "\u2026") if val and len(str(val)) > length else str(val or "")
+    ),
+}
+
+
+def _apply_seo_transforms(value: str, transforms: list[str]) -> str:
+    """Apply a chain of ``name`` or ``name(arg)`` transforms to a string."""
+    for expr in transforms:
+        expr = expr.strip()
+        match = re.match(r"(\w+)\((.+)\)", expr)
+        if match:
+            name, raw_arg = match.group(1), match.group(2)
+            kwargs = {}
+            try:
+                kwargs["length"] = int(raw_arg)
+            except ValueError:
+                kwargs["length"] = raw_arg
+        else:
+            name = expr
+            kwargs = {}
+        fn = _SEO_TRANSFORMS.get(name)
+        if fn:
+            value = fn(value, **kwargs)
+    return value
 
 
 # ── SEO helpers ──────────────────────────────────────────────────────────
 
 
 def _resolve_seo_placeholders(template: str, context: dict[str, Any]) -> str:
-    """Resolve ``{{post.title}}`` style placeholders in SEO strings."""
+    """Resolve ``{{post.title}}`` style placeholders in SEO strings.
+
+    Supports pipe transforms: ``{{post.body | plain_text | truncate(160)}}``.
+    """
 
     def _replace(match: re.Match) -> str:
-        path = match.group(1)
-        parts = path.split(".")
+        raw = match.group(1)
+        parts_pipe = [p.strip() for p in raw.split("|")]
+        var_path = parts_pipe[0]
+        transforms = parts_pipe[1:]
+
+        segments = var_path.split(".")
         current: Any = context
-        for part in parts:
+        for seg in segments:
             if isinstance(current, dict):
-                current = current.get(part)
+                current = current.get(seg)
             else:
                 return match.group(0)
-        return str(current) if current is not None else ""
+        result = str(current) if current is not None else ""
+        if transforms:
+            result = _apply_seo_transforms(result, transforms)
+        return result
 
     return _PLACEHOLDER_RE.sub(_replace, template)
+
+
+def _resolve_seo_field(
+    value: Any,
+    data_context: dict[str, Any],
+) -> str:
+    """Resolve a single SEO field value, supporting fallback chains.
+
+    ``value`` may be:
+    * A string template (legacy) — resolved directly.
+    * A dict with ``"fallback"`` — an ordered list of templates; the first
+      non-empty result wins.
+    """
+    if isinstance(value, str):
+        return _resolve_seo_placeholders(value, data_context)
+    if isinstance(value, dict) and "fallback" in value:
+        for tpl in value["fallback"]:
+            resolved = _resolve_seo_placeholders(tpl, data_context)
+            if resolved and resolved.strip():
+                return resolved
+        return ""
+    return str(value) if value is not None else ""
 
 
 def _build_seo_context(
@@ -75,11 +152,10 @@ def _build_seo_context(
     """Build resolved SEO metadata from config + fetched data."""
     seo: dict[str, Any] = {"site_name": site_name}
 
-    for key, template in seo_config.items():
+    for key, value in seo_config.items():
         if key == "json_ld":
             continue
-        if isinstance(template, str):
-            seo[key] = _resolve_seo_placeholders(template, data_context)
+        seo[key] = _resolve_seo_field(value, data_context)
 
     json_ld_config = seo_config.get("json_ld")
     if json_ld_config:
@@ -98,6 +174,33 @@ def _resolve_json_ld(config: Any, context: dict[str, Any]) -> Any:
     if isinstance(config, list):
         return [_resolve_json_ld(item, context) for item in config]
     return config
+
+
+# ── Pagination SEO ───────────────────────────────────────────────────────
+
+
+def _inject_pagination_seo(
+    seo: dict[str, Any],
+    data_context: dict[str, Any],
+    request: Request,
+) -> None:
+    """Add ``pagination_prev`` / ``pagination_next`` to the SEO context.
+
+    Scans data_context for ``{name}_pagination`` entries and uses the first
+    one found to compute rel=prev / rel=next URLs.
+    """
+    for key, val in data_context.items():
+        if not key.endswith("_pagination") or not isinstance(val, dict):
+            continue
+        page = val.get("page", 1)
+        total_pages = val.get("total_pages", 1)
+        base = str(request.url).split("?")[0]
+        if page > 1:
+            prev_page = page - 1
+            seo["pagination_prev"] = f"{base}?page={prev_page}" if prev_page > 1 else base
+        if page < total_pages:
+            seo["pagination_next"] = f"{base}?page={page + 1}"
+        break
 
 
 # ── Cache helpers ────────────────────────────────────────────────────────
@@ -230,6 +333,16 @@ async def _fetch_data_source(
     )
 
 
+def _detect_slug_field(col_config: dict[str, Any]) -> str | None:
+    """Return the name of the first ``x-slug`` field in the collection schema, if any."""
+    schema = col_config.get("schema", {})
+    props = schema.get("properties", {}) if isinstance(schema, dict) else {}
+    for name, prop_def in props.items():
+        if isinstance(prop_def, dict) and "x-slug" in prop_def:
+            return name
+    return None
+
+
 async def _fetch_single_doc(
     collection: Any,
     col_config: dict[str, Any],
@@ -241,13 +354,20 @@ async def _fetch_single_doc(
     computed_names: list[str] | None,
     projection: dict[str, int] | None,
 ) -> dict[str, Any]:
-    """Fetch a single document by ID with optional populate/computed."""
+    """Fetch a single document by ID or slug with optional populate/computed."""
     doc_id = path_params.get(id_param)
     if not doc_id:
         raise HTTPException(status_code=404, detail="Not found")
-    oid = _to_object_id(doc_id)
 
-    filter_spec: dict[str, Any] = {"_id": oid}
+    try:
+        oid = ObjectId(doc_id)
+        filter_spec: dict[str, Any] = {"_id": oid}
+    except (InvalidId, TypeError):
+        slug_field = _detect_slug_field(col_config)
+        if slug_field:
+            filter_spec = {slug_field: doc_id}
+        else:
+            raise HTTPException(status_code=404, detail="Not found") from None
     filter_spec = _apply_policy_filter(filter_spec, col_config, user)
     if col_config.get("soft_delete"):
         filter_spec = _apply_soft_delete_filter(filter_spec)
@@ -481,26 +601,78 @@ def _convert_route_pattern(pattern: str) -> str:
 # ── Sitemap generation ───────────────────────────────────────────────────
 
 
+def _format_sitemap_url(
+    loc: str,
+    meta: dict[str, Any] | None = None,
+    doc: dict[str, Any] | None = None,
+) -> str:
+    """Format a single ``<url>`` element with optional lastmod/changefreq/priority."""
+    parts = [f"  <url>\n    <loc>{loc}</loc>"]
+    if meta:
+        lastmod = meta.get("lastmod")
+        if lastmod and doc:
+            resolved = _resolve_seo_placeholders(lastmod, {"doc": doc})
+            if resolved:
+                parts.append(f"    <lastmod>{resolved}</lastmod>")
+        elif lastmod and "{{" not in lastmod:
+            parts.append(f"    <lastmod>{lastmod}</lastmod>")
+        changefreq = meta.get("changefreq")
+        if changefreq:
+            parts.append(f"    <changefreq>{changefreq}</changefreq>")
+        priority = meta.get("priority")
+        if priority is not None:
+            parts.append(f"    <priority>{priority}</priority>")
+    parts.append("  </url>")
+    return "\n".join(parts)
+
+
+def _build_sitemap_xml(urls: list[str]) -> str:
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' + "\n".join(urls) + "\n</urlset>"
+    )
+
+
+def _build_sitemap_index_xml(sitemap_urls: list[str]) -> str:
+    entries = "\n".join(f"  <sitemap><loc>{u}</loc></sitemap>" for u in sitemap_urls)
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' + entries + "\n</sitemapindex>"
+    )
+
+
 def _register_sitemap_route(
     router: APIRouter,
     ssr_config: dict[str, Any],
     collections_config: dict[str, Any],
     base_url: str,
 ) -> None:
-    """Register a ``/sitemap.xml`` route that lists all SSR-eligible URLs."""
-    routes = ssr_config.get("routes", {})
+    """Register ``/sitemap.xml`` (with optional index splitting) from SSR config.
 
-    @router.get("/sitemap.xml", response_class=Response, include_in_schema=False)
-    async def sitemap(request: Request, db=Depends(get_scoped_db)) -> Response:
+    When ``sitemap`` is an object, it may carry per-route metadata
+    (``lastmod``, ``changefreq``, ``priority``) and ``max_urls_per_file``
+    for automatic index splitting.  The legacy ``"sitemap": true`` form
+    is fully backward-compatible.
+    """
+    routes = ssr_config.get("routes", {})
+    sitemap_cfg = ssr_config.get("sitemap", True)
+    route_meta: dict[str, dict[str, Any]] = {}
+    max_per_file = 50000
+    if isinstance(sitemap_cfg, dict):
+        route_meta = sitemap_cfg.get("routes", {})
+        max_per_file = sitemap_cfg.get("max_urls_per_file", 50000)
+
+    async def _collect_urls(request: Request, db: Any) -> list[str]:
         host = base_url or str(request.base_url).rstrip("/")
         urls: list[str] = []
 
         for pattern, route_config in routes.items():
             if route_config.get("auth"):
                 continue
+            meta = route_meta.get(pattern)
 
             if "{" not in pattern and ":" not in pattern:
-                urls.append(f"  <url><loc>{host}{pattern}</loc></url>")
+                urls.append(_format_sitemap_url(f"{host}{pattern}", meta))
                 continue
 
             data_sources = route_config.get("data", {})
@@ -522,20 +694,254 @@ def _register_sitemap_route(
                     if col_config.get("soft_delete"):
                         filter_spec = _apply_soft_delete_filter(filter_spec)
 
-                    cursor = col.find(filter_spec or {}, {"_id": 1})
-                    docs = await cursor.to_list(length=10000)
+                    projection: dict[str, int] = {"_id": 1}
+                    if meta and meta.get("lastmod"):
+                        lastmod_tpl = meta["lastmod"]
+                        lm_match = _PLACEHOLDER_RE.search(lastmod_tpl)
+                        if lm_match:
+                            field_path = lm_match.group(1)
+                            if field_path.startswith("doc."):
+                                projection[field_path[4:]] = 1
+
+                    cursor = col.find(filter_spec or {}, projection)
+                    docs = await cursor.to_list(length=100000)
                     param = source["id_param"]
                     for doc in docs:
                         doc_id = str(doc["_id"])
                         url_path = _convert_route_pattern(pattern).replace(f"{{{param}}}", doc_id)
-                        urls.append(f"  <url><loc>{host}{url_path}</loc></url>")
+                        doc_ser = serialize_doc(doc)
+                        urls.append(_format_sitemap_url(f"{host}{url_path}", meta, doc_ser))
                     break
 
-        xml = (
-            '<?xml version="1.0" encoding="UTF-8"?>\n'
-            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' + "\n".join(urls) + "\n</urlset>"
-        )
-        return Response(content=xml, media_type="application/xml")
+        return urls
+
+    @router.get("/sitemap.xml", response_class=Response, include_in_schema=False)
+    async def sitemap(request: Request, db=Depends(get_scoped_db)) -> Response:
+        urls = await _collect_urls(request, db)
+        if len(urls) <= max_per_file:
+            return Response(content=_build_sitemap_xml(urls), media_type="application/xml")
+        host = base_url or str(request.base_url).rstrip("/")
+        num_files = math.ceil(len(urls) / max_per_file)
+        index_urls = [f"{host}/sitemap-{i + 1}.xml" for i in range(num_files)]
+        return Response(content=_build_sitemap_index_xml(index_urls), media_type="application/xml")
+
+    @router.get("/sitemap-{page_num}.xml", response_class=Response, include_in_schema=False)
+    async def sitemap_page(page_num: int, request: Request, db=Depends(get_scoped_db)) -> Response:
+        if page_num < 1:
+            raise HTTPException(status_code=404, detail="Not found")
+        urls = await _collect_urls(request, db)
+        start = (page_num - 1) * max_per_file
+        if start >= len(urls):
+            raise HTTPException(status_code=404, detail="Not found")
+        page_urls = urls[start : start + max_per_file]
+        return Response(content=_build_sitemap_xml(page_urls), media_type="application/xml")
+
+
+# ── RSS / Atom feed generation ───────────────────────────────────────────
+
+
+def _build_rss_xml(
+    feed_cfg: dict[str, Any],
+    docs: list[dict[str, Any]],
+    host: str,
+    site_name: str,
+    site_description: str,
+) -> str:
+    """Build an RSS 2.0 XML string from feed config and documents."""
+    title = _resolve_seo_placeholders(
+        feed_cfg.get("title", "{{site_name}}"),
+        {"site_name": site_name},
+    )
+    desc = _resolve_seo_placeholders(
+        feed_cfg.get("description", "{{site_description}}"),
+        {"site_name": site_name, "site_description": site_description},
+    )
+    item_tpl = feed_cfg.get("item", {})
+
+    items: list[str] = []
+    for doc in docs:
+        ctx = {"doc": doc, "base_url": host, "site_name": site_name}
+        parts = ["    <item>"]
+        for tag, tpl in item_tpl.items():
+            resolved = _resolve_seo_placeholders(tpl, ctx)
+            parts.append(f"      <{tag}>{_xml_escape(resolved)}</{tag}>")
+        parts.append("    </item>")
+        items.append("\n".join(parts))
+
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">\n'
+        "  <channel>\n"
+        f"    <title>{_xml_escape(title)}</title>\n"
+        f"    <description>{_xml_escape(desc)}</description>\n"
+        f"    <link>{host}</link>\n" + "\n".join(items) + "\n"
+        "  </channel>\n"
+        "</rss>"
+    )
+
+
+def _build_atom_xml(
+    feed_cfg: dict[str, Any],
+    docs: list[dict[str, Any]],
+    host: str,
+    feed_path: str,
+    site_name: str,
+    site_description: str,
+) -> str:
+    """Build an Atom 1.0 XML string from feed config and documents."""
+    title = _resolve_seo_placeholders(
+        feed_cfg.get("title", "{{site_name}}"),
+        {"site_name": site_name},
+    )
+    subtitle = _resolve_seo_placeholders(
+        feed_cfg.get("description", "{{site_description}}"),
+        {"site_name": site_name, "site_description": site_description},
+    )
+    item_tpl = feed_cfg.get("item", {})
+
+    atom_tag_map = {
+        "title": "title",
+        "link": "id",
+        "description": "summary",
+        "pubDate": "updated",
+        "author": "author",
+    }
+
+    entries: list[str] = []
+    for doc in docs:
+        ctx = {"doc": doc, "base_url": host, "site_name": site_name}
+        parts = ["    <entry>"]
+        for rss_tag, tpl in item_tpl.items():
+            atom_tag = atom_tag_map.get(rss_tag, rss_tag)
+            resolved = _resolve_seo_placeholders(tpl, ctx)
+            if atom_tag == "id":
+                parts.append(f"      <id>{_xml_escape(resolved)}</id>")
+                parts.append(f'      <link href="{_xml_escape(resolved)}"/>')
+            elif atom_tag == "author":
+                parts.append(f"      <author><name>{_xml_escape(resolved)}</name></author>")
+            else:
+                parts.append(f"      <{atom_tag}>{_xml_escape(resolved)}</{atom_tag}>")
+        parts.append("    </entry>")
+        entries.append("\n".join(parts))
+
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<feed xmlns="http://www.w3.org/2005/Atom">\n'
+        f"  <title>{_xml_escape(title)}</title>\n"
+        f"  <subtitle>{_xml_escape(subtitle)}</subtitle>\n"
+        f'  <link href="{host}{feed_path}" rel="self"/>\n'
+        f'  <link href="{host}"/>\n'
+        f"  <id>{host}{feed_path}</id>\n" + "\n".join(entries) + "\n"
+        "</feed>"
+    )
+
+
+def _xml_escape(text: str) -> str:
+    """Escape XML special characters."""
+    return (
+        text.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+        .replace("'", "&apos;")
+    )
+
+
+def _register_feed_routes(
+    router: APIRouter,
+    feeds_config: dict[str, dict[str, Any]],
+    collections_config: dict[str, Any],
+    base_url: str,
+    site_name: str,
+    site_description: str,
+) -> None:
+    """Register RSS/Atom feed routes from ``ssr.feeds`` config."""
+    from hashlib import md5
+
+    for feed_path, feed_cfg in feeds_config.items():
+        fmt = feed_cfg.get("format", "rss")
+        col_name = feed_cfg.get("collection", "")
+        scope_name = feed_cfg.get("scope")
+        sort_spec = feed_cfg.get("sort", {"created_at": -1})
+        limit = feed_cfg.get("limit", 20)
+
+        if not col_name:
+            logger.warning("Feed %s has no collection, skipping", feed_path)
+            continue
+
+        def _make_handler(
+            _path: str,
+            _cfg: dict[str, Any],
+            _fmt: str,
+            _col: str,
+            _scope: str | None,
+            _sort: Any,
+            _limit: int,
+        ):  # type: ignore[no-untyped-def]
+            @router.get(_path, response_class=Response, include_in_schema=False)
+            async def feed_handler(request: Request, db=Depends(get_scoped_db)) -> Response:
+                host = base_url or str(request.base_url).rstrip("/")
+                col_config = collections_config.get(_col, {})
+                collection = db[_col]
+
+                filter_spec: dict[str, Any] | None = None
+                if _scope:
+                    scope_filter = col_config.get("scopes", {}).get(_scope, {})
+                    if isinstance(scope_filter, dict) and "filter" in scope_filter:
+                        scope_filter = scope_filter["filter"]
+                    filter_spec = scope_filter or None
+                if col_config.get("soft_delete"):
+                    filter_spec = _apply_soft_delete_filter(filter_spec)
+
+                cursor = collection.find(filter_spec or {})
+                if _sort:
+                    cursor = cursor.sort(
+                        list(_sort.items()) if isinstance(_sort, dict) else _sort,
+                    )
+                cursor = cursor.limit(_limit)
+                docs = await cursor.to_list(length=_limit)
+                serialized = [serialize_doc(d) for d in docs]
+
+                if _fmt == "atom":
+                    xml = _build_atom_xml(_cfg, serialized, host, _path, site_name, site_description)
+                    content_type = "application/atom+xml; charset=utf-8"
+                else:
+                    xml = _build_rss_xml(_cfg, serialized, host, site_name, site_description)
+                    content_type = "application/rss+xml; charset=utf-8"
+
+                etag = md5(xml.encode()).hexdigest()  # noqa: S324
+                resp = Response(content=xml, media_type=content_type)
+                resp.headers["ETag"] = f'"{etag}"'
+                resp.headers["Cache-Control"] = "public, max-age=3600"
+                return resp
+
+        _make_handler(feed_path, feed_cfg, fmt, col_name, scope_name, sort_spec, limit)
+
+
+# ── robots.txt generation ────────────────────────────────────────────────
+
+
+def _register_robots_route(
+    router: APIRouter,
+    robots_config: dict[str, Any],
+    base_url: str,
+) -> None:
+    """Register a ``/robots.txt`` route from manifest ``ssr.robots`` config."""
+    allow_paths = robots_config.get("allow", [])
+    disallow_paths = robots_config.get("disallow", [])
+    sitemap_url = robots_config.get("sitemap", "")
+
+    @router.get("/robots.txt", response_class=Response, include_in_schema=False)
+    async def robots_txt(request: Request) -> Response:
+        host = base_url or str(request.base_url).rstrip("/")
+        lines = ["User-agent: *"]
+        for path in allow_paths:
+            lines.append(f"Allow: {path}")
+        for path in disallow_paths:
+            lines.append(f"Disallow: {path}")
+        sm = sitemap_url.replace("{{base_url}}", host) if sitemap_url else f"{host}/sitemap.xml"
+        lines.append(f"Sitemap: {sm}")
+        return Response(content="\n".join(lines) + "\n", media_type="text/plain")
 
 
 # ── Error page rendering ────────────────────────────────────────────────
@@ -616,9 +1022,38 @@ def mount_ssr_routes(
     error_handler = _ErrorPageHandler(env)
     router = APIRouter(include_in_schema=False)
 
+    robots_config = ssr_config.get("robots")
+    if robots_config:
+        _register_robots_route(router, robots_config, base_url)
+        logger.info("Registered /robots.txt")
+
     if ssr_config.get("sitemap", True) and routes:
         _register_sitemap_route(router, ssr_config, collections_config, base_url)
         logger.info("Registered /sitemap.xml")
+
+    feeds_config = ssr_config.get("feeds", {})
+    feed_links: list[dict[str, str]] = []
+    for feed_path, feed_cfg in feeds_config.items():
+        fmt = feed_cfg.get("format", "rss")
+        mime = "application/atom+xml" if fmt == "atom" else "application/rss+xml"
+        feed_links.append(
+            {
+                "href": feed_path,
+                "type": mime,
+                "title": _resolve_seo_placeholders(feed_cfg.get("title", site_name), {}),
+            }
+        )
+
+    if feeds_config:
+        _register_feed_routes(router, feeds_config, collections_config, base_url, site_name, site_description)
+        logger.info("Registered %d feed route(s)", len(feeds_config))
+
+    og_config = ssr_config.get("og_image_fallback")
+    if og_config and og_config.get("enabled"):
+        from ._og_image import register_og_image_route
+
+        register_og_image_route(router, og_config, collections_config, base_url)
+        logger.info("Registered OG image fallback route")
 
     for pattern, route_config in routes.items():
         fastapi_path = _convert_route_pattern(pattern)
@@ -645,6 +1080,7 @@ def mount_ssr_routes(
             auth_required=auth_required,
             cache_config=cache_config,
             error_handler=error_handler,
+            feed_links=feed_links or None,
         )
         logger.info("Registered SSR route: %s -> %s", pattern, template_name)
 
@@ -665,6 +1101,7 @@ def _register_ssr_route(  # noqa: PLR0913
     auth_required: bool,
     cache_config: dict[str, Any] | None,
     error_handler: _ErrorPageHandler,
+    feed_links: list[dict[str, str]] | None = None,
 ) -> None:
     """Register a single SSR route handler."""
     from jinja2.exceptions import TemplateError as _TemplateError
@@ -715,12 +1152,22 @@ def _register_ssr_route(  # noqa: PLR0913
         if not seo.get("description"):
             seo["description"] = site_description
 
+        url_str = str(request.url)
+        seo["canonical"] = url_str.split("?")[0]
+        if feed_links:
+            seo["feed_links"] = feed_links
+
+        _inject_pagination_seo(seo, data_context, request)
+
+        cache_context = {"is_stale": False, "cached_at": None}
+
         try:
             template = jinja_env.get_template(template_name)
             html = template.render(
                 request=request,
                 seo=seo,
                 user=user,
+                cache=cache_context,
                 **data_context,
             )
         except _TemplateError:
@@ -731,6 +1178,15 @@ def _register_ssr_route(  # noqa: PLR0913
             raise
 
         resp = HTMLResponse(content=html)
+        resp.headers["X-Cache-Status"] = "MISS"
         if cache_header:
             resp.headers["Cache-Control"] = cache_header
+            resp.headers["X-Cache-Age"] = "0"
+        link_parts: list[str] = []
+        if seo.get("pagination_prev"):
+            link_parts.append(f'<{seo["pagination_prev"]}>; rel="prev"')
+        if seo.get("pagination_next"):
+            link_parts.append(f'<{seo["pagination_next"]}>; rel="next"')
+        if link_parts:
+            resp.headers["Link"] = ", ".join(link_parts)
         return resp

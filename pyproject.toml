@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mdb-engine"
-version = "0.11.1"
+version = "0.11.2"
 description = "MongoDB Engine"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -67,6 +67,9 @@ otel = [
 ]
 casbin = []  # Now core deps; kept for backward compat with pip install mdb-engine[casbin]
 oso = ["oso-cloud>=0.1.0"]
+og-image = [
+    "Pillow>=10.0.0",
+]
 test = [
     "pytest>=7.4.0",
     "pytest-asyncio>=0.21.0",

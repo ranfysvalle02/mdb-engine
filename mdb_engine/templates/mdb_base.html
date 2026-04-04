@@ -42,12 +42,15 @@
     <title>{% block title %}{{ seo.title if seo is defined and seo.title else '' }}{% endblock %}</title>
     {% block seo_meta %}
     {% if seo is defined and seo %}
+    {% if seo.canonical %}
+    <link rel="canonical" href="{{ seo.canonical }}">
+    {% endif %}
     <meta name="description" content="{{ seo.description }}">
     <meta property="og:title" content="{{ seo.title }}">
     <meta property="og:description" content="{{ seo.description }}">
     <meta property="og:type" content="{{ seo.og_type or 'website' }}">
     <meta property="og:site_name" content="{{ seo.site_name }}">
-    <meta property="og:url" content="{{ request.url }}">
+    <meta property="og:url" content="{{ seo.canonical or request.url }}">
     {% if seo.og_image %}
     <meta property="og:image" content="{{ seo.og_image }}">
     <meta name="twitter:card" content="summary_large_image">
@@ -61,6 +64,17 @@
     {% endif %}
     {% if seo.json_ld %}
     <script type="application/ld+json">{{ seo.json_ld | safe }}</script>
+    {% endif %}
+    {% if seo.pagination_prev %}
+    <link rel="prev" href="{{ seo.pagination_prev }}">
+    {% endif %}
+    {% if seo.pagination_next %}
+    <link rel="next" href="{{ seo.pagination_next }}">
+    {% endif %}
+    {% if seo.feed_links %}
+    {% for feed in seo.feed_links %}
+    <link rel="alternate" type="{{ feed.type }}" title="{{ feed.title }}" href="{{ feed.href }}">
+    {% endfor %}
     {% endif %}
     {% endif %}
     {% endblock %}
