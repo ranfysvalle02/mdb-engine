@@ -1009,7 +1009,7 @@ def _make_markdown_filter() -> Any:
     }  # fmt: skip
 
     _ALLOWED_ATTRS: dict[str, set[str]] = {
-        "a": {"href", "title", "rel"},
+        "a": {"href", "title"},
         "img": {"src", "alt", "title", "width", "height", "loading"},
         "td": {"align"},
         "th": {"align"},

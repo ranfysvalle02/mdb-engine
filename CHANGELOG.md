@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.12.1
+
+### Fixed
+
+- **`| markdown` filter crash on links** — `nh3.clean()` raises a `ValueError`
+  when `rel` is in the allowed-attributes dict while `link_rel` is set (the
+  default).  Any Markdown containing links (e.g. `[text](url)`) caused a 500.
+  Removed `rel` from the `<a>` allow-list so `nh3`'s default
+  `link_rel="noopener noreferrer"` handles it automatically — which is the
+  correct security behavior for user-generated links.
+
 ## 0.12.0
 
 ### Added — Performance Middleware Suite

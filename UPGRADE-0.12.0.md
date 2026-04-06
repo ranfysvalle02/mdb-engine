@@ -120,7 +120,7 @@ The `| safe` is required because Jinja's `autoescape` is on. The filter already 
 
 **Allowed HTML tags:** `h1`-`h6`, `p`, `br`, `hr`, `ul`, `ol`, `li`, `a`, `strong`, `em`, `code`, `pre`, `blockquote`, `img`, `table`, `thead`, `tbody`, `tr`, `th`, `td`, `del`, `sup`, `sub`, `details`, `summary`, `div`, `span`.
 
-**Allowed attributes:** `href`, `title`, `rel` on links; `src`, `alt`, `loading` on images; `class` on code/pre/div/span; `align` on table cells.
+**Allowed attributes:** `href`, `title` on links; `src`, `alt`, `title`, `width`, `height`, `loading` on images; `class` on code/pre/div/span; `align` on table cells. Links automatically get `rel="noopener noreferrer"` via `nh3`'s default `link_rel` — no need to allow `rel` manually.
 
 **Graceful degradation:** If `mistune` and `nh3` are not installed, the filter is simply not registered. Templates that reference `| markdown` will get a Jinja `UndefinedError` — install the deps to fix.
 
@@ -321,7 +321,7 @@ document.getElementById('post-body').innerHTML =
 {% endblock %}
 ```
 
-**After (0.12.0):**
+**After (0.12.x):**
 
 ```html
 {% block content %}
@@ -401,3 +401,15 @@ Cache-Control headers and asset fingerprinting still work independently.
 | `mdb_engine/cli/_serve_app.py` | Uses `CachedStaticFiles` + `AssetRegistry` instead of bare `StaticFiles` |
 | `mdb_engine/cli/_serve_multi_app.py` | Same as above for multi-app |
 | `pyproject.toml` | Version bump + new `perf` and `markdown` extras |
+
+---
+
+## 0.12.1 Patch
+
+**Bug fix:** The `| markdown` filter crashed with a `ValueError` on any Markdown containing links (e.g. `[text](https://example.com)`).
+
+**Root cause:** `nh3.clean()` was called with `rel` in the allowed-attributes dict for `<a>` tags, but `nh3`'s default `link_rel="noopener noreferrer"` conflicts with an explicit `rel` allow — `nh3` raises `ValueError` to prevent ambiguity.
+
+**Fix:** Removed `rel` from the `<a>` allow-list. `nh3`'s default `link_rel` now manages `rel` automatically, which is the correct security behavior (all user-generated links get `rel="noopener noreferrer"`).
+
+**Action required:** `pip install --upgrade mdb-engine` to `>=0.12.1`. No manifest or template changes needed.

@@ -1,5 +1,5 @@
 """
-Tests for the 0.12.0 performance middleware suite.
+Tests for the 0.12.x performance middleware suite.
 
 Covers:
 - GZip / Brotli compression middleware selection
@@ -324,6 +324,27 @@ class TestMarkdownFilter:
         result = md_filter("[click here](https://example.com)")
         assert 'href="https://example.com"' in result
         assert "click here" in result
+
+    def test_links_do_not_crash_nh3(self):
+        """Regression: nh3 raises ValueError if 'rel' is in allowed attrs
+        while link_rel is set (the default). Ensure links render without error.
+        See: https://github.com/ranfysvalle02/mdb-engine/issues/XXX
+        """
+        pytest.importorskip("mistune", reason="mistune required")
+        pytest.importorskip("nh3", reason="nh3 required")
+
+        from mdb_engine.routing._ssr import _make_markdown_filter
+
+        md_filter = _make_markdown_filter()
+        body = (
+            "Check out [Google](https://google.com) and "
+            "[GitHub](https://github.com) for more info.\n\n"
+            "Also see [docs](/docs)."
+        )
+        result = md_filter(body)
+        assert "https://google.com" in result
+        assert "https://github.com" in result
+        assert "noopener" in result  # nh3 default link_rel applies
 
     def test_strips_script_tags(self):
         pytest.importorskip("mistune", reason="mistune required")
