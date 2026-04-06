@@ -57,13 +57,28 @@ class FakeGridFSBucket:
             del self._files[file_id]
 
 
+class FakeGridOut:
+    """Mimics motor GridOut: attribute access only, not subscriptable.
+
+    Real ``GridOut`` objects expose ``._id``, ``.metadata``, ``.filename``
+    as attributes — *not* via ``__getitem__``.  Using this in tests ensures
+    service code never accidentally relies on dict subscripting.
+    """
+
+    def __init__(self, doc: dict[str, Any]) -> None:
+        self._id = doc["_id"]
+        self.metadata = doc.get("metadata", {})
+        self.filename = doc.get("filename", "")
+        self._data = doc.get("data", b"")
+
+
 class FakeGridFSCursor:
     def __init__(self, files: dict, filter_spec: dict):
-        self._results = []
+        self._results: list[FakeGridOut] = []
         target_hash = filter_spec.get("metadata.hash")
         for _fid, entry in files.items():
             if entry["metadata"].get("hash") == target_hash:
-                self._results.append(entry)
+                self._results.append(FakeGridOut(entry))
 
     def __aiter__(self):
         return FakeGridFSAsyncIter(self._results)

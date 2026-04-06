@@ -101,7 +101,7 @@ from .routing.auto_crud import create_auto_crud_router, mount_auto_crud_routes
 # Utilities
 from .utils import clean_mongo_doc, clean_mongo_docs
 
-__version__ = "0.12.3"
+__version__ = "0.12.4"
 
 
 # ---------------------------------------------------------------------------

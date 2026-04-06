@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.12.4
+
+### Fixed
+
+- **File serving crash** — `retrieve()` and `delete()` in the upload service
+  used dict subscripting (`["_id"]`, `.get("metadata")`) on `GridOut` objects
+  returned by `AsyncIOMotorGridFSBucket.find()`. Real `GridOut` objects expose
+  data via attributes (`.metadata`, `._id`), not dict access, causing
+  `TypeError: 'GridOut' object is not subscriptable` on every file serve
+  request. Switched to attribute access throughout.
+
+- **Misleading master key warning** — The startup warning when
+  `MDB_ENGINE_MASTER_KEY` is not set previously stated "App-level
+  authentication will not be available", which implied cookie/session auth was
+  broken. The message now clarifies that only envelope encryption for app
+  secrets is disabled and cookie/session authentication is not affected.
+
+### Improved
+
+- **Test fakes hardened** — Unit test mocks now use a `FakeGridOut` wrapper
+  that mimics real Motor `GridOut` attribute-only access (no `__getitem__`),
+  preventing dict-vs-attribute bugs from passing tests while failing at
+  runtime.
+
 ## 0.12.3
 
 ### Added — Upload Service

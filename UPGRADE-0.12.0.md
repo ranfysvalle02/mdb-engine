@@ -462,3 +462,15 @@ Cache-Control headers and asset fingerprinting still work independently.
 - `get_upload_service_optional(request)` — returns `None` if not enabled.
 
 **Action required:** `pip install --upgrade mdb-engine` to `>=0.12.3`. Add `"uploads": {"enabled": true}` to your manifest to activate. No changes needed if you don't use uploads.
+
+---
+
+## 0.12.4 Patch
+
+**Bug fix:** The upload service's file serving route (`GET /uploads/{hash}.{ext}`) crashed with `TypeError: 'GridOut' object is not subscriptable` on every request. `retrieve()` and `delete()` used dict subscripting (`["_id"]`, `.get("metadata")`) on `GridOut` objects returned by Motor's `AsyncIOMotorGridFSBucket.find()`, but `GridOut` exposes data via attributes (`.metadata`, `._id`), not dict access.
+
+**Fix:** Switched `retrieve()` and `delete()` to use attribute access (`grid_out._id`, `getattr(grid_out, "metadata", None)`). Updated the `_find_by_hash` return type annotation accordingly. Unit test fakes now use a `FakeGridOut` wrapper that blocks dict subscripting, so this class of bug will be caught in tests going forward.
+
+**Improved warning:** The startup warning when `MDB_ENGINE_MASTER_KEY` is not set previously read "App-level authentication will not be available", implying cookie/session auth was broken. It now reads: "Envelope encryption for app secrets is disabled. Cookie/session authentication is not affected."
+
+**Action required:** `pip install --upgrade mdb-engine` to `>=0.12.4`. No manifest or template changes needed.

@@ -195,26 +195,31 @@ class UploadService:
 
         Returns ``None`` if the file does not exist.
         """
-        grid_in = await self._find_by_hash(file_hash)
-        if grid_in is None:
+        grid_out = await self._find_by_hash(file_hash)
+        if grid_out is None:
             return None
 
-        stream = await self._bucket.open_download_stream(grid_in["_id"])
+        stream = await self._bucket.open_download_stream(grid_out._id)  # noqa: SLF001
         data = await stream.read()
-        ct = grid_in.get("metadata", {}).get("content_type", "application/octet-stream")
+        meta = getattr(grid_out, "metadata", None) or {}
+        ct = meta.get("content_type", "application/octet-stream")
         return data, ct
 
     async def delete(self, file_hash: str) -> bool:
         """Delete a file by its content hash. Returns True if deleted."""
-        grid_in = await self._find_by_hash(file_hash)
-        if grid_in is None:
+        grid_out = await self._find_by_hash(file_hash)
+        if grid_out is None:
             return False
-        await self._bucket.delete(grid_in["_id"])
+        await self._bucket.delete(grid_out._id)  # noqa: SLF001
         logger.info("Deleted upload %s for app '%s'", file_hash, self._app_slug)
         return True
 
-    async def _find_by_hash(self, file_hash: str) -> dict[str, Any] | None:
-        """Look up a GridFS file document by metadata.hash."""
+    async def _find_by_hash(self, file_hash: str) -> Any:
+        """Look up a GridFS file document by metadata.hash.
+
+        Returns a ``GridOut`` instance or ``None``.  We type this as
+        ``Any`` to avoid importing motor's GridOut at type-check time.
+        """
         cursor = self._bucket.find({"metadata.hash": file_hash}, limit=1)
         async for doc in cursor:
             return doc

@@ -195,8 +195,9 @@ class MongoDBEngine(
         except ValueError as e:
             logger.warning(
                 f"Encryption service not initialized: {e}. "
-                "App-level authentication will not be available. "
-                f"Set {MASTER_KEY_ENV_VAR} environment variable."
+                "Envelope encryption for app secrets is disabled. "
+                "Cookie/session authentication is not affected. "
+                f"Set {MASTER_KEY_ENV_VAR} to enable app-secret encryption."
             )
             # Continue without encryption (backward compatibility)
             self._encryption_service = None
