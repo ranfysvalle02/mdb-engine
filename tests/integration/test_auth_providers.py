@@ -506,14 +506,19 @@ class _FakeOsoClient:
         self._policies: set[tuple[str, str, str]] = set()
         self._roles: dict[str, set[str]] = {}
 
+    @staticmethod
+    def _id(val) -> str:
+        """Extract plain string ID from an oso_cloud.Value or plain string."""
+        return val.id if hasattr(val, "id") else str(val)
+
     def insert(self, fact: list) -> bool:
         name = fact[0]
         if name == "grants_permission":
             _, role, action, resource = fact
-            self._policies.add((str(role), str(resource), str(action)))
+            self._policies.add((self._id(role), self._id(resource), self._id(action)))
         elif name == "has_role":
             _, user, role, *_ = fact
-            self._roles.setdefault(str(user), set()).add(str(role))
+            self._roles.setdefault(self._id(user), set()).add(self._id(role))
         return True
 
     def _effective_roles(self, user: str) -> set[str]:
@@ -527,9 +532,9 @@ class _FakeOsoClient:
         return visited
 
     def authorize(self, actor, action, resource) -> bool:
-        user = actor.id if hasattr(actor, "id") else str(actor)
-        act = str(action)
-        res = resource.id if hasattr(resource, "id") else str(resource)
+        user = self._id(actor)
+        act = self._id(action)
+        res = self._id(resource)
         roles = self._effective_roles(user) | {user}
         return any((r, res, act) in self._policies for r in roles)
 
