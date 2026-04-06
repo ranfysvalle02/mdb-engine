@@ -72,7 +72,7 @@ from bson.errors import InvalidId
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pymongo.errors import DuplicateKeyError, PyMongoError
 
-from ..dependencies import get_scoped_db, require_collection_permission, require_role, require_user
+from ..dependencies import get_effective_roles, get_scoped_db, require_collection_permission, require_role, require_user
 from ._hooks import BackgroundHookExecutor, HookExecutor
 from ._rate_limit import create_collection_rate_limit_dependency
 from ._serialization import serialize_doc
@@ -278,6 +278,7 @@ class _CollectionCtx:
         self,
         scope_names: list[str] | None,
         user: dict[str, Any] | None,
+        role_hierarchy: dict[str, list[str]] | None = None,
     ) -> dict[str, Any] | None:
         """Resolve named scopes into a merged MQL filter.
 
@@ -287,8 +288,9 @@ class _CollectionCtx:
         * **Extended:** ``{"filter": {"approved": false}, "auth": {"roles": ["admin"]}}``
 
         When a scope carries ``auth.roles``, the requesting user must have
-        at least one of those roles or a 403 is raised.  ``auth.required``
-        enforces authentication without checking a specific role.
+        at least one of those roles (after hierarchy expansion) or a 403 is
+        raised.  ``auth.required`` enforces authentication without checking
+        a specific role.
         """
         if not scope_names or not self.scopes_config:
             return None
@@ -311,10 +313,7 @@ class _CollectionCtx:
             if scope_auth:
                 required_roles = scope_auth.get("roles")
                 if required_roles:
-                    user_roles = set()
-                    if user:
-                        user_roles = {str(user.get("role", ""))}
-                        user_roles |= set(user.get("roles", []))
+                    user_roles = get_effective_roles(user, role_hierarchy) if user else set()
                     if not any(r in user_roles for r in required_roles):
                         raise HTTPException(
                             status_code=403,
@@ -342,8 +341,9 @@ class _CollectionCtx:
         parsed_filter: dict[str, Any] | None,
         user: dict[str, Any] | None,
         scope_names: list[str] | None = None,
+        role_hierarchy: dict[str, list[str]] | None = None,
     ) -> dict[str, Any] | None:
-        scope_filter = self.resolve_scopes(scope_names, user)
+        scope_filter = self.resolve_scopes(scope_names, user, role_hierarchy)
         policy_filter = self.resolve_policy("read", user)
         combined = merge_filters(parsed_filter, scope_filter, policy_filter)
         if self.soft_delete:
@@ -463,7 +463,8 @@ def _register_read_routes(
         user = _get_user_from_request(request)
         collection = db[ctx.name]
 
-        effective_filter = ctx.read_filter(parsed.filter, user, parsed.scope)
+        hierarchy = getattr(request.app.state, "role_hierarchy", None)
+        effective_filter = ctx.read_filter(parsed.filter, user, parsed.scope, hierarchy)
 
         scope_name = parsed.scope[0] if parsed.scope else None
         cc = ctx.cache_control_header(scope_name)
@@ -502,7 +503,8 @@ def _register_read_routes(
         params = dict(request.query_params)
         parsed = parse_query_params(params)
         user = _get_user_from_request(request)
-        effective_filter = ctx.read_filter(parsed.filter, user, parsed.scope)
+        hierarchy = getattr(request.app.state, "role_hierarchy", None)
+        effective_filter = ctx.read_filter(parsed.filter, user, parsed.scope, hierarchy)
         total = await db[ctx.name].count_documents(effective_filter or {})
         return {"count": total}
 
@@ -513,8 +515,9 @@ def _register_read_routes(
             params = dict(request.query_params)
             parsed = parse_query_params(params)
             user = _get_user_from_request(request)
+            hierarchy = getattr(request.app.state, "role_hierarchy", None)
 
-            scope_filter = ctx.resolve_scopes(parsed.scope, user)
+            scope_filter = ctx.resolve_scopes(parsed.scope, user, hierarchy)
             policy_filter = ctx.resolve_policy("read", user)
             trash_filter: dict[str, Any] = {"deleted_at": {"$ne": None}}
             combined = merge_filters(parsed.filter, scope_filter, policy_filter, trash_filter) or trash_filter

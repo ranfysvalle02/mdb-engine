@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.11.5
+
+### Fixed -- Scoped Auth Role Hierarchy
+
+- **Scope `auth.roles` now respects `role_hierarchy`** -- The
+  `resolve_scopes` method in `auto_crud` previously checked only the
+  user's raw `role` / `roles` fields when evaluating scope-level auth
+  gates (e.g. `"pending": {"filter": ..., "auth": {"roles": ["moderator"]}}`).
+  Role hierarchy was ignored, so an admin whose hierarchy includes
+  moderator would receive 403 on moderator-gated scopes. The scope auth
+  path now calls `get_effective_roles(user, role_hierarchy)`, matching
+  the behavior of `require_role()` and `require_collection_permission()`.
+
+### Fixed -- OSO Provider Parity Test
+
+- **`_FakeOsoClient` now handles `oso_cloud.Value` objects** -- When
+  `oso-cloud` is installed (CI), `OsoAdapter.add_role_for_user` wraps
+  arguments in `Value` objects. The test fake's `insert()` method used
+  `str()` on these, producing a repr string that didn't match the `.id`
+  extraction in `authorize()`. Added a `_id()` helper that consistently
+  extracts `.id` from Value objects, fixing the `test_role_inheritance`
+  CI failure.
+
 ## 0.11.4
 
 ### Fixed -- Collection Auth Role Handling

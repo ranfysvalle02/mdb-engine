@@ -1643,6 +1643,150 @@ class TestScopes:
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# Scoped Auth with Role Hierarchy (v0.11.5 fix)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def _build_scoped_auth_test_app(
+    scopes: dict,
+    seed_data: dict | None = None,
+    user: dict | None = None,
+    role_hierarchy: dict | None = None,
+) -> tuple[FastAPI, TestClient]:
+    """Build an app with scoped auth and optional role hierarchy."""
+    from starlette.middleware.base import BaseHTTPMiddleware
+
+    config = {"scopes": scopes}
+    collections_config = {"tasks": config}
+    app = FastAPI()
+    app.state.role_hierarchy = role_hierarchy
+
+    fake_db = _SmartFakeScopedDB(seed_data)
+
+    async def _override_db():
+        return fake_db
+
+    app.dependency_overrides[get_scoped_db] = _override_db
+
+    _user = user
+
+    class InjectUserMiddleware(BaseHTTPMiddleware):
+        async def dispatch(self, request, call_next):
+            request.state.user = _user
+            request.state.user_roles = []
+            return await call_next(request)
+
+    app.add_middleware(InjectUserMiddleware)
+
+    for name, cfg in collections_config.items():
+        router = create_auto_crud_router(name, cfg)
+        app.include_router(router)
+
+    return app, TestClient(app)
+
+
+class TestScopedAuthHierarchy:
+    """Verify that scoped auth.roles respects the manifest role_hierarchy."""
+
+    def test_admin_inherits_moderator_for_scoped_auth(self):
+        """Admin should access a scope that requires moderator via hierarchy."""
+        oid = ObjectId()
+        _, client = _build_scoped_auth_test_app(
+            scopes={
+                "pending": {
+                    "filter": {"approved": False},
+                    "auth": {"roles": ["moderator"]},
+                }
+            },
+            seed_data={"tasks": [{"_id": oid, "approved": False, "deleted_at": None}]},
+            user={"_id": "u1", "email": "admin@test.com", "role": "admin"},
+            role_hierarchy={"admin": ["editor", "moderator", "reader"], "editor": ["reader"], "moderator": ["reader"]},
+        )
+        resp = client.get("/api/tasks?scope=pending")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 1
+
+    def test_reader_denied_moderator_scope(self):
+        """Reader should be denied a scope requiring moderator."""
+        _, client = _build_scoped_auth_test_app(
+            scopes={
+                "pending": {
+                    "filter": {"approved": False},
+                    "auth": {"roles": ["moderator"]},
+                }
+            },
+            user={"_id": "u2", "email": "reader@test.com", "role": "reader"},
+            role_hierarchy={"admin": ["editor", "moderator", "reader"], "editor": ["reader"], "moderator": ["reader"]},
+        )
+        resp = client.get("/api/tasks?scope=pending")
+        assert resp.status_code == 403
+
+    def test_editor_inherits_reader_for_scoped_auth(self):
+        """Editor should access a scope that requires reader via hierarchy."""
+        oid = ObjectId()
+        _, client = _build_scoped_auth_test_app(
+            scopes={
+                "published": {
+                    "filter": {"status": "published"},
+                    "auth": {"roles": ["reader"]},
+                }
+            },
+            seed_data={"tasks": [{"_id": oid, "status": "published", "deleted_at": None}]},
+            user={"_id": "u3", "email": "editor@test.com", "role": "editor"},
+            role_hierarchy={"admin": ["editor", "moderator", "reader"], "editor": ["reader"]},
+        )
+        resp = client.get("/api/tasks?scope=published")
+        assert resp.status_code == 200
+
+    def test_no_hierarchy_falls_back_to_direct_match(self):
+        """Without hierarchy, only direct role match should work."""
+        _, client = _build_scoped_auth_test_app(
+            scopes={
+                "pending": {
+                    "filter": {"approved": False},
+                    "auth": {"roles": ["moderator"]},
+                }
+            },
+            user={"_id": "u1", "email": "admin@test.com", "role": "admin"},
+            role_hierarchy=None,
+        )
+        resp = client.get("/api/tasks?scope=pending")
+        assert resp.status_code == 403
+
+    def test_anonymous_denied_scoped_auth(self):
+        """Anonymous user should get 403 on role-gated scope."""
+        _, client = _build_scoped_auth_test_app(
+            scopes={
+                "pending": {
+                    "filter": {"approved": False},
+                    "auth": {"roles": ["moderator"]},
+                }
+            },
+            user=None,
+            role_hierarchy={"admin": ["moderator"]},
+        )
+        resp = client.get("/api/tasks?scope=pending")
+        assert resp.status_code == 403
+
+    def test_count_endpoint_respects_scoped_hierarchy(self):
+        """The _count endpoint should also respect hierarchy for scoped auth."""
+        _, client = _build_scoped_auth_test_app(
+            scopes={
+                "pending": {
+                    "filter": {"approved": False},
+                    "auth": {"roles": ["moderator"]},
+                }
+            },
+            seed_data={"tasks": [{"_id": ObjectId(), "approved": False, "deleted_at": None}]},
+            user={"_id": "u1", "email": "admin@test.com", "role": "admin"},
+            role_hierarchy={"admin": ["moderator"]},
+        )
+        resp = client.get("/api/tasks/_count?scope=pending")
+        assert resp.status_code == 200
+        assert resp.json()["count"] == 1
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # MQL-as-DSL: Pipelines
 # ═══════════════════════════════════════════════════════════════════════
 
