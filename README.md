@@ -3,10 +3,8 @@
 **The MongoDB Engine for Python Apps** — Auto-sandboxing, index management, and AI services in one package.
 
 [![PyPI](https://img.shields.io/pypi/v/mdb-engine)](https://pypi.org/project/mdb-engine/)
-[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Coverage](https://img.shields.io/badge/coverage-90%25-green)]()
-[![Tests](https://img.shields.io/badge/statements-5023%252F5585-green)]()
 
 ## Get Running in 60 Seconds
 

@@ -33,6 +33,8 @@ from pymongo.errors import (
     ServerSelectionTimeoutError,
 )
 
+from ..constants import DEFAULT_MAX_POOL_SIZE, DEFAULT_MIN_POOL_SIZE
+
 logger = logging.getLogger(__name__)
 
 # Global singleton instance
@@ -59,8 +61,8 @@ def get_shared_mongo_client(
 
     Args:
         mongo_uri: MongoDB connection URI
-        max_pool_size: Maximum connection pool size (default: from env or 10)
-        min_pool_size: Minimum connection pool size (default: from env or 1)
+        max_pool_size: Maximum connection pool size (default: from env or 50)
+        min_pool_size: Minimum connection pool size (default: from env or 10)
         server_selection_timeout_ms: Server selection timeout in milliseconds
         max_idle_time_ms: Maximum idle time before closing connections
         retry_writes: Enable automatic retry for write operations
@@ -75,11 +77,11 @@ def get_shared_mongo_client(
     """
     global _shared_client
 
-    # Get pool sizes from environment or use defaults
+    # Get pool sizes from environment or use framework-wide defaults
     if max_pool_size is None:
-        max_pool_size = int(os.getenv("MONGO_ACTOR_MAX_POOL_SIZE", "10"))
+        max_pool_size = int(os.getenv("MONGO_ACTOR_MAX_POOL_SIZE", str(DEFAULT_MAX_POOL_SIZE)))
     if min_pool_size is None:
-        min_pool_size = int(os.getenv("MONGO_ACTOR_MIN_POOL_SIZE", "1"))
+        min_pool_size = int(os.getenv("MONGO_ACTOR_MIN_POOL_SIZE", str(DEFAULT_MIN_POOL_SIZE)))
 
     logger.info(
         f"MongoDB Shared Pool Configuration: max_pool_size={max_pool_size}, "

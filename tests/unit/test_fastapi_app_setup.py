@@ -609,6 +609,30 @@ class TestAuthProviders:
             mock_casbin.assert_not_awaited()
             mock_default.assert_not_awaited()
 
+    @pytest.mark.asyncio
+    async def test_no_policy_with_collection_auth_no_provider(self):
+        """Collections with auth.roles / auth.write_roles but no auth.policy
+        must NOT trigger Casbin auto-creation — they use the inline
+        require_role fallback path (Bug 1 fix, v0.11.4)."""
+        mixin, engine, app = self._make_mixin_app()
+        auth_config = {"mode": "app"}
+        app_manifest = {
+            "collections": {
+                "posts": {"auth": {"write_roles": ["editor"], "public_read": True}},
+                "comments": {"auth": {"roles": ["moderator"]}},
+            }
+        }
+
+        with (
+            patch.object(mixin, "_initialize_oso_provider", new_callable=AsyncMock) as mock_oso,
+            patch.object(mixin, "_initialize_casbin_provider", new_callable=AsyncMock) as mock_casbin,
+            patch.object(mixin, "_initialize_casbin_provider_default", new_callable=AsyncMock) as mock_default,
+        ):
+            await mixin._initialize_auth_provider(engine, app, "s", app_manifest, auth_config)
+            mock_oso.assert_not_awaited()
+            mock_casbin.assert_not_awaited()
+            mock_default.assert_not_awaited()
+
 
 # ============================================================================
 # TestOSOProviderInit

@@ -32,7 +32,18 @@ from ..auth.rate_limiter import InMemoryRateLimitStore, RateLimit
 
 logger = logging.getLogger(__name__)
 
-_store = InMemoryRateLimitStore()
+_store: InMemoryRateLimitStore | Any = InMemoryRateLimitStore()
+
+
+def set_collection_rate_limit_store(store: Any) -> None:
+    """Replace the module-level store used by per-collection rate limits.
+
+    Call this at startup to switch from the default in-memory store to a
+    ``MongoDBRateLimitStore`` (or any object with the same
+    ``record_attempt(identifier, window_seconds)`` async interface).
+    """
+    global _store
+    _store = store
 
 
 def _get_identifier(request: Request, collection: str, operation: str, per: str) -> str:

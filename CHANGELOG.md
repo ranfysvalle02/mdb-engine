@@ -1,5 +1,54 @@
 # Changelog
 
+## 0.11.4
+
+### Fixed -- Collection Auth Role Handling
+
+- **Removed Casbin auto-creation for manifests without `auth.policy`** --
+  Previously, `_initialize_auth_provider` auto-created a Casbin enforcer
+  whenever any collection had an `auth` block (e.g. `write_roles`,
+  `roles`), even when no `auth.policy` section existed in the manifest.
+  The auto-created provider had role-to-collection policies but no
+  user-to-role groupings, so every `enforce(email, collection, action)`
+  call returned `False` -- resulting in 403 on every role-gated endpoint.
+  Collections that use `auth.roles` / `auth.write_roles` without an
+  explicit `auth.policy` now correctly fall back to the inline
+  `require_role` path, which reads roles directly from the user object.
+
+- **`public_read` collections no longer gated by `write_roles`** --
+  The `public_read` code path in `auto_crud` incorrectly added an auth
+  dependency to the read router when `write_roles` or `create_roles` was
+  set (via the `_use_provider` flag). This caused anonymous users to
+  receive 401 on collections that declared `"public_read": true`. The
+  read router is now always unauthenticated when `public_read` is
+  enabled, regardless of write/create role configuration.
+
+## 0.11.3
+
+### Improved -- Authorization Provider Testing & Hardening
+
+- **Relaxed OsoAdapter import guard** -- `OsoAdapter.__init__` no longer
+  requires `oso-cloud` or `oso` to be importable at construction time.
+  The factory (`oso_factory.py`) already validates the package before
+  building a client, so the redundant check was removed. A `None` client
+  is still rejected (fail-closed). This makes mock-based testing possible
+  without the real OSO package installed.
+
+- **CI now installs `oso-cloud`** -- The integration test job installs
+  `.[test,dev,ai,oso]` so OSO adapter tests run in CI instead of being
+  skipped.
+
+- **Expanded OSO adapter test coverage** -- Added tests for `save_policy`,
+  `has_policy`, `has_role_for_user`, `remove_role_for_user`, `clear_cache`,
+  cache TTL / hit behavior, uninitialized-deny, and `None`-client rejection
+  (16 new tests).
+
+- **Provider-parity contract tests** -- New `TestProviderParityContract`
+  class runs identical authorization sequences (add policy, check, role
+  inheritance, has_policy, clear_cache, save_policy) through both
+  `CasbinAdapter` (real MongoDB enforcer) and `OsoAdapter` (thin in-memory
+  fake), proving both honor the same `BaseAuthorizationProvider` contract.
+
 ## 0.11.2
 
 ### Added — SSR, SEO & Blog Features

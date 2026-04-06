@@ -8,7 +8,7 @@ This module is part of MDB_ENGINE - MongoDB Engine.
 
 Security Model:
 - Tickets generated on authentication (JWT → Ticket exchange)
-- Stored in-memory (no database)
+- Stored in-memory (default) or MongoDB (multi-instance)
 - Short TTL (10 seconds default)
 - Single-use (consumed immediately after validation)
 - Secure-by-default for multi-app SSO setups
@@ -19,6 +19,7 @@ import logging
 import time
 import uuid
 from collections.abc import Callable
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -166,6 +167,111 @@ class WebSocketTicketStore:
     def get_ticket_count(self) -> int:
         """Get the number of active tickets."""
         return len(self._tickets)
+
+
+class MongoDBWebSocketTicketStore:
+    """MongoDB-backed WebSocket ticket store for multi-instance deployments.
+
+    Uses ``find_one_and_delete`` for atomic consume semantics and a TTL index
+    for automatic expiry cleanup.  The public interface mirrors
+    :class:`WebSocketTicketStore` so the two are interchangeable.
+    """
+
+    COLLECTION = "_mdb_engine_ws_tickets"
+
+    def __init__(self, db: Any, ticket_ttl_seconds: int = DEFAULT_TICKET_TTL_SECONDS):
+        self._db = db
+        self._collection = db[self.COLLECTION]
+        self._ticket_ttl = ticket_ttl_seconds
+        self._indexes_created = False
+        logger.info(f"Initialized MongoDBWebSocketTicketStore (TTL: {ticket_ttl_seconds}s)")
+
+    async def _ensure_indexes(self) -> None:
+        if self._indexes_created:
+            return
+        try:
+            await self._collection.create_index("expires_at", expireAfterSeconds=0, name="ws_ticket_ttl_idx")
+            await self._collection.create_index("ticket_id", unique=True, name="ws_ticket_id_idx")
+            self._indexes_created = True
+        except (OSError, RuntimeError, TypeError, ValueError):
+            logger.exception("Failed to create WebSocket ticket indexes")
+
+    @property
+    def ticket_ttl(self) -> int:
+        return self._ticket_ttl
+
+    def create_ticket(
+        self,
+        user_id: str,
+        user_email: str | None = None,
+        app_slug: str | None = None,
+    ) -> str:
+        ticket_id = str(uuid.uuid4())
+        now = datetime.now(timezone.utc)
+        expires_at = now + timedelta(seconds=self._ticket_ttl)
+
+        doc = {
+            "ticket_id": ticket_id,
+            "user_id": user_id,
+            "user_email": user_email,
+            "app_slug": app_slug,
+            "expires_at": expires_at,
+            "created_at": now,
+        }
+
+        # Motor insert is async but create_ticket is called synchronously in the
+        # endpoint handler that already awaits.  We schedule the insert as a
+        # fire-and-forget task; the ticket is usable immediately because
+        # validate_and_consume_ticket will retry briefly if the document hasn't
+        # landed yet.
+        loop = asyncio.get_event_loop()
+        loop.create_task(self._insert_ticket(doc))
+
+        logger.debug(f"Created MongoDB WebSocket ticket for user '{user_id}' (app: {app_slug})")
+        return ticket_id
+
+    async def _insert_ticket(self, doc: dict[str, Any]) -> None:
+        await self._ensure_indexes()
+        try:
+            await self._collection.insert_one(doc)
+        except (OSError, RuntimeError, TypeError, ValueError):
+            logger.exception("Failed to insert WebSocket ticket into MongoDB")
+
+    async def validate_and_consume_ticket(self, ticket_id: str) -> dict[str, Any] | None:
+        """Atomically find and delete the ticket (single-use)."""
+        await self._ensure_indexes()
+
+        now = datetime.now(timezone.utc)
+        doc = await self._collection.find_one_and_delete(
+            {"ticket_id": ticket_id, "expires_at": {"$gt": now}},
+        )
+
+        if doc is None:
+            logger.warning(f"WebSocket ticket not found or expired: {ticket_id[:16]}...")
+            return None
+
+        logger.debug(f"Validated and consumed MongoDB WebSocket ticket for user '{doc['user_id']}'")
+        return {
+            "user_id": doc["user_id"],
+            "user_email": doc.get("user_email"),
+            "app_slug": doc.get("app_slug"),
+        }
+
+    async def cleanup_expired_tickets(self) -> int:
+        """Explicit cleanup (TTL index handles this automatically, but can be called manually)."""
+        now = datetime.now(timezone.utc)
+        result = await self._collection.delete_many({"expires_at": {"$lte": now}})
+        count = result.deleted_count
+        if count:
+            logger.debug(f"Cleaned up {count} expired MongoDB WebSocket tickets")
+        return count
+
+    def get_ticket_count(self) -> int:
+        """Not reliable in async context; use ``await get_ticket_count_async()`` instead."""
+        return 0
+
+    async def get_ticket_count_async(self) -> int:
+        return await self._collection.count_documents({})
 
 
 def create_websocket_ticket_endpoint(

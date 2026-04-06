@@ -71,7 +71,7 @@ The engine exposes `max_pool_size` and `min_pool_size` on the `MongoDBEngine` co
 engine = MongoDBEngine(
     mongo_uri=os.getenv("MONGODB_URI"),
     db_name=os.getenv("MDB_DB_NAME"),
-    max_pool_size=200,   # Default: 100. Increase for high-concurrency apps.
+    max_pool_size=200,   # Default: 50. Increase for high-concurrency apps.
     min_pool_size=20,    # Default: 10. Keep warm connections ready.
 )
 ```
@@ -444,6 +444,7 @@ When running with `--workers > 1`:
 
 ## Further Reading
 
+- [Scaling Runbook](SCALING_RUNBOOK.md) — pool sizing, horizontal scaling, WebSocket strategies, rate-limit backends
 - [Manifest Reference](../MANIFEST_REFERENCE.md) — full manifest schema documentation
 - [CSFLE Setup](CSFLE_SETUP.md) — field-level encryption with KMS providers
 - [CSRF Protection](CSRF_PROTECTION.md) — CSRF configuration for browser apps

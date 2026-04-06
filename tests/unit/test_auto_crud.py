@@ -2164,3 +2164,52 @@ class TestAuthzProviderIntegration:
         titles = [d["title"] for d in resp.json()["data"]]
         assert "mine" in titles
         assert "other" in titles
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# public_read fallback (no authz_provider on app.state)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestPublicReadFallback:
+    """Verify public_read works without an authz_provider (inline role fallback)."""
+
+    def test_public_read_without_provider_allows_anonymous_get(self):
+        """Anonymous GET should succeed when public_read is True, even with write_roles set."""
+        oid = ObjectId()
+        _, client = _build_auth_test_app(
+            auth_config={"public_read": True, "write_roles": ["editor"]},
+            seed_data={"tasks": [{"_id": oid, "title": "hello"}]},
+            user=None,
+        )
+        resp = client.get("/api/tasks")
+        assert resp.status_code == 200
+
+    def test_public_read_without_provider_rejects_anonymous_write(self):
+        """Anonymous POST should be rejected (write router requires auth)."""
+        _, client = _build_auth_test_app(
+            auth_config={"public_read": True, "write_roles": ["editor"]},
+            user=None,
+        )
+        resp = client.post("/api/tasks", json={"title": "new"})
+        assert resp.status_code == 401
+
+    def test_public_read_without_provider_allows_authenticated_write(self):
+        """Authenticated user with correct role can write."""
+        _, client = _build_auth_test_app(
+            auth_config={"public_read": True, "write_roles": ["editor"]},
+            user={"_id": "u1", "email": "a@b.com", "role": "editor"},
+        )
+        resp = client.post("/api/tasks", json={"title": "new"})
+        assert resp.status_code == 201
+
+    def test_public_read_without_provider_get_by_id(self):
+        """Anonymous GET by ID should work for public_read collections."""
+        oid = ObjectId()
+        _, client = _build_auth_test_app(
+            auth_config={"public_read": True, "write_roles": ["editor"]},
+            seed_data={"tasks": [{"_id": oid, "title": "hi"}]},
+            user=None,
+        )
+        resp = client.get(f"/api/tasks/{oid}")
+        assert resp.status_code == 200

@@ -1110,13 +1110,18 @@ async def broadcast_to_app(app_slug: str, message: dict[str, Any], user_id: str 
     This is the simplest way to send WebSocket messages from anywhere in your app code.
     Messages are automatically scoped to the app for security.
 
+    When a non-InProcess :class:`BroadcastBackend` is configured (see
+    ``mdb_engine.routing._broadcast``), this function also publishes the
+    message through the backend so that other processes can deliver it to
+    their local connections.
+
     Args:
         app_slug: App slug (ensures isolation)
         message: Message dictionary to broadcast
         user_id: Optional user_id to filter recipients (if None, broadcasts to all)
 
     Returns:
-        Number of clients that received the message
+        Number of clients that received the message *on this process*
 
     Example:
         ```python
@@ -1135,6 +1140,23 @@ async def broadcast_to_app(app_slug: str, message: dict[str, Any], user_id: str 
         }, user_id="user123")
         ```
     """
+    # Publish through the broadcast backend for cross-process delivery
+    try:
+        from ._broadcast import InProcessBackend, get_broadcast_backend
+
+        backend = get_broadcast_backend()
+        if not isinstance(backend, InProcessBackend):
+            envelope = {
+                "app_slug": app_slug,
+                "message": message,
+                "user_id": user_id,
+                "_source": "broadcast_to_app",
+            }
+            await backend.publish(f"ws:{app_slug}", envelope)
+    except (ImportError, OSError, RuntimeError, TypeError, ValueError):
+        logger.debug("Broadcast backend publish failed; falling back to local-only", exc_info=True)
+
+    # Always deliver to local connections
     manager = await get_websocket_manager(app_slug)
     return await manager.broadcast(message, filter_by_user=user_id)
 

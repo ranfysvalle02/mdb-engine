@@ -68,4 +68,13 @@ __all__ = [
     "broadcast_to_app",  # Simplest way to broadcast from app code
     "register_message_handler",  # Register handlers to listen to client messages
     "get_message_handler",
+    # Broadcast backend (scaling)
+    "set_broadcast_backend",
+    "get_broadcast_backend",
 ]
+
+# Broadcast backend utilities are always importable (no WebSocket dependency)
+try:
+    from ._broadcast import get_broadcast_backend, set_broadcast_backend
+except ImportError:
+    pass

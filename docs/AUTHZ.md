@@ -478,6 +478,13 @@ app = engine.create_app(
 - ✅ Initial role assignments from `authorization.initial_roles`
 - ✅ Demo users from `auth.users.demo_users`
 
+> **Important:** Auto-initialization requires an **explicit `auth.policy`** section
+> in the manifest. Collections that only declare `auth.roles` or
+> `auth.write_roles` without `auth.policy` do **not** trigger Casbin/OSO
+> creation. Those collections use the inline `require_role` fallback,
+> which reads roles directly from the authenticated user's `role` /
+> `roles` fields.
+
 ### Manifest Configuration
 
 Authorization is configured in your app's `manifest.json`:
@@ -972,16 +979,30 @@ async def check(self, subject: str, resource: str, action: str, user_object=None
 
 ### 6. Test with Mock Providers
 
-```python
-from unittest.mock import AsyncMock
+Both `CasbinAdapter` and `OsoAdapter` accept their underlying client at
+construction time, so you can substitute mocks or fakes in tests:
 
-# In tests
+```python
+from unittest.mock import AsyncMock, MagicMock
+from mdb_engine.auth.provider import OsoAdapter
+
+# Quick mock for route-level tests
 mock_provider = AsyncMock(spec=AuthorizationProvider)
 mock_provider.check.return_value = True
-
-# Use in tests
 app.state.authz_provider = mock_provider
+
+# OsoAdapter works with any object that has .authorize / .insert methods,
+# so you can pass a MagicMock directly (no oso-cloud package required):
+oso_client = MagicMock()
+oso_client.authorize = MagicMock(return_value=True)
+adapter = OsoAdapter(oso_client)
 ```
+
+The engine ships with **provider-parity contract tests**
+(`tests/integration/test_auth_providers.py::TestProviderParityContract`)
+that run identical authorization sequences through both adapters. If you
+create a custom provider, consider adding it to the parity suite to
+guarantee it satisfies the same `BaseAuthorizationProvider` contract.
 
 ## API Reference
 

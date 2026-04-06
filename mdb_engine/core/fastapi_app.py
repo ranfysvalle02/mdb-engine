@@ -345,6 +345,8 @@ class FastAPIAppMixin:
         if _collections_cfg:
             from ..routing.auto_crud import mount_auto_crud_routes
 
+            self._wire_collection_rate_limit_store(auth_config)
+
             _auth_col = _users_cfg_pre.get("collection_name", "users") if _app_auth_on else "users"
             mount_auto_crud_routes(
                 app,
@@ -489,17 +491,49 @@ class FastAPIAppMixin:
         auth_config: dict[str, Any],
         auth_mode: str,
     ) -> None:
-        """Add rate limiting middleware."""
+        """Add rate limiting middleware.
+
+        Automatically selects the MongoDB-backed rate-limit store when a
+        database connection is available and ``rate_limit_store`` is not
+        explicitly set to ``"memory"``.
+        """
         rate_limits_config = auth_config.get("rate_limits", {})
         if rate_limits_config or auth_mode == "shared":
-            from ..auth.rate_limiter import create_rate_limit_middleware
+            from ..auth.rate_limiter import create_rate_limit_middleware, create_rate_limit_store
 
-            rate_limit_middleware = create_rate_limit_middleware(manifest_auth=auth_config)
+            store_preference = auth_config.get("rate_limit_store", "auto")
+            store = None
+            if store_preference != "memory":
+                try:
+                    db = self._connection_manager.mongo_db
+                    if db is not None:
+                        store = create_rate_limit_store(db=db)
+                        logger.info(f"Using MongoDBRateLimitStore for '{slug}' rate limiting")
+                except (AttributeError, RuntimeError):
+                    pass
+
+            rate_limit_middleware = create_rate_limit_middleware(manifest_auth=auth_config, store=store)
             app.add_middleware(rate_limit_middleware)
+            store_type = "mongodb" if store is not None else "memory"
             logger.info(
                 f"AuthRateLimitMiddleware added for '{slug}' "
-                f"(endpoints: {list(rate_limits_config.keys()) or 'defaults'})"
+                f"(endpoints: {list(rate_limits_config.keys()) or 'defaults'}, store: {store_type})"
             )
+
+    def _wire_collection_rate_limit_store(self, auth_config: dict[str, Any]) -> None:
+        """Set the per-collection rate-limit store to MongoDB when available."""
+        store_pref = auth_config.get("rate_limit_store", "auto")
+        if store_pref == "memory":
+            return
+        try:
+            db = self._connection_manager.mongo_db
+            if db is not None:
+                from ..auth.rate_limiter import create_rate_limit_store
+                from ..routing._rate_limit import set_collection_rate_limit_store
+
+                set_collection_rate_limit_store(create_rate_limit_store(db=db))
+        except (AttributeError, RuntimeError):
+            pass
 
     def _add_shared_auth_middleware(self, app: "FastAPI", slug: str, auth_config: dict[str, Any]) -> None:
         """Add shared auth middleware."""
@@ -638,9 +672,11 @@ class FastAPIAppMixin:
         Provider selection order:
         1. Explicit ``auth.policy.provider`` in manifest → use that.
         2. ``auth.policy`` present but no provider → default to Casbin.
-        3. No ``auth.policy`` but collections have ``auth`` blocks →
-           auto-create Casbin and compile manifest policies into it.
-        4. Nothing → skip.
+        3. No ``auth.policy`` → skip.  Collections that declare ``auth.roles``
+           are handled by the inline ``require_role`` / ``require_collection_permission``
+           fallback path, which reads roles directly from the user object.
+           Auto-creating a Casbin provider here would break that flow because
+           Casbin has no user→role groupings — every enforce() call would deny.
         """
         try:
             auth_policy = auth_config.get("policy", {})
@@ -660,13 +696,6 @@ class FastAPIAppMixin:
             logger.warning(
                 f"Unknown authz provider type '{authz_provider_type}' for '{slug}' - skipping initialization"
             )
-        else:
-            # No explicit auth.policy — auto-create Casbin if collections have auth blocks
-            from ..auth.policy_compiler import has_collection_auth
-
-            if has_collection_auth(app_manifest):
-                logger.info(f"Collections with auth detected for '{slug}', auto-creating Casbin provider")
-                await self._initialize_casbin_provider_default(engine, app, slug, app_manifest)
 
         # After provider is ready, compile manifest collection-auth into policies
         authz_provider = getattr(app.state, "authz_provider", None)

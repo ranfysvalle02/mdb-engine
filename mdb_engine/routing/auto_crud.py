@@ -1122,15 +1122,10 @@ def create_auto_crud_router(
     _read_rate_deps = [Depends(_read_rate_dep)]
 
     # public_read: split into two routers — public reads, auth-gated writes.
+    # public_read means reads are always unauthenticated; write_roles / create_roles
+    # only affect the write router.
     if _public_read and _auth_baseline:
-        if _use_provider:
-            read_router = APIRouter(
-                prefix=prefix,
-                tags=route_tags,
-                dependencies=[Depends(require_collection_permission(collection_name, "read"))],
-            )
-        else:
-            read_router = APIRouter(prefix=prefix, tags=route_tags)
+        read_router = APIRouter(prefix=prefix, tags=route_tags)
         write_router = APIRouter(prefix=prefix, tags=route_tags, dependencies=[Depends(require_user())])
     else:
         read_router = APIRouter(prefix=prefix, tags=route_tags, dependencies=router_dependencies)

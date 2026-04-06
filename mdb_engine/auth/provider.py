@@ -291,26 +291,21 @@ class OsoAdapter(BaseAuthorizationProvider):
         """
         Initialize the OSO adapter.
 
+        The oso_factory already validates that the oso-cloud package is
+        importable before constructing a client, so we only guard against
+        a None client here (fail-closed).
+
         Args:
             oso_client: Pre-configured OSO Cloud client or OSO library instance
 
         Raises:
-            AuthorizationError: If OSO is not available
+            AuthorizationError: If oso_client is None
         """
-        # Lazy import to allow code to exist without OSO installed
-        try:
-            import oso_cloud  # noqa: F401
-        except ImportError:
-            try:
-                import oso  # noqa: F401
-            except ImportError as e:
-                raise AuthorizationError(
-                    "OSO library is not installed. " "Install with: pip install oso-cloud or pip install oso"
-                ) from e
+        if oso_client is None:
+            raise AuthorizationError("oso_client must not be None")
 
         super().__init__(engine_name="OSO Cloud")
         self._oso = oso_client
-        # Cache for authorization results: {(subject, resource, action): (result, timestamp)}
         self._cache: dict[tuple[str, str, str], tuple[bool, float]] = {}
         self._cache_lock = asyncio.Lock()
         self._mark_initialized()
