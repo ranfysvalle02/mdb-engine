@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.12.2
+
+### Fixed
+
+- **`| markdown` filter strips `data:` URI images** — `nh3.clean()` defaults
+  `url_schemes` to `{"http", "https", "mailto"}`, which silently removes
+  `src` attributes containing `data:` URIs (e.g. base64-encoded images).
+  The `nh3.clean()` call now passes `url_schemes={"http", "https", "mailto",
+  "data"}` so inline images survive sanitisation.  A post-process step
+  neutralizes `data:` URIs in `<a href>` attributes (replacing them with
+  `href="#"`) to prevent XSS via `data:text/html` link navigation.
+
+- **`og:image` meta tag accepts `data:` URIs** — When a post's cover image
+  resolved to a base64 `data:` URI, the full multi-KB string landed in the
+  `og:image` meta tag. Social platforms cannot use these.  The SEO fallback
+  resolver now skips values starting with `data:` for image-related SEO keys,
+  and the OG image route's cover-field redirect ignores `data:` URIs (falling
+  through to the auto-generated PNG).
+
 ## 0.12.1
 
 ### Fixed

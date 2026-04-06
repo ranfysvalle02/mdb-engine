@@ -125,6 +125,8 @@ def _resolve_seo_placeholders(template: str, context: dict[str, Any]) -> str:
 def _resolve_seo_field(
     value: Any,
     data_context: dict[str, Any],
+    *,
+    skip_data_uri: bool = False,
 ) -> str:
     """Resolve a single SEO field value, supporting fallback chains.
 
@@ -132,13 +134,23 @@ def _resolve_seo_field(
     * A string template (legacy) — resolved directly.
     * A dict with ``"fallback"`` — an ordered list of templates; the first
       non-empty result wins.
+
+    When *skip_data_uri* is True, resolved values starting with ``data:``
+    are treated as empty so the chain falls through to the next candidate.
+    This prevents multi-KB base64 strings from landing in ``og:image`` meta
+    tags where social platforms cannot use them.
     """
     if isinstance(value, str):
-        return _resolve_seo_placeholders(value, data_context)
+        resolved = _resolve_seo_placeholders(value, data_context)
+        if skip_data_uri and resolved.startswith("data:"):
+            return ""
+        return resolved
     if isinstance(value, dict) and "fallback" in value:
         for tpl in value["fallback"]:
             resolved = _resolve_seo_placeholders(tpl, data_context)
             if resolved and resolved.strip():
+                if skip_data_uri and resolved.startswith("data:"):
+                    continue
                 return resolved
         return ""
     return str(value) if value is not None else ""
@@ -152,10 +164,15 @@ def _build_seo_context(
     """Build resolved SEO metadata from config + fetched data."""
     seo: dict[str, Any] = {"site_name": site_name}
 
+    _IMAGE_SEO_KEYS = {"og_image", "og:image", "twitter_image", "twitter:image", "image"}
     for key, value in seo_config.items():
         if key == "json_ld":
             continue
-        seo[key] = _resolve_seo_field(value, data_context)
+        seo[key] = _resolve_seo_field(
+            value,
+            data_context,
+            skip_data_uri=key in _IMAGE_SEO_KEYS,
+        )
 
     json_ld_config = seo_config.get("json_ld")
     if json_ld_config:
@@ -1019,11 +1036,27 @@ def _make_markdown_filter() -> Any:
         "span": {"class"},
     }
 
+    _URL_SCHEMES = {"http", "https", "mailto", "data"}
+
+    # data: URIs are allowed in url_schemes so <img src="data:..."> works,
+    # but they're dangerous in <a href="data:text/html;..."> (XSS via
+    # navigation).  Post-process to neutralize them on anchors only.
+    _DATA_HREF_RE = re.compile(
+        r"""(<a\s[^>]*?)href\s*=\s*"data:[^"]*\"""",
+        re.IGNORECASE,
+    )
+
     def _markdown_filter(text: str | None) -> str:
         if not text:
             return ""
         raw_html = mistune.html(str(text))
-        return nh3.clean(raw_html, tags=_ALLOWED_TAGS, attributes=_ALLOWED_ATTRS)
+        cleaned = nh3.clean(
+            raw_html,
+            tags=_ALLOWED_TAGS,
+            attributes=_ALLOWED_ATTRS,
+            url_schemes=_URL_SCHEMES,
+        )
+        return _DATA_HREF_RE.sub(r'\1href="#"', cleaned)
 
     return _markdown_filter
 

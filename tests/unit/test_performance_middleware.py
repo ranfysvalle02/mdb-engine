@@ -399,6 +399,119 @@ class TestMarkdownFilter:
         assert "<table>" in result
         assert "<td>" in result
 
+    def test_data_uri_images_preserved(self):
+        """Regression: nh3 default url_schemes excludes 'data', stripping
+        src from <img> tags with base64 data URIs."""
+        pytest.importorskip("mistune", reason="mistune required")
+        pytest.importorskip("nh3", reason="nh3 required")
+
+        from mdb_engine.routing._ssr import _make_markdown_filter
+
+        md_filter = _make_markdown_filter()
+        data_uri = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUg=="
+        result = md_filter(f"![alt text]({data_uri})")
+        assert f'src="{data_uri}"' in result
+        assert 'alt="alt text"' in result
+
+    def test_data_uri_mixed_with_normal_images(self):
+        """Both data: and https: images should survive sanitisation."""
+        pytest.importorskip("mistune", reason="mistune required")
+        pytest.importorskip("nh3", reason="nh3 required")
+
+        from mdb_engine.routing._ssr import _make_markdown_filter
+
+        md_filter = _make_markdown_filter()
+        body = (
+            "![logo](https://example.com/logo.png)\n\n"
+            "![inline](data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==)"
+        )
+        result = md_filter(body)
+        assert "https://example.com/logo.png" in result
+        assert "data:image/gif;base64," in result
+
+    def test_data_uri_in_link_href_is_neutralized(self):
+        """XSS prevention: data: URIs in <a href> allow arbitrary JS
+        execution via navigation. They must be stripped even though
+        data: is allowed in url_schemes for <img src>."""
+        pytest.importorskip("mistune", reason="mistune required")
+        pytest.importorskip("nh3", reason="nh3 required")
+
+        from mdb_engine.routing._ssr import _make_markdown_filter
+
+        md_filter = _make_markdown_filter()
+        xss_payload = "[click me](data:text/html;base64," "PHNjcmlwdD5hbGVydCgnWFNTJyk8L3NjcmlwdD4=)"
+        result = md_filter(xss_payload)
+        assert "data:text/html" not in result
+        assert 'href="#"' in result
+        assert "click me" in result
+
+    def test_data_uri_link_does_not_break_surrounding_content(self):
+        """A malicious data: link surrounded by legitimate content should
+        only affect the bad link, not the rest of the output."""
+        pytest.importorskip("mistune", reason="mistune required")
+        pytest.importorskip("nh3", reason="nh3 required")
+
+        from mdb_engine.routing._ssr import _make_markdown_filter
+
+        md_filter = _make_markdown_filter()
+        body = (
+            "[safe](https://example.com) and "
+            "[evil](data:text/html,<script>alert(1)</script>) and "
+            "![img](data:image/png;base64,abc123)"
+        )
+        result = md_filter(body)
+        assert "https://example.com" in result
+        assert "data:text/html" not in result
+        assert "data:image/png;base64,abc123" in result
+
+
+class TestSEODataURISkip:
+    """Regression: data: URIs must not land in og:image meta tags."""
+
+    def test_resolve_seo_field_skips_data_uri(self):
+        from mdb_engine.routing._ssr import _resolve_seo_field
+
+        result = _resolve_seo_field(
+            "data:image/png;base64,abc123",
+            {},
+            skip_data_uri=True,
+        )
+        assert result == ""
+
+    def test_resolve_seo_field_allows_data_uri_when_not_skipping(self):
+        from mdb_engine.routing._ssr import _resolve_seo_field
+
+        result = _resolve_seo_field(
+            "data:image/png;base64,abc123",
+            {},
+            skip_data_uri=False,
+        )
+        assert result == "data:image/png;base64,abc123"
+
+    def test_fallback_chain_skips_data_uri(self):
+        from mdb_engine.routing._ssr import _resolve_seo_field
+
+        value = {
+            "fallback": [
+                "data:image/png;base64,abc123",
+                "https://example.com/fallback.png",
+            ]
+        }
+        result = _resolve_seo_field(value, {}, skip_data_uri=True)
+        assert result == "https://example.com/fallback.png"
+
+    def test_fallback_chain_returns_empty_when_all_data_uris(self):
+        from mdb_engine.routing._ssr import _resolve_seo_field
+
+        value = {
+            "fallback": [
+                "data:image/png;base64,abc",
+                "data:image/gif;base64,def",
+            ]
+        }
+        result = _resolve_seo_field(value, {}, skip_data_uri=True)
+        assert result == ""
+
 
 # ════════════════════════════════════════════════════════════════════════════
 # Link preload headers

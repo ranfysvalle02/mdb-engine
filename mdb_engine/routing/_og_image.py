@@ -134,7 +134,7 @@ def register_og_image_route(
             raise HTTPException(status_code=404, detail="Not found")
 
         existing_cover = doc.get(cover_field)
-        if existing_cover:
+        if existing_cover and not existing_cover.startswith("data:"):
             host = base_url or str(request.base_url).rstrip("/")
             if existing_cover.startswith(("http://", "https://")):
                 redirect_url = existing_cover

@@ -413,3 +413,17 @@ Cache-Control headers and asset fingerprinting still work independently.
 **Fix:** Removed `rel` from the `<a>` allow-list. `nh3`'s default `link_rel` now manages `rel` automatically, which is the correct security behavior (all user-generated links get `rel="noopener noreferrer"`).
 
 **Action required:** `pip install --upgrade mdb-engine` to `>=0.12.1`. No manifest or template changes needed.
+
+---
+
+## 0.12.2 Patch
+
+**Bug fix 1:** The `| markdown` filter stripped `src` from `<img>` tags when the URL used a `data:` scheme (base64-encoded images). `nh3.clean()` defaults `url_schemes` to `{"http", "https", "mailto"}` — `data:` was not included.
+
+**Fix:** Added `url_schemes={"http", "https", "mailto", "data"}` to the `nh3.clean()` call. Inline base64 images now render correctly. A post-process step also neutralizes `data:` URIs in `<a href>` attributes (replacing with `href="#"`) to prevent XSS via `data:text/html` link navigation — so `data:` is safe for images but cannot be weaponized in links.
+
+**Bug fix 2:** When a post's cover image was a `data:` URI, the `og:image` meta tag contained the full multi-KB base64 string. Social platforms (X, LinkedIn, Facebook) cannot render these.
+
+**Fix:** The SEO fallback resolver now skips values starting with `data:` for image-related SEO keys (`og_image`, `og:image`, `twitter_image`, `twitter:image`, `image`), falling through to the next candidate in the chain. The OG image route's cover-field redirect also ignores `data:` URIs, falling through to the auto-generated PNG.
+
+**Action required:** `pip install --upgrade mdb-engine` to `>=0.12.2`. No manifest or template changes needed.
