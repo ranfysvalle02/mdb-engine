@@ -426,6 +426,10 @@ class FastAPIAppMixin:
         if manifest:
             self._add_cors_middleware(app, slug, manifest)
 
+        # Add compression middleware (before otel/observability so compressed
+        # responses still get correlation headers and tracing)
+        self._add_compression_middleware(app, slug, manifest)
+
         # Add OpenTelemetry instrumentation (outermost - captures full request lifecycle)
         self._add_otel_middleware(app, slug)
 
@@ -858,6 +862,34 @@ class FastAPIAppMixin:
             f"origins={merged.get('allow_origins')}, "
             f"credentials={merged.get('allow_credentials')}"
         )
+
+    def _add_compression_middleware(
+        self,
+        app: "FastAPI",
+        slug: str,
+        manifest: dict[str, Any] | None = None,
+    ) -> None:
+        """Add GZip or Brotli response compression.
+
+        Prefers Brotli (``brotli-asgi``) when installed, otherwise falls
+        back to Starlette's built-in ``GZipMiddleware``.  Opt out via
+        ``compression.enabled: false`` in the manifest.
+        """
+        compression = (manifest or {}).get("compression", {})
+        if isinstance(compression, dict) and compression.get("enabled") is False:
+            return
+        min_size = compression.get("minimum_size", 500) if isinstance(compression, dict) else 500
+
+        try:
+            from brotli_asgi import BrotliMiddleware
+
+            app.add_middleware(BrotliMiddleware, minimum_size=min_size)
+            logger.info("BrotliMiddleware added for '%s' (min_size=%d)", slug, min_size)
+        except ImportError:
+            from starlette.middleware.gzip import GZipMiddleware
+
+            app.add_middleware(GZipMiddleware, minimum_size=min_size)
+            logger.info("GZipMiddleware added for '%s' (min_size=%d)", slug, min_size)
 
     async def _initialize_oauth_service(
         self,

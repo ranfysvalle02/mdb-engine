@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mdb-engine"
-version = "0.11.5"
+version = "0.12.0"
 description = "MongoDB Engine"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -70,6 +70,15 @@ oso = ["oso-cloud>=0.1.0"]
 og-image = [
     "Pillow>=10.0.0",
 ]
+perf = [
+    "brotli-asgi>=1.0.0",
+    "rjsmin>=1.2.0",
+    "csscompressor>=0.9.0",
+]
+markdown = [
+    "mistune>=3.0.0",
+    "nh3>=0.2.0",
+]
 test = [
     "pytest>=7.4.0",
     "pytest-asyncio>=0.21.0",
@@ -111,6 +120,11 @@ all = [
     "opentelemetry-exporter-otlp>=1.20.0",
     "opentelemetry-instrumentation-fastapi>=0.41b0",
     "opentelemetry-instrumentation-pymongo>=0.41b0",
+    "brotli-asgi>=1.0.0",
+    "rjsmin>=1.2.0",
+    "csscompressor>=0.9.0",
+    "mistune>=3.0.0",
+    "nh3>=0.2.0",
 ]
 
 [project.urls]
@@ -234,6 +248,11 @@ module = [
     "authlib.*",
     "httpx.*",
     "opentelemetry.*",
+    "brotli_asgi.*",
+    "mistune.*",
+    "nh3.*",
+    "rjsmin.*",
+    "csscompressor.*",
 ]
 ignore_missing_imports = true
 

@@ -1913,12 +1913,74 @@ MANIFEST_SCHEMA_V2 = {
                                     "additionalProperties": False,
                                     "description": "Cache-Control headers for this SSR route.",
                                 },
+                                "preload": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "href": {
+                                                "type": "string",
+                                                "description": "URL of the resource to preload.",
+                                            },
+                                            "as": {
+                                                "type": "string",
+                                                "enum": [
+                                                    "style",
+                                                    "script",
+                                                    "font",
+                                                    "image",
+                                                    "fetch",
+                                                    "document",
+                                                ],
+                                                "description": "Resource type hint for the browser.",
+                                            },
+                                            "crossorigin": {
+                                                "type": "boolean",
+                                                "default": False,
+                                                "description": "Add crossorigin attribute (required for fonts).",
+                                            },
+                                        },
+                                        "required": ["href", "as"],
+                                        "additionalProperties": False,
+                                    },
+                                    "description": (
+                                        "Resources to preload via Link headers. " "Merged with top-level ssr.preload."
+                                    ),
+                                },
                             },
                             "required": ["template"],
                             "additionalProperties": False,
                         },
                     },
                     "additionalProperties": False,
+                },
+                "preload": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "href": {
+                                "type": "string",
+                                "description": "URL of the resource to preload.",
+                            },
+                            "as": {
+                                "type": "string",
+                                "enum": ["style", "script", "font", "image", "fetch", "document"],
+                                "description": "Resource type hint for the browser.",
+                            },
+                            "crossorigin": {
+                                "type": "boolean",
+                                "default": False,
+                                "description": "Add crossorigin attribute (required for fonts).",
+                            },
+                        },
+                        "required": ["href", "as"],
+                        "additionalProperties": False,
+                    },
+                    "description": (
+                        "Site-wide resources to preload via Link headers on every "
+                        "SSR response (CSS, fonts). Per-route preload lists are merged."
+                    ),
                 },
             },
             "additionalProperties": False,
@@ -4103,6 +4165,72 @@ MANIFEST_SCHEMA_V2 = {
                 },
                 "additionalProperties": False,
             },
+        },
+        "compression": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": (
+                        "Enable response compression (GZip or Brotli). " "Enabled by default; set to false to disable."
+                    ),
+                },
+                "minimum_size": {
+                    "type": "integer",
+                    "default": 500,
+                    "minimum": 0,
+                    "description": "Minimum response size in bytes before compression is applied.",
+                },
+            },
+            "additionalProperties": False,
+            "description": (
+                "Response compression settings. Prefers Brotli when " "brotli-asgi is installed, otherwise uses GZip."
+            ),
+        },
+        "static_cache": {
+            "type": "object",
+            "properties": {
+                "fonts": {
+                    "type": "string",
+                    "default": "max-age=31536000, immutable",
+                    "description": "Cache-Control header for font files (.woff2, .woff, .ttf, .otf).",
+                },
+                "styles": {
+                    "type": "string",
+                    "default": "max-age=86400, stale-while-revalidate=3600",
+                    "description": "Cache-Control header for CSS files.",
+                },
+                "scripts": {
+                    "type": "string",
+                    "default": "max-age=86400, stale-while-revalidate=3600",
+                    "description": "Cache-Control header for JS files.",
+                },
+                "images": {
+                    "type": "string",
+                    "default": "max-age=604800",
+                    "description": "Cache-Control header for image files (.png, .jpg, .svg, etc.).",
+                },
+                "default": {
+                    "type": "string",
+                    "default": "max-age=3600",
+                    "description": "Cache-Control header for all other static files.",
+                },
+                "minify": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": (
+                        "Minify CSS and JS files at startup. Requires "
+                        "rjsmin and csscompressor (pip install mdb-engine[perf])."
+                    ),
+                },
+            },
+            "additionalProperties": False,
+            "description": (
+                "Cache-Control headers for static assets served from public/. "
+                "Each key maps to a category of files. Default values provide "
+                "sensible caching for production deployments."
+            ),
         },
         "developer_id": {
             "type": "string",

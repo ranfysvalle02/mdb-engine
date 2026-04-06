@@ -16,7 +16,8 @@ A consolidated checklist and reference for deploying MDB-Engine applications to 
 8. [Health Checks](#health-checks)
 9. [AI Services Configuration](#ai-services-configuration)
 10. [Docker Deployment](#docker-deployment)
-11. [Environment Variables Reference](#environment-variables-reference)
+11. [Performance Optimization](#performance-optimization)
+12. [Environment Variables Reference](#environment-variables-reference)
 
 ---
 
@@ -422,6 +423,81 @@ When running with `--workers > 1`:
 - Use `MongoDBRateLimitStore` (in-memory store is per-process)
 - WebSocket connections are pinned to a single worker — use sticky sessions if behind a load balancer
 - Each worker gets its own connection pool — adjust `max_pool_size` accordingly (total connections = workers x max_pool_size)
+
+---
+
+## Performance Optimization
+
+### Response Compression
+
+GZip compression is enabled by default for all responses over 500 bytes. For better compression ratios, install Brotli:
+
+```bash
+pip install mdb-engine[perf]
+```
+
+If your reverse proxy (nginx, Cloudflare) already handles compression, disable it in the engine to avoid double-encoding:
+
+```json
+{
+  "compression": { "enabled": false }
+}
+```
+
+### Static Asset Caching
+
+All files in `public/` get `Cache-Control` headers automatically. The defaults are production-ready:
+
+- Fonts: 1 year, immutable
+- CSS/JS: 1 day + stale-while-revalidate
+- Images: 7 days
+
+To set longer lifetimes safely, use asset fingerprinting in templates:
+
+```html
+<link rel="stylesheet" href="{{ asset_url('style.css') }}">
+```
+
+This appends `?v=<hash>` so browsers fetch updated files after deploys.
+
+### Resource Preloading
+
+For SSR pages, declare critical resources to preload via `Link` headers:
+
+```json
+{
+  "ssr": {
+    "preload": [
+      { "href": "/public/style.css", "as": "style" },
+      { "href": "/public/fonts/inter.woff2", "as": "font", "crossorigin": true }
+    ]
+  }
+}
+```
+
+Behind CDNs that support 103 Early Hints (Cloudflare), this lets browsers start fetching assets during the server's database query latency.
+
+### CSS/JS Minification
+
+Optional startup minification (no build step needed):
+
+```json
+{
+  "static_cache": { "minify": true }
+}
+```
+
+Requires `pip install mdb-engine[perf]`.
+
+### Server-Side Markdown
+
+Eliminate client-side Markdown rendering (marked.js + DOMPurify) by installing:
+
+```bash
+pip install mdb-engine[markdown]
+```
+
+Then use the `| markdown` filter in templates instead of client-side JS.
 
 ---
 

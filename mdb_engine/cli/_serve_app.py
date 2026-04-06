@@ -53,6 +53,21 @@ app = engine.create_app(slug=_slug, manifest=manifest_path)
 _templates_dir = manifest_path.parent / "templates"
 _ssr_config = _manifest_data.get("ssr", {})
 
+# --- public/ convention -------------------------------------------------
+# If a ``public/`` directory exists next to the manifest, auto-serve it.
+# ``public/index.html`` is served at ``/``; all files available under
+# ``/public/``.  Inspired by Rails' ``public/`` directory.
+#
+# Build AssetRegistry early so SSR templates can use {{ asset_url() }}.
+_public_dir = manifest_path.parent / "public"
+_static_cache_cfg = _manifest_data.get("static_cache", {})
+_asset_registry = None
+
+if _public_dir.is_dir():
+    from mdb_engine.routing.static import AssetRegistry  # noqa: E402
+
+    _asset_registry = AssetRegistry(directory=_public_dir)
+
 if _templates_dir.is_dir() and _ssr_config.get("enabled"):
     from mdb_engine.routing._ssr import mount_ssr_routes  # noqa: E402
 
@@ -61,16 +76,10 @@ if _templates_dir.is_dir() and _ssr_config.get("enabled"):
         _templates_dir,
         _ssr_config,
         collections_config=_manifest_data.get("collections", {}),
+        asset_registry=_asset_registry,
     )
 
-# --- public/ convention -------------------------------------------------
-# If a ``public/`` directory exists next to the manifest, auto-serve it.
-# ``public/index.html`` is served at ``/``; all files available under
-# ``/public/``.  Inspired by Rails' ``public/`` directory.
-#
-# When SSR is active and has a ``/`` route, the SSR route takes priority
-# (registered above).  Otherwise ``public/index.html`` is used.
-_public_dir = manifest_path.parent / "public"
+# Mount static files with Cache-Control headers
 if _public_dir.is_dir():
     _has_ssr_root = _ssr_config.get("enabled") and "/" in _ssr_config.get("routes", {})
 
@@ -82,6 +91,14 @@ if _public_dir.is_dir():
         async def _serve_index():
             return _index.read_text()
 
-    from starlette.staticfiles import StaticFiles  # noqa: E402
+    from mdb_engine.routing.static import CachedStaticFiles  # noqa: E402
 
-    app.mount("/public", StaticFiles(directory=str(_public_dir)), name="public")
+    app.mount(
+        "/public",
+        CachedStaticFiles(
+            directory=str(_public_dir),
+            cache_config=_static_cache_cfg,
+            minify=_static_cache_cfg.get("minify", False),
+        ),
+        name="public",
+    )

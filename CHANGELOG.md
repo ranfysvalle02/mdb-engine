@@ -1,5 +1,50 @@
 # Changelog
 
+## 0.12.0
+
+### Added — Performance Middleware Suite
+
+- **GZip / Brotli response compression** — All responses over 500 bytes are
+  now compressed automatically via Starlette's `GZipMiddleware`.  When
+  `brotli-asgi` is installed (`pip install mdb-engine[perf]`), Brotli is
+  preferred.  Opt out via `compression.enabled: false` in the manifest.
+
+- **Cache-Control headers for static assets** — Files served from `public/`
+  now receive `Cache-Control` headers based on file type (fonts get 1-year
+  immutable, CSS/JS get 1-day with `stale-while-revalidate`, images get
+  7-day).  Configurable via the new `static_cache` manifest key.
+
+- **Server-side Markdown Jinja filter** — A `| markdown` filter is
+  registered on all SSR Jinja environments.  Uses `mistune` + `nh3` for
+  fast rendering with server-side sanitization.  Install with
+  `pip install mdb-engine[markdown]`.  Eliminates client-side JS for
+  Markdown rendering (~60 KB savings, no CLS).
+
+- **Asset fingerprinting** — An `AssetRegistry` computes content hashes
+  for all `public/` files at startup.  Templates can use
+  `{{ asset_url('style.css') }}` which renders as
+  `/public/style.css?v=a1b2c3d4` for cache busting on deploy.
+
+- **Link preload headers** — SSR responses can include `Link: <...>;
+  rel=preload` headers for critical CSS, fonts, and scripts.  Configured
+  via `ssr.preload` (global) and per-route `preload` arrays in the
+  manifest.  Works with CDN Early Hints (Cloudflare, etc.).
+
+- **CSS / JS minification** — Optional in-memory minification of `.css`
+  and `.js` files at startup.  Enable with `static_cache.minify: true` and
+  `pip install mdb-engine[perf]`.
+
+### Added — New optional extras
+
+- `pip install mdb-engine[perf]` — `brotli-asgi`, `rjsmin`, `csscompressor`
+- `pip install mdb-engine[markdown]` — `mistune`, `nh3`
+
+### Added — Manifest schema keys
+
+- `compression` — GZip/Brotli opt-out and `minimum_size` tuning
+- `static_cache` — Per-category `Cache-Control` overrides and `minify` flag
+- `ssr.preload` — Global and per-route resource preload hints
+
 ## 0.11.5
 
 ### Fixed -- Scoped Auth Role Hierarchy

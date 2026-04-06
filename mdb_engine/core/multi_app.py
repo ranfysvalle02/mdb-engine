@@ -1312,6 +1312,15 @@ class MultiAppMixin:
                             child_templates.env.globals["app_slug"] = slug
 
                             try:
+                                from mdb_engine.routing._ssr import _make_markdown_filter
+
+                                _md = _make_markdown_filter()
+                                if _md is not None:
+                                    child_templates.env.filters["markdown"] = _md
+                            except ImportError:
+                                pass
+
+                            try:
                                 from jinja2 import ChoiceLoader, FileSystemLoader
 
                                 _fw_templates = str(Path(__file__).resolve().parent.parent / "templates")

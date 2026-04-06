@@ -85,6 +85,17 @@ def _mount_ssr_and_static() -> None:  # noqa: C901
 
         ssr_config = manifest_data.get("ssr", {})
         templates_dir = manifest_dir / "templates"
+        static_cache_cfg = manifest_data.get("static_cache", {})
+
+        public_dir = manifest_dir / "public"
+        asset_registry = None
+        if public_dir.is_dir():
+            try:
+                from mdb_engine.routing.static import AssetRegistry  # noqa: E402
+
+                asset_registry = AssetRegistry(directory=public_dir, base_path=path_prefix)
+            except (ImportError, OSError) as exc:
+                logger.warning("AssetRegistry failed for '%s': %s", slug, exc)
 
         if templates_dir.is_dir() and ssr_config.get("enabled"):
             try:
@@ -96,12 +107,12 @@ def _mount_ssr_and_static() -> None:  # noqa: C901
                     ssr_config,
                     collections_config=manifest_data.get("collections", {}),
                     base_path=path_prefix,
+                    asset_registry=asset_registry,
                 )
                 logger.info("Mounted SSR routes for '%s'", slug)
             except (ImportError, OSError, ValueError) as exc:
                 logger.warning("SSR mounting failed for '%s': %s", slug, exc)
 
-        public_dir = manifest_dir / "public"
         if public_dir.is_dir():
             _has_ssr_root = ssr_config.get("enabled") and "/" in ssr_config.get("routes", {})
 
@@ -115,18 +126,26 @@ def _mount_ssr_and_static() -> None:  # noqa: C901
                 async def _serve_child_index(_idx=_idx):
                     return _idx.read_text()
 
-            from starlette.staticfiles import StaticFiles  # noqa: E402
+            from mdb_engine.routing.static import CachedStaticFiles  # noqa: E402
 
-            child_app.mount("/public", StaticFiles(directory=str(public_dir)), name=f"public_{slug}")
+            child_app.mount(
+                "/public",
+                CachedStaticFiles(
+                    directory=str(public_dir),
+                    cache_config=static_cache_cfg,
+                    minify=static_cache_cfg.get("minify", False),
+                ),
+                name=f"public_{slug}",
+            )
             logger.info("Mounted static files for '%s' at %s/public/", slug, path_prefix)
 
     # Also mount a shared public/ directory at the apps_dir root (if it exists)
     if _mode == "apps_dir":
         shared_public = _resolved / "public"
         if shared_public.is_dir():
-            from starlette.staticfiles import StaticFiles  # noqa: E402
+            from mdb_engine.routing.static import CachedStaticFiles as _SharedCachedStatic  # noqa: E402
 
-            app.mount("/public", StaticFiles(directory=str(shared_public)), name="shared_public")
+            app.mount("/public", _SharedCachedStatic(directory=str(shared_public)), name="shared_public")
             logger.info("Mounted shared static files at /public/")
 
 

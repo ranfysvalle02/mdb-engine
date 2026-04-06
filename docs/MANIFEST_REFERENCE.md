@@ -1158,6 +1158,99 @@ Here's a complete manifest.json demonstrating all major features:
 
 ---
 
+## Performance
+
+### Response Compression
+
+GZip compression is enabled by default. Configure or disable:
+
+```json
+{
+  "compression": {
+    "enabled": true,
+    "minimum_size": 500
+  }
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `boolean` | `true` | Set to `false` to disable compression (e.g., if your reverse proxy handles it) |
+| `minimum_size` | `integer` | `500` | Minimum response size in bytes before compression applies |
+
+When `brotli-asgi` is installed (`pip install mdb-engine[perf]`), Brotli is preferred over GZip.
+
+### Static Asset Caching
+
+Files served from `public/` receive `Cache-Control` headers automatically. Override defaults:
+
+```json
+{
+  "static_cache": {
+    "fonts": "max-age=31536000, immutable",
+    "styles": "max-age=86400, stale-while-revalidate=3600",
+    "scripts": "max-age=86400, stale-while-revalidate=3600",
+    "images": "max-age=604800",
+    "default": "max-age=3600",
+    "minify": false
+  }
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `fonts` | `string` | `max-age=31536000, immutable` | Cache-Control for `.woff2`, `.woff`, `.ttf`, `.otf` |
+| `styles` | `string` | `max-age=86400, stale-while-revalidate=3600` | Cache-Control for `.css` |
+| `scripts` | `string` | `max-age=86400, stale-while-revalidate=3600` | Cache-Control for `.js`, `.mjs` |
+| `images` | `string` | `max-age=604800` | Cache-Control for `.png`, `.jpg`, `.svg`, `.webp`, etc. |
+| `default` | `string` | `max-age=3600` | Cache-Control for all other files |
+| `minify` | `boolean` | `false` | Minify CSS/JS at startup (requires `pip install mdb-engine[perf]`) |
+
+### Resource Preloading
+
+Add `Link` preload headers to SSR responses for critical CSS, fonts, and scripts:
+
+```json
+{
+  "ssr": {
+    "preload": [
+      { "href": "/public/style.css", "as": "style" },
+      { "href": "/public/fonts/inter.woff2", "as": "font", "crossorigin": true }
+    ],
+    "routes": {
+      "/posts/:slug": {
+        "template": "post.html",
+        "preload": [
+          { "href": "/public/prism.js", "as": "script" }
+        ]
+      }
+    }
+  }
+}
+```
+
+Top-level `ssr.preload` applies to all SSR routes. Per-route `preload` is merged with the global list.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `href` | `string` | Yes | URL of the resource |
+| `as` | `string` | Yes | Resource type: `style`, `script`, `font`, `image`, `fetch`, `document` |
+| `crossorigin` | `boolean` | No | Add `crossorigin` attribute (required for font preloading) |
+
+### Asset Fingerprinting
+
+Templates can use `{{ asset_url('style.css') }}` to generate cache-busted URLs (e.g., `/public/style.css?v=a1b2c3d4`). No manifest config needed — the hash registry is built automatically from the `public/` directory.
+
+### Server-Side Markdown
+
+When `mistune` and `nh3` are installed (`pip install mdb-engine[markdown]`), a `| markdown` Jinja filter is registered on all SSR environments:
+
+```html
+{{ post.body | markdown | safe }}
+```
+
+---
+
 ## Validation
 
 Validate your manifest.json before using it:

@@ -982,12 +982,59 @@ class _ErrorPageHandler:
 # ── Main mount function ──────────────────────────────────────────────────
 
 
+def _make_markdown_filter() -> Any:
+    """Build a Jinja filter that renders Markdown to sanitized HTML.
+
+    Returns ``None`` when the required libraries are not installed so
+    callers can skip registration gracefully.
+    """
+    try:
+        import mistune
+        import nh3
+    except ImportError:
+        logger.debug(
+            "mistune/nh3 not installed — |markdown Jinja filter unavailable. "
+            "Install with: pip install mdb-engine[markdown]"
+        )
+        return None
+
+    _ALLOWED_TAGS = {
+        "h1", "h2", "h3", "h4", "h5", "h6",
+        "p", "br", "hr",
+        "ul", "ol", "li",
+        "a", "strong", "em", "code", "pre", "blockquote",
+        "img", "table", "thead", "tbody", "tr", "th", "td",
+        "del", "sup", "sub", "details", "summary",
+        "div", "span",
+    }  # fmt: skip
+
+    _ALLOWED_ATTRS: dict[str, set[str]] = {
+        "a": {"href", "title", "rel"},
+        "img": {"src", "alt", "title", "width", "height", "loading"},
+        "td": {"align"},
+        "th": {"align"},
+        "code": {"class"},
+        "pre": {"class"},
+        "div": {"class"},
+        "span": {"class"},
+    }
+
+    def _markdown_filter(text: str | None) -> str:
+        if not text:
+            return ""
+        raw_html = mistune.html(str(text))
+        return nh3.clean(raw_html, tags=_ALLOWED_TAGS, attributes=_ALLOWED_ATTRS)
+
+    return _markdown_filter
+
+
 def mount_ssr_routes(
     app: Any,
     templates_dir: Path,
     ssr_config: dict[str, Any],
     collections_config: dict[str, Any] | None = None,
     base_path: str = "",
+    asset_registry: Any | None = None,
 ) -> None:
     """Register SSR routes on a FastAPI app from manifest config.
 
@@ -1000,6 +1047,8 @@ def mount_ssr_routes(
         base_path: URL path prefix for the app (e.g. ``/tech-blog``).
             Injected into templates as ``{{ base_path }}`` so links work
             correctly in multi-app deployments.  Empty string for single-app.
+        asset_registry: Optional ``AssetRegistry`` for ``{{ asset_url() }}``
+            cache-busting in templates.
     """
     from jinja2 import ChoiceLoader, Environment, FileSystemLoader
 
@@ -1008,6 +1057,7 @@ def mount_ssr_routes(
     site_name = ssr_config.get("site_name", "")
     site_description = ssr_config.get("site_description", "")
     base_url = ssr_config.get("base_url", "")
+    global_preload: list[dict[str, Any]] = ssr_config.get("preload", [])
 
     loaders = [FileSystemLoader(str(templates_dir))]
     if Path(_FW_TEMPLATES_DIR).exists():
@@ -1018,6 +1068,13 @@ def mount_ssr_routes(
         autoescape=True,
     )
     env.globals["base_path"] = base_path
+
+    md_filter = _make_markdown_filter()
+    if md_filter is not None:
+        env.filters["markdown"] = md_filter
+
+    if asset_registry is not None:
+        env.globals["asset_url"] = asset_registry.asset_url
 
     error_handler = _ErrorPageHandler(env)
     router = APIRouter(include_in_schema=False)
@@ -1062,6 +1119,8 @@ def mount_ssr_routes(
         seo_config = route_config.get("seo", {})
         auth_required = route_config.get("auth", False)
         cache_config = route_config.get("cache")
+        route_preload: list[dict[str, Any]] = route_config.get("preload", [])
+        merged_preload = global_preload + route_preload
 
         if not template_name:
             logger.warning("SSR route %s has no template, skipping", pattern)
@@ -1081,11 +1140,27 @@ def mount_ssr_routes(
             cache_config=cache_config,
             error_handler=error_handler,
             feed_links=feed_links or None,
+            preload=merged_preload or None,
         )
         logger.info("Registered SSR route: %s -> %s", pattern, template_name)
 
     app.include_router(router)
     logger.info("Mounted %d SSR route(s)", len(routes))
+
+
+def _build_preload_link_parts(preload: list[dict[str, Any]]) -> list[str]:
+    """Build ``Link`` header parts for resource preloading."""
+    parts: list[str] = []
+    for item in preload:
+        href = item.get("href", "")
+        as_type = item.get("as", "")
+        if not href or not as_type:
+            continue
+        part = f"<{href}>; rel=preload; as={as_type}"
+        if item.get("crossorigin"):
+            part += "; crossorigin"
+        parts.append(part)
+    return parts
 
 
 def _register_ssr_route(  # noqa: PLR0913
@@ -1102,11 +1177,13 @@ def _register_ssr_route(  # noqa: PLR0913
     cache_config: dict[str, Any] | None,
     error_handler: _ErrorPageHandler,
     feed_links: list[dict[str, str]] | None = None,
+    preload: list[dict[str, Any]] | None = None,
 ) -> None:
     """Register a single SSR route handler."""
     from jinja2.exceptions import TemplateError as _TemplateError
 
     cache_header = _build_cache_header(cache_config)
+    preload_link_parts = _build_preload_link_parts(preload) if preload else []
 
     @router.get(path, response_class=HTMLResponse)
     async def ssr_handler(
@@ -1182,7 +1259,7 @@ def _register_ssr_route(  # noqa: PLR0913
         if cache_header:
             resp.headers["Cache-Control"] = cache_header
             resp.headers["X-Cache-Age"] = "0"
-        link_parts: list[str] = []
+        link_parts: list[str] = list(preload_link_parts)
         if seo.get("pagination_prev"):
             link_parts.append(f'<{seo["pagination_prev"]}>; rel="prev"')
         if seo.get("pagination_next"):
