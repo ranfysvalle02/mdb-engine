@@ -1,5 +1,54 @@
 # Changelog
 
+## 0.12.3
+
+### Added — Upload Service
+
+- **GridFS-backed file upload endpoint** — New `uploads` manifest section enables
+  a content-addressed file upload service scoped per app. Files are stored in
+  GridFS with SHA-256 deduplication. Supports multipart form uploads and base64
+  JSON bodies. Configure via `uploads.enabled`, `uploads.max_size`,
+  `uploads.allowed_types`, and `uploads.path_prefix` in the manifest.
+
+- **Upload auth configuration** — Upload endpoint respects `uploads.auth.required`
+  and `uploads.auth.roles` for fine-grained access control. Inherits app-level
+  auth when no upload-specific config is provided.
+
+- **Multi-app upload isolation** — Each mounted app gets its own GridFS bucket
+  (`{slug}_uploads`) and routes are scoped under the app's `path_prefix`,
+  preventing cross-app collisions.
+
+- **New dependencies** — `get_upload_service` and `get_upload_service_optional`
+  FastAPI dependencies for injecting the upload service into custom routes.
+
+### Security — Upload Service Hardening
+
+- **Hash validation on serve route** — The `GET {path_prefix}/{hash}.{ext}` route
+  now validates that `file_hash` matches `^[0-9a-f]{64}$` before querying GridFS,
+  preventing NoSQL injection via crafted path parameters.
+
+- **Zero-byte upload rejection** — `UploadService.store()` now raises `ValueError`
+  for empty payloads, preventing storage of zero-byte files.
+
+- **SVG XSS mitigation** — `image/svg+xml` removed from `DEFAULT_ALLOWED_TYPES`
+  (now opt-in via manifest `allowed_types`). When SVGs are served, the response
+  includes `Content-Disposition: attachment` to force download instead of inline
+  rendering.
+
+- **`If-None-Match` / 304 support** — The serve route now checks the
+  `If-None-Match` request header against the file hash and returns `304 Not
+  Modified` when they match, saving a full GridFS round-trip.
+
+### Added — Manifest Schema
+
+- **`uploads` schema key** — New top-level manifest property with `enabled`,
+  `max_size`, `allowed_types`, `path_prefix`, and `auth` sub-properties.
+
+### Added — New dependency
+
+- `python-multipart>=0.0.7` added to core dependencies for multipart file upload
+  support.
+
 ## 0.12.2
 
 ### Fixed

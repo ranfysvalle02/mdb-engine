@@ -317,6 +317,12 @@ async def _fetch_data_source(
     collection = db[collection_name]
     col_config = collections_config.get(collection_name, {})
     projection = col_config.get("default_projection")
+
+    exclude_fields = source_config.get("exclude_fields")
+    if exclude_fields:
+        extra_exclusion = {f: 0 for f in exclude_fields}
+        projection = {**(projection or {}), **extra_exclusion}
+
     populate_names = source_config.get("populate")
     computed_names = source_config.get("computed")
     needs_aggregation = bool(populate_names or computed_names)
@@ -1061,6 +1067,13 @@ def _make_markdown_filter() -> Any:
     return _markdown_filter
 
 
+def _strip_data_uris_filter(value: str | None) -> str:
+    """Jinja filter: return empty string for ``data:`` URIs, pass through otherwise."""
+    if value and isinstance(value, str) and value.startswith("data:"):
+        return ""
+    return value or ""
+
+
 def mount_ssr_routes(
     app: Any,
     templates_dir: Path,
@@ -1105,6 +1118,7 @@ def mount_ssr_routes(
     md_filter = _make_markdown_filter()
     if md_filter is not None:
         env.filters["markdown"] = md_filter
+    env.filters["strip_data_uris"] = _strip_data_uris_filter
 
     if asset_registry is not None:
         env.globals["asset_url"] = asset_registry.asset_url

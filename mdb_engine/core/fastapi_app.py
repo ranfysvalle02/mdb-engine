@@ -242,6 +242,19 @@ class FastAPIAppMixin:
                 app.state.embedding_service = engine.get_embedding_service(slug)
                 app.state.llm_service = engine.get_llm_service(slug)
 
+            # Initialize upload service if configured
+            _uploads_cfg = app_manifest.get("uploads", {})
+            if _uploads_cfg.get("enabled"):
+                from ..uploads.service import UploadService
+
+                _upload_svc = UploadService(
+                    db=engine.connection_manager.mongo_db,
+                    app_slug=slug,
+                    config=_uploads_cfg,
+                )
+                app.state.upload_service = _upload_svc
+                logger.info(f"Upload service initialized for '{slug}'")
+
             # Initialize DI container (if not already set)
             from ..di import Container
 
@@ -354,6 +367,13 @@ class FastAPIAppMixin:
                 app_auth_enabled=_app_auth_on,
                 auth_users_collection=_auth_col,
             )
+
+        # Auto-register upload routes when uploads.enabled
+        _uploads_cfg = pre_manifest.get("uploads", {})
+        if _uploads_cfg.get("enabled"):
+            from ..uploads.router import mount_upload_routes
+
+            mount_upload_routes(app, _uploads_cfg, app_auth_enabled=_app_auth_on)
 
         # Auto-register JSON auth routes when auth.users is enabled
         _users_cfg = auth_config.get("users", {})

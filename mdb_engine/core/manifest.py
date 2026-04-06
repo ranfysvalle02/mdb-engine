@@ -1795,6 +1795,15 @@ MANIFEST_SCHEMA_V2 = {
                                                     "(must be defined in collection's computed)."
                                                 ),
                                             },
+                                            "exclude_fields": {
+                                                "type": "array",
+                                                "items": {"type": "string"},
+                                                "description": (
+                                                    "Fields to exclude from the data "
+                                                    "passed to the template. Merged "
+                                                    "with the collection's default_projection."
+                                                ),
+                                            },
                                         },
                                         "required": ["collection"],
                                     },
@@ -4230,6 +4239,68 @@ MANIFEST_SCHEMA_V2 = {
                 "Cache-Control headers for static assets served from public/. "
                 "Each key maps to a category of files. Default values provide "
                 "sensible caching for production deployments."
+            ),
+        },
+        "uploads": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Enable GridFS-backed file upload service.",
+                },
+                "max_size": {
+                    "type": "string",
+                    "default": "5MB",
+                    "pattern": "^\\d+[KMG]B$",
+                    "description": (
+                        "Maximum file size per upload (e.g. '5MB', '10MB'). " "Files exceeding this limit are rejected."
+                    ),
+                },
+                "allowed_types": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "default": [
+                        "image/jpeg",
+                        "image/png",
+                        "image/gif",
+                        "image/webp",
+                    ],
+                    "description": "Allowed MIME types for uploads.",
+                },
+                "path_prefix": {
+                    "type": "string",
+                    "default": "/uploads",
+                    "description": (
+                        "URL path prefix for serving uploaded files. " "Files are served at {path_prefix}/{hash}.{ext}."
+                    ),
+                },
+                "auth": {
+                    "type": "object",
+                    "properties": {
+                        "required": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": (
+                                "Require authentication for the upload endpoint. " "Serving files is always public."
+                            ),
+                        },
+                        "roles": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "Roles allowed to upload files. " "If omitted, any authenticated user can upload."
+                            ),
+                        },
+                    },
+                    "additionalProperties": False,
+                },
+            },
+            "additionalProperties": False,
+            "description": (
+                "Image/file upload service backed by GridFS. "
+                "Provides content-addressed storage with deduplication. "
+                "Upload via POST /api/_uploads, serve at {path_prefix}/{hash}.{ext}."
             ),
         },
         "developer_id": {

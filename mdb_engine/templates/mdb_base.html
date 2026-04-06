@@ -51,7 +51,7 @@
     <meta property="og:type" content="{{ seo.og_type or 'website' }}">
     <meta property="og:site_name" content="{{ seo.site_name }}">
     <meta property="og:url" content="{{ seo.canonical or request.url }}">
-    {% if seo.og_image %}
+    {% if seo.og_image and not seo.og_image.startswith('data:') %}
     <meta property="og:image" content="{{ seo.og_image }}">
     <meta name="twitter:card" content="summary_large_image">
     {% else %}
@@ -59,7 +59,7 @@
     {% endif %}
     <meta name="twitter:title" content="{{ seo.title }}">
     <meta name="twitter:description" content="{{ seo.description }}">
-    {% if seo.og_image %}
+    {% if seo.og_image and not seo.og_image.startswith('data:') %}
     <meta name="twitter:image" content="{{ seo.og_image }}">
     {% endif %}
     {% if seo.json_ld %}

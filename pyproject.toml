@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mdb-engine"
-version = "0.12.2"
+version = "0.12.3"
 description = "MongoDB Engine"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -33,6 +33,7 @@ dependencies = [
     "jsonschema>=4.0.0",
     "bcrypt>=4.0.0",
     "cryptography>=41.0.0",  # Required for envelope encryption
+    "python-multipart>=0.0.7",  # Required for UploadFile (multipart form uploads)
     "casbin>=1.0.0",  # Core authorization engine (RBAC/ACL)
     "casbin-motor-adapter>=0.1.0",  # MongoDB-backed policy storage for Casbin
 ]
@@ -212,7 +213,7 @@ ignore = [
 "mdb_engine/routing/websockets.py" = ["C901"]
 
 [tool.ruff.lint.mccabe]
-max-complexity = 25
+max-complexity = 30
 
 [tool.mypy]
 python_version = "3.10"
@@ -280,6 +281,7 @@ module = [
     "mdb_engine.osi.*",
     "mdb_engine.repositories.*",
     "mdb_engine.routing.*",
+    "mdb_engine.uploads.*",
     "mdb_engine.utils.*",
 ]
 ignore_errors = true

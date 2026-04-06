@@ -36,6 +36,7 @@ if TYPE_CHECKING:
     from .llm.service import LLMService
     from .memory import BaseMemoryService
     from .profile.service import ProfileService
+    from .uploads.service import UploadService
 
 logger = logging.getLogger(__name__)
 
@@ -245,6 +246,26 @@ async def get_graph_service_optional(request: Request) -> Any | None:
     if not slug:
         return None
     return engine.get_graph_service(slug)
+
+
+async def get_upload_service(request: Request) -> "UploadService":
+    """Get the upload service for the current app.
+
+    Raises:
+        HTTPException(503): If the upload service is not configured.
+    """
+    service = getattr(request.app.state, "upload_service", None)
+    if service is None:
+        raise HTTPException(
+            503,
+            "Upload service not configured. " "Enable it with uploads.enabled=true in your manifest.",
+        )
+    return service
+
+
+async def get_upload_service_optional(request: Request) -> "UploadService | None":
+    """Get the upload service, or None if not configured."""
+    return getattr(request.app.state, "upload_service", None)
 
 
 async def get_llm_client(request: Request) -> Union["AzureOpenAI", "OpenAI"]:
@@ -709,6 +730,8 @@ __all__ = [
     "get_memory_service",
     "get_graph_service",
     "get_profile_service",
+    "get_upload_service",
+    "get_upload_service_optional",
     "get_llm_client",
     "get_llm_model_name",
     "get_authz_provider",

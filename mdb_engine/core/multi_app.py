@@ -1312,11 +1312,15 @@ class MultiAppMixin:
                             child_templates.env.globals["app_slug"] = slug
 
                             try:
-                                from mdb_engine.routing._ssr import _make_markdown_filter
+                                from mdb_engine.routing._ssr import (
+                                    _make_markdown_filter,
+                                    _strip_data_uris_filter,
+                                )
 
                                 _md = _make_markdown_filter()
                                 if _md is not None:
                                     child_templates.env.filters["markdown"] = _md
+                                child_templates.env.filters["strip_data_uris"] = _strip_data_uris_filter
                             except ImportError:
                                 pass
 
@@ -1444,6 +1448,25 @@ class MultiAppMixin:
                         from ..routing.auto_crud import mount_auto_crud_routes
 
                         mount_auto_crud_routes(child_app, _collections_cfg)
+
+                    # Auto-register upload routes when uploads.enabled.
+                    # Routes are mounted on child_app which is later mounted at
+                    # path_prefix, so two apps both using "/uploads" resolve to
+                    # e.g. /app1/uploads/... and /app2/uploads/... without collision.
+                    # Data isolation is also enforced by per-slug GridFS buckets.
+                    _uploads_cfg = app_manifest_data.get("uploads", {})
+                    if _uploads_cfg.get("enabled"):
+                        from ..uploads.router import mount_upload_routes
+                        from ..uploads.service import UploadService
+
+                        mount_upload_routes(child_app, _uploads_cfg)
+                        _upload_svc = UploadService(
+                            db=engine.connection_manager.mongo_db,
+                            app_slug=slug,
+                            config=_uploads_cfg,
+                        )
+                        child_app.state.upload_service = _upload_svc
+                        logger.info(f"Upload service initialized for mounted app '{slug}'")
 
                     # Pre-create shared LLM/embedding services for this app
                     # so graph and memory share the same instances.

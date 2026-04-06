@@ -427,3 +427,38 @@ Cache-Control headers and asset fingerprinting still work independently.
 **Fix:** The SEO fallback resolver now skips values starting with `data:` for image-related SEO keys (`og_image`, `og:image`, `twitter_image`, `twitter:image`, `image`), falling through to the next candidate in the chain. The OG image route's cover-field redirect also ignores `data:` URIs, falling through to the auto-generated PNG.
 
 **Action required:** `pip install --upgrade mdb-engine` to `>=0.12.2`. No manifest or template changes needed.
+
+---
+
+## 0.12.3 — Upload Service & Security Hardening
+
+**New feature: GridFS-backed file uploads.** Add `"uploads": {"enabled": true}` to your manifest and the engine exposes `POST /api/_uploads` (multipart or base64 JSON) and `GET /uploads/{hash}.{ext}` (content-addressed serving). Files are stored in per-app GridFS buckets with SHA-256 deduplication.
+
+**Manifest configuration:**
+
+```json
+{
+  "uploads": {
+    "enabled": true,
+    "max_size": "5MB",
+    "allowed_types": ["image/jpeg", "image/png", "image/gif", "image/webp"],
+    "path_prefix": "/uploads",
+    "auth": {
+      "required": true,
+      "roles": ["editor", "admin"]
+    }
+  }
+}
+```
+
+**Security hardening included in this release:**
+- Serve route validates `file_hash` as hex-only (`^[0-9a-f]{64}$`) to prevent NoSQL injection.
+- Zero-byte uploads are rejected with 400.
+- `image/svg+xml` removed from default allowed types (opt-in only). SVGs are served with `Content-Disposition: attachment` to prevent XSS.
+- `If-None-Match` / 304 support on the serve route saves GridFS round-trips on repeat requests.
+
+**New dependencies for custom routes:**
+- `get_upload_service(request)` — raises 503 if uploads not enabled.
+- `get_upload_service_optional(request)` — returns `None` if not enabled.
+
+**Action required:** `pip install --upgrade mdb-engine` to `>=0.12.3`. Add `"uploads": {"enabled": true}` to your manifest to activate. No changes needed if you don't use uploads.

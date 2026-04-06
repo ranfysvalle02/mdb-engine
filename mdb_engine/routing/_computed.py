@@ -45,12 +45,14 @@ def _transform_plain_text(value: str, **_kw: Any) -> str:
 def _transform_first_image(value: str, **_kw: Any) -> str:
     if not value:
         return ""
-    md_match = _MD_IMAGE_RE.search(value)
-    if md_match:
-        return md_match.group(1)
-    html_match = _HTML_IMG_RE.search(value)
-    if html_match:
-        return html_match.group(1)
+    for md_match in _MD_IMAGE_RE.finditer(value):
+        src = md_match.group(1)
+        if not src.startswith("data:"):
+            return src
+    for html_match in _HTML_IMG_RE.finditer(value):
+        src = html_match.group(1)
+        if not src.startswith("data:"):
+            return src
     return ""
 
 
