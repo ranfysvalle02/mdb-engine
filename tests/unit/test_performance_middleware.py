@@ -687,7 +687,8 @@ class TestManifestPerformanceKeys:
         )
         assert result[0] is True
 
-    def test_ssr_preload_missing_required_fields(self, _run_validate):
+    def test_ssr_preload_href_only_valid_for_preconnect(self, _run_validate):
+        """href-only items are valid (used for preconnect/dns-prefetch)."""
         result = _run_validate(
             {
                 "schema_version": "2.0",
@@ -696,6 +697,20 @@ class TestManifestPerformanceKeys:
                 "ssr": {
                     "enabled": True,
                     "preload": [{"href": "/style.css"}],
+                },
+            }
+        )
+        assert result[0] is True
+
+    def test_ssr_preload_missing_href_fails(self, _run_validate):
+        result = _run_validate(
+            {
+                "schema_version": "2.0",
+                "slug": "test",
+                "name": "Test",
+                "ssr": {
+                    "enabled": True,
+                    "preload": [{"as": "style"}],
                 },
             }
         )
