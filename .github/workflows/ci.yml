@@ -352,20 +352,19 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
-  # Publish job (runs automatically on push to main, release, or manual dispatch)
+  # Publish job (runs on version tags, GitHub releases, or manual dispatch)
   publish:
     name: Publish to PyPI
     needs: [code-quality, test-unit, test-integration]
     runs-on: ubuntu-latest
-    # Automatically publish on push to main, release, tag, or manual dispatch
+    # Only publish when a version tag is pushed, a release is published, or manually triggered
     if: |
-      github.ref == 'refs/heads/main' ||
       (github.event_name == 'workflow_dispatch' && github.event.inputs.publish_to_pypi == 'true') ||
       (github.event_name == 'release' && github.event.action == 'published') ||
       (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
     timeout-minutes: 15
     permissions:
-      contents: read
+      contents: write
       id-token: write
 
     steps:
@@ -433,6 +432,15 @@ jobs:
           echo "Using PyPI API token from GitHub repository secrets (PYPI_API_TOKEN)"
           python -m twine upload dist/* --verbose --non-interactive
           echo "::endgroup::"
+
+      - name: Create GitHub Release
+        if: success() && startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: dist/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish Summary
         if: success()
