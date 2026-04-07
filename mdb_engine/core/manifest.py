@@ -1521,6 +1521,14 @@ MANIFEST_SCHEMA_V2 = {
                         "If omitted, uses the request's base URL."
                     ),
                 },
+                "lang": {
+                    "type": "string",
+                    "default": "en",
+                    "description": (
+                        "HTML lang attribute value (e.g. 'en', 'es', 'fr'). "
+                        'Sets <html lang="..."> for accessibility and SEO.'
+                    ),
+                },
                 "sitemap": {
                     "oneOf": [
                         {"type": "boolean"},
@@ -1654,7 +1662,10 @@ MANIFEST_SCHEMA_V2 = {
                                     "description": (
                                         "Item field templates. Keys are RSS/Atom element "
                                         "names (title, link, description, pubDate, author). "
-                                        "Values support {{doc.field}} placeholders."
+                                        "Values support {{doc.field}} placeholders and "
+                                        "pipe transforms (e.g. {{doc.created_at | rfc822}} "
+                                        "for RFC 822 dates, {{doc.created_at | rfc3339}} "
+                                        "for RFC 3339/ISO 8601 dates)."
                                     ),
                                     "additionalProperties": {"type": "string"},
                                 },
@@ -1897,6 +1908,41 @@ MANIFEST_SCHEMA_V2 = {
                                                 "as seo.json_ld in the template context."
                                             ),
                                         },
+                                        "robots": {
+                                            "type": "string",
+                                            "description": (
+                                                "Robots meta tag value "
+                                                "(e.g. 'noindex, follow'). "
+                                                "Omit to use search-engine defaults."
+                                            ),
+                                        },
+                                        "breadcrumbs": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "name": {
+                                                        "type": "string",
+                                                        "description": (
+                                                            "Breadcrumb label. " "Supports {{var.field}} placeholders."
+                                                        ),
+                                                    },
+                                                    "url": {
+                                                        "type": "string",
+                                                        "description": (
+                                                            "Breadcrumb URL. " "Supports {{var.field}} placeholders."
+                                                        ),
+                                                    },
+                                                },
+                                                "required": ["name", "url"],
+                                                "additionalProperties": False,
+                                            },
+                                            "description": (
+                                                "Breadcrumb items — auto-generates "
+                                                "BreadcrumbList JSON-LD. Merged with "
+                                                "explicit json_ld if both are present."
+                                            ),
+                                        },
                                     },
                                     "additionalProperties": False,
                                 },
@@ -1917,6 +1963,33 @@ MANIFEST_SCHEMA_V2 = {
                                             "type": "string",
                                             "pattern": "^[0-9]+(s|m|h|d)$",
                                             "description": "Stale-while-revalidate duration.",
+                                        },
+                                        "scope": {
+                                            "type": "string",
+                                            "enum": ["public", "private"],
+                                            "default": "public",
+                                            "description": (
+                                                "Cache scope: 'public' (CDN OK) or " "'private' (browser only)."
+                                            ),
+                                        },
+                                        "vary": {
+                                            "type": "array",
+                                            "items": {"type": "string"},
+                                            "description": (
+                                                "Header names for the Vary response "
+                                                "header (e.g. ['Cookie']). When auth "
+                                                "is true and vary is omitted, 'Cookie' "
+                                                "is added automatically."
+                                            ),
+                                        },
+                                        "etag": {
+                                            "type": "boolean",
+                                            "default": False,
+                                            "description": (
+                                                "Enable ETag / If-None-Match on this "
+                                                "route. Opt-in because hashing large "
+                                                "pages on every request has CPU cost."
+                                            ),
                                         },
                                     },
                                     "additionalProperties": False,
@@ -1941,7 +2014,21 @@ MANIFEST_SCHEMA_V2 = {
                                                     "fetch",
                                                     "document",
                                                 ],
-                                                "description": "Resource type hint for the browser.",
+                                                "description": (
+                                                    "Resource type hint for the browser. "
+                                                    "Required for rel=preload, ignored "
+                                                    "for preconnect/dns-prefetch."
+                                                ),
+                                            },
+                                            "rel": {
+                                                "type": "string",
+                                                "enum": ["preload", "preconnect", "dns-prefetch"],
+                                                "default": "preload",
+                                                "description": (
+                                                    "Link relation type. Use 'preconnect' "
+                                                    "or 'dns-prefetch' for third-party "
+                                                    "domain hints."
+                                                ),
                                             },
                                             "crossorigin": {
                                                 "type": "boolean",
@@ -1949,7 +2036,7 @@ MANIFEST_SCHEMA_V2 = {
                                                 "description": "Add crossorigin attribute (required for fonts).",
                                             },
                                         },
-                                        "required": ["href", "as"],
+                                        "required": ["href"],
                                         "additionalProperties": False,
                                     },
                                     "description": (
@@ -1975,7 +2062,21 @@ MANIFEST_SCHEMA_V2 = {
                             "as": {
                                 "type": "string",
                                 "enum": ["style", "script", "font", "image", "fetch", "document"],
-                                "description": "Resource type hint for the browser.",
+                                "description": (
+                                    "Resource type hint for the browser. "
+                                    "Required for rel=preload, ignored "
+                                    "for preconnect/dns-prefetch."
+                                ),
+                            },
+                            "rel": {
+                                "type": "string",
+                                "enum": ["preload", "preconnect", "dns-prefetch"],
+                                "default": "preload",
+                                "description": (
+                                    "Link relation type. Use 'preconnect' "
+                                    "or 'dns-prefetch' for third-party "
+                                    "domain hints."
+                                ),
                             },
                             "crossorigin": {
                                 "type": "boolean",
@@ -1983,12 +2084,52 @@ MANIFEST_SCHEMA_V2 = {
                                 "description": "Add crossorigin attribute (required for fonts).",
                             },
                         },
-                        "required": ["href", "as"],
+                        "required": ["href"],
                         "additionalProperties": False,
                     },
                     "description": (
                         "Site-wide resources to preload via Link headers on every "
                         "SSR response (CSS, fonts). Per-route preload lists are merged."
+                    ),
+                },
+                "redirects": {
+                    "type": "object",
+                    "description": (
+                        "Manifest-driven redirects. Keys are URL patterns "
+                        "(Express-style :param or FastAPI-style {param}). "
+                        "Registered before SSR routes so they take precedence."
+                    ),
+                    "patternProperties": {
+                        ".*": {
+                            "type": "object",
+                            "properties": {
+                                "to": {
+                                    "type": "string",
+                                    "description": (
+                                        "Target URL pattern. Path params from " "the source are interpolated."
+                                    ),
+                                },
+                                "status": {
+                                    "type": "integer",
+                                    "enum": [301, 302],
+                                    "default": 301,
+                                    "description": "HTTP redirect status code.",
+                                },
+                            },
+                            "required": ["to"],
+                            "additionalProperties": False,
+                        },
+                    },
+                    "additionalProperties": False,
+                },
+                "trailing_slash": {
+                    "type": "string",
+                    "enum": ["strip", "ensure", "ignore"],
+                    "default": "ignore",
+                    "description": (
+                        "Trailing-slash policy. 'strip' redirects /path/ "
+                        "to /path (301). 'ensure' redirects /path to /path/. "
+                        "'ignore' does nothing (default)."
                     ),
                 },
             },
@@ -1999,7 +2140,7 @@ MANIFEST_SCHEMA_V2 = {
                 "data from MongoDB — including relations ($lookup), computed "
                 "fields, pagination, policy enforcement, caching, JSON-LD, "
                 "auto-sitemap, RSS/Atom feeds, robots.txt, OG image "
-                "generation, and custom error pages."
+                "generation, redirects, and custom error pages."
             ),
         },
         "jobs": {

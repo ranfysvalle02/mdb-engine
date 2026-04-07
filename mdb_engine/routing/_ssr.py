@@ -28,6 +28,9 @@ import json
 import logging
 import math
 import re
+from datetime import datetime, timezone
+from email.utils import format_datetime as _format_rfc822
+from hashlib import md5 as _md5
 from pathlib import Path
 from typing import Any
 
@@ -35,7 +38,7 @@ from bson import ObjectId
 from bson.errors import InvalidId
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
-from starlette.responses import Response
+from starlette.responses import RedirectResponse, Response
 
 from ..dependencies import get_current_user, get_scoped_db
 from ._serialization import serialize_doc
@@ -63,11 +66,46 @@ def _strip_markdown(text: str) -> str:
     return text.strip()
 
 
+def _parse_datetime(val: str) -> datetime:
+    """Best-effort parse of an ISO-ish or ``str(datetime)`` value to aware UTC."""
+    s = str(val).strip()
+    # Python str(datetime) uses space separator; normalise to 'T'
+    s = re.sub(r"^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2})", r"\1T\2", s)
+    # fromisoformat handles most variants including +00:00 / Z
+    s = s.replace("Z", "+00:00")
+    dt = datetime.fromisoformat(s)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def _to_rfc822(val: str, **_kw: Any) -> str:
+    """Format a datetime string as RFC 822 (RSS ``pubDate``)."""
+    if not val:
+        return ""
+    try:
+        return _format_rfc822(_parse_datetime(val), usegmt=True)
+    except (ValueError, TypeError):
+        return str(val)
+
+
+def _to_rfc3339(val: str, **_kw: Any) -> str:
+    """Format a datetime string as RFC 3339 / ISO 8601 (Atom ``updated``)."""
+    if not val:
+        return ""
+    try:
+        return _parse_datetime(val).isoformat()
+    except (ValueError, TypeError):
+        return str(val)
+
+
 _SEO_TRANSFORMS: dict[str, Any] = {
     "plain_text": lambda val, **_kw: _strip_markdown(str(val)) if val else "",
     "truncate": lambda val, length=160, **_kw: (
         (str(val)[: length - 1].rsplit(" ", 1)[0] + "\u2026") if val and len(str(val)) > length else str(val or "")
     ),
+    "rfc822": _to_rfc822,
+    "rfc3339": _to_rfc3339,
 }
 
 
@@ -164,9 +202,10 @@ def _build_seo_context(
     """Build resolved SEO metadata from config + fetched data."""
     seo: dict[str, Any] = {"site_name": site_name}
 
+    _SKIP_KEYS = {"json_ld", "breadcrumbs"}
     _IMAGE_SEO_KEYS = {"og_image", "og:image", "twitter_image", "twitter:image", "image"}
     for key, value in seo_config.items():
-        if key == "json_ld":
+        if key in _SKIP_KEYS:
             continue
         seo[key] = _resolve_seo_field(
             value,
@@ -175,11 +214,44 @@ def _build_seo_context(
         )
 
     json_ld_config = seo_config.get("json_ld")
+    breadcrumbs_config = seo_config.get("breadcrumbs")
+
+    ld_objects: list[Any] = []
     if json_ld_config:
-        resolved_ld = _resolve_json_ld(json_ld_config, data_context)
-        seo["json_ld"] = json.dumps(resolved_ld, default=str)
+        ld_objects.append(_resolve_json_ld(json_ld_config, data_context))
+    if breadcrumbs_config:
+        ld_objects.append(_build_breadcrumb_ld(breadcrumbs_config, data_context))
+
+    if len(ld_objects) == 1:
+        seo["json_ld"] = json.dumps(ld_objects[0], default=str)
+    elif len(ld_objects) > 1:
+        seo["json_ld"] = json.dumps({"@context": "https://schema.org", "@graph": ld_objects}, default=str)
 
     return seo
+
+
+def _build_breadcrumb_ld(
+    breadcrumbs: list[dict[str, str]],
+    data_context: dict[str, Any],
+) -> dict[str, Any]:
+    """Build a BreadcrumbList JSON-LD object from manifest shorthand."""
+    items = []
+    for i, crumb in enumerate(breadcrumbs, 1):
+        name = _resolve_seo_placeholders(crumb.get("name", ""), data_context)
+        url = _resolve_seo_placeholders(crumb.get("url", ""), data_context)
+        items.append(
+            {
+                "@type": "ListItem",
+                "position": i,
+                "name": name,
+                "item": url,
+            }
+        )
+    return {
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        "itemListElement": items,
+    }
 
 
 def _resolve_json_ld(config: Any, context: dict[str, Any]) -> Any:
@@ -242,7 +314,8 @@ def _build_cache_header(cache_config: dict[str, Any] | None) -> str | None:
     seconds = _parse_cache_ttl(ttl)
     if seconds <= 0:
         return None
-    parts = [f"max-age={seconds}"]
+    scope = cache_config.get("scope", "public")
+    parts = [scope, f"max-age={seconds}"]
     swr = cache_config.get("stale_while_revalidate")
     if swr:
         swr_secs = _parse_cache_ttl(swr)
@@ -767,6 +840,7 @@ def _build_rss_xml(
     feed_cfg: dict[str, Any],
     docs: list[dict[str, Any]],
     host: str,
+    feed_path: str,
     site_name: str,
     site_description: str,
 ) -> str:
@@ -780,6 +854,8 @@ def _build_rss_xml(
         {"site_name": site_name, "site_description": site_description},
     )
     item_tpl = feed_cfg.get("item", {})
+    now_rfc822 = _format_rfc822(datetime.now(timezone.utc), usegmt=True)
+    self_url = f"{host}{feed_path}"
 
     items: list[str] = []
     for doc in docs:
@@ -797,7 +873,11 @@ def _build_rss_xml(
         "  <channel>\n"
         f"    <title>{_xml_escape(title)}</title>\n"
         f"    <description>{_xml_escape(desc)}</description>\n"
-        f"    <link>{host}</link>\n" + "\n".join(items) + "\n"
+        f"    <link>{host}</link>\n"
+        f'    <atom:link href="{_xml_escape(self_url)}" rel="self"'
+        f' type="application/rss+xml"/>\n'
+        f"    <lastBuildDate>{now_rfc822}</lastBuildDate>\n"
+        "    <generator>mdb-engine</generator>\n" + "\n".join(items) + "\n"
         "  </channel>\n"
         "</rss>"
     )
@@ -847,6 +927,8 @@ def _build_atom_xml(
         parts.append("    </entry>")
         entries.append("\n".join(parts))
 
+    now_rfc3339 = datetime.now(timezone.utc).isoformat()
+
     return (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         '<feed xmlns="http://www.w3.org/2005/Atom">\n'
@@ -854,7 +936,9 @@ def _build_atom_xml(
         f"  <subtitle>{_xml_escape(subtitle)}</subtitle>\n"
         f'  <link href="{host}{feed_path}" rel="self"/>\n'
         f'  <link href="{host}"/>\n'
-        f"  <id>{host}{feed_path}</id>\n" + "\n".join(entries) + "\n"
+        f"  <id>{host}{feed_path}</id>\n"
+        f"  <updated>{now_rfc3339}</updated>\n"
+        "  <generator>mdb-engine</generator>\n" + "\n".join(entries) + "\n"
         "</feed>"
     )
 
@@ -929,12 +1013,24 @@ def _register_feed_routes(
                     xml = _build_atom_xml(_cfg, serialized, host, _path, site_name, site_description)
                     content_type = "application/atom+xml; charset=utf-8"
                 else:
-                    xml = _build_rss_xml(_cfg, serialized, host, site_name, site_description)
+                    xml = _build_rss_xml(_cfg, serialized, host, _path, site_name, site_description)
                     content_type = "application/rss+xml; charset=utf-8"
 
                 etag = md5(xml.encode()).hexdigest()  # noqa: S324
+                etag_header = f'"{etag}"'
+
+                if_none_match = request.headers.get("if-none-match")
+                if if_none_match and if_none_match.strip() == etag_header:
+                    return Response(
+                        status_code=304,
+                        headers={
+                            "ETag": etag_header,
+                            "Cache-Control": "public, max-age=3600",
+                        },
+                    )
+
                 resp = Response(content=xml, media_type=content_type)
-                resp.headers["ETag"] = f'"{etag}"'
+                resp.headers["ETag"] = etag_header
                 resp.headers["Cache-Control"] = "public, max-age=3600"
                 return resp
 
@@ -1000,6 +1096,67 @@ class _ErrorPageHandler:
         tpl = self._env.get_template("500.html")
         html = tpl.render(request=request, seo={"title": "Server Error"})
         return HTMLResponse(content=html, status_code=500)
+
+
+# ── Redirects ────────────────────────────────────────────────────────────
+
+
+def _register_redirect_routes(
+    router: APIRouter,
+    redirects_config: dict[str, dict[str, Any]],
+) -> None:
+    """Register 301/302 redirect routes from ``ssr.redirects``."""
+    for from_pattern, redirect_cfg in redirects_config.items():
+        from_path = _convert_route_pattern(from_pattern)
+        to_pattern = redirect_cfg.get("to", "")
+        status_code = redirect_cfg.get("status", 301)
+        if not to_pattern:
+            logger.warning("Redirect %s has no 'to', skipping", from_pattern)
+            continue
+
+        to_fastapi = _convert_route_pattern(to_pattern)
+
+        def _make_handler(_to: str, _status: int):  # type: ignore[no-untyped-def]
+            async def handler(request: Request) -> RedirectResponse:
+                resolved = _to
+                for param, value in request.path_params.items():
+                    resolved = resolved.replace(f"{{{param}}}", value)
+                return RedirectResponse(url=resolved, status_code=_status)
+
+            return handler
+
+        router.add_api_route(
+            from_path,
+            _make_handler(to_fastapi, status_code),
+            methods=["GET"],
+            response_class=RedirectResponse,
+            include_in_schema=False,
+        )
+        logger.info("Registered redirect: %s -> %s (%d)", from_pattern, to_pattern, status_code)
+
+
+# ── Trailing-slash normalisation ─────────────────────────────────────────
+
+
+def _register_trailing_slash_middleware(
+    app: Any,
+    policy: str,
+) -> None:
+    """Add trailing-slash redirect middleware to the app."""
+    from starlette.middleware.base import BaseHTTPMiddleware
+
+    class TrailingSlashMiddleware(BaseHTTPMiddleware):
+        async def dispatch(self, request: Request, call_next):  # type: ignore[override]
+            path = request.url.path
+            if policy == "strip" and path != "/" and path.endswith("/"):
+                new_url = str(request.url).replace(path, path.rstrip("/"), 1)
+                return RedirectResponse(url=new_url, status_code=301)
+            if policy == "ensure" and not path.endswith("/"):
+                new_url = str(request.url).replace(path, path + "/", 1)
+                return RedirectResponse(url=new_url, status_code=301)
+            return await call_next(request)
+
+    app.add_middleware(TrailingSlashMiddleware)
 
 
 # ── Main mount function ──────────────────────────────────────────────────
@@ -1114,6 +1271,7 @@ def mount_ssr_routes(
         autoescape=True,
     )
     env.globals["base_path"] = base_path
+    env.globals["lang"] = ssr_config.get("lang", "en")
 
     md_filter = _make_markdown_filter()
     if md_filter is not None:
@@ -1137,14 +1295,18 @@ def mount_ssr_routes(
 
     feeds_config = ssr_config.get("feeds", {})
     feed_links: list[dict[str, str]] = []
+    _seo_ctx = {"site_name": site_name, "site_description": site_description}
     for feed_path, feed_cfg in feeds_config.items():
         fmt = feed_cfg.get("format", "rss")
         mime = "application/atom+xml" if fmt == "atom" else "application/rss+xml"
         feed_links.append(
             {
-                "href": feed_path,
+                "href": f"{base_path}{feed_path}",
                 "type": mime,
-                "title": _resolve_seo_placeholders(feed_cfg.get("title", site_name), {}),
+                "title": _resolve_seo_placeholders(
+                    feed_cfg.get("title", site_name),
+                    _seo_ctx,
+                ),
             }
         )
 
@@ -1158,6 +1320,15 @@ def mount_ssr_routes(
 
         register_og_image_route(router, og_config, collections_config, base_url)
         logger.info("Registered OG image fallback route")
+
+    redirects_config = ssr_config.get("redirects", {})
+    if redirects_config:
+        _register_redirect_routes(router, redirects_config)
+
+    trailing_slash = ssr_config.get("trailing_slash", "ignore")
+    if trailing_slash != "ignore":
+        _register_trailing_slash_middleware(app, trailing_slash)
+        logger.info("Registered trailing-slash policy: %s", trailing_slash)
 
     for pattern, route_config in routes.items():
         fastapi_path = _convert_route_pattern(pattern)
@@ -1195,15 +1366,38 @@ def mount_ssr_routes(
     logger.info("Mounted %d SSR route(s)", len(routes))
 
 
+def _normalize_preload_links(preload: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Normalise preload items for template rendering."""
+    links: list[dict[str, Any]] = []
+    for item in preload:
+        href = item.get("href", "")
+        if not href:
+            continue
+        rel = item.get("rel", "preload")
+        link: dict[str, Any] = {"href": href, "rel": rel}
+        if item.get("as"):
+            link["as"] = item["as"]
+        if item.get("crossorigin"):
+            link["crossorigin"] = True
+        links.append(link)
+    return links
+
+
 def _build_preload_link_parts(preload: list[dict[str, Any]]) -> list[str]:
-    """Build ``Link`` header parts for resource preloading."""
+    """Build ``Link`` header parts for resource preloading / preconnect."""
     parts: list[str] = []
     for item in preload:
         href = item.get("href", "")
-        as_type = item.get("as", "")
-        if not href or not as_type:
+        if not href:
             continue
-        part = f"<{href}>; rel=preload; as={as_type}"
+        rel = item.get("rel", "preload")
+        if rel == "preload":
+            as_type = item.get("as", "")
+            if not as_type:
+                continue
+            part = f"<{href}>; rel=preload; as={as_type}"
+        else:
+            part = f"<{href}>; rel={rel}"
         if item.get("crossorigin"):
             part += "; crossorigin"
         parts.append(part)
@@ -1231,6 +1425,10 @@ def _register_ssr_route(  # noqa: PLR0913
 
     cache_header = _build_cache_header(cache_config)
     preload_link_parts = _build_preload_link_parts(preload) if preload else []
+    cache_vary: list[str] = list((cache_config or {}).get("vary", []))
+    if auth_required and not cache_vary:
+        cache_vary = ["Cookie"]
+    etag_enabled = bool((cache_config or {}).get("etag"))
 
     @router.get(path, response_class=HTMLResponse)
     async def ssr_handler(
@@ -1285,6 +1483,8 @@ def _register_ssr_route(  # noqa: PLR0913
 
         cache_context = {"is_stale": False, "cached_at": None}
 
+        preload_links = _normalize_preload_links(preload) if preload else []
+
         try:
             template = jinja_env.get_template(template_name)
             html = template.render(
@@ -1292,6 +1492,7 @@ def _register_ssr_route(  # noqa: PLR0913
                 seo=seo,
                 user=user,
                 cache=cache_context,
+                preload_links=preload_links,
                 **data_context,
             )
         except _TemplateError:
@@ -1301,11 +1502,26 @@ def _register_ssr_route(  # noqa: PLR0913
                 return err_page
             raise
 
+        if etag_enabled:
+            etag_value = _md5(html.encode()).hexdigest()  # noqa: S324
+            etag_header = f'"{etag_value}"'
+            if_none_match = request.headers.get("if-none-match")
+            if if_none_match and if_none_match.strip() == etag_header:
+                resp_304 = Response(status_code=304)
+                resp_304.headers["ETag"] = etag_header
+                if cache_header:
+                    resp_304.headers["Cache-Control"] = cache_header
+                return resp_304
+
         resp = HTMLResponse(content=html)
         resp.headers["X-Cache-Status"] = "MISS"
         if cache_header:
             resp.headers["Cache-Control"] = cache_header
             resp.headers["X-Cache-Age"] = "0"
+        if etag_enabled:
+            resp.headers["ETag"] = etag_header
+        if cache_vary:
+            resp.headers["Vary"] = ", ".join(cache_vary)
         link_parts: list[str] = list(preload_link_parts)
         if seo.get("pagination_prev"):
             link_parts.append(f'<{seo["pagination_prev"]}>; rel="prev"')

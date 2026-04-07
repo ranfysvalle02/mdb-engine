@@ -20,11 +20,13 @@
       {{ seo.og_image }}    — Open Graph image URL
       {{ seo.site_name }}   — site name from manifest
       {{ seo.json_ld }}     — JSON-LD structured data string
+      {{ seo.robots }}      — robots meta directive (e.g. "noindex, follow")
 
     Template globals injected by the engine (always available):
       {{ base_path }}    — app mount path, e.g. "/ai-chat"
       {{ auth_hub_url }} — auth hub URL, e.g. "/auth-hub"
       {{ app_slug }}     — app slug, e.g. "ai-chat"
+      {{ lang }}         — HTML lang attribute (default: "en")
 
     JavaScript globals (available in base_js / extra_js):
       MDB.BASE         — same as {{ base_path }}
@@ -35,13 +37,16 @@
       BASE              — alias for MDB.BASE (backwards-compatible)
 #}
 <!DOCTYPE html>
-<html lang="en">
+<html lang="{{ lang | default('en') }}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}{{ seo.title if seo is defined and seo.title else '' }}{% endblock %}</title>
     {% block seo_meta %}
     {% if seo is defined and seo %}
+    {% if seo.robots %}
+    <meta name="robots" content="{{ seo.robots }}">
+    {% endif %}
     {% if seo.canonical %}
     <link rel="canonical" href="{{ seo.canonical }}">
     {% endif %}
@@ -76,6 +81,11 @@
     <link rel="alternate" type="{{ feed.type }}" title="{{ feed.title }}" href="{{ feed.href }}">
     {% endfor %}
     {% endif %}
+    {% endif %}
+    {% if preload_links is defined and preload_links %}
+    {% for link in preload_links %}
+    <link rel="{{ link.rel }}" href="{{ link.href }}"{% if link.as is defined and link.as %} as="{{ link.as }}"{% endif %}{% if link.crossorigin is defined and link.crossorigin %} crossorigin{% endif %}>
+    {% endfor %}
     {% endif %}
     {% endblock %}
     {% block head %}{% endblock %}

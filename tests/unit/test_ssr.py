@@ -41,6 +41,8 @@ from mdb_engine.routing._ssr import (
     _convert_route_pattern,
     _resolve_json_ld,
     _resolve_seo_placeholders,
+    _to_rfc822,
+    _to_rfc3339,
     mount_ssr_routes,
 )
 
@@ -166,6 +168,7 @@ def _build_ssr_app(
     collections_config: dict[str, Any] | None = None,
     db_collections: dict[str, FakeCollection] | None = None,
     user: dict[str, Any] | None = None,
+    base_path: str = "",
 ) -> tuple[TestClient, Path]:
     """Build a test app with SSR routes and return (client, templates_dir)."""
     app = FastAPI()
@@ -187,7 +190,7 @@ def _build_ssr_app(
         tpl_path.parent.mkdir(parents=True, exist_ok=True)
         tpl_path.write_text(content)
 
-    mount_ssr_routes(app, tmpdir, ssr_config, collections_config or {})
+    mount_ssr_routes(app, tmpdir, ssr_config, collections_config or {}, base_path=base_path)
     return TestClient(app), tmpdir
 
 
@@ -283,14 +286,22 @@ class TestBuildCacheHeader:
         assert _build_cache_header(None) is None
 
     def test_ttl(self):
-        assert _build_cache_header({"ttl": "5m"}) == "max-age=300"
+        assert _build_cache_header({"ttl": "5m"}) == "public, max-age=300"
 
     def test_ttl_with_swr(self):
         h = _build_cache_header({"ttl": "1h", "stale_while_revalidate": "5m"})
-        assert h == "max-age=3600, stale-while-revalidate=300"
+        assert h == "public, max-age=3600, stale-while-revalidate=300"
 
     def test_zero_ttl_returns_none(self):
         assert _build_cache_header({"ttl": "0s"}) is None
+
+    def test_private_scope(self):
+        h = _build_cache_header({"ttl": "5m", "scope": "private"})
+        assert h == "private, max-age=300"
+
+    def test_public_scope_explicit(self):
+        h = _build_cache_header({"ttl": "10m", "scope": "public"})
+        assert h == "public, max-age=600"
 
 
 # ═════════════════════════════════════════════════════════════════════════
@@ -452,8 +463,10 @@ class TestSSRCacheHeaders:
         )
         resp = client.get("/")
         assert resp.status_code == 200
-        assert "max-age=300" in resp.headers.get("cache-control", "")
-        assert "stale-while-revalidate=30" in resp.headers.get("cache-control", "")
+        cc = resp.headers.get("cache-control", "")
+        assert "public" in cc
+        assert "max-age=300" in cc
+        assert "stale-while-revalidate=30" in cc
 
     def test_no_cache_by_default(self):
         client, _ = _build_ssr_app(
@@ -1165,3 +1178,848 @@ class TestAutoSeoMetaTags:
         assert '<meta name="twitter:card" content="summary">' in html
         assert "og:image" not in html
         assert "twitter:image" not in html
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# RSS / Atom Feeds
+# ═════════════════════════════════════════════════════════════════════════
+
+_FEED_SSR_CONFIG: dict[str, Any] = {
+    "enabled": True,
+    "site_name": "Test Blog",
+    "site_description": "A test blog",
+    "base_url": "https://example.com",
+    "routes": {
+        "/": {"template": "index.html"},
+    },
+    "feeds": {
+        "/feed.xml": {
+            "format": "rss",
+            "collection": "posts",
+            "scope": "published",
+            "sort": {"created_at": -1},
+            "limit": 20,
+            "title": "{{site_name}} RSS",
+            "description": "{{site_description}}",
+            "item": {
+                "title": "{{doc.title}}",
+                "link": "{{base_url}}/posts/{{doc.slug}}",
+                "description": "{{doc.excerpt}}",
+                "pubDate": "{{doc.created_at}}",
+            },
+        },
+    },
+}
+
+_FEED_POSTS = [
+    {
+        "_id": ObjectId(),
+        "title": "First Post",
+        "slug": "first",
+        "excerpt": "Hello",
+        "created_at": "2026-04-01T12:00:00+00:00",
+        "status": "published",
+    },
+    {
+        "_id": ObjectId(),
+        "title": "Second Post",
+        "slug": "second",
+        "excerpt": "World",
+        "created_at": "2026-03-15T09:00:00+00:00",
+        "status": "published",
+    },
+]
+
+
+class TestSSRFeeds:
+    """Tests for manifest-driven RSS/Atom feed generation."""
+
+    def _app(
+        self,
+        ssr_config: dict[str, Any] | None = None,
+        collections_config: dict[str, Any] | None = None,
+        posts: list[dict] | None = None,
+        base_path: str = "",
+    ) -> TestClient:
+        config = ssr_config or _FEED_SSR_CONFIG
+        cols_cfg = collections_config or {
+            "posts": {"scopes": {"published": {"status": "published"}}},
+        }
+        client, _ = _build_ssr_app(
+            templates={"index.html": "home"},
+            ssr_config=config,
+            collections_config=cols_cfg,
+            db_collections={"posts": FakeCollection(posts or _FEED_POSTS)},
+            base_path=base_path,
+        )
+        return client
+
+    # ── RSS basics ────────────────────────────────────────────────────
+
+    def test_rss_feed_returns_200_with_correct_content_type(self):
+        client = self._app()
+        resp = client.get("/feed.xml")
+        assert resp.status_code == 200
+        assert "application/rss+xml" in resp.headers["content-type"]
+
+    def test_rss_feed_contains_items(self):
+        client = self._app()
+        xml = client.get("/feed.xml").text
+        assert "<item>" in xml
+        assert "<title>First Post</title>" in xml
+        assert "<title>Second Post</title>" in xml
+
+    def test_rss_feed_has_self_link(self):
+        client = self._app()
+        xml = client.get("/feed.xml").text
+        assert 'rel="self"' in xml
+        assert 'type="application/rss+xml"' in xml
+        assert "https://example.com/feed.xml" in xml
+
+    def test_rss_feed_has_last_build_date(self):
+        client = self._app()
+        xml = client.get("/feed.xml").text
+        assert "<lastBuildDate>" in xml
+
+    def test_rss_feed_has_generator(self):
+        client = self._app()
+        xml = client.get("/feed.xml").text
+        assert "<generator>mdb-engine</generator>" in xml
+
+    # ── Atom basics ───────────────────────────────────────────────────
+
+    def test_atom_feed_returns_200_with_correct_content_type(self):
+        cfg = {
+            **_FEED_SSR_CONFIG,
+            "feeds": {
+                "/atom.xml": {
+                    **_FEED_SSR_CONFIG["feeds"]["/feed.xml"],
+                    "format": "atom",
+                },
+            },
+        }
+        client = self._app(ssr_config=cfg)
+        resp = client.get("/atom.xml")
+        assert resp.status_code == 200
+        assert "application/atom+xml" in resp.headers["content-type"]
+
+    def test_atom_feed_has_updated(self):
+        cfg = {
+            **_FEED_SSR_CONFIG,
+            "feeds": {
+                "/atom.xml": {
+                    **_FEED_SSR_CONFIG["feeds"]["/feed.xml"],
+                    "format": "atom",
+                },
+            },
+        }
+        client = self._app(ssr_config=cfg)
+        xml = client.get("/atom.xml").text
+        assert "<updated>" in xml
+
+    def test_atom_feed_has_generator(self):
+        cfg = {
+            **_FEED_SSR_CONFIG,
+            "feeds": {
+                "/atom.xml": {
+                    **_FEED_SSR_CONFIG["feeds"]["/feed.xml"],
+                    "format": "atom",
+                },
+            },
+        }
+        client = self._app(ssr_config=cfg)
+        xml = client.get("/atom.xml").text
+        assert "<generator>mdb-engine</generator>" in xml
+
+    # ── Scope filtering ──────────────────────────────────────────────
+
+    def test_scope_filters_items(self):
+        posts = [
+            *_FEED_POSTS,
+            {
+                "_id": ObjectId(),
+                "title": "Draft",
+                "slug": "draft",
+                "excerpt": "WIP",
+                "created_at": "2026-04-02",
+                "status": "draft",
+            },
+        ]
+        client = self._app(posts=posts)
+        xml = client.get("/feed.xml").text
+        assert "First Post" in xml
+        assert "Draft" not in xml
+
+    # ── Soft-delete exclusion ────────────────────────────────────────
+
+    def test_soft_delete_excluded(self):
+        """Soft-deleted docs are excluded via ``deleted_at: null`` filter."""
+        posts = [
+            {
+                "_id": ObjectId(),
+                "title": "Live Post",
+                "slug": "live",
+                "excerpt": "Visible",
+                "created_at": "2026-04-01",
+                "deleted_at": None,
+            },
+            {
+                "_id": ObjectId(),
+                "title": "Deleted Post",
+                "slug": "del",
+                "excerpt": "Gone",
+                "created_at": "2026-04-03",
+                "deleted_at": "2026-04-04",
+            },
+        ]
+        cfg = {
+            **_FEED_SSR_CONFIG,
+            "feeds": {
+                "/feed.xml": {
+                    "format": "rss",
+                    "collection": "posts",
+                    "sort": {"created_at": -1},
+                    "limit": 20,
+                    "item": {"title": "{{doc.title}}"},
+                },
+            },
+        }
+        cols_cfg = {"posts": {"soft_delete": True}}
+        client = self._app(ssr_config=cfg, collections_config=cols_cfg, posts=posts)
+        xml = client.get("/feed.xml").text
+        assert "Live Post" in xml
+        assert "Deleted Post" not in xml
+
+    # ── Limit ────────────────────────────────────────────────────────
+
+    def test_limit_respected(self):
+        cfg = {
+            **_FEED_SSR_CONFIG,
+            "feeds": {
+                "/feed.xml": {
+                    **_FEED_SSR_CONFIG["feeds"]["/feed.xml"],
+                    "limit": 1,
+                },
+            },
+        }
+        client = self._app(ssr_config=cfg)
+        xml = client.get("/feed.xml").text
+        assert xml.count("<item>") == 1
+
+    # ── Caching / Conditional GET ────────────────────────────────────
+
+    def test_etag_and_cache_control_headers(self):
+        client = self._app()
+        resp = client.get("/feed.xml")
+        assert "ETag" in resp.headers
+        assert resp.headers["Cache-Control"] == "public, max-age=3600"
+
+    def test_if_none_match_returns_304(self):
+        client = self._app()
+        resp1 = client.get("/feed.xml")
+        etag = resp1.headers["ETag"]
+        resp2 = client.get("/feed.xml", headers={"If-None-Match": etag})
+        assert resp2.status_code == 304
+
+    # ── <link rel="alternate"> injection ─────────────────────────────
+
+    def test_feed_link_injected_into_ssr_page_head(self):
+        client, _ = _build_ssr_app(
+            templates={"index.html": _BASE_CHILD_LIST},
+            ssr_config={
+                **_FEED_SSR_CONFIG,
+                "routes": {
+                    "/": {
+                        "template": "index.html",
+                        "data": {"posts": {"collection": "posts", "limit": 10}},
+                        "seo": {"title": "Home", "description": "desc"},
+                    },
+                },
+            },
+            collections_config={
+                "posts": {"scopes": {"published": {"status": "published"}}},
+            },
+            db_collections={"posts": FakeCollection(_FEED_POSTS)},
+        )
+        html = client.get("/").text
+        assert 'rel="alternate"' in html
+        assert 'type="application/rss+xml"' in html
+        assert 'href="/feed.xml"' in html
+        assert "Test Blog RSS" in html
+
+    def test_feed_link_href_includes_base_path(self):
+        client, _ = _build_ssr_app(
+            templates={"index.html": _BASE_CHILD_LIST},
+            ssr_config={
+                **_FEED_SSR_CONFIG,
+                "routes": {
+                    "/": {
+                        "template": "index.html",
+                        "data": {"posts": {"collection": "posts", "limit": 10}},
+                        "seo": {"title": "Home", "description": "desc"},
+                    },
+                },
+            },
+            collections_config={
+                "posts": {"scopes": {"published": {"status": "published"}}},
+            },
+            db_collections={"posts": FakeCollection(_FEED_POSTS)},
+            base_path="/blog",
+        )
+        html = client.get("/").text
+        assert 'href="/blog/feed.xml"' in html
+
+    # ── Missing collection warning ───────────────────────────────────
+
+    def test_feed_with_no_collection_skipped(self):
+        cfg = {
+            **_FEED_SSR_CONFIG,
+            "feeds": {"/bad.xml": {"format": "rss"}},
+        }
+        client = self._app(ssr_config=cfg)
+        resp = client.get("/bad.xml")
+        assert resp.status_code == 404
+
+    # ── rfc822 / rfc3339 pipe transforms ─────────────────────────────
+
+    def test_rfc822_transform_iso_input(self):
+        assert _to_rfc822("2026-04-01T12:00:00+00:00") == "Wed, 01 Apr 2026 12:00:00 GMT"
+
+    def test_rfc822_transform_python_str_input(self):
+        assert _to_rfc822("2026-04-01 12:00:00+00:00") == "Wed, 01 Apr 2026 12:00:00 GMT"
+
+    def test_rfc3339_transform_iso_input(self):
+        result = _to_rfc3339("2026-04-01T12:00:00+00:00")
+        assert result == "2026-04-01T12:00:00+00:00"
+
+    def test_rfc822_transform_empty_string(self):
+        assert _to_rfc822("") == ""
+
+    def test_rfc3339_transform_empty_string(self):
+        assert _to_rfc3339("") == ""
+
+    def test_rfc822_transform_invalid_input(self):
+        assert _to_rfc822("not-a-date") == "not-a-date"
+
+    def test_rfc3339_transform_invalid_input(self):
+        assert _to_rfc3339("not-a-date") == "not-a-date"
+
+    def test_rfc822_transform_z_suffix(self):
+        assert _to_rfc822("2026-04-01T12:00:00Z") == "Wed, 01 Apr 2026 12:00:00 GMT"
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# Per-Route Meta Robots
+# ═════════════════════════════════════════════════════════════════════════
+
+
+class TestMetaRobots:
+    def test_robots_meta_tag_rendered(self):
+        oid = ObjectId()
+        client, _ = _build_ssr_app(
+            templates={"post.html": _BASE_CHILD},
+            ssr_config={
+                "enabled": True,
+                "site_name": "Blog",
+                "routes": {
+                    "/posts/{id}": {
+                        "template": "post.html",
+                        "data": {"post": {"collection": "posts", "id_param": "id"}},
+                        "seo": {
+                            "title": "{{post.title}}",
+                            "description": "desc",
+                            "robots": "noindex, follow",
+                        },
+                    }
+                },
+            },
+            db_collections={
+                "posts": FakeCollection([{"_id": oid, "title": "Hidden Post"}]),
+            },
+        )
+        html = client.get(f"/posts/{oid}").text
+        assert '<meta name="robots" content="noindex, follow">' in html
+
+    def test_robots_meta_tag_absent_when_not_set(self):
+        oid = ObjectId()
+        client, _ = _build_ssr_app(
+            templates={"post.html": _BASE_CHILD},
+            ssr_config={
+                "enabled": True,
+                "site_name": "Blog",
+                "routes": {
+                    "/posts/{id}": {
+                        "template": "post.html",
+                        "data": {"post": {"collection": "posts", "id_param": "id"}},
+                        "seo": {"title": "{{post.title}}", "description": "desc"},
+                    }
+                },
+            },
+            db_collections={
+                "posts": FakeCollection([{"_id": oid, "title": "Visible Post"}]),
+            },
+        )
+        html = client.get(f"/posts/{oid}").text
+        assert 'name="robots"' not in html
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# Configurable <html lang>
+# ═════════════════════════════════════════════════════════════════════════
+
+
+class TestHtmlLang:
+    def test_custom_lang_attribute(self):
+        client, _ = _build_ssr_app(
+            templates={"index.html": _BASE_CHILD_LIST},
+            ssr_config={
+                "enabled": True,
+                "site_name": "Mi Blog",
+                "lang": "es",
+                "routes": {
+                    "/": {
+                        "template": "index.html",
+                        "data": {"posts": {"collection": "posts", "limit": 10}},
+                        "seo": {"title": "Inicio", "description": "desc"},
+                    }
+                },
+            },
+            db_collections={"posts": FakeCollection([{"_id": ObjectId(), "title": "A"}])},
+        )
+        html = client.get("/").text
+        assert '<html lang="es">' in html
+
+    def test_default_lang_is_en(self):
+        client, _ = _build_ssr_app(
+            templates={"index.html": _BASE_CHILD_LIST},
+            ssr_config={
+                "enabled": True,
+                "site_name": "Blog",
+                "routes": {
+                    "/": {
+                        "template": "index.html",
+                        "data": {"posts": {"collection": "posts", "limit": 10}},
+                        "seo": {"title": "Home", "description": "desc"},
+                    }
+                },
+            },
+            db_collections={"posts": FakeCollection([{"_id": ObjectId(), "title": "A"}])},
+        )
+        html = client.get("/").text
+        assert '<html lang="en">' in html
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# Manifest-Driven Redirects
+# ═════════════════════════════════════════════════════════════════════════
+
+
+class TestSSRRedirects:
+    def test_static_301_redirect(self):
+        client, _ = _build_ssr_app(
+            templates={"index.html": "home", "new.html": "new page"},
+            ssr_config={
+                "enabled": True,
+                "redirects": {
+                    "/old": {"to": "/new", "status": 301},
+                },
+                "routes": {
+                    "/": {"template": "index.html"},
+                    "/new": {"template": "new.html"},
+                },
+            },
+        )
+        resp = client.get("/old", follow_redirects=False)
+        assert resp.status_code == 301
+        assert resp.headers["location"] == "/new"
+
+    def test_parameterized_redirect(self):
+        client, _ = _build_ssr_app(
+            templates={"post.html": "<h1>post</h1>"},
+            ssr_config={
+                "enabled": True,
+                "redirects": {
+                    "/blog/:slug": {"to": "/posts/:slug", "status": 301},
+                },
+                "routes": {
+                    "/posts/{slug}": {"template": "post.html"},
+                },
+            },
+        )
+        resp = client.get("/blog/hello-world", follow_redirects=False)
+        assert resp.status_code == 301
+        assert resp.headers["location"] == "/posts/hello-world"
+
+    def test_302_redirect(self):
+        client, _ = _build_ssr_app(
+            templates={"index.html": "home"},
+            ssr_config={
+                "enabled": True,
+                "redirects": {
+                    "/temp": {"to": "/", "status": 302},
+                },
+                "routes": {"/": {"template": "index.html"}},
+            },
+        )
+        resp = client.get("/temp", follow_redirects=False)
+        assert resp.status_code == 302
+        assert resp.headers["location"] == "/"
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# Preconnect / DNS-Prefetch in Preload
+# ═════════════════════════════════════════════════════════════════════════
+
+from mdb_engine.routing._ssr import _build_preload_link_parts
+
+
+class TestPreconnectPreload:
+    def test_preconnect_link_header(self):
+        parts = _build_preload_link_parts(
+            [
+                {"href": "https://fonts.googleapis.com", "rel": "preconnect", "crossorigin": True},
+            ]
+        )
+        assert len(parts) == 1
+        assert parts[0] == "<https://fonts.googleapis.com>; rel=preconnect; crossorigin"
+
+    def test_dns_prefetch_link_header(self):
+        parts = _build_preload_link_parts(
+            [
+                {"href": "https://cdn.example.com", "rel": "dns-prefetch"},
+            ]
+        )
+        assert len(parts) == 1
+        assert parts[0] == "<https://cdn.example.com>; rel=dns-prefetch"
+
+    def test_preload_still_works(self):
+        parts = _build_preload_link_parts(
+            [
+                {"href": "/public/style.css", "as": "style"},
+            ]
+        )
+        assert len(parts) == 1
+        assert parts[0] == "</public/style.css>; rel=preload; as=style"
+
+    def test_preload_without_as_skipped(self):
+        parts = _build_preload_link_parts(
+            [
+                {"href": "/public/style.css"},
+            ]
+        )
+        assert len(parts) == 0
+
+    def test_mixed_preload_and_preconnect(self):
+        parts = _build_preload_link_parts(
+            [
+                {"href": "/public/style.css", "as": "style"},
+                {"href": "https://fonts.googleapis.com", "rel": "preconnect", "crossorigin": True},
+                {"href": "https://cdn.example.com", "rel": "dns-prefetch"},
+            ]
+        )
+        assert len(parts) == 3
+        assert "rel=preload" in parts[0]
+        assert "rel=preconnect" in parts[1]
+        assert "rel=dns-prefetch" in parts[2]
+
+    def test_preconnect_link_tag_in_html(self):
+        client, _ = _build_ssr_app(
+            templates={"index.html": _BASE_CHILD_LIST},
+            ssr_config={
+                "enabled": True,
+                "site_name": "Blog",
+                "preload": [
+                    {"href": "https://fonts.googleapis.com", "rel": "preconnect", "crossorigin": True},
+                    {"href": "/public/style.css", "as": "style"},
+                ],
+                "routes": {
+                    "/": {
+                        "template": "index.html",
+                        "data": {"posts": {"collection": "posts", "limit": 10}},
+                        "seo": {"title": "Home", "description": "desc"},
+                    }
+                },
+            },
+            db_collections={"posts": FakeCollection([{"_id": ObjectId(), "title": "A"}])},
+        )
+        html = client.get("/").text
+        assert '<link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>' in html
+        assert '<link rel="preload" href="/public/style.css" as="style">' in html
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# Vary Header
+# ═════════════════════════════════════════════════════════════════════════
+
+
+class TestSSRVaryHeader:
+    def test_explicit_vary_header(self):
+        client, _ = _build_ssr_app(
+            templates={"index.html": "cached"},
+            ssr_config={
+                "enabled": True,
+                "routes": {
+                    "/": {
+                        "template": "index.html",
+                        "cache": {"ttl": "5m", "vary": ["Cookie", "Accept-Language"]},
+                    }
+                },
+            },
+        )
+        resp = client.get("/")
+        assert resp.status_code == 200
+        assert resp.headers.get("vary") == "Cookie, Accept-Language"
+
+    def test_auto_vary_cookie_on_auth_route(self):
+        client, _ = _build_ssr_app(
+            templates={"dash.html": "dashboard"},
+            ssr_config={
+                "enabled": True,
+                "routes": {
+                    "/dashboard": {
+                        "template": "dash.html",
+                        "auth": True,
+                        "cache": {"ttl": "1m"},
+                    }
+                },
+            },
+            user={"_id": "u1", "name": "Alice"},
+        )
+        resp = client.get("/dashboard")
+        assert resp.status_code == 200
+        assert resp.headers.get("vary") == "Cookie"
+
+    def test_no_vary_on_public_route_without_config(self):
+        client, _ = _build_ssr_app(
+            templates={"index.html": "home"},
+            ssr_config={
+                "enabled": True,
+                "routes": {"/": {"template": "index.html"}},
+            },
+        )
+        resp = client.get("/")
+        assert "vary" not in resp.headers
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# Trailing-Slash Normalization
+# ═════════════════════════════════════════════════════════════════════════
+
+
+class TestSSRTrailingSlash:
+    def test_strip_redirects_trailing_slash(self):
+        client, _ = _build_ssr_app(
+            templates={"about.html": "about"},
+            ssr_config={
+                "enabled": True,
+                "trailing_slash": "strip",
+                "routes": {"/about": {"template": "about.html"}},
+            },
+        )
+        resp = client.get("/about/", follow_redirects=False)
+        assert resp.status_code == 301
+        location = resp.headers["location"]
+        assert location.endswith("/about")
+        assert not location.endswith("/about/")
+
+    def test_strip_does_not_redirect_root(self):
+        client, _ = _build_ssr_app(
+            templates={"index.html": "home"},
+            ssr_config={
+                "enabled": True,
+                "trailing_slash": "strip",
+                "routes": {"/": {"template": "index.html"}},
+            },
+        )
+        resp = client.get("/", follow_redirects=False)
+        assert resp.status_code == 200
+
+    def test_ensure_adds_trailing_slash(self):
+        client, _ = _build_ssr_app(
+            templates={"about.html": "about"},
+            ssr_config={
+                "enabled": True,
+                "trailing_slash": "ensure",
+                "routes": {"/about/": {"template": "about.html"}},
+            },
+        )
+        resp = client.get("/about", follow_redirects=False)
+        assert resp.status_code == 301
+        assert resp.headers["location"].endswith("/about/")
+
+    def test_ignore_no_redirect(self):
+        client, _ = _build_ssr_app(
+            templates={"about.html": "about"},
+            ssr_config={
+                "enabled": True,
+                "trailing_slash": "ignore",
+                "routes": {"/about": {"template": "about.html"}},
+            },
+        )
+        resp = client.get("/about", follow_redirects=False)
+        assert resp.status_code == 200
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# ETag / Conditional GET on SSR Pages
+# ═════════════════════════════════════════════════════════════════════════
+
+
+class TestSSRETag:
+    def test_etag_header_present(self):
+        client, _ = _build_ssr_app(
+            templates={"index.html": "static content"},
+            ssr_config={
+                "enabled": True,
+                "routes": {
+                    "/": {
+                        "template": "index.html",
+                        "cache": {"ttl": "5m", "etag": True},
+                    }
+                },
+            },
+        )
+        resp = client.get("/")
+        assert resp.status_code == 200
+        assert "ETag" in resp.headers
+        assert resp.headers["ETag"].startswith('"')
+        assert resp.headers["ETag"].endswith('"')
+
+    def test_304_on_matching_if_none_match(self):
+        client, _ = _build_ssr_app(
+            templates={"index.html": "static content"},
+            ssr_config={
+                "enabled": True,
+                "routes": {
+                    "/": {
+                        "template": "index.html",
+                        "cache": {"ttl": "5m", "etag": True},
+                    }
+                },
+            },
+        )
+        resp1 = client.get("/")
+        etag = resp1.headers["ETag"]
+        resp2 = client.get("/", headers={"If-None-Match": etag})
+        assert resp2.status_code == 304
+
+    def test_no_etag_when_not_enabled(self):
+        client, _ = _build_ssr_app(
+            templates={"index.html": "no etag"},
+            ssr_config={
+                "enabled": True,
+                "routes": {
+                    "/": {
+                        "template": "index.html",
+                        "cache": {"ttl": "5m"},
+                    }
+                },
+            },
+        )
+        resp = client.get("/")
+        assert resp.status_code == 200
+        assert "ETag" not in resp.headers
+
+    def test_no_etag_without_cache_config(self):
+        client, _ = _build_ssr_app(
+            templates={"index.html": "no cache"},
+            ssr_config={
+                "enabled": True,
+                "routes": {"/": {"template": "index.html"}},
+            },
+        )
+        resp = client.get("/")
+        assert resp.status_code == 200
+        assert "ETag" not in resp.headers
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# Breadcrumb JSON-LD Shorthand
+# ═════════════════════════════════════════════════════════════════════════
+
+
+class TestBreadcrumbJsonLd:
+    def test_breadcrumb_ld_generated(self):
+        seo = _build_seo_context(
+            {
+                "title": "Blog Post",
+                "breadcrumbs": [
+                    {"name": "Home", "url": "https://example.com/"},
+                    {"name": "Blog", "url": "https://example.com/blog"},
+                    {"name": "{{post.title}}", "url": "https://example.com/posts/{{post.slug}}"},
+                ],
+            },
+            {"post": {"title": "My Post", "slug": "my-post"}},
+            "Blog",
+        )
+        assert "json_ld" in seo
+        ld = json.loads(seo["json_ld"])
+        assert ld["@type"] == "BreadcrumbList"
+        assert len(ld["itemListElement"]) == 3
+        assert ld["itemListElement"][0]["position"] == 1
+        assert ld["itemListElement"][0]["name"] == "Home"
+        assert ld["itemListElement"][2]["name"] == "My Post"
+        assert ld["itemListElement"][2]["item"] == "https://example.com/posts/my-post"
+
+    def test_breadcrumbs_merged_with_json_ld(self):
+        seo = _build_seo_context(
+            {
+                "title": "Post",
+                "json_ld": {
+                    "@context": "https://schema.org",
+                    "@type": "Article",
+                    "headline": "{{post.title}}",
+                },
+                "breadcrumbs": [
+                    {"name": "Home", "url": "/"},
+                    {"name": "{{post.title}}", "url": "/posts/{{post.slug}}"},
+                ],
+            },
+            {"post": {"title": "My Post", "slug": "my-post"}},
+            "Blog",
+        )
+        ld = json.loads(seo["json_ld"])
+        assert "@graph" in ld
+        assert len(ld["@graph"]) == 2
+        types = {item["@type"] for item in ld["@graph"]}
+        assert "Article" in types
+        assert "BreadcrumbList" in types
+
+    def test_no_breadcrumbs_no_json_ld(self):
+        seo = _build_seo_context(
+            {"title": "Home"},
+            {},
+            "Blog",
+        )
+        assert "json_ld" not in seo
+
+    def test_breadcrumb_in_template(self):
+        oid = ObjectId()
+        client, _ = _build_ssr_app(
+            templates={"post.html": _BASE_CHILD},
+            ssr_config={
+                "enabled": True,
+                "site_name": "Blog",
+                "routes": {
+                    "/posts/{id}": {
+                        "template": "post.html",
+                        "data": {"post": {"collection": "posts", "id_param": "id"}},
+                        "seo": {
+                            "title": "{{post.title}}",
+                            "description": "desc",
+                            "breadcrumbs": [
+                                {"name": "Home", "url": "https://example.com/"},
+                                {"name": "{{post.title}}", "url": "https://example.com/posts/{{post.id}}"},
+                            ],
+                        },
+                    }
+                },
+            },
+            db_collections={
+                "posts": FakeCollection([{"_id": oid, "title": "BC Post"}]),
+            },
+        )
+        html = client.get(f"/posts/{oid}").text
+        assert '<script type="application/ld+json">' in html
+        assert "BreadcrumbList" in html
+        assert "BC Post" in html

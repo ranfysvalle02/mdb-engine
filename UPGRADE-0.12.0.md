@@ -474,3 +474,72 @@ Cache-Control headers and asset fingerprinting still work independently.
 **Improved warning:** The startup warning when `MDB_ENGINE_MASTER_KEY` is not set previously read "App-level authentication will not be available", implying cookie/session auth was broken. It now reads: "Envelope encryption for app secrets is disabled. Cookie/session authentication is not affected."
 
 **Action required:** `pip install --upgrade mdb-engine` to `>=0.12.4`. No manifest or template changes needed.
+
+---
+
+## 0.12.5 — RSS/Atom Feed Polish
+
+**RSS/Atom feeds are now spec-compliant out of the box** and include several DX improvements for manifest authors.
+
+### RSS 2.0 compliance
+
+RSS feeds now emit three elements required/recommended by the RSS 2.0 spec and RSS Board best practices:
+
+- `<atom:link rel="self">` — self-referencing link inside `<channel>` (required when the Atom namespace is declared)
+- `<lastBuildDate>` — RFC 822 timestamp of when the feed was generated
+- `<generator>mdb-engine</generator>`
+
+### Atom 1.0 compliance
+
+Atom feeds now emit:
+
+- Feed-level `<updated>` — RFC 3339 timestamp (required by RFC 4287)
+- `<generator>mdb-engine</generator>`
+
+### New pipe transforms: `rfc822` and `rfc3339`
+
+Date fields from MongoDB (ISO strings or Python `datetime` values) can now be formatted inline using pipe transforms in feed item templates:
+
+```json
+{
+  "ssr": {
+    "feeds": {
+      "/feed.xml": {
+        "collection": "posts",
+        "scope": "published",
+        "item": {
+          "title": "{{doc.title}}",
+          "link": "{{base_url}}/posts/{{doc.slug}}",
+          "description": "{{doc.excerpt | plain_text | truncate(200)}}",
+          "pubDate": "{{doc.created_at | rfc822}}"
+        }
+      }
+    }
+  }
+}
+```
+
+- `rfc822` — formats as `Mon, 06 Apr 2026 12:00:00 GMT` (RSS `pubDate` format)
+- `rfc3339` — formats as `2026-04-06T12:00:00+00:00` (Atom `updated` format)
+
+Both transforms handle ISO 8601 strings, Python `str(datetime)` format, and `Z` suffix. Invalid values pass through unchanged.
+
+### Bug fix: `<link rel="alternate">` title placeholders
+
+The `{{site_name}}` placeholder in feed titles was not resolved in the `<link rel="alternate">` tag injected into SSR page `<head>` tags. The title now resolves correctly.
+
+### Bug fix: multi-app feed link paths
+
+In multi-app deployments, the `<link rel="alternate" href="...">` tag in `<head>` now correctly includes the app's `base_path` prefix (e.g. `/blog/feed.xml` instead of `/feed.xml`).
+
+### Conditional GET (304 Not Modified)
+
+Feed routes now honor the `If-None-Match` request header. When a feed aggregator sends back the `ETag` from a previous response, the engine returns `304 Not Modified` with no body — saving bandwidth on repeated polls.
+
+### Action required
+
+`pip install --upgrade mdb-engine` to `>=0.12.5`. No manifest changes needed — existing `ssr.feeds` configurations automatically benefit from all improvements. To use the new date transforms, update your feed item templates (e.g. `"pubDate": "{{doc.created_at | rfc822}}"`).
+
+---
+
+See [UPGRADE-0.13.0.md](UPGRADE-0.13.0.md) for the next release.
