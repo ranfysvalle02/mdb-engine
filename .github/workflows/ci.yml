@@ -63,22 +63,18 @@ jobs:
               - 'tests/**'
               - 'scripts/**'
               - 'pyproject.toml'
-              - 'setup.py'
               - 'Makefile'
-              - '.flake8'
               - '.semgrep.yml'
             tests:
               - 'mdb_engine/**'
               - 'tests/**'
               - 'pyproject.toml'
-              - 'setup.py'
             docs:
               - 'docs/**'
               - '*.md'
               - 'examples/**'
             python:
               - 'pyproject.toml'
-              - 'setup.py'
               - '.python-version'
             ci:
               - '.github/workflows/**'
@@ -104,9 +100,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION_DEFAULT }}
           cache: 'pip'
-          cache-dependency-path: |
-            pyproject.toml
-            setup.py
+          cache-dependency-path: pyproject.toml
 
       - name: Cache Ruff
         if: github.event.inputs.skip_cache != 'true'
@@ -186,9 +180,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: 'pip'
-          cache-dependency-path: |
-            pyproject.toml
-            setup.py
+          cache-dependency-path: pyproject.toml
 
       - name: Install dependencies
         run: |
@@ -305,9 +297,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION_DEFAULT }}
           cache: 'pip'
-          cache-dependency-path: |
-            pyproject.toml
-            setup.py
+          cache-dependency-path: pyproject.toml
 
       - name: Install dependencies
         run: |
@@ -386,9 +376,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION_DEFAULT }}
           cache: 'pip'
-          cache-dependency-path: |
-            pyproject.toml
-            setup.py
+          cache-dependency-path: pyproject.toml
 
       - name: Install build tools
         run: |
@@ -429,7 +417,7 @@ jobs:
           ls -lh dist/ | sed 's/^/  - /' >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Package version:**" >> $GITHUB_STEP_SUMMARY
-          grep "^version" pyproject.toml setup.py | head -1 >> $GITHUB_STEP_SUMMARY
+          grep "^version" pyproject.toml | head -1 >> $GITHUB_STEP_SUMMARY
 
       - name: Publish to PyPI using GitHub secret
         env:
@@ -467,7 +455,7 @@ jobs:
           echo "**Common issues:**" >> $GITHUB_STEP_SUMMARY
           echo "1. **Missing PYPI_API_TOKEN secret**: Configure in Settings → Secrets → Actions" >> $GITHUB_STEP_SUMMARY
           echo "2. **Invalid token**: Get a new token from https://pypi.org/manage/account/token/" >> $GITHUB_STEP_SUMMARY
-          echo "3. **Version already exists**: Bump version in pyproject.toml and setup.py" >> $GITHUB_STEP_SUMMARY
+          echo "3. **Version already exists**: Bump version in pyproject.toml" >> $GITHUB_STEP_SUMMARY
           echo "4. **Package name conflict**: Check https://pypi.org/project/mdb-engine/" >> $GITHUB_STEP_SUMMARY
           echo "5. **Network/API issues**: Check PyPI status at https://status.python.org/" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY

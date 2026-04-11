@@ -87,15 +87,9 @@ Example:
 
 This gives developers immediate confidence their config is correct.
 
-## 7. Drop `setup.py` in Favor of `pyproject.toml`-Only (Low Impact, Low Effort)
+## 7. ~~Drop `setup.py` in Favor of `pyproject.toml`-Only~~ (DONE)
 
-Both [`setup.py`](setup.py) and [`pyproject.toml`](pyproject.toml) exist. Since the project targets Python >=3.10 and uses setuptools with PEP 621 metadata, `setup.py` is redundant and a maintenance burden.
-
-- Remove `setup.py`
-
-- Ensure all metadata and entry points live in `pyproject.toml`
-
-- Verify `pip install -e .` still works without `setup.py`
+Completed: `setup.py` removed. Version single-sourced via `importlib.metadata` in `__init__.py`. All metadata lives in `pyproject.toml`.
 
 ## 8. Add `.editorconfig` (Low Impact, Low Effort)
 
@@ -179,7 +173,7 @@ A `mdb dev` command that wraps uvicorn with auto-reload, similar to `next dev` o
 | CLI tests | Medium | Low | P1 |
 | Better startup error messages | Medium | Low | P1 |
 | Startup summary banner | Medium | Low | P1 |
-| Drop `setup.py` | Low | Low | P2 |
+| ~~Drop `setup.py`~~ | ~~Low~~ | ~~Low~~ | ~~DONE~~ |
 | Add `.editorconfig` | Low | Low | P2 |
 | Adopt `pre-commit` framework | Low | Medium | P2 |
 | Incremental type coverage | Medium | High | P2 |

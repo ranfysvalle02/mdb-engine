@@ -17,7 +17,7 @@ This guide shows you the **least effort** way to publish `mdb-engine` to PyPI.
    - Add secret: `PYPI_API_TOKEN` with your PyPI token
 
 2. **Update package metadata** (if not done):
-   - Edit `setup.py` and `pyproject.toml`:
+   - Edit `pyproject.toml`:
      - Author: Fabian Valle
      - Email: oblivio.company@gmail.com
      - GitHub repo URL: `https://github.com/ranfysvalle02/mdb-engine`
@@ -26,9 +26,9 @@ This guide shows you the **least effort** way to publish `mdb-engine` to PyPI.
 
 **Method A: Create a GitHub Release**
 ```bash
-# 1. Update version in setup.py and pyproject.toml
+# 1. Update version in pyproject.toml
 # 2. Commit and push
-git add setup.py pyproject.toml
+git add pyproject.toml
 git commit -m "Bump version to 0.1.7"
 git push
 
@@ -67,13 +67,12 @@ make publish
 
 ## Version Bumping
 
-Before publishing, update the version in **both** files:
-- `setup.py`: `version="0.1.7"`
+Before publishing, update the version in `pyproject.toml`:
 - `pyproject.toml`: `version = "0.1.7"`
 
 ## Checklist Before Publishing
 
-- [ ] Version updated in `setup.py` and `pyproject.toml`
+- [ ] Version updated in `pyproject.toml`
 - [ ] Author/email/URL verified (currently: Fabian Valle, oblivio.company@gmail.com)
 - [ ] Tests pass: `make test`
 - [ ] Linting passes: `make lint-local`
@@ -85,7 +84,7 @@ Before publishing, update the version in **both** files:
 **"Package name already exists"**
 - The package name `mdb-engine` might be taken on PyPI
 - Check: https://pypi.org/project/mdb-engine/
-- If taken, update `name` in `setup.py` and `pyproject.toml`
+- If taken, update `name` in `pyproject.toml`
 
 **"403 Forbidden" or "Invalid token"**
 - **Most common cause**: You ran `twine upload` directly without credentials

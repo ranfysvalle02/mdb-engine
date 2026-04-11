@@ -130,7 +130,6 @@ flake8 mdb_engine/
 
 1. **Update Version**
    - ✅ pyproject.toml: 0.4.0
-   - ✅ setup.py: 0.4.0
 
 2. **Run Tests**
    ```bash

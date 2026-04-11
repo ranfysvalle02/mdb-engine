@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     g++ \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml setup.py MANIFEST.in ./
+COPY pyproject.toml MANIFEST.in ./
 
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"

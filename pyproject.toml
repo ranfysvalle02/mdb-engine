@@ -134,6 +134,9 @@ Documentation = "https://github.com/ranfysvalle02/mdb-engine#readme"
 Repository = "https://github.com/ranfysvalle02/mdb-engine"
 Issues = "https://github.com/ranfysvalle02/mdb-engine/issues"
 
+[tool.setuptools.packages.find]
+include = ["mdb_engine", "mdb_engine.*"]
+
 [tool.setuptools.package-data]
 mdb_engine = ["templates/*.html", "py.typed"]
 
