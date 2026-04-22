@@ -32,7 +32,10 @@ from .manifest import (  # Classes; Constants; Functions (for backward compatibi
     SCHEMA_REGISTRY,
     ManifestParser,
     ManifestValidator,
+    canonicalize_manifest,
     clear_validation_cache,
+    compute_manifest_hash,
+    compute_schema_hash,
     get_schema_for_version,
     get_schema_version,
     migrate_manifest,
@@ -88,6 +91,10 @@ __all__ = [
     "get_schema_for_version",
     "clear_validation_cache",
     "validate_manifests_parallel",
+    # Canonicalization and hashing for reconciler
+    "canonicalize_manifest",
+    "compute_manifest_hash",
+    "compute_schema_hash",
     # Schemas
     "MANIFEST_SCHEMA_V1",
     "MANIFEST_SCHEMA_V2",

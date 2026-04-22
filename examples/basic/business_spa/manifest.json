@@ -1,0 +1,624 @@
+{
+  "schema_version": "2.0",
+  "slug": "business_spa",
+  "name": "Acme Services",
+  "auth": {
+    "mode": "app",
+    "users": {
+      "enabled": true,
+      "strategy": "app_users",
+      "allow_registration": true,
+      "registration_role": "visitor",
+      "max_login_attempts": 5,
+      "login_lockout_seconds": 900,
+      "session_cookie_name": "business_spa_session",
+      "role_hierarchy": {
+        "admin": ["staff", "visitor"],
+        "staff": ["visitor"]
+      },
+      "demo_users": [
+        {
+          "email": "{{env.ADMIN_EMAIL}}",
+          "password": "{{env.ADMIN_PASSWORD}}",
+          "role": "admin"
+        }
+      ]
+    }
+  },
+  "collections": {
+    "services": {
+      "auto_crud": true,
+      "auth": { "public_read": true, "write_roles": ["admin"] },
+      "schema": {
+        "type": "object",
+        "properties": {
+          "name":             { "type": "string" },
+          "description":      { "type": "string" },
+          "price":            { "type": "number" },
+          "currency":         { "type": "string" },
+          "duration_minutes": { "type": "integer" },
+          "active":           { "type": "boolean" }
+        },
+        "required": ["name"]
+      },
+      "defaults": {
+        "currency": "USD",
+        "active": true,
+        "duration_minutes": 60
+      },
+      "scopes": {
+        "active": { "active": true }
+      }
+    },
+    "business_hours": {
+      "auto_crud": true,
+      "auth": { "public_read": true, "write_roles": ["admin"] },
+      "schema": {
+        "type": "object",
+        "properties": {
+          "day":    { "type": "string", "enum": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"], "x-unique": true },
+          "open":   { "type": "string" },
+          "close":  { "type": "string" },
+          "closed": { "type": "boolean" }
+        },
+        "required": ["day"]
+      },
+      "defaults": {
+        "closed": false
+      }
+    },
+    "slides": {
+      "auto_crud": true,
+      "auth": { "public_read": true, "write_roles": ["admin"] },
+      "schema": {
+        "type": "object",
+        "properties": {
+          "order":     { "type": "integer" },
+          "image_url": { "type": "string" },
+          "eyebrow":   { "type": "string" },
+          "title":     { "type": "string" },
+          "subtitle":  { "type": "string" },
+          "cta_label": { "type": "string" },
+          "cta_href":  { "type": "string" },
+          "active":    { "type": "boolean" }
+        },
+        "required": ["title", "image_url"]
+      },
+      "defaults": { "order": 0, "active": true },
+      "scopes": { "active": { "active": true } }
+    },
+    "about_sections": {
+      "auto_crud": true,
+      "auth": { "public_read": true, "write_roles": ["admin"] },
+      "schema": {
+        "type": "object",
+        "properties": {
+          "order":     { "type": "integer" },
+          "icon":      { "type": "string" },
+          "heading":   { "type": "string" },
+          "body":      { "type": "string" },
+          "image_url": { "type": "string" },
+          "flip":      { "type": "boolean" }
+        },
+        "required": ["heading", "body"]
+      },
+      "defaults": { "order": 0, "flip": false }
+    },
+    "testimonials": {
+      "auto_crud": true,
+      "auth": { "public_read": true, "write_roles": ["admin"] },
+      "schema": {
+        "type": "object",
+        "properties": {
+          "order":      { "type": "integer" },
+          "author":     { "type": "string" },
+          "role":       { "type": "string" },
+          "quote":      { "type": "string" },
+          "avatar_url": { "type": "string" },
+          "rating":     { "type": "integer", "minimum": 1, "maximum": 5 }
+        },
+        "required": ["author", "quote"]
+      },
+      "defaults": { "order": 0, "rating": 5 }
+    },
+    "gallery": {
+      "auto_crud": true,
+      "auth": { "public_read": true, "write_roles": ["admin"] },
+      "schema": {
+        "type": "object",
+        "properties": {
+          "order":     { "type": "integer" },
+          "image_url": { "type": "string" },
+          "title":     { "type": "string" },
+          "category":  { "type": "string" },
+          "alt":       { "type": "string" }
+        },
+        "required": ["image_url"]
+      },
+      "defaults": { "order": 0 }
+    },
+    "faqs": {
+      "auto_crud": true,
+      "auth": { "public_read": true, "write_roles": ["admin"] },
+      "schema": {
+        "type": "object",
+        "properties": {
+          "order":    { "type": "integer" },
+          "question": { "type": "string" },
+          "answer":   { "type": "string" },
+          "category": { "type": "string" }
+        },
+        "required": ["question", "answer"]
+      },
+      "defaults": { "order": 0 }
+    },
+    "locations": {
+      "auto_crud": true,
+      "auth": { "public_read": true, "write_roles": ["admin"] },
+      "schema": {
+        "type": "object",
+        "properties": {
+          "order":          { "type": "integer" },
+          "name":           { "type": "string" },
+          "address_line1":  { "type": "string" },
+          "address_line2":  { "type": "string" },
+          "city":           { "type": "string" },
+          "region":         { "type": "string" },
+          "postcode":       { "type": "string" },
+          "country":        { "type": "string" },
+          "lat":            { "type": "number" },
+          "lng":            { "type": "number" },
+          "phone":          { "type": "string" },
+          "email":          { "type": "string" },
+          "directions_url": { "type": "string" },
+          "is_primary":     { "type": "boolean" }
+        },
+        "required": ["name", "lat", "lng"]
+      },
+      "defaults": { "order": 0, "is_primary": false, "country": "USA" },
+      "scopes": { "primary": { "is_primary": true } }
+    },
+    "leads": {
+      "auto_crud": true,
+      "auth": {
+        "create_roles": ["visitor", "staff", "admin"],
+        "write_roles":  ["staff", "admin"]
+      },
+      "owner_field": "submitter_id",
+      "policy": { "read": { "submitter_id": "{{user._id}}" } },
+      "immutable_fields": ["submitter_id", "source_service_id"],
+      "writable_fields": ["name", "contact", "channel", "message", "source_service_id", "status", "notes"],
+      "schema": {
+        "type": "object",
+        "properties": {
+          "name":              { "type": "string" },
+          "contact":           { "type": "string" },
+          "channel":           { "type": "string", "enum": ["email", "whatsapp", "phone"] },
+          "message":           { "type": "string" },
+          "source_service_id": { "type": "string" },
+          "status":            { "type": "string", "enum": ["new", "contacted", "won", "lost"] },
+          "notes":             { "type": "string" }
+        },
+        "required": ["name", "contact", "channel"]
+      },
+      "defaults": {
+        "status": "new",
+        "channel": "email"
+      },
+      "scopes": {
+        "open":  { "status": { "$in": ["new", "contacted"] } },
+        "new":   { "status": "new" },
+        "won":   { "status": "won" }
+      },
+      "hooks": {
+        "after_create": [
+          {
+            "action": "insert",
+            "collection": "audit_log",
+            "document": {
+              "event": "lead_created",
+              "entity": "leads",
+              "entity_id": "{{doc._id}}",
+              "actor": "{{user.email}}",
+              "timestamp": "$$NOW"
+            }
+          }
+        ],
+        "after_update": [
+          {
+            "action": "insert",
+            "collection": "audit_log",
+            "document": {
+              "event": "lead_updated",
+              "entity": "leads",
+              "entity_id": "{{doc._id}}",
+              "actor": "{{user.email}}",
+              "timestamp": "$$NOW"
+            }
+          }
+        ]
+      }
+    },
+    "appointments": {
+      "auto_crud": true,
+      "auth": {
+        "create_roles": ["visitor", "staff", "admin"],
+        "write_roles":  ["staff", "admin"]
+      },
+      "owner_field": "customer_id",
+      "policy": { "read": { "customer_id": "{{user._id}}" } },
+      "immutable_fields": ["customer_id"],
+      "writable_fields": ["service_id", "scheduled_at", "notes", "status", "channel", "contact"],
+      "schema": {
+        "type": "object",
+        "properties": {
+          "service_id":   { "type": "string" },
+          "scheduled_at": { "type": "string" },
+          "notes":        { "type": "string" },
+          "status":       { "type": "string", "enum": ["requested", "confirmed", "done", "cancelled"] },
+          "channel":      { "type": "string", "enum": ["email", "whatsapp", "phone"] },
+          "contact":      { "type": "string" }
+        },
+        "required": ["service_id", "scheduled_at", "contact"]
+      },
+      "defaults": {
+        "status": "requested",
+        "channel": "email"
+      },
+      "scopes": {
+        "upcoming":  { "status": { "$in": ["requested", "confirmed"] } },
+        "requested": { "status": "requested" },
+        "done":      { "status": "done" }
+      },
+      "hooks": {
+        "after_create": [
+          {
+            "action": "insert",
+            "collection": "audit_log",
+            "document": {
+              "event": "appointment_created",
+              "entity": "appointments",
+              "entity_id": "{{doc._id}}",
+              "actor": "{{user.email}}",
+              "timestamp": "$$NOW"
+            }
+          }
+        ]
+      }
+    },
+    "customers": {
+      "auto_crud": true,
+      "auth": { "roles": ["staff", "admin"] },
+      "schema": {
+        "type": "object",
+        "properties": {
+          "name":    { "type": "string" },
+          "email":   { "type": "string" },
+          "phone":   { "type": "string" },
+          "notes":   { "type": "string" },
+          "lead_id": { "type": "string" }
+        },
+        "required": ["name"]
+      }
+    },
+    "outbox": {
+      "auto_crud": true,
+      "auth": { "roles": ["admin"] },
+      "writable_fields": ["status", "attempts", "delivered_at", "error"],
+      "schema": {
+        "type": "object",
+        "properties": {
+          "channel":      { "type": "string", "enum": ["email", "whatsapp", "phone"] },
+          "to":           { "type": "string" },
+          "template":     { "type": "string" },
+          "payload":      { "type": "object" },
+          "status":       { "type": "string", "enum": ["pending", "logged", "delivered", "failed"] },
+          "attempts":     { "type": "integer" },
+          "delivered_at": { "type": "string" },
+          "error":        { "type": "string" }
+        }
+      },
+      "defaults": {
+        "status": "pending",
+        "attempts": 0
+      },
+      "scopes": {
+        "pending": { "status": "pending" }
+      },
+      "ttl": { "field": "created_at", "expire_after": "30d" }
+    },
+    "audit_log": {
+      "auto_crud": true,
+      "read_only": true,
+      "timestamps": false,
+      "auth": { "roles": ["admin"] },
+      "ttl": { "field": "timestamp", "expire_after": "90d" }
+    }
+  },
+  "actions": {
+    "enqueue-lead-notification": {
+      "trigger": "event",
+      "event": "after_create",
+      "collection": "leads"
+    },
+    "enqueue-booking-notification": {
+      "trigger": "event",
+      "event": "after_create",
+      "collection": "appointments"
+    },
+    "outbox-dispatch": {
+      "trigger": "schedule",
+      "interval_seconds": 30
+    }
+  },
+  "managed_indexes": {
+    "leads":        [{ "type": "regular", "keys": { "status": 1, "created_at": -1 }, "name": "idx_lead_status" }],
+    "appointments": [{ "type": "regular", "keys": { "scheduled_at": 1 }, "name": "idx_appt_when" }],
+    "outbox":       [{ "type": "regular", "keys": { "status": 1, "created_at": 1 }, "name": "idx_outbox_queue" }],
+    "slides":         [{ "type": "regular", "keys": { "order": 1 }, "name": "idx_slides_order" }],
+    "about_sections": [{ "type": "regular", "keys": { "order": 1 }, "name": "idx_about_order" }],
+    "testimonials": [
+      { "type": "regular", "keys": { "order": 1 }, "name": "idx_testimonials_order" },
+      {
+        "type": "search",
+        "name": "idx_testimonials_fts",
+        "definition": {
+          "mappings": {
+            "dynamic": false,
+            "fields": {
+              "quote":  { "type": "string", "analyzer": "lucene.english" },
+              "author": { "type": "string", "analyzer": "lucene.standard" },
+              "role":   { "type": "string", "analyzer": "lucene.standard" }
+            }
+          }
+        }
+      }
+    ],
+    "gallery": [
+      { "type": "regular", "keys": { "order": 1 }, "name": "idx_gallery_order" },
+      {
+        "type": "search",
+        "name": "idx_gallery_fts",
+        "definition": {
+          "mappings": {
+            "dynamic": false,
+            "fields": {
+              "title":    { "type": "string", "analyzer": "lucene.english" },
+              "alt":      { "type": "string", "analyzer": "lucene.english" },
+              "category": { "type": "string", "analyzer": "lucene.keyword" }
+            }
+          }
+        }
+      }
+    ],
+    "faqs": [
+      { "type": "regular", "keys": { "order": 1 }, "name": "idx_faqs_order" },
+      {
+        "type": "search",
+        "name": "idx_faqs_fts",
+        "definition": {
+          "mappings": {
+            "dynamic": false,
+            "fields": {
+              "question": { "type": "string", "analyzer": "lucene.english" },
+              "answer":   { "type": "string", "analyzer": "lucene.english" },
+              "category": { "type": "string", "analyzer": "lucene.keyword" }
+            }
+          }
+        }
+      }
+    ],
+    "services": [
+      {
+        "type": "search",
+        "name": "idx_services_fts",
+        "definition": {
+          "mappings": {
+            "dynamic": false,
+            "fields": {
+              "name":        { "type": "string", "analyzer": "lucene.english" },
+              "description": { "type": "string", "analyzer": "lucene.english" }
+            }
+          }
+        }
+      }
+    ],
+    "locations":      [{ "type": "regular", "keys": { "order": 1 }, "name": "idx_locations_order" }]
+  },
+
+  "manifest_tracking": {
+    "enabled": true,
+    "mode": "reconcile",
+    "protect_collections": ["leads", "appointments", "customers", "audit_log"],
+    "allow_immediate_drop": false,
+    "retention": {
+      "max_revisions": 50,
+      "max_age_days": 90,
+      "trash_ttl_days": 14
+    },
+    "sign_revisions": true,
+    "sweeper": {
+      "enabled": true,
+      "interval_seconds": 3600
+    },
+    "confirm_if": {
+      "destructive_ops": 2,
+      "docs_at_risk": 500,
+      "protect_on_match": ["*_audit*", "customers"]
+    }
+  },
+  "admin_api": {
+    "enabled": true,
+    "path_prefix": "/__mdb",
+    "auth": { "mode": "app_token", "header": "X-App-Token" },
+    "audit": { "enabled": true, "collection": "_mdb_admin_audit" },
+    "modules": {
+      "reconciler": { "enabled": true,  "scopes": ["read", "apply"] },
+      "trash":      { "enabled": true,  "scopes": ["read", "restore", "purge"] },
+      "secrets":    { "enabled": true,  "scopes": ["rotate"] },
+      "audit":      { "enabled": true,  "scopes": ["read"] },
+      "health":     { "enabled": true,  "public": false }
+    }
+  },
+  "initial_data": {
+    "services": [
+      { "name": "Standard Service", "description": "Our most popular package — thorough, reliable, and backed by our satisfaction guarantee.", "price": 149, "currency": "USD", "duration_minutes": 60, "active": true },
+      { "name": "Premium Service", "description": "Everything in Standard, plus extended diagnostics, detailed report, and priority scheduling.", "price": 249, "currency": "USD", "duration_minutes": 90, "active": true },
+      { "name": "Quick Consultation", "description": "A focused 30-minute session to scope your needs and recommend next steps. Fee credited toward booked work.", "price": 49, "currency": "USD", "duration_minutes": 30, "active": true }
+    ],
+    "business_hours": [
+      { "day": "mon", "open": "09:00", "close": "18:00", "closed": false },
+      { "day": "tue", "open": "09:00", "close": "18:00", "closed": false },
+      { "day": "wed", "open": "09:00", "close": "18:00", "closed": false },
+      { "day": "thu", "open": "09:00", "close": "18:00", "closed": false },
+      { "day": "fri", "open": "09:00", "close": "17:00", "closed": false },
+      { "day": "sat", "open": "10:00", "close": "14:00", "closed": false },
+      { "day": "sun", "open": "",      "close": "",      "closed": true  }
+    ],
+    "slides": [
+      {
+        "order": 1,
+        "image_url": "https://picsum.photos/seed/business-hero-1/1600/900",
+        "eyebrow": "Trusted since day one",
+        "title": "Work done right, the first time.",
+        "subtitle": "Friendly experts, transparent pricing, and a satisfaction guarantee on every job.",
+        "cta_label": "Get a free quote",
+        "cta_href": "#contact",
+        "active": true
+      },
+      {
+        "order": 2,
+        "image_url": "https://picsum.photos/seed/business-hero-2/1600/900",
+        "eyebrow": "Now booking",
+        "title": "Same-week availability.",
+        "subtitle": "Pick a time that works for you — we confirm within the hour during business hours.",
+        "cta_label": "Book an appointment",
+        "cta_href": "#book",
+        "active": true
+      },
+      {
+        "order": 3,
+        "image_url": "https://picsum.photos/seed/business-hero-3/1600/900",
+        "eyebrow": "Local & independent",
+        "title": "A small team that sweats the details.",
+        "subtitle": "No call centers, no upsells — just honest work from people who take pride in it.",
+        "cta_label": "Meet the team",
+        "cta_href": "#about",
+        "active": true
+      }
+    ],
+    "about_sections": [
+      {
+        "order": 1,
+        "icon": "shield",
+        "heading": "Licensed, insured, and reliable",
+        "body": "We show up when we say we will, do what we said we'd do, and stand behind every job. If something isn't right, we make it right.",
+        "image_url": "https://picsum.photos/seed/business-about-1/1200/800",
+        "flip": false
+      },
+      {
+        "order": 2,
+        "icon": "sparkles",
+        "heading": "Craftsmanship over shortcuts",
+        "body": "Anyone can do a job fast. We focus on doing it well — with the right tools, the right materials, and the kind of attention to detail that shows five years from now.",
+        "image_url": "https://picsum.photos/seed/business-about-2/1200/800",
+        "flip": true
+      },
+      {
+        "order": 3,
+        "icon": "heart",
+        "heading": "Built on repeat customers",
+        "body": "Most of our work comes from referrals and clients we've served for years. That only happens when every interaction earns your trust.",
+        "image_url": "https://picsum.photos/seed/business-about-3/1200/800",
+        "flip": false
+      }
+    ],
+    "testimonials": [
+      { "order": 1, "author": "Sarah M.", "role": "Homeowner",       "quote": "Showed up on time, explained everything clearly, and the price matched the quote to the dollar. Couldn't ask for more.",              "avatar_url": "https://i.pravatar.cc/150?img=47", "rating": 5 },
+      { "order": 2, "author": "David R.", "role": "Small business",   "quote": "We've used them for three years running. Always professional, always fair. They treat our place like their own.",                    "avatar_url": "https://i.pravatar.cc/150?img=12", "rating": 5 },
+      { "order": 3, "author": "Priya K.", "role": "Property manager", "quote": "Honest about what needed doing — and what didn't. That saved me from a much bigger bill I was expecting somewhere else.",           "avatar_url": "https://i.pravatar.cc/150?img=32", "rating": 5 },
+      { "order": 4, "author": "Miguel A.", "role": "First-time client","quote": "Responsive from the first message. Booked online, confirmation within an hour, job done the next day. Exactly how it should work.", "avatar_url": "https://i.pravatar.cc/150?img=68", "rating": 5 },
+      { "order": 5, "author": "Elena T.", "role": "Repeat customer",  "quote": "Friendly team, tidy workspace, and they even followed up a week later to make sure everything was still working. Rare these days.","avatar_url": "https://i.pravatar.cc/150?img=25", "rating": 5 },
+      { "order": 6, "author": "Jordan P.", "role": "Referral",        "quote": "My neighbor wouldn't stop recommending them. Now I get why — fair pricing and zero drama. Already booked them for my next job.",     "avatar_url": "https://i.pravatar.cc/150?img=58", "rating": 5 }
+    ],
+    "gallery": [
+      { "order": 1, "image_url": "https://picsum.photos/seed/business-gallery-1/900/900", "title": "Recent project",  "category": "work",   "alt": "Finished work on a recent project" },
+      { "order": 2, "image_url": "https://picsum.photos/seed/business-gallery-2/900/900", "title": "In the workshop", "category": "behind", "alt": "Our team at work in the shop" },
+      { "order": 3, "image_url": "https://picsum.photos/seed/business-gallery-3/900/900", "title": "On location",     "category": "work",   "alt": "On-site work at a client location" },
+      { "order": 4, "image_url": "https://picsum.photos/seed/business-gallery-4/900/900", "title": "Tools of the trade","category": "behind","alt": "A selection of the tools we use" },
+      { "order": 5, "image_url": "https://picsum.photos/seed/business-gallery-5/900/900", "title": "Happy customer",  "category": "work",   "alt": "A customer enjoying the finished result" },
+      { "order": 6, "image_url": "https://picsum.photos/seed/business-gallery-6/900/900", "title": "Detail work",     "category": "work",   "alt": "Close-up of the detail we put into our work" },
+      { "order": 7, "image_url": "https://picsum.photos/seed/business-gallery-7/900/900", "title": "Team day",        "category": "team",   "alt": "Our team at a planning session" },
+      { "order": 8, "image_url": "https://picsum.photos/seed/business-gallery-8/900/900", "title": "Before & after",  "category": "work",   "alt": "Before and after a recent job" }
+    ],
+    "faqs": [
+      { "order": 1, "question": "How quickly can you get to my job?",                 "answer": "Most jobs are booked within the same week. For urgent requests, give us a call — we keep a small buffer for emergencies." },
+      { "order": 2, "question": "Do you give free quotes?",                            "answer": "Yes. Send us a message with a short description (and photos if you have them) and we'll come back with a clear, itemized quote — no obligation." },
+      { "order": 3, "question": "What areas do you serve?",                            "answer": "We serve the city and surrounding suburbs. If you're outside that radius, reach out anyway — we'll let you know if we can help or recommend someone who can." },
+      { "order": 4, "question": "Are you insured?",                                    "answer": "Fully licensed and insured. We're happy to share our certificate of insurance on request before any work begins." },
+      { "order": 5, "question": "Do you guarantee your work?",                         "answer": "Every job is backed by our satisfaction guarantee. If something isn't right, let us know within 30 days and we'll come back and fix it at no charge." },
+      { "order": 6, "question": "What payment methods do you accept?",                 "answer": "Cash, card, bank transfer, and most major digital wallets. Invoicing is available for repeat business customers." }
+    ],
+    "locations": [
+      {
+        "order": 1,
+        "name": "Main office",
+        "address_line1": "123 Market Street",
+        "address_line2": "Suite 200",
+        "city": "Denver",
+        "region": "CO",
+        "postcode": "80202",
+        "country": "USA",
+        "lat": 39.7492,
+        "lng": -104.9903,
+        "phone": "+1 (555) 010-0100",
+        "email": "hello@acme.local",
+        "directions_url": "https://www.google.com/maps/dir/?api=1&destination=39.7492,-104.9903",
+        "is_primary": true
+      }
+    ]
+  },
+
+  "ssr": {
+    "enabled": true,
+    "lang": "en",
+    "site_name": "Acme Services",
+    "site_description": "Friendly experts, transparent pricing, a satisfaction guarantee on every job.",
+    "base_url": "{{env.SITE_BASE_URL}}",
+    "trailing_slash": "strip",
+    "preload": [
+      { "href": "/public/app.css", "rel": "preload", "as": "style" },
+      { "href": "https://picsum.photos", "rel": "preconnect" },
+      { "href": "https://i.pravatar.cc", "rel": "dns-prefetch" }
+    ],
+    "routes": {
+      "/": {
+        "template": "home.html",
+        "data": {
+          "slides":         { "collection": "slides",         "scope": "active", "sort": { "order": 1 }, "limit": 20 },
+          "about_sections": { "collection": "about_sections", "sort": { "order": 1 }, "limit": 20 },
+          "services":       { "collection": "services",       "scope": "active", "sort": { "name": 1 }, "limit": 50 },
+          "gallery":        { "collection": "gallery",        "sort": { "order": 1 }, "limit": 40 },
+          "testimonials":   { "collection": "testimonials",   "sort": { "order": 1 }, "limit": 20 },
+          "business_hours": { "collection": "business_hours", "limit": 7 },
+          "faqs":           { "collection": "faqs",           "sort": { "order": 1 }, "limit": 40 },
+          "locations":      { "collection": "locations",      "sort": { "order": 1 }, "limit": 10 }
+        },
+        "seo": {
+          "title": "Acme Services \u2014 Quality service, no back-and-forth",
+          "description": "Book a service visit in under a minute. Licensed, insured, and locally owned.",
+          "og_image": "https://picsum.photos/seed/business-og/1200/630",
+          "robots": "index, follow",
+          "json_ld": {
+            "@context": "https://schema.org",
+            "@type": "LocalBusiness",
+            "name": "Acme Services",
+            "description": "Friendly experts, transparent pricing, a satisfaction guarantee on every job.",
+            "priceRange": "$$"
+          }
+        },
+        "cache": { "ttl": "5m", "etag": true, "scope": "public" }
+      }
+    }
+  }
+}

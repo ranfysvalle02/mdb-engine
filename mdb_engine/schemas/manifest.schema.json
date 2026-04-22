@@ -1006,6 +1006,200 @@
       },
       "description": "Collection name -> list of index definitions"
     },
+    "manifest_tracking": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable manifest reconciliation and revision tracking."
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["safe", "reconcile", "strict"],
+          "default": "safe",
+          "description": "Reconciler mode: 'safe' (adds/updates only, log removals), 'reconcile' (quarantine removals into trash), 'strict' (same as reconcile, but empty collections may skip quarantine when allow_immediate_drop is set)."
+        },
+        "protect_collections": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Collection names that must never be quarantined, even if removed from the manifest."
+        },
+        "allow_immediate_drop": {
+          "type": "boolean",
+          "default": false,
+          "description": "When mode='strict', allow empty collections to be dropped immediately instead of quarantined."
+        },
+        "retention": {
+          "type": "object",
+          "properties": {
+            "max_revisions": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 50,
+              "description": "Maximum number of manifest revisions to retain per app."
+            },
+            "max_age_days": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 90,
+              "description": "Maximum age (days) of manifest revisions to retain per app."
+            },
+            "trash_ttl_days": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 14,
+              "description": "Days a quarantined artifact lives in trash before auto-purge."
+            }
+          },
+          "additionalProperties": false,
+          "description": "Retention policy for revision history and quarantined artifacts."
+        },
+        "sign_revisions": {
+          "type": "boolean",
+          "default": false,
+          "description": "If true, revision documents include an HMAC signature derived from the app secret."
+        },
+        "sweeper": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean", "default": true },
+            "interval_seconds": { "type": "integer", "minimum": 60, "default": 3600 }
+          },
+          "additionalProperties": false,
+          "description": "Built-in scheduled sweeper that hard-drops expired quarantine entries."
+        },
+        "confirm_if": {
+          "type": "object",
+          "properties": {
+            "destructive_ops": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Block apply when the plan contains N or more destructive ops (drop_collection/drop_index/disable_service) unless --yes / MDB_CONFIRM=1 is set."
+            },
+            "docs_at_risk": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Block apply when the estimated total document count across destructive ops is >= this value."
+            },
+            "protect_on_match": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Glob patterns matched against destructive op target names. Any match forces explicit confirmation."
+            }
+          },
+          "additionalProperties": false,
+          "description": "Safety thresholds that block large or sensitive applies until explicitly confirmed."
+        }
+      },
+      "additionalProperties": false,
+      "description": "Manifest reconciliation configuration. Controls how startup cleans up the database when the manifest changes."
+    },
+    "admin_api": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, the engine mounts the admin plane (/__mdb/*) on the generated FastAPI app. Default is false: the admin surface is opt-in. Endpoints require a valid X-App-Token header unless the module declares itself public."
+        },
+        "path_prefix": {
+          "type": "string",
+          "default": "/__mdb",
+          "description": "Path prefix under which the admin plane is mounted."
+        },
+        "auth": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": ["app_token"],
+              "default": "app_token",
+              "description": "Auth mode used by the admin plane. Only 'app_token' is supported today."
+            },
+            "header": {
+              "type": "string",
+              "default": "X-App-Token",
+              "description": "HTTP header name carrying the per-app token."
+            }
+          },
+          "additionalProperties": false
+        },
+        "audit": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true,
+              "description": "When true, every authenticated call writes one row to the audit collection."
+            },
+            "collection": {
+              "type": "string",
+              "default": "_mdb_admin_audit",
+              "description": "Collection storing audit rows. Created automatically with TTL and slug/module indexes."
+            }
+          },
+          "additionalProperties": false
+        },
+        "modules": {
+          "type": "object",
+          "properties": {
+            "reconciler": {
+              "type": "object",
+              "properties": {
+                "enabled": { "type": "boolean", "default": true },
+                "scopes": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "default": ["read", "apply"]
+                }
+              },
+              "additionalProperties": false
+            },
+            "trash": {
+              "type": "object",
+              "properties": {
+                "enabled": { "type": "boolean", "default": true },
+                "scopes": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "default": ["read", "restore", "purge"]
+                }
+              },
+              "additionalProperties": false
+            },
+            "secrets": {
+              "type": "object",
+              "properties": {
+                "enabled": { "type": "boolean", "default": false },
+                "scopes": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "default": ["rotate"]
+                }
+              },
+              "additionalProperties": false
+            },
+            "health": {
+              "type": "object",
+              "properties": {
+                "enabled": { "type": "boolean", "default": true },
+                "public": {
+                  "type": "boolean",
+                  "default": false,
+                  "description": "If true, GET /health (liveness) bypasses auth. /health/modules is always authenticated."
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": true,
+          "description": "Per-module enable/scope configuration. Missing entries default to the module's built-in defaults."
+        }
+      },
+      "additionalProperties": false,
+      "description": "First-class admin plane (/__mdb/*): pluggable modules with shared auth + audit. Replaces manifest_tracking.admin_api."
+    },
     "encrypted_fields": {
       "type": "object",
       "patternProperties": {
@@ -2630,6 +2824,11 @@
           "pattern": "^[a-zA-Z0-9_]+$",
           "minLength": 1,
           "description": "Base index name (will be prefixed with slug)"
+        },
+        "rename_from": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Previous index names that should be treated as the same index during reconciliation (prevents drop+add when an index is renamed). Names are matched against the unprefixed base name."
         },
         "type": {
           "type": "string",

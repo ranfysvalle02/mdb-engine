@@ -1,0 +1,813 @@
+<!DOCTYPE html>
+<html lang="{{ lang }}">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ seo.title }}</title>
+  <meta name="description" content="{{ seo.description }}">
+  <link rel="canonical" href="{{ seo.canonical }}">
+  {% if seo.robots %}<meta name="robots" content="{{ seo.robots }}">{% endif %}
+
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="{{ seo.title }}">
+  <meta property="og:description" content="{{ seo.description }}">
+  <meta property="og:url" content="{{ seo.canonical }}">
+  {% if seo.og_image %}<meta property="og:image" content="{{ seo.og_image }}">{% endif %}
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="{{ seo.title }}">
+  <meta name="twitter:description" content="{{ seo.description }}">
+
+  {% for link in preload_links %}
+    {% if link.rel == 'preload' %}
+  <link rel="preload" href="{{ link.href }}" as="{{ link.as }}"{% if link.crossorigin %} crossorigin{% endif %}>
+    {% elif link.rel == 'preconnect' %}
+  <link rel="preconnect" href="{{ link.href }}"{% if link.crossorigin %} crossorigin{% endif %}>
+    {% elif link.rel == 'dns-prefetch' %}
+  <link rel="dns-prefetch" href="{{ link.href }}">
+    {% endif %}
+  {% endfor %}
+
+  <link rel="stylesheet" href="{{ asset_url('app.css') if asset_url is defined else base_path ~ '/public/app.css' }}">
+
+  {% if seo.json_ld %}
+  <script type="application/ld+json">{{ seo.json_ld | safe }}</script>
+  {% endif %}
+</head>
+<body>
+
+<div class="toasts" id="toasts"></div>
+
+<div class="lightbox" id="lightbox" onclick="closeLightbox()">
+  <button class="close" onclick="closeLightbox()" aria-label="Close">&times;</button>
+  <img id="lightboxImg" src="" alt="">
+</div>
+
+<nav class="top" id="topNav">
+  <div class="inner">
+    <a class="brand" href="#top" data-nav="home" onclick="event.preventDefault();navClick(this)">{{ seo.site_name }}<span>.</span></a>
+    <div class="nav-drawer" id="navDrawer">
+      <div class="links" id="navLinks" role="menubar" aria-label="Main menu">
+        <button data-nav="home" class="on" role="menuitem">Home</button>
+        <button data-nav="services" role="menuitem">Services</button>
+        <button data-nav="gallery" role="menuitem">Gallery</button>
+        <button data-nav="testimonials" role="menuitem">Reviews</button>
+        <button data-nav="find-us" role="menuitem">Visit</button>
+        <button data-nav="faq" role="menuitem">FAQ</button>
+        <button data-v="book" role="menuitem">Book</button>
+        <button data-v="admin" class="admin-only hidden" role="menuitem">Admin</button>
+        <span class="nav-indicator" aria-hidden="true"></span>
+      </div>
+      <div class="auth-area" id="authArea"></div>
+    </div>
+    <button class="nav-toggle" id="navToggle" aria-label="Open menu" aria-expanded="false" aria-controls="navDrawer" onclick="toggleNav()">
+      <span></span><span></span><span></span>
+    </button>
+  </div>
+  <div class="nav-scrim" id="navScrim" onclick="closeNav()"></div>
+</nav>
+
+<div class="auth-panel" id="authPanel">
+  <h3 id="authPanelTitle">Sign in</h3>
+  <div class="auth-row">
+    <input id="authEmail" type="email" placeholder="you@example.com" autocomplete="email">
+    <input id="authPassword" type="password" placeholder="Password" autocomplete="current-password">
+    <button class="btn btn-p" id="authSubmitBtn">Sign in</button>
+    <button class="btn btn-o" onclick="hideAuthPanel()">Cancel</button>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     HOME — server-rendered marketing view (default visible)
+     ═══════════════════════════════════════════════════════════════════ -->
+<div class="view on" id="v-home">
+
+  <section class="hero-slider" id="heroSlider">
+    {% if slides %}
+      {% for s in slides %}
+      <div class="hero-slide{% if loop.first %} on{% endif %}">
+        <div class="bg" style="background-image:url('{{ s.image_url }}')"></div>
+        <div class="content">
+          {% if s.eyebrow %}<span class="hero-eyebrow">{{ s.eyebrow }}</span>{% endif %}
+          <h1 class="hero-title">{{ s.title }}</h1>
+          {% if s.subtitle %}<p class="hero-subtitle">{{ s.subtitle }}</p>{% endif %}
+          {% if s.cta_label %}
+          <div class="hero-cta"><a href="{{ s.cta_href or '#contact' }}" class="btn btn-p btn-lg">{{ s.cta_label }}</a></div>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+      {% if slides|length > 1 %}
+      <button class="hero-arrow prev" onclick="slideStep(-1)" aria-label="Previous slide">&lsaquo;</button>
+      <button class="hero-arrow next" onclick="slideStep(1)" aria-label="Next slide">&rsaquo;</button>
+      <div class="hero-nav" id="heroNav"></div>
+      {% endif %}
+    {% else %}
+      <div class="hero-slide on">
+        <div class="bg" style="background:linear-gradient(135deg,#14b8a6 0%,#0f766e 100%)"></div>
+        <div class="content">
+          <span class="hero-eyebrow">Welcome</span>
+          <h1 class="hero-title">Quality service, no back-and-forth.</h1>
+          <p class="hero-subtitle">Add slides in Admin &rarr; Site content to customize this hero.</p>
+          <div class="hero-cta"><a href="#contact" class="btn btn-p btn-lg">Get a free quote</a></div>
+        </div>
+      </div>
+    {% endif %}
+  </section>
+
+  <section class="trust-bar">
+    <div class="inner">
+      <div class="trust-item"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg> Licensed &amp; insured</div>
+      <div class="trust-item"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="9 12 11 14 15 10"/></svg> Satisfaction guaranteed</div>
+      <div class="trust-item"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg> 5-star rated locally</div>
+      <div class="trust-item"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg> Locally owned</div>
+    </div>
+  </section>
+
+  {% if about_sections %}
+  <section class="m-section" id="about" data-reveal>
+    <div class="m-inner">
+      <div class="m-head">
+        <span class="m-eyebrow">About us</span>
+        <h2 class="m-title">Why people choose us</h2>
+        <p class="m-subtitle">We&#39;re built on three simple promises, and we back every one of them.</p>
+      </div>
+      <div id="aboutGrid">
+        {% for b in about_sections %}
+        <div class="about-block{% if b.flip %} flip{% endif %}">
+          <div>
+            <div class="icon-chip">
+              {% if b.icon == 'shield' %}
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              {% elif b.icon == 'sparkles' %}
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l2 5 5 2-5 2-2 5-2-5-5-2 5-2z"/><path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9z"/></svg>
+              {% elif b.icon == 'heart' %}
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+              {% elif b.icon == 'check' %}
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="9 12 11 14 15 10"/></svg>
+              {% else %}
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+              {% endif %}
+            </div>
+            <h3>{{ b.heading }}</h3>
+            <p>{{ b.body }}</p>
+          </div>
+          <div class="visual">{% if b.image_url %}<img src="{{ b.image_url }}" alt="{{ b.heading }}" loading="lazy">{% endif %}</div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+  {% endif %}
+
+  <section class="m-section alt" id="services" data-reveal>
+    <div class="m-inner">
+      <div class="m-head">
+        <span class="m-eyebrow">Services</span>
+        <h2 class="m-title">Simple pricing, no surprises</h2>
+        <p class="m-subtitle">Every package is transparent, upfront, and tailored to what you actually need.</p>
+      </div>
+      <div class="services-grid" id="servicesGrid">
+        {% if services %}
+          {% for s in services %}
+          <div class="service-card">
+            <h3>{{ s.name }}</h3>
+            <div class="sc-desc">{{ s.description or '' }}</div>
+            <div class="sc-foot">
+              <div class="sc-price">
+                {% if s.price is not none %}{{ s.currency or 'USD' }} {{ s.price }}{% else %}&mdash;{% endif %}
+              </div>
+              {% if s.duration_minutes %}<div class="sc-dur">{{ s.duration_minutes }} min</div>{% endif %}
+            </div>
+          </div>
+          {% endfor %}
+        {% else %}
+          <div class="empty">No services yet. Sign in as admin to add some.</div>
+        {% endif %}
+      </div>
+    </div>
+  </section>
+
+  {% if gallery %}
+  <section class="m-section" id="gallery" data-reveal>
+    <div class="m-inner">
+      <div class="m-head">
+        <span class="m-eyebrow">Gallery</span>
+        <h2 class="m-title">Recent work</h2>
+        <p class="m-subtitle">A small window into what we do every day.</p>
+      </div>
+      <div class="gallery-grid" id="galleryGrid">
+        {% for g in gallery %}
+        <div class="gallery-item" data-src="{{ g.image_url }}" data-alt="{{ g.alt or g.title or '' }}">
+          <img src="{{ g.image_url }}" alt="{{ g.alt or g.title or '' }}" loading="lazy">
+          {% if g.title or g.category %}
+          <div class="overlay">
+            <div class="overlay-text">
+              {% if g.category %}<span class="overlay-cat">{{ g.category }}</span>{% endif %}
+              {{ g.title or '' }}
+            </div>
+          </div>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+  {% endif %}
+
+  {% if testimonials %}
+  <section class="m-section alt" id="testimonials" data-reveal>
+    <div class="m-inner">
+      <div class="m-head">
+        <span class="m-eyebrow">Testimonials</span>
+        <h2 class="m-title">What our customers say</h2>
+      </div>
+      <div class="testimonials-grid" id="testimonialsGrid">
+        {% for t in testimonials %}
+          {% set rating = t.rating if t.rating and t.rating >= 1 and t.rating <= 5 else 5 %}
+        <div class="testimonial">
+          <div class="stars">{{ '\u2605' * rating }}{{ '\u2606' * (5 - rating) }}</div>
+          <div class="quote">{{ t.quote }}</div>
+          <div class="who">
+            {% if t.avatar_url %}
+            <img src="{{ t.avatar_url }}" alt="{{ t.author }}" loading="lazy">
+            {% else %}
+            <div style="width:40px;height:40px;border-radius:50%;background:var(--surface3)"></div>
+            {% endif %}
+            <div>
+              <div class="name">{{ t.author }}</div>
+              {% if t.role %}<div class="role">{{ t.role }}</div>{% endif %}
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+  {% endif %}
+
+  <section class="m-section" id="hours" data-reveal>
+    <div class="m-inner">
+      <div class="m-head">
+        <span class="m-eyebrow">Hours</span>
+        <h2 class="m-title">When we&#39;re available</h2>
+      </div>
+      {% set by_day = {} %}
+      {% for h in business_hours %}{% set _ = by_day.update({h.day: h}) %}{% endfor %}
+      <div class="hours-grid" id="hoursGrid">
+        {% for d in ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] %}
+          {% set h = by_day.get(d) %}
+          {% if not h %}
+            <div class="hour-cell"><div class="d">{{ d }}</div><div class="t muted">&mdash;</div></div>
+          {% elif h.closed %}
+            <div class="hour-cell closed"><div class="d">{{ d }}</div><div class="t">closed</div></div>
+          {% else %}
+            <div class="hour-cell"><div class="d">{{ d }}</div><div class="t">{{ h.open or '' }}&ndash;{{ h.close or '' }}</div></div>
+          {% endif %}
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+
+  {% if locations %}
+  {% set loc = locations[0] %}
+  {% set lat = loc.lat | float %}
+  {% set lng = loc.lng | float %}
+  {% set bbox_pad = 0.008 %}
+  <section class="m-section alt" id="find-us" data-reveal>
+    <div class="m-inner">
+      <div class="m-head">
+        <span class="m-eyebrow">Find us</span>
+        <h2 class="m-title">Stop by or reach out</h2>
+        <p class="m-subtitle">We&#39;re based {% if loc.city %}in {{ loc.city }}{% if loc.region %}, {{ loc.region }}{% endif %}{% else %}locally{% endif %} &mdash; get directions, call, or email below.</p>
+      </div>
+      <div class="map-wrap">
+        <aside class="map-card">
+          <div class="map-card-head">
+            <span class="map-pin" aria-hidden="true">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+            </span>
+            <div>
+              <div class="loc-eyebrow">Visit us at</div>
+              <h3 class="loc-name">{{ loc.name }}</h3>
+            </div>
+          </div>
+          {% if loc.address_line1 or loc.city %}
+          <address class="loc-address">
+            {% if loc.address_line1 %}<span class="loc-line">{{ loc.address_line1 }}</span>{% endif %}
+            {% if loc.address_line2 %}<span class="loc-line">{{ loc.address_line2 }}</span>{% endif %}
+            {% if loc.city or loc.region or loc.postcode %}
+            <span class="loc-line">{{ loc.city or '' }}{% if loc.city and (loc.region or loc.postcode) %}, {% endif %}{{ loc.region or '' }}{% if loc.postcode %} {{ loc.postcode }}{% endif %}</span>
+            {% endif %}
+            {% if loc.country %}<span class="loc-line muted">{{ loc.country }}</span>{% endif %}
+          </address>
+          {% endif %}
+          <dl class="loc-meta">
+            {% if loc.phone %}
+            <div class="loc-meta-row">
+              <dt aria-label="Phone">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.79 19.79 0 0 1 2.12 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+              </dt>
+              <dd><a href="tel:{{ loc.phone }}">{{ loc.phone }}</a></dd>
+            </div>
+            {% endif %}
+            {% if loc.email %}
+            <div class="loc-meta-row">
+              <dt aria-label="Email">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+              </dt>
+              <dd><a href="mailto:{{ loc.email }}">{{ loc.email }}</a></dd>
+            </div>
+            {% endif %}
+          </dl>
+          {% if loc.directions_url %}
+          <a href="{{ loc.directions_url }}" target="_blank" rel="noopener" class="btn btn-p loc-cta">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>
+            Get directions
+          </a>
+          {% endif %}
+          {% if locations|length > 1 %}
+          <div class="loc-others">
+            <div class="loc-others-label">Other locations</div>
+            <ul>
+              {% for l in locations[1:] %}
+              <li>
+                <strong>{{ l.name }}</strong>
+                {% if l.city %}<span class="muted"> &middot; {{ l.city }}{% if l.region %}, {{ l.region }}{% endif %}</span>{% endif %}
+              </li>
+              {% endfor %}
+            </ul>
+          </div>
+          {% endif %}
+        </aside>
+        <div class="map-embed">
+          <iframe
+            src="https://www.openstreetmap.org/export/embed.html?bbox={{ lng - bbox_pad }}%2C{{ lat - bbox_pad / 2 }}%2C{{ lng + bbox_pad }}%2C{{ lat + bbox_pad / 2 }}&amp;layer=mapnik&amp;marker={{ lat }}%2C{{ lng }}"
+            loading="lazy" title="Map showing {{ loc.name }}" allowfullscreen></iframe>
+          <a class="map-larger" href="https://www.openstreetmap.org/?mlat={{ lat }}&amp;mlon={{ lng }}#map=16/{{ lat }}/{{ lng }}" target="_blank" rel="noopener">View larger map &rsaquo;</a>
+        </div>
+      </div>
+    </div>
+  </section>
+  {% endif %}
+
+  {% if faqs %}
+  <section class="m-section" id="faq" data-reveal>
+    <div class="m-inner">
+      <div class="m-head">
+        <span class="m-eyebrow">FAQ</span>
+        <h2 class="m-title">Common questions</h2>
+      </div>
+      <div class="faq-list" id="faqList">
+        {% for f in faqs %}
+        <details class="faq-item">
+          <summary>{{ f.question }}</summary>
+          <div class="answer">{{ f.answer }}</div>
+        </details>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+  {% endif %}
+
+  <section class="cta-section" id="contact">
+    <div class="cta-wrap">
+      <div class="cta-head">
+        <span class="m-eyebrow">Get a quote</span>
+        <h2 class="m-title">Tell us what you need</h2>
+        <p class="m-subtitle">We&#39;ll read every message and respond within one business day.</p>
+      </div>
+      <div class="form-card" id="leadFormCard">
+        <div class="form-row">
+          <div>
+            <label for="lName">Your name</label>
+            <input id="lName" placeholder="Alex Rivera">
+          </div>
+          <div>
+            <label for="lContact">Email or phone</label>
+            <input id="lContact" placeholder="alex@example.com">
+          </div>
+        </div>
+        <div class="form-row">
+          <div>
+            <label for="lChannel">Preferred channel</label>
+            <select id="lChannel">
+              <option value="email">Email</option>
+              <option value="sms">SMS / Text</option>
+              <option value="whatsapp">WhatsApp</option>
+              <option value="phone">Phone call</option>
+            </select>
+          </div>
+          <div>
+            <label for="lService">Service of interest</label>
+            <select id="lService">
+              <option value="">&mdash; any / not sure &mdash;</option>
+              {% for s in services %}
+              <option value="{{ s._id }}">{{ s.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+        <div class="form-field">
+          <label for="lMessage">What do you need help with?</label>
+          <textarea id="lMessage" rows="4" placeholder="A short description &mdash; no pressure, we&#39;ll follow up to scope it."></textarea>
+        </div>
+        <div class="form-actions">
+          <button class="btn btn-p btn-lg" onclick="submitLead()">Send request</button>
+          <span class="form-hint">We&#39;ll reply within one business day.</span>
+        </div>
+      </div>
+      <div class="form-thanks" id="leadThanks" hidden>
+        <div class="thanks-icon" aria-hidden="true">
+          <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="9 12 11 14 15 10"/></svg>
+        </div>
+        <h3>We&#39;ll be in touch soon!</h3>
+        <p>Thanks for reaching out. Someone from our team will get back to you within one business day.</p>
+        <div class="form-actions" style="justify-content:center">
+          <button class="btn btn-o" onclick="resetLeadForm()">Send another request</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <div class="footer-col">
+        <div class="brand-large">{{ seo.site_name }}<span>.</span></div>
+        <p>{{ seo.description }}</p>
+      </div>
+      <div class="footer-col">
+        <h4>Services</h4>
+        <ul>
+          {% for s in services[:4] %}
+          <li><a href="#services">{{ s.name }}</a></li>
+          {% endfor %}
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4>Visit</h4>
+        <ul>
+          <li><a href="#about">About</a></li>
+          <li><a href="#gallery">Gallery</a></li>
+          <li><a href="#faq">FAQ</a></li>
+          <li><a href="#hours">Hours</a></li>
+          <li><a href="#find-us">Find us</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4>Contact</h4>
+        <ul>
+          <li><a href="#contact">Get a quote</a></li>
+          <li><a href="#" onclick="go('book');return false;">Book a visit</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <div>&copy; <span id="copyYear"></span> {{ seo.site_name }}. Built with <a href="https://github.com/NEWERA/mdb-engine">mdb-engine</a>.</div>
+      <div>Manifest-driven site &middot; SSR at <code>/</code></div>
+    </div>
+  </footer>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     BOOK — client-hydrated SPA view (hidden by default)
+     ═══════════════════════════════════════════════════════════════════ -->
+<div class="view" id="v-book">
+  <div class="view-hero">
+    <span class="tag">Book a visit</span>
+    <h1>Pick a time, we&#39;ll confirm.</h1>
+    <p>Choose a service, propose a date/time, and share how you&#39;d like us to confirm. We&#39;ll respond within one business day.</p>
+  </div>
+  <div class="wrap">
+    <div class="form-card" id="bookFormCard">
+      <div class="form-row">
+        <div>
+          <label for="bService">Service</label>
+          <select id="bService">
+            {% if services %}
+              {% for s in services %}
+              <option value="{{ s._id }}">{{ s.name }}</option>
+              {% endfor %}
+            {% else %}
+              <option value="">(no services yet)</option>
+            {% endif %}
+          </select>
+        </div>
+        <div>
+          <label for="bWhen">Preferred date &amp; time</label>
+          <input id="bWhen" type="datetime-local">
+        </div>
+      </div>
+      <div class="form-row">
+        <div>
+          <label for="bChannel">How should we confirm?</label>
+          <select id="bChannel">
+            <option value="email">Email</option>
+            <option value="sms">SMS / Text</option>
+            <option value="whatsapp">WhatsApp</option>
+            <option value="phone">Phone call</option>
+          </select>
+        </div>
+        <div>
+          <label for="bContact">Contact for confirmation</label>
+          <input id="bContact" placeholder="you@example.com or +1 555 0100">
+        </div>
+      </div>
+      <div class="form-field">
+        <label for="bNotes">Anything we should know?</label>
+        <textarea id="bNotes" rows="3" placeholder="Access code, parking, special requirements&hellip;"></textarea>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-p" onclick="submitBooking()">Request booking</button>
+        <span class="form-hint">We&#39;ll reach out to confirm. No charge until we agree on scope.</span>
+      </div>
+    </div>
+    <div class="form-thanks" id="bookThanks" hidden>
+      <div class="thanks-icon" aria-hidden="true">
+        <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="9 12 11 14 15 10"/></svg>
+      </div>
+      <h3>Booking request received!</h3>
+      <p>We&#39;ll reach out on your preferred channel to confirm the time. Typically within one business day.</p>
+      <div class="form-actions" style="justify-content:center">
+        <button class="btn btn-o" onclick="resetBookForm()">Book another visit</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     ADMIN — client-hydrated SPA view (hidden by default, admin-only)
+     ═══════════════════════════════════════════════════════════════════ -->
+<div class="view" id="v-admin">
+  <div class="view-hero">
+    <span class="tag">Admin</span>
+    <h1>Operations dashboard</h1>
+    <p>Manage leads, appointments, outbound notifications, services, and site content &mdash; all from one place.</p>
+  </div>
+  <div class="wrap">
+    <div class="stats" id="adminStats"></div>
+
+    <div class="admin-section" id="mdbOpsSection">
+      <h2>Ops <small class="sub" style="font-weight:400">mdb-engine admin plane</small></h2>
+      <p class="sub">Pending schema changes, quarantined artifacts, audit log, and token rotation. Authenticated via your app token.</p>
+      <div id="mdbOpsModuleBadges" class="ops-badges"></div>
+      <div class="tabs" id="mdbOpsTabs">
+        <button class="on" data-o="pending">Pending changes</button>
+        <button data-o="trash">Trash</button>
+        <button data-o="history">History</button>
+        <button data-o="audit">Audit</button>
+        <button data-o="secrets">Secrets</button>
+      </div>
+      <div class="ops-panel on" id="mdbOpsPending">
+        <div class="form-actions" style="margin-bottom:12px">
+          <button class="btn btn-o btn-sm" onclick="mdbOpsRefresh()">Refresh</button>
+          <button class="btn btn-p btn-sm" onclick="mdbOpsApply(false)">Apply</button>
+          <button class="btn btn-o btn-sm" onclick="mdbOpsApply(true)">Dry run</button>
+        </div>
+        <pre id="mdbOpsPendingOut" class="ops-pre">Loading…</pre>
+      </div>
+      <div class="ops-panel" id="mdbOpsTrash">
+        <div class="form-actions" style="margin-bottom:12px">
+          <button class="btn btn-o btn-sm" onclick="mdbOpsRefresh()">Refresh</button>
+        </div>
+        <div class="rows" id="mdbOpsTrashList"></div>
+      </div>
+      <div class="ops-panel" id="mdbOpsHistory">
+        <div class="form-actions" style="margin-bottom:12px">
+          <button class="btn btn-o btn-sm" onclick="mdbOpsRefresh()">Refresh</button>
+        </div>
+        <pre id="mdbOpsHistoryOut" class="ops-pre">Loading…</pre>
+      </div>
+      <div class="ops-panel" id="mdbOpsAudit">
+        <div class="form-actions" style="margin-bottom:12px">
+          <select id="mdbAuditModule" class="input input-sm" onchange="mdbAuditRefresh()">
+            <option value="">All modules</option>
+            <option value="reconciler">reconciler</option>
+            <option value="trash">trash</option>
+            <option value="secrets">secrets</option>
+            <option value="audit">audit</option>
+            <option value="health">health</option>
+          </select>
+          <button class="btn btn-o btn-sm" onclick="mdbAuditRefresh()">Refresh</button>
+          <button class="btn btn-o btn-sm" id="mdbAuditFollowBtn" onclick="mdbAuditToggleFollow()">Follow</button>
+        </div>
+        <div class="rows" id="mdbAuditList"></div>
+      </div>
+      <div class="ops-panel" id="mdbOpsSecrets">
+        <h3 style="margin:0 0 8px;font-size:.95rem;font-weight:600">Current token</h3>
+        <pre id="mdbSecretsCurrent" class="ops-pre" style="margin-bottom:14px">Loading…</pre>
+        <h3 style="margin:0 0 8px;font-size:.95rem;font-weight:600">Rotate</h3>
+        <p class="sub" style="margin-top:0">Tokens are shown <strong>exactly once</strong>; store the new value immediately. Rotating immediately invalidates the previous token.</p>
+        <div class="grid2" style="margin-bottom:12px">
+          <input id="mdbRotateLabel" class="input" placeholder="Label (e.g. ci-gha)" maxlength="120">
+          <input id="mdbRotateScopes" class="input" placeholder="Scopes (comma-separated, e.g. reconciler:read,trash:read)">
+        </div>
+        <div class="form-actions" style="margin-bottom:12px">
+          <button class="btn btn-d btn-sm" onclick="mdbRotateToken()">Rotate token</button>
+        </div>
+        <pre id="mdbRotateOut" class="ops-pre">No rotation yet.</pre>
+      </div>
+    </div>
+
+    <div class="admin-section">
+      <h2>Leads</h2>
+      <p class="sub">Incoming quote requests &mdash; update status as you work them.</p>
+      <div class="tabs" id="leadTabs">
+        <button class="on" data-s="">All</button>
+        <button data-s="new">New</button>
+        <button data-s="contacted">Contacted</button>
+        <button data-s="won">Won</button>
+        <button data-s="lost">Lost</button>
+      </div>
+      <div class="rows" id="leadsList"></div>
+      <div class="row-sub" style="margin-top:8px"><span id="leadsCount"></span></div>
+    </div>
+
+    <div class="admin-section">
+      <h2>Appointments</h2>
+      <p class="sub">Requested visits &mdash; confirm, mark done, or cancel.</p>
+      <div class="tabs" id="apptTabs">
+        <button class="on" data-s="">All</button>
+        <button data-s="upcoming">Upcoming</button>
+        <button data-s="past">Past</button>
+      </div>
+      <div class="rows" id="apptsList"></div>
+    </div>
+
+    <div class="admin-section">
+      <h2>Outbox</h2>
+      <p class="sub">Every lead / booking enqueues a notification here. This demo logs them; wire real delivery via a hook (see README).</p>
+      <div class="pipeline">Pipeline: <code>lead.after_create</code> &rarr; <code>outbox.pending</code> &rarr; <code>outbox-dispatch</code> (scheduled) &rarr; <code>outbox.logged</code></div>
+      <div class="rows" id="outboxList"></div>
+    </div>
+
+    <div class="admin-section">
+      <h2>Services</h2>
+      <p class="sub">What you offer. Shown on the home page &amp; in the booking form.</p>
+      <div class="form-card" style="margin-bottom:16px">
+        <div class="form-row">
+          <div><label for="sName">Name</label><input id="sName" placeholder="Premium Service"></div>
+          <div><label for="sPrice">Price</label><input id="sPrice" type="number" step="0.01" placeholder="249"></div>
+        </div>
+        <div class="form-row">
+          <div><label for="sCurrency">Currency</label><input id="sCurrency" placeholder="USD"></div>
+          <div><label for="sDuration">Duration (min)</label><input id="sDuration" type="number" placeholder="60"></div>
+        </div>
+        <div class="form-field"><label for="sDesc">Description</label><textarea id="sDesc" rows="2" placeholder="Short pitch"></textarea></div>
+        <div class="form-actions"><button class="btn btn-p btn-sm" onclick="addService()">Add service</button></div>
+      </div>
+      <div class="rows" id="servicesList"></div>
+    </div>
+
+    <div class="admin-section">
+      <h2>Site content</h2>
+      <p class="sub">Everything the home page shows &mdash; all manifest-driven, all in MongoDB.</p>
+      <div class="content-tabs" id="contentTabs">
+        <button class="on" data-c="slides">Slides</button>
+        <button data-c="about_sections">About</button>
+        <button data-c="testimonials">Testimonials</button>
+        <button data-c="gallery">Gallery</button>
+        <button data-c="faqs">FAQs</button>
+        <button data-c="locations">Locations</button>
+      </div>
+
+      <div class="content-panel on" id="panel-slides">
+        <div class="form-card" style="margin-bottom:16px">
+          <div class="form-row">
+            <div><label for="slTitle">Title</label><input id="slTitle" placeholder="Your headline"></div>
+            <div><label for="slEyebrow">Eyebrow</label><input id="slEyebrow" placeholder="Booking open"></div>
+          </div>
+          <div class="form-field"><label for="slSubtitle">Subtitle</label><input id="slSubtitle" placeholder="Supporting copy"></div>
+          <div class="form-field"><label for="slImage">Image URL</label><input id="slImage" placeholder="https://picsum.photos/seed/x/1600/900"></div>
+          <div class="form-row">
+            <div><label for="slCtaLabel">CTA label</label><input id="slCtaLabel" placeholder="Get a quote"></div>
+            <div><label for="slCtaHref">CTA link</label><input id="slCtaHref" placeholder="#contact"></div>
+          </div>
+          <div class="form-row">
+            <div><label for="slOrder">Order</label><input id="slOrder" type="number" value="10"></div>
+            <div><label for="slActive">Active</label><select id="slActive"><option value="true">Yes</option><option value="false">No</option></select></div>
+          </div>
+          <div class="form-actions"><button class="btn btn-p btn-sm" onclick="addContent('slides')">Add slide</button></div>
+        </div>
+        <div class="rows" id="slidesList"></div>
+      </div>
+
+      <div class="content-panel" id="panel-about_sections">
+        <div class="form-card" style="margin-bottom:16px">
+          <div class="form-row">
+            <div><label for="abHeading">Heading</label><input id="abHeading" placeholder="Built on integrity"></div>
+            <div>
+              <label for="abIcon">Icon</label>
+              <select id="abIcon">
+                <option value="shield">Shield</option>
+                <option value="sparkles">Sparkles</option>
+                <option value="heart">Heart</option>
+                <option value="check">Check</option>
+                <option value="star">Star</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-field"><label for="abBody">Body</label><textarea id="abBody" rows="3" placeholder="A paragraph about what sets you apart."></textarea></div>
+          <div class="form-field"><label for="abImage">Image URL</label><input id="abImage" placeholder="https://picsum.photos/seed/x/900/700"></div>
+          <div class="form-row">
+            <div><label for="abOrder">Order</label><input id="abOrder" type="number" value="10"></div>
+            <div><label for="abFlip">Layout</label><select id="abFlip"><option value="false">Image right</option><option value="true">Image left</option></select></div>
+          </div>
+          <div class="form-actions"><button class="btn btn-p btn-sm" onclick="addContent('about_sections')">Add about block</button></div>
+        </div>
+        <div class="rows" id="about_sectionsList"></div>
+      </div>
+
+      <div class="content-panel" id="panel-testimonials">
+        <div class="form-card" style="margin-bottom:16px">
+          <div class="form-row">
+            <div><label for="tmAuthor">Author</label><input id="tmAuthor" placeholder="Jamie P."></div>
+            <div><label for="tmRole">Role / context</label><input id="tmRole" placeholder="Homeowner"></div>
+          </div>
+          <div class="form-field"><label for="tmQuote">Quote</label><textarea id="tmQuote" rows="3" placeholder="&quot;They were&hellip;&quot;"></textarea></div>
+          <div class="form-field"><label for="tmAvatar">Avatar URL</label><input id="tmAvatar" placeholder="https://i.pravatar.cc/120?u=x"></div>
+          <div class="form-row">
+            <div><label for="tmRating">Rating</label><input id="tmRating" type="number" min="1" max="5" value="5"></div>
+            <div><label for="tmOrder">Order</label><input id="tmOrder" type="number" value="10"></div>
+          </div>
+          <div class="form-actions"><button class="btn btn-p btn-sm" onclick="addContent('testimonials')">Add testimonial</button></div>
+        </div>
+        <div class="rows" id="testimonialsList"></div>
+      </div>
+
+      <div class="content-panel" id="panel-gallery">
+        <div class="form-card" style="margin-bottom:16px">
+          <div class="form-row">
+            <div><label for="gaTitle">Title</label><input id="gaTitle" placeholder="Kitchen remodel"></div>
+            <div><label for="gaCat">Category</label><input id="gaCat" placeholder="Residential"></div>
+          </div>
+          <div class="form-field"><label for="gaImage">Image URL</label><input id="gaImage" placeholder="https://picsum.photos/seed/x/800/800"></div>
+          <div class="form-row">
+            <div><label for="gaAlt">Alt text</label><input id="gaAlt" placeholder="Kitchen after renovation"></div>
+            <div><label for="gaOrder">Order</label><input id="gaOrder" type="number" value="10"></div>
+          </div>
+          <div class="form-actions"><button class="btn btn-p btn-sm" onclick="addContent('gallery')">Add image</button></div>
+        </div>
+        <div class="rows" id="galleryList"></div>
+      </div>
+
+      <div class="content-panel" id="panel-faqs">
+        <div class="form-card" style="margin-bottom:16px">
+          <div class="form-field"><label for="fqQ">Question</label><input id="fqQ" placeholder="Do you offer free estimates?"></div>
+          <div class="form-field"><label for="fqA">Answer</label><textarea id="fqA" rows="3" placeholder="Yes &mdash; any visit under 30 min is free&hellip;"></textarea></div>
+          <div class="form-row">
+            <div><label for="fqCat">Category</label><input id="fqCat" placeholder="Pricing"></div>
+            <div><label for="fqOrder">Order</label><input id="fqOrder" type="number" value="10"></div>
+          </div>
+          <div class="form-actions"><button class="btn btn-p btn-sm" onclick="addContent('faqs')">Add FAQ</button></div>
+        </div>
+        <div class="rows" id="faqsList"></div>
+      </div>
+
+      <div class="content-panel" id="panel-locations">
+        <div class="form-card" style="margin-bottom:16px">
+          <div class="form-row">
+            <div><label for="loName">Name</label><input id="loName" placeholder="Main office"></div>
+            <div><label for="loOrder">Order</label><input id="loOrder" type="number" value="10"></div>
+          </div>
+          <div class="form-row">
+            <div><label for="loLine1">Address line 1</label><input id="loLine1" placeholder="123 Market Street"></div>
+            <div><label for="loLine2">Address line 2</label><input id="loLine2" placeholder="Suite 200"></div>
+          </div>
+          <div class="form-row">
+            <div><label for="loCity">City</label><input id="loCity" placeholder="Denver"></div>
+            <div><label for="loRegion">Region / State</label><input id="loRegion" placeholder="CO"></div>
+          </div>
+          <div class="form-row">
+            <div><label for="loPost">Postal code</label><input id="loPost" placeholder="80202"></div>
+            <div><label for="loCountry">Country</label><input id="loCountry" placeholder="USA"></div>
+          </div>
+          <div class="form-row">
+            <div><label for="loLat">Latitude</label><input id="loLat" type="number" step="0.000001" placeholder="39.7492"></div>
+            <div><label for="loLng">Longitude</label><input id="loLng" type="number" step="0.000001" placeholder="-104.9903"></div>
+          </div>
+          <div class="form-row">
+            <div><label for="loPhone">Phone</label><input id="loPhone" placeholder="+1 555 010 0100"></div>
+            <div><label for="loEmail">Email</label><input id="loEmail" placeholder="hello@example.com"></div>
+          </div>
+          <div class="form-field"><label for="loDir">Directions URL</label><input id="loDir" placeholder="https://www.google.com/maps/dir/?api=1&amp;destination=LAT,LNG"></div>
+          <div class="form-field"><label for="loPrimary">Primary location?</label><select id="loPrimary"><option value="true">Yes</option><option value="false">No</option></select></div>
+          <div class="form-actions">
+            <button class="btn btn-p btn-sm" onclick="addContent('locations')">Add location</button>
+            <span class="form-hint">Tip: paste lat/lng from <a href="https://www.openstreetmap.org/" target="_blank" rel="noopener">OpenStreetMap</a> or Google Maps.</span>
+          </div>
+        </div>
+        <div class="rows" id="locationsList"></div>
+      </div>
+    </div>
+
+    <div class="admin-section">
+      <h2>Audit log</h2>
+      <p class="sub">Recent events across the app &mdash; powered by manifest-driven hooks.</p>
+      <div class="rows" id="auditList"></div>
+    </div>
+  </div>
+</div>
+
+<script src="{{ asset_url('app.js') if asset_url is defined else base_path ~ '/public/app.js' }}"></script>
+</body>
+</html>

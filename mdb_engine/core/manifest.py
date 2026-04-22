@@ -47,6 +47,14 @@ from ..constants import (
     MIN_VECTOR_DIMENSIONS,
 )
 
+# Re-export canonicalize / hash helpers so callers can do:
+#     from mdb_engine.core.manifest import canonicalize_manifest, compute_manifest_hash
+from .manifest_hash import (  # noqa: E402,F401
+    canonicalize_manifest,
+    compute_manifest_hash,
+    compute_schema_hash,
+)
+
 logger = logging.getLogger(__name__)
 
 # Schema registry: maps version -> schema definition
@@ -1431,6 +1439,73 @@ MANIFEST_SCHEMA_V2 = {
                 }
             },
             "description": "Collection name -> list of index definitions",
+        },
+        "manifest_tracking": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Enable manifest reconciliation and revision tracking.",
+                },
+                "mode": {
+                    "type": "string",
+                    "enum": ["safe", "reconcile", "strict"],
+                    "default": "safe",
+                    "description": (
+                        "Reconciler mode. 'safe' applies adds/updates only and logs "
+                        "removals. 'reconcile' quarantines removals into the trash "
+                        "namespace. 'strict' is like 'reconcile' but empty collections "
+                        "may skip quarantine when allow_immediate_drop is set."
+                    ),
+                },
+                "protect_collections": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Collection base names that must never be quarantined, " "even when removed from the manifest."
+                    ),
+                },
+                "allow_immediate_drop": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": (
+                        "When mode='strict', allow empty collections to be dropped "
+                        "immediately instead of quarantined."
+                    ),
+                },
+                "retention": {
+                    "type": "object",
+                    "properties": {
+                        "max_revisions": {"type": "integer", "minimum": 1, "default": 50},
+                        "max_age_days": {"type": "integer", "minimum": 1, "default": 90},
+                        "trash_ttl_days": {"type": "integer", "minimum": 1, "default": 14},
+                    },
+                    "additionalProperties": False,
+                    "description": ("Retention policy for revision history and quarantined artifacts."),
+                },
+                "sign_revisions": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": (
+                        "If true, revision documents include an HMAC signature " "derived from the app secret."
+                    ),
+                },
+                "sweeper": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {"type": "boolean", "default": True},
+                        "interval_seconds": {"type": "integer", "minimum": 60, "default": 3600},
+                    },
+                    "additionalProperties": False,
+                    "description": ("Built-in scheduled sweeper that hard-drops expired quarantine entries."),
+                },
+            },
+            "additionalProperties": False,
+            "description": (
+                "Manifest reconciliation configuration. Controls how startup "
+                "cleans up the database when the manifest changes."
+            ),
         },
         "encrypted_fields": {
             "type": "object",
@@ -4461,6 +4536,15 @@ MANIFEST_SCHEMA_V2 = {
                     "minLength": 1,
                     "description": "Base index name (will be prefixed with slug)",
                 },
+                "rename_from": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Previous index base names that should be treated as the same "
+                        "index during reconciliation. Prevents drop+add when an index "
+                        "is renamed."
+                    ),
+                },
                 "type": {
                     "type": "string",
                     "enum": [
@@ -4657,6 +4741,16 @@ MANIFEST_SCHEMA_V2 = {
                     "type": "boolean",
                     "default": True,
                     "description": "Generate REST endpoints for this collection",
+                },
+                "rename_from": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Previous collection base names that should be treated as the "
+                        "same collection during reconciliation. When the reconciler "
+                        "finds a matching trashed/orphan collection it renames it back "
+                        "instead of creating a new empty collection."
+                    ),
                 },
                 "schema": {
                     "type": "object",

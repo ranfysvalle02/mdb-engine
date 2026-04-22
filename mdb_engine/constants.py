@@ -76,8 +76,67 @@ RESERVED_COLLECTION_PREFIXES: Final[tuple[str, ...]] = (
 RESERVED_COLLECTION_NAMES: Final[tuple[str, ...]] = (
     "apps_config",  # Engine internal - app registration
     "_mdb_engine_app_secrets",  # Engine internal - encrypted app secrets
+    "_mdb_manifest_revisions",  # Engine internal - manifest revision history
+    "_mdb_owned_artifacts",  # Engine internal - current artifact ledger
+    "_mdb_trash",  # Engine internal - tombstones for quarantined artifacts
+    "_mdb_manifest_locks",  # Engine internal - advisory locks for reconciler
+    "_mdb_meta",  # Engine internal - bootstrap marker / metadata
+    "_mdb_admin_audit",  # Engine internal - admin plane audit log
 )
 """Reserved collection names that cannot be accessed through scoped wrappers."""
+
+# Reserved collection name prefixes for quarantined artifacts
+RESERVED_TRASH_PREFIX: Final[str] = "_mdb_trash__"
+"""Prefix for quarantined collections renamed by the manifest reconciler."""
+
+# ============================================================================
+# MANIFEST RECONCILER CONSTANTS
+# ============================================================================
+
+MANIFEST_REVISIONS_COLLECTION: Final[str] = "_mdb_manifest_revisions"
+"""Internal collection storing manifest revision history per app slug."""
+
+OWNED_ARTIFACTS_COLLECTION: Final[str] = "_mdb_owned_artifacts"
+"""Internal collection storing the ledger of engine-owned artifacts per app."""
+
+TRASH_COLLECTION: Final[str] = "_mdb_trash"
+"""Internal collection storing tombstones for quarantined artifacts."""
+
+MANIFEST_LOCKS_COLLECTION: Final[str] = "_mdb_manifest_locks"
+"""Internal collection storing per-slug advisory locks for the reconciler."""
+
+DEFAULT_TRASH_TTL_DAYS: Final[int] = 14
+"""Default number of days a quarantined artifact lives before auto-purge."""
+
+DEFAULT_MAX_REVISIONS: Final[int] = 50
+"""Default maximum number of retained manifest revisions per app."""
+
+DEFAULT_MAX_REVISION_AGE_DAYS: Final[int] = 90
+"""Default maximum age of retained manifest revisions per app."""
+
+DEFAULT_RECONCILE_MODE: Final[str] = "safe"
+"""Default reconciler mode when `manifest_tracking.mode` is unspecified."""
+
+SUPPORTED_RECONCILE_MODES: Final[tuple[str, ...]] = ("safe", "reconcile", "strict")
+"""Supported reconciler modes.
+
+- ``safe``: additions and updates are applied, removals are logged only.
+- ``reconcile``: removals are quarantined into the trash namespace.
+- ``strict``: as ``reconcile``, but empty collections may skip quarantine
+  when ``allow_immediate_drop`` is set.
+"""
+
+DEFAULT_MANIFEST_LOCK_TTL_SECONDS: Final[int] = 120
+"""Default TTL for a manifest reconcile advisory lock (seconds)."""
+
+# Standard exit codes used by the `mdb-engine` CLI reconcile / trash /
+# manifest commands. Documented so CI pipelines and downstream tooling
+# can rely on them.
+CLI_EXIT_OK: Final[int] = 0
+CLI_EXIT_ERROR: Final[int] = 1
+CLI_EXIT_DRIFT: Final[int] = 2
+CLI_EXIT_LOCKED: Final[int] = 3
+CLI_EXIT_CONFIRMATION_REQUIRED: Final[int] = 4
 
 # App slug constraints
 MAX_APP_SLUG_LENGTH: Final[int] = 100

@@ -288,6 +288,168 @@ Full manifest with common options:
 
 ---
 
+## 6.1. Manifest Reconciliation (declarative drift cleanup)
+
+Every `create_app` / `create_multi_app` call runs the **reconciler**: a
+plan-then-apply loop that compares the manifest to what's currently in
+MongoDB and closes the gap. It's what gives mdb-engine its
+"declarative" feel — you change the manifest, restart, done.
+
+### The safety model
+
+```
+manifest.json  →  plan (ReconcilePlan)  →  apply (under per-slug lock)  →  ledger + revisions
+```
+
+- **Additive changes are always applied** (new collections, new indexes).
+- **Destructive changes go to quarantine first**, not hard-dropped:
+  - Removed collection → renamed to `_mdb_trash__<slug>__<hash>`.
+  - Tombstone row written to `_mdb_trash` with a retention TTL.
+  - The built-in `trash_sweeper` action deletes them after the TTL.
+- **`rename_from`** — add it to a collection config to smoothly rename
+  without data loss:
+  ```json
+  {"collections": {"sales_orders": {"rename_from": ["orders"]}}}
+  ```
+- **`protect_collections`** — listed collections are never dropped/renamed
+  even if the manifest removes them.
+
+### `manifest_tracking` block
+
+```json
+{
+  "manifest_tracking": {
+    "enabled": true,
+    "mode": "reconcile",
+    "retention": {"max_revisions": 50, "max_age_days": 90, "trash_ttl_days": 7},
+    "protect_collections": ["auth_users"],
+    "confirm_if": {
+      "destructive_ops": 3,
+      "docs_at_risk": 1000,
+      "protect_on_match": ["*_audit", "ledger_*"]
+    }
+  },
+  "admin_api": {
+    "enabled": true,
+    "path_prefix": "/__mdb",
+    "modules": {
+      "reconciler": {"enabled": true, "scopes": ["read", "apply"]},
+      "trash":      {"enabled": true, "scopes": ["read", "restore", "purge"]}
+    }
+  }
+}
+```
+
+`confirm_if` trips a ``status="confirmation_required"`` response from
+``engine.reconcile(..., confirm=False)`` when:
+- `destructive_ops` — more than N drops/renames are planned
+- `docs_at_risk` — summed document count across destructive ops exceeds N
+- `protect_on_match` — any destructive op targets a glob in this list
+
+### Runtime API (on the engine)
+
+```python
+engine = MongoDBEngine(...)
+await engine.bootstrap()
+
+# Plan + apply
+diff = await engine.manifest_diff("my_app")            # pure read
+res  = await engine.reconcile("my_app", confirm=True)  # apply
+head = await engine.manifest_head("my_app")            # latest revision
+
+# Trash
+entries = await engine.trash_list("my_app")
+plan    = await engine.trash_restore_plan("my_app", trash_id)
+await engine.trash_restore("my_app", trash_id)
+await engine.trash_purge("my_app", expired_only=True)
+
+# Change-stream hook (deploy event bus)
+async for rev in engine.watch_revisions("my_app"):
+    print(rev["revision"], rev["hash"])
+```
+
+### CLI
+
+```bash
+mdb-engine reconcile my_app                       # interactive
+mdb-engine reconcile my_app --yes                 # bypass confirm_if
+mdb-engine reconcile my_app --manifest-only --against=HEAD~1  # CI diff
+mdb-engine reconcile my_app --output-format json
+mdb-engine manifest show my_app
+mdb-engine manifest adopt my_app                  # baseline an existing DB
+mdb-engine trash ls my_app
+mdb-engine trash ls --all                         # across slugs
+mdb-engine trash restore my_app <id> --dry-run
+mdb-engine trash purge my_app
+```
+
+Exit codes: `0` ok / noop, `1` error, `2` drift, `3` lock contention,
+`4` confirmation required.
+
+### Admin plane (admin_api)
+
+When top-level `admin_api.enabled=true` the engine mounts a composed
+admin surface at `admin_api.path_prefix` (default `/__mdb`). Modules
+register themselves; each module declares **per-endpoint** scopes and
+metadata, so a `reconciler:read` token can call
+`GET /reconciler/plan` but is rejected on `POST /reconciler/apply`.
+
+| Module     | Endpoint                                     | Scope       | Mutates |
+|------------|----------------------------------------------|-------------|---------|
+| (surface)  | `GET  /__mdb/health/live`                    | *public*    | no      |
+| health     | `GET  /__mdb/health`                         | `*` / `read`| no      |
+| health     | `GET  /__mdb/health/modules`                 | `read`      | no      |
+| reconciler | `GET  /__mdb/reconciler/plan?slug=`          | `read`      | no      |
+| reconciler | `POST /__mdb/reconciler/apply?slug=&yes=`    | `apply`     | **yes** |
+| reconciler | `GET  /__mdb/reconciler/manifest/history?slug=` | `read`   | no      |
+| trash      | `GET  /__mdb/trash?slug=`                    | `read`      | no      |
+| trash      | `POST /__mdb/trash/{id}/restore?slug=`       | `restore`   | **yes** |
+| trash      | `POST /__mdb/trash/{id}/purge?slug=`         | `purge`     | **yes** |
+| secrets    | `GET  /__mdb/secrets/current?slug=`          | `read`      | no      |
+| secrets    | `POST /__mdb/secrets/rotate?slug=`           | `rotate`    | **yes** |
+| audit      | `GET  /__mdb/audit?slug=`                    | `read`      | no      |
+| audit      | `GET  /__mdb/audit/recent?slug=`             | `read`      | no      |
+| audit      | `GET  /__mdb/audit/stats?slug=`              | `read`      | no      |
+
+Load-bearing behaviours the admin plane guarantees:
+
+- **Liveness is always reachable.** `GET /__mdb/health/live` has no
+  auth, no slug, no rate limit — pin k8s / LB probes here so they
+  can never cascade into restart loops.
+- **Idempotent destructive POSTs.** Every mutating endpoint honours
+  `Idempotency-Key: <opaque>`: the first call's response is cached
+  for 24h, any repeat returns the same body with
+  `X-Idempotent-Replay: true`. Conflict (same key, different body) →
+  `409`. CLI sends `--idempotency-key` when provided.
+- **Rate limited by default.** 120/min reads, 15/min writes, keyed on
+  `(slug, token_id or IP, module:bucket)`. Override via
+  `admin_api.rate_limits`. 429 responses carry `Retry-After`.
+- **Fire-and-forget audit.** Every authenticated call enqueues one
+  `_mdb_admin_audit` row (TTL 365d) via `asyncio.create_task` so DB
+  latency never blocks API latency. Bounded in-flight counter drops
+  excess rows with a warning rather than leaking tasks.
+- **HMAC token fingerprints.** Audit rows carry
+  `principal_token_id = hmac_sha256(engine_master_key, token)[:16]`
+  plus optional human `principal_label` — enough to blame a CI key
+  without creating a verification oracle.
+- **No-store always.** All admin responses receive
+  `Cache-Control: no-store` + `Pragma: no-cache`; tokens can never
+  land in a proxy cache.
+
+CLI parity is enforced by
+`tests/integration/test_admin_cli_parity.py`: every `mdb-engine admin
+<module> <action> -o json` output matches the raw HTTP body
+byte-for-byte. `--output table` exists for humans; `--output yaml`
+was intentionally dropped.
+
+See [`docs/admin_plane.md`](../../docs/admin_plane.md) for the full
+scope model, audit shape, events catalog, and instructions for
+shipping a third-party module with `ModuleRouter`.
+[`docs/reconciler.md`](../../docs/reconciler.md) is the
+reconciler-specific walkthrough.
+
+---
+
 ## 6.5. Zero-Code Collections (MQL-as-DSL)
 
 Define collections in the manifest with `auto_crud: true` to generate a full REST API with no Python code. Run with `mdb-engine serve manifest.json`.

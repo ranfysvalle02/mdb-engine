@@ -61,6 +61,14 @@ class AppRegistrationManager:
         self.manifest_parser = manifest_parser
         self._apps: dict[str, dict[str, Any]] = {}
 
+    @staticmethod
+    def _reconciler_enabled(manifest: dict[str, Any]) -> bool:
+        """Return True when ``manifest_tracking.enabled`` is truthy (default)."""
+        tracking = manifest.get("manifest_tracking")
+        if not isinstance(tracking, dict):
+            return True  # enabled by default when manifest_tracking block is absent
+        return bool(tracking.get("enabled", True))
+
     async def validate_manifest(self, manifest: "ManifestDict") -> tuple[bool, str | None, list[str] | None]:
         """
         Validate a manifest against the schema.
@@ -123,6 +131,7 @@ class AppRegistrationManager:
         initialize_profile_callback: Callable[[str, dict[str, Any]], Any] | None = None,
         register_websockets_callback: Callable[[str, dict[str, Any]], Any] | None = None,
         setup_observability_callback: Callable[[str, "ManifestDict", dict[str, Any]], Any] | None = None,
+        reconciler_callback: Callable[[str, dict[str, Any], dict[str, Any] | None], Any] | None = None,
     ) -> bool:
         """
         Register an app from its manifest.
@@ -194,29 +203,88 @@ class AppRegistrationManager:
             # Use normalized manifest for rest of registration
             manifest = normalized_manifest
 
+            # Load the previously-persisted manifest (if any) so the reconciler
+            # can diff the desired state against the last-applied state. This
+            # MUST happen before we overwrite apps_config below.
+            prev_manifest: dict[str, Any] | None = None
+            # Only bother loading the prior manifest if reconciliation is enabled
+            # AND a callback has been wired in; plain unit tests with MagicMock
+            # databases would otherwise blow up on ``await`` of a non-coroutine.
+            if reconciler_callback is not None and self._reconciler_enabled(manifest):
+                try:
+                    prev_manifest = await self._mongo_db.apps_config.find_one({"slug": slug})
+                except (
+                    ConnectionFailure,
+                    ServerSelectionTimeoutError,
+                    OperationFailure,
+                    InvalidOperation,
+                    TypeError,
+                ) as e:
+                    logger.debug(f"[{slug}] Could not load prior manifest for reconciliation: {e}")
+                    prev_manifest = None
+
+            # Run declarative reconciler BEFORE persisting the new manifest so
+            # we have a chance to quarantine removed collections/indexes and
+            # delegate service-owned artifacts. The reconciler is fail-open:
+            # errors here are logged but never block registration, so existing
+            # apps remain bootable even if reconciler dependencies are missing.
+            #
+            # When the reconciler is enabled and applied a revision, it also
+            # writes ``apps_config`` **atomically inside its per-slug lock**
+            # (via ``Reconciler._persist_manifest``). The ``persisted_apps_config``
+            # flag in the result tells us to skip the fallback write below,
+            # preventing the race where a crash between the reconciler's
+            # revision insert and a separate apps_config write could leave
+            # the ledger ahead of the published manifest.
+            reconciled_indexes = False
+            apps_config_persisted_by_reconciler = False
+            if reconciler_callback is not None and self._reconciler_enabled(manifest):
+                try:  # nosemgrep
+                    reconcile_result = await reconciler_callback(slug, manifest, prev_manifest)
+                    if isinstance(reconcile_result, dict):
+                        reconciled_indexes = bool(reconcile_result.get("reconciled_indexes"))
+                        apps_config_persisted_by_reconciler = bool(reconcile_result.get("persisted_apps_config"))
+                        contextual_logger.info(
+                            "Manifest reconciliation completed",
+                            extra={
+                                "app_slug": slug,
+                                "status": reconcile_result.get("status"),
+                                "summary": (reconcile_result.get("plan") or {}).get("summary"),
+                            },
+                        )
+                except Exception as e:  # noqa: BLE001
+                    logger.warning(
+                        f"[{slug}] Reconciler failed (continuing registration): {e}",
+                        exc_info=True,
+                    )
+
             # Store app config in memory
             self._apps[slug] = manifest
 
-            # Persist app config to MongoDB
-            try:
-                await self._mongo_db.apps_config.replace_one(
-                    {"slug": slug},
-                    manifest,
-                    upsert=True,
-                )
-            except (
-                ConnectionFailure,
-                ServerSelectionTimeoutError,
-                OperationFailure,
-            ) as e:
-                logger.warning(
-                    f"Failed to persist app '{slug}' to MongoDB: {e}",
-                    exc_info=True,
-                )
-                # Continue even if persistence fails - app is still registered in memory
-            except InvalidOperation as e:
-                logger.debug(f"Cannot persist app '{slug}': MongoDB client is closed: {e}")
-                # Continue - app is still registered in memory
+            # Persist app config to MongoDB — only when the reconciler did
+            # not already do it atomically inside its lock. Skipping here
+            # is the entire point of the atomic-persist change: two writes
+            # cannot disagree if only one of them ever happens.
+            if not apps_config_persisted_by_reconciler:
+                try:
+                    await self._mongo_db.apps_config.replace_one(
+                        {"slug": slug},
+                        manifest,
+                        upsert=True,
+                    )
+                except (
+                    ConnectionFailure,
+                    ServerSelectionTimeoutError,
+                    OperationFailure,
+                ) as e:
+                    logger.warning(
+                        f"Failed to persist app '{slug}' to MongoDB: {e}",
+                        exc_info=True,
+                    )
+                    # Continue even if persistence fails - app is still registered in memory
+                except InvalidOperation as e:
+                    logger.debug(f"Cannot persist app '{slug}': MongoDB client is closed: {e}")
+                    # Continue - app is still registered in memory
 
             # Invalidate auth config cache for this app
             try:
@@ -229,8 +297,9 @@ class AppRegistrationManager:
             # Build list of callbacks to run in parallel
             callback_tasks = []
 
-            # Create indexes if requested
-            if create_indexes_callback and "managed_indexes" in manifest:
+            # Create indexes if requested (reconciler may have already handled
+            # index management; skip the fallback callback in that case).
+            if create_indexes_callback and "managed_indexes" in manifest and not reconciled_indexes:
                 logger.info(f"[{slug}] Creating managed indexes " f"(has_managed_indexes=True)")
                 callback_tasks.append(create_indexes_callback(slug, manifest))
 

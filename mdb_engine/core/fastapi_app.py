@@ -389,12 +389,191 @@ class FastAPIAppMixin:
             app.include_router(_auth_router)
             logger.info(f"App-user auth routes mounted for '{slug}' (/auth/*)")
 
+        # Auto-mount the admin plane (/__mdb/*) when the manifest's
+        # top-level ``admin_api.enabled`` is true. The surface composes
+        # enabled modules (health, reconciler, trash, audit, secrets)
+        # with shared auth + audit middleware, plus a dedicated rate
+        # limiter scoped to the prefix.
+        _admin_cfg = pre_manifest.get("admin_api") or {}
+        if bool(_admin_cfg.get("enabled", False)):
+            try:  # nosemgrep
+                _prefix = _admin_cfg.get("path_prefix") or "/__mdb"
+                surface = engine.admin_surface(_admin_cfg)
+                _admin_router = surface.build_router()
+                app.include_router(_admin_router, prefix=_prefix)
+                self._install_admin_audit_middleware(app, surface, _prefix)
+                self._install_admin_rate_limit(app, _prefix, _admin_cfg)
+                logger.info(
+                    "Admin plane mounted for '%s' at %s/* (modules: %s)",
+                    slug,
+                    _prefix,
+                    ", ".join(m.name for m, c in surface.list_modules() if c.enabled),
+                )
+            except Exception as e:  # noqa: BLE001 - admin surface is optional
+                logger.warning(
+                    "Could not mount admin plane for '%s' (%s); continuing.",
+                    slug,
+                    e,
+                )
+
         # Setup all middleware
         self._setup_middleware(app, slug, auth_config, auth_mode, is_sub_app, pre_manifest)
 
         logger.debug(f"FastAPI app created for '{slug}'")
 
         return app
+
+    def _install_admin_audit_middleware(
+        self,
+        app: "FastAPI",
+        surface: Any,
+        prefix: str,
+    ) -> None:
+        """Attach HTTP middleware for the admin plane.
+
+        Responsibilities (single pass over admin requests):
+
+        1. Short-circuit non-admin paths.
+        2. Dispatch the handler.
+        3. Stamp ``Cache-Control: no-store`` + ``Pragma: no-cache`` on
+           every admin response so intermediaries never cache tokens
+           or audit payloads.
+        4. Schedule :meth:`AdminSurface.persist_audit` on a background
+           task so a slow Mongo write cannot delay the response. Task
+           concurrency is bounded by a semaphore to cap memory growth
+           during a Mongo outage.
+        """
+
+        admin_prefix = prefix.rstrip("/") + "/"
+        # Bounded in-flight tracker: we never allow more than this
+        # many pending audit writes at once. During a Mongo outage we
+        # drop new rows (logging a warning) rather than piling up
+        # coroutines that each hold references to Request/Response.
+        max_in_flight = 128
+        in_flight_counter: dict[str, int] = {"n": 0}
+        in_flight_tasks: set[asyncio.Task] = set()
+
+        async def _persist(req: Any, resp: Any) -> None:
+            try:
+                await surface.persist_audit(req, resp)
+            except Exception:  # noqa: BLE001
+                logger.debug("admin audit persist failed", exc_info=True)
+            finally:
+                in_flight_counter["n"] = max(0, in_flight_counter["n"] - 1)
+
+        @app.middleware("http")
+        async def _mdb_admin_mw(request, call_next):  # type: ignore[no-untyped-def]
+            if not request.url.path.startswith(admin_prefix):
+                return await call_next(request)
+            # Liveness probes intentionally bypass auth, audit, cache
+            # stamping, and rate limiting — they must be cheap and
+            # boring so load balancers and kube-probes don't create
+            # noise.
+            if request.url.path.rstrip("/").endswith("/health/live"):
+                return await call_next(request)
+            response = await call_next(request)
+            # Stamp no-store on every admin response. Modules that set
+            # their own Cache-Control (e.g. /secrets/rotate) keep it.
+            lower_headers = {k.lower() for k in response.headers.keys()}
+            if "cache-control" not in lower_headers:
+                response.headers["Cache-Control"] = "no-store"
+                response.headers["Pragma"] = "no-cache"
+            # Surface Idempotency-Key replay on the wire so clients can
+            # distinguish a fresh apply from a cached replay. Set by
+            # :func:`mdb_engine.admin.idempotency.replay_or_record`.
+            if getattr(request.state, "mdb_idempotent_replay", False):
+                response.headers["X-Idempotent-Replay"] = "true"
+            # Fire-and-forget audit persistence — never blocks the
+            # response. Bounded by ``max_in_flight`` so DB hangs can't
+            # leak tasks.
+            if in_flight_counter["n"] >= max_in_flight:
+                logger.warning(
+                    "admin audit backpressure: dropping audit row for %s %s (in_flight=%d)",
+                    request.method,
+                    request.url.path,
+                    in_flight_counter["n"],
+                )
+            else:
+                in_flight_counter["n"] += 1
+                task = asyncio.create_task(
+                    _persist(request, response),
+                    name="mdb-admin-audit",
+                )
+                in_flight_tasks.add(task)
+                task.add_done_callback(in_flight_tasks.discard)
+            return response
+
+    def _install_admin_rate_limit(
+        self,
+        app: "FastAPI",
+        prefix: str,
+        admin_cfg: dict[str, Any],
+    ) -> None:
+        """Attach :class:`AdminRateLimitMiddleware` scoped to *prefix*.
+
+        Honours ``admin_api.rate_limits`` when present; otherwise uses
+        the module defaults (120/min read, 15/min write).  Set
+        ``admin_api.rate_limits.enabled = false`` to disable entirely.
+
+        Backend selection (``admin_api.rate_limits.backend``):
+
+        - ``"memory"`` (default) → per-process :class:`InMemoryRateLimitStore`.
+          Zero-dep, sliding window, bounded LRU. Single-process only.
+        - ``"mongo"`` → :class:`MongoRateLimitStore`. Fixed-window,
+          atomic, **correct across workers and pods**. Requires a
+          live Mongo connection at install time.
+        """
+        rate_cfg = admin_cfg.get("rate_limits") or {}
+        if rate_cfg.get("enabled") is False:
+            return
+        try:  # nosemgrep
+            from ..admin.rate_limit import AdminRateLimitMiddleware
+            from ..admin.rate_limit_stores import (
+                InMemoryRateLimitStore,
+                MongoRateLimitStore,
+                bootstrap_rate_limit_collection,
+            )
+
+            backend = str(rate_cfg.get("backend") or "memory").lower()
+            store = None
+            if backend == "mongo":
+                mongo_db = getattr(self._connection_manager, "mongo_db", None)
+                if mongo_db is None:
+                    logger.warning(
+                        "admin_api.rate_limits.backend=mongo requested but no "
+                        "Mongo connection is available; falling back to in-memory."
+                    )
+                else:
+                    try:  # nosemgrep
+                        import asyncio
+
+                        loop = asyncio.get_event_loop()
+                        if loop.is_running():
+                            # Schedule the bootstrap; the middleware itself
+                            # tolerates a missing index on first boot.
+                            loop.create_task(bootstrap_rate_limit_collection(mongo_db))
+                        else:
+                            loop.run_until_complete(bootstrap_rate_limit_collection(mongo_db))
+                    except Exception:  # noqa: BLE001
+                        logger.warning(
+                            "bootstrap of admin rate-limit collection failed; "
+                            "TTL cleanup may lag but counts are still correct.",
+                            exc_info=True,
+                        )
+                    store = MongoRateLimitStore(mongo_db)
+                    logger.info("Admin plane rate limiter using Mongo backend (cross-worker correct)")
+            if store is None:
+                max_keys = int(rate_cfg.get("memory_max_keys") or 10_000)
+                store = InMemoryRateLimitStore(max_keys=max_keys)
+
+            app.add_middleware(
+                AdminRateLimitMiddleware,
+                admin_prefix=prefix,
+                limits={k: v for k, v in rate_cfg.items() if isinstance(v, dict) and k in {"read", "write"}} or None,
+                store=store,
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning("Admin rate limit middleware not installed", exc_info=True)
 
     def _setup_middleware(
         self,

@@ -6,6 +6,7 @@ Provides methods for manifest validation, app registration, and app management.
 
 import logging
 import secrets
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -13,6 +14,7 @@ if TYPE_CHECKING:
     from .app_registration import AppRegistrationManager
     from .app_secrets import AppSecretsManager
     from .index_management import IndexManager
+    from .reconciler import Reconciler
     from .service_initialization import ServiceInitializer
     from .types import ManifestDict
 
@@ -36,6 +38,7 @@ class AppLifecycleMixin:
     _service_initializer: "ServiceInitializer | None"
     _app_read_scopes: dict[str, list[str]]
     _app_secrets_manager: "AppSecretsManager | None"
+    _reconciler: "Reconciler | None"
 
     async def validate_manifest(self, manifest: "ManifestDict") -> tuple[bool, str | None, list[str] | None]:
         """
@@ -177,6 +180,56 @@ class AppLifecycleMixin:
             if self._service_initializer:
                 await self._service_initializer.setup_observability(slug, manifest, observability_config)
 
+        async def reconciler_callback(
+            slug: str,
+            desired_manifest: dict[str, Any],
+            prev_manifest: dict[str, Any] | None,
+        ) -> dict[str, Any]:
+            """Run the manifest reconciler before any service callbacks fire.
+
+            The reconciler persists ``apps_config`` inside its per-slug
+            lock when ``persist_manifest=True`` (default), so the ledger,
+            revision history, and ``apps_config._applied_hash`` all
+            advance atomically. The caller inspects
+            ``result["persisted_apps_config"]`` to know whether it
+            still needs to persist on its own.
+            """
+            reconciler = getattr(self, "_reconciler", None)
+            if reconciler is None:
+                return {"status": "skipped", "reason": "reconciler_disabled"}
+            prev_hash = None
+            if prev_manifest:
+                prev_hash = prev_manifest.get("_applied_hash")
+            try:
+                plan = await reconciler.plan(
+                    slug,
+                    desired_manifest,
+                    prev_hash=prev_hash,
+                    prev_manifest=prev_manifest,
+                )
+            except ValueError as e:
+                # Reserved-name / invalid-rename guard tripped.
+                logger.exception(f"[{slug}] Reconciler: manifest rejected: {e}")
+                return {"status": "invalid_manifest", "reason": str(e), "reconciled_indexes": False}
+            result = await reconciler.apply(
+                plan,
+                manifest=desired_manifest,
+                applied_by="register_app",
+                persist_manifest=True,
+            )
+            # Mirror the applied metadata on the in-memory dict so
+            # downstream callbacks see the fresh hash/revision. The
+            # durable copy on disk was already written inside the lock.
+            desired_manifest["_applied_hash"] = plan.to_hash
+            desired_manifest["_applied_schema_hash"] = plan.schema_hash
+            if result.get("revision") and isinstance(result["revision"], dict):
+                desired_manifest["_applied_revision"] = result["revision"].get("revision")
+            result["reconciled_indexes"] = not plan.is_noop
+            # Inform the registration manager that apps_config has
+            # already been persisted atomically alongside the revision.
+            result["persisted_apps_config"] = result.get("status") in ("applied", "noop")
+            return result
+
         # Register app first (this validates and stores the manifest)
         result = await self._app_registration_manager.register_app(
             manifest=manifest,
@@ -189,6 +242,7 @@ class AppLifecycleMixin:
             initialize_profile_callback=initialize_profile_callback,
             register_websockets_callback=register_websockets_callback,
             setup_observability_callback=setup_observability_callback,
+            reconciler_callback=reconciler_callback,
         )
 
         # Initialize Perfect Brain (nested inside memory_config)
@@ -318,3 +372,196 @@ class AppLifecycleMixin:
         if not self._app_registration_manager:
             raise RuntimeError("MongoDBEngine not initialized. Call initialize() first.")
         return self._app_registration_manager.apps
+
+    # ------------------------------------------------------------------
+    # Manifest reconciler API (manifest history, trash, replay)
+    # ------------------------------------------------------------------
+
+    def _require_reconciler(self):
+        reconciler = getattr(self, "_reconciler", None)
+        if reconciler is None:
+            raise RuntimeError(
+                "Manifest reconciler is not available. Ensure the engine was "
+                "initialized successfully and pymongo is installed."
+            )
+        return reconciler
+
+    def admin_router(self, cfg: "dict[str, Any] | None" = None):
+        """Return a freshly-built admin plane FastAPI router.
+
+        Useful for custom mounts (e.g. mounting under a non-default
+        prefix on a multi-app host). ``create_app`` auto-mounts this
+        router at ``/__mdb`` when the manifest's top-level
+        ``admin_api.enabled`` is true (default: false).
+
+        Pass ``cfg`` to override per-module enable/scope flags;
+        defaults come from the manifest that was used when building
+        this engine's :class:`AdminSurface`.
+        """
+        surface = self.admin_surface(cfg)  # type: ignore[attr-defined]
+        return surface.build_router()
+
+    async def reconcile(
+        self,
+        slug: str,
+        manifest: "ManifestDict | None" = None,
+        *,
+        dry_run: bool = False,
+        force: bool = False,
+        confirm: bool = False,
+        expected_head: str | None = None,
+        caused_by_commit: str | None = None,
+        caused_by_user: str | None = None,
+    ) -> dict[str, Any]:
+        """Run the manifest reconciler for a slug.
+
+        Args:
+            slug: App slug to reconcile.
+            manifest: Optional manifest to reconcile against. When ``None``,
+                the currently-persisted manifest in ``apps_config`` is used.
+            dry_run: When True, returns the computed plan without applying.
+            force: When True, runs reconciliation even if the manifest hash
+                matches the last-applied hash (useful for recovery).
+            confirm: When True, bypass ``manifest_tracking.confirm_if``
+                gates. Equivalent to ``MDB_CONFIRM=1`` / CLI ``--yes``.
+            expected_head: Optional revision hash the caller expects to
+                still be HEAD. When supplied and the stored HEAD does
+                not match, returns ``status="drift"`` and refuses to
+                apply (TOCTOU guard for GitOps pipelines).
+            caused_by_commit: Optional git SHA to record on the revision
+                and on tombstones for any destructive ops.
+            caused_by_user: Optional operator identity for the revision.
+
+        Returns:
+            Dict with keys ``status`` (``applied``, ``noop``, ``dry_run``,
+            ``locked``, ``drift``, ``confirmation_required``, or
+            ``invalid_manifest``), ``plan``, ``revision`` (if applied).
+        """
+        reconciler = self._require_reconciler()
+        if not self._app_registration_manager:
+            raise RuntimeError("MongoDBEngine not initialized. Call initialize() first.")
+
+        db = self._app_registration_manager._mongo_db  # noqa: SLF001
+        prev = await db.apps_config.find_one({"slug": slug})
+        desired = manifest if manifest is not None else prev
+        if desired is None:
+            raise ValueError(f"No manifest available for slug={slug!r}")
+
+        if expected_head is not None:
+            head = await reconciler.head_revision(slug)
+            actual = (head or {}).get("hash") if head else (prev or {}).get("_applied_hash")
+            if actual != expected_head:
+                return {
+                    "status": "drift",
+                    "expected_head": expected_head,
+                    "actual_head": actual,
+                }
+
+        prev_hash = None if force else (prev or {}).get("_applied_hash")
+        try:
+            plan = await reconciler.plan(slug, desired, prev_hash=prev_hash, prev_manifest=prev)
+        except ValueError as e:
+            return {"status": "invalid_manifest", "reason": str(e)}
+        return await reconciler.apply(
+            plan,
+            manifest=desired,
+            applied_by="engine.reconcile",
+            dry_run=dry_run,
+            confirm=confirm,
+            caused_by_commit=caused_by_commit,
+            caused_by_user=caused_by_user,
+        )
+
+    async def manifest_history(self, slug: str, *, limit: int = 20) -> list[dict[str, Any]]:
+        """Return recent manifest revisions for an app, newest first."""
+        reconciler = self._require_reconciler()
+        return await reconciler.get_history(slug, limit=limit)
+
+    async def manifest_head(self, slug: str) -> dict[str, Any] | None:
+        """Return the most recent revision document for a slug, or ``None``."""
+        reconciler = self._require_reconciler()
+        return await reconciler.head_revision(slug)
+
+    async def manifest_diff(self, slug: str) -> dict[str, Any]:
+        """Return the plan that would be applied right now against the current manifest."""
+        reconciler = self._require_reconciler()
+        if not self._app_registration_manager:
+            raise RuntimeError("MongoDBEngine not initialized. Call initialize() first.")
+        db = self._app_registration_manager._mongo_db  # noqa: SLF001
+        prev = await db.apps_config.find_one({"slug": slug})
+        if prev is None:
+            raise ValueError(f"No persisted manifest for slug={slug!r}")
+        plan = await reconciler.plan(
+            slug,
+            prev,
+            prev_hash=prev.get("_applied_hash"),
+            prev_manifest=prev,
+        )
+        return plan.to_dict()
+
+    async def manifest_adopt(self, slug: str) -> dict[str, Any]:
+        """Seed the reconciler ledger from existing ``<slug>_*`` collections.
+
+        Use this once when upgrading an app that predates the
+        reconciler so subsequent reconciles treat pre-existing state
+        as the baseline rather than re-adding everything.
+        """
+        reconciler = self._require_reconciler()
+        return await reconciler.adopt(slug)
+
+    async def trash_list(self, slug: str) -> list[dict[str, Any]]:
+        reconciler = self._require_reconciler()
+        return await reconciler.trash_list(slug)
+
+    async def trash_list_all(self) -> list[dict[str, Any]]:
+        """Return trash entries for every slug (admin view)."""
+        reconciler = self._require_reconciler()
+        return await reconciler.trash_list(None)
+
+    async def trash_summary(self) -> list[dict[str, Any]]:
+        """Return per-slug trash roll-ups: count + estimated doc totals."""
+        reconciler = self._require_reconciler()
+        return await reconciler.trash_summary()
+
+    async def trash_restore(
+        self,
+        slug: str,
+        trash_id: Any,
+        *,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        """Restore a trash entry. When ``dry_run=True``, only previews the restore."""
+        reconciler = self._require_reconciler()
+        return await reconciler.trash_restore(slug, trash_id, dry_run=dry_run)
+
+    async def trash_restore_plan(self, slug: str, trash_id: Any) -> dict[str, Any]:
+        """Return the reconciler's view of whether a trash entry is restorable."""
+        reconciler = self._require_reconciler()
+        return await reconciler.trash_restore_plan(slug, trash_id)
+
+    async def trash_purge(
+        self,
+        slug: str,
+        *,
+        expired_only: bool = True,
+        ids: list[Any] | None = None,
+    ) -> int:
+        reconciler = self._require_reconciler()
+        return await reconciler.trash_purge(slug, expired_only=expired_only, ids=ids)
+
+    async def watch_revisions(
+        self,
+        slug: str,
+        callback: "Callable[[dict[str, Any]], Any]",
+        *,
+        resume_after: Any = None,
+    ) -> None:
+        """Tail ``_mdb_manifest_revisions`` for a slug.
+
+        ``callback`` may be sync or async; it receives the newly
+        inserted revision doc. Blocks until cancelled. Requires the
+        database to be a replica set (change streams are not available
+        on standalone mongod). See :mod:`mdb_engine.core.reconciler`.
+        """
+        reconciler = self._require_reconciler()
+        await reconciler.watch_revisions(slug, callback, resume_after=resume_after)

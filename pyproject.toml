@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mdb-engine"
-version = "0.13.2"
+version = "0.13.3"
 description = "MongoDB Engine"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -91,6 +91,7 @@ test = [
     "nest-asyncio>=1.5.0",  # Required for TestClient with Motor in async tests
     "python-dateutil>=2.8.2",  # Required for datetime string parsing in seeding tests
     "pyyaml>=6.0.0",  # Required for OSI integration tests (YAML parsing/validation)
+    "hypothesis>=6.100.0",  # Property-based tests for manifest canonicalization
 ]
 dev = [
     # Pin ruff version to prevent local/CI drift

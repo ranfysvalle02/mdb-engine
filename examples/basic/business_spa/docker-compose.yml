@@ -1,0 +1,89 @@
+# Business SPA — Docker Compose
+#
+# Quick start:
+#   docker compose up
+#   open http://localhost:8000
+#
+# Production overrides:
+#   ADMIN_EMAIL=owner@corp.com \
+#   ADMIN_PASSWORD=<strong> \
+#   MDB_JWT_SECRET=<random-64-chars> \
+#   docker compose up
+#
+# All secrets are passed via environment variables. The manifest uses
+# {{env.ADMIN_EMAIL}} / {{env.ADMIN_PASSWORD}} placeholders which the
+# engine resolves at startup.
+
+services:
+  api:
+    image: python:3.11-slim
+    working_dir: /app
+    volumes:
+      - ./manifest.json:/app/manifest.json
+      - ./public:/app/public
+      - ./actions:/app/actions
+      - ./templates:/app/templates
+      # Mount local mdb_engine source for development
+      - ../../../mdb_engine:/engine_src/mdb_engine
+      - ../../../pyproject.toml:/engine_src/pyproject.toml
+      - ../../../README.md:/engine_src/README.md
+    environment:
+      # --- Database ---
+      - MONGODB_URI=mongodb://mongo:27017/?directConnection=true
+      - MDB_DB_NAME=mdb_engine
+
+      # --- Security (CHANGE THESE in production) ---
+      - MDB_JWT_SECRET=${MDB_JWT_SECRET:-dev_business_spa_jwt_secret_change_me_please_32_chars}
+      - MDB_ENGINE_MASTER_KEY=${MDB_ENGINE_MASTER_KEY:-dev_master_key_change_me_in_production_32ch}
+
+      # --- Admin seeding ---
+      # Resolved by {{env.ADMIN_EMAIL}} / {{env.ADMIN_PASSWORD}}
+      # in the manifest's demo_users array. Override for production.
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@example.com}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin123}
+
+      # --- SSR ---
+      # Public URL of this site. Used by the SSR layer for canonical URLs
+      # and JSON-LD. Override in production to your real domain.
+      - SITE_BASE_URL=${SITE_BASE_URL:-http://localhost:8000}
+
+      # --- Future: external delivery providers ---
+      # The outbox-dispatch.py action intentionally does NOT call any
+      # provider today. When you wire one, read its credentials from
+      # environment variables (never the manifest). See README.md for
+      # the three recommended extension paths.
+      #
+      # - RESEND_API_KEY=${RESEND_API_KEY:-}
+      # - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID:-}
+      # - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN:-}
+      # - TWILIO_WHATSAPP_FROM=${TWILIO_WHATSAPP_FROM:-}
+      # - META_WHATSAPP_TOKEN=${META_WHATSAPP_TOKEN:-}
+      # - META_WHATSAPP_PHONE_ID=${META_WHATSAPP_PHONE_ID:-}
+
+      # --- Internal (do not change) ---
+      - _MDB_SERVE_MANIFEST=/app/manifest.json
+    # jinja2 is required by the SSR layer (ssr block in manifest.json).
+    # It is not in core mdb-engine deps, so we install it explicitly here.
+    command: >
+      bash -c "pip install -e /engine_src uvicorn jinja2 -q &&
+               uvicorn mdb_engine.cli._serve_app:app --host 0.0.0.0 --port 8000 --reload"
+    ports:
+      - "8000:8000"
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+  mongo:
+    image: mongodb/mongodb-atlas-local:8.0
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  mongo_data:

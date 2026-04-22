@@ -153,6 +153,14 @@ class MongoDBEngine(
         self._app_secrets_manager: AppSecretsManager | None = None
         self._websocket_session_manager: Any | None = None  # WebSocketSessionManager
         self._websocket_ticket_store: Any | None = None  # WebSocketTicketStore
+        # Manifest reconciler (quarantine-to-trash). Set up in initialize().
+        self._reconciler: Any | None = None
+        self._trash_sweeper_task: asyncio.Task | None = None
+        self._trash_sweeper_stop: asyncio.Event | None = None
+        # Admin plane composer. Lazily constructed per manifest in
+        # admin_surface(); cached here so introspection (and multiple
+        # create_app calls for the same slug) share one instance.
+        self._admin_surfaces: dict[str, Any] = {}
 
         # Store app read_scopes mapping for validation
         self._app_read_scopes: dict[str, list[str]] = {}
@@ -239,6 +247,44 @@ class MongoDBEngine(
             connection_manager=self._connection_manager,
         )
 
+        # Manifest reconciler: bootstrap internal collections, build the
+        # reconciler instance, register default service-artifact listers,
+        # and spin up the hourly trash sweeper.
+        try:  # nosemgrep
+            from ..actions._builtin.trash_sweeper import (
+                DEFAULT_SWEEP_INTERVAL_SECONDS,
+                run_sweeper_loop,
+            )
+            from .reconciler import Reconciler
+            from .reconciler_store import bootstrap_reconciler_collections
+            from .service_artifacts import register_default_listers
+
+            await bootstrap_reconciler_collections(self._connection_manager.mongo_db)
+            self._reconciler = Reconciler(self._connection_manager.mongo_db)
+            register_default_listers(self._reconciler, self._connection_manager.mongo_db)
+
+            try:  # nosemgrep
+                from ..admin import bootstrap_admin_collections
+
+                await bootstrap_admin_collections(self._connection_manager.mongo_db)
+            except Exception as e:  # noqa: BLE001 - audit is best-effort
+                logger.warning(f"Admin audit bootstrap failed: {e}", exc_info=True)
+
+            self._trash_sweeper_stop = asyncio.Event()
+            self._trash_sweeper_task = asyncio.create_task(
+                run_sweeper_loop(
+                    self._connection_manager.mongo_db,
+                    interval_seconds=DEFAULT_SWEEP_INTERVAL_SECONDS,
+                    stop_event=self._trash_sweeper_stop,
+                ),
+                name="mdb-engine-trash-sweeper",
+            )
+            logger.info("Manifest reconciler initialized (trash sweeper running)")
+        except Exception as e:  # noqa: BLE001
+            # Reconciler is best-effort; the engine must still boot if it fails.
+            logger.warning(f"Manifest reconciler could not be initialized: {e}", exc_info=True)
+            self._reconciler = None
+
     @property
     def connection_manager(self):
         """
@@ -248,6 +294,34 @@ class MongoDBEngine(
             ConnectionManager instance
         """
         return self._connection_manager
+
+    def admin_surface(self, cfg: dict[str, Any] | None = None) -> "Any":
+        """Return the :class:`AdminSurface` for ``cfg``.
+
+        The surface is cached per ``path_prefix`` so multiple
+        ``create_app`` calls for the same manifest reuse one composer
+        (and therefore one auth/audit configuration).
+        """
+        from ..admin import AdminSurface
+
+        resolved = cfg or {}
+        key = str(resolved.get("path_prefix") or "/__mdb")
+        if key in self._admin_surfaces:
+            return self._admin_surfaces[key]
+        surface = AdminSurface(self, resolved)
+        surface.register_default_modules()
+        self._admin_surfaces[key] = surface
+        return surface
+
+    def admin_surface_cached(self) -> "Any | None":
+        """Return the most recently built admin surface, if any.
+
+        Used by :class:`HealthAdminModule` to answer
+        ``GET /health/modules`` without re-reading the manifest.
+        """
+        if not self._admin_surfaces:
+            return None
+        return next(iter(self._admin_surfaces.values()))
 
     @property
     def mongo_client(self) -> AsyncIOMotorClient:
@@ -309,6 +383,19 @@ class MongoDBEngine(
         """
         start = time.monotonic()
         logger.info("[Engine] Shutdown initiated")
+
+        # Stop the built-in trash sweeper if it's running.
+        if self._trash_sweeper_stop is not None:
+            self._trash_sweeper_stop.set()
+        if self._trash_sweeper_task is not None and not self._trash_sweeper_task.done():
+            self._trash_sweeper_task.cancel()
+            try:
+                await self._trash_sweeper_task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
+            finally:
+                self._trash_sweeper_task = None
+                self._trash_sweeper_stop = None
 
         if self._service_initializer:
             self._service_initializer.clear_services()
