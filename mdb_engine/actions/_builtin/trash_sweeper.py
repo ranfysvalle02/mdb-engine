@@ -79,7 +79,7 @@ async def sweep_once(db: AsyncIOMotorDatabase) -> dict[str, Any]:
                     EVENT_TRASH_SWEPT,
                     slug=tomb.get("slug"),
                     kind=tomb.get("kind"),
-                    name=tomb.get("original_name"),
+                    original_name=tomb.get("original_name"),
                     trash_name=trash_name,
                     expired_at=tomb.get("expires_at"),
                 )

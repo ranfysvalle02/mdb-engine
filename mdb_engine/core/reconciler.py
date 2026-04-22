@@ -591,7 +591,7 @@ class Reconciler:
                         slug=plan.slug,
                         op=op.op,
                         collection=op.collection,
-                        name=op.name,
+                        op_name=op.name,
                     ):
                         await self._execute_op(
                             plan.slug,
@@ -606,7 +606,7 @@ class Reconciler:
                         slug=plan.slug,
                         op=op.op,
                         collection=op.collection,
-                        name=op.name,
+                        op_name=op.name,
                         duration_ms=int((time.monotonic() - t_op) * 1000),
                     )
                     executed_ops.append(op)

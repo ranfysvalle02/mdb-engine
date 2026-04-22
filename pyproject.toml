@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mdb-engine"
-version = "0.13.3"
+version = "0.13.4"
 description = "MongoDB Engine"
 readme = "README.md"
 requires-python = ">=3.10"

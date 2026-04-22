@@ -1500,6 +1500,40 @@ MANIFEST_SCHEMA_V2 = {
                     "additionalProperties": False,
                     "description": ("Built-in scheduled sweeper that hard-drops expired quarantine entries."),
                 },
+                "confirm_if": {
+                    "type": "object",
+                    "properties": {
+                        "destructive_ops": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "description": (
+                                "Block apply when the plan contains N or more destructive ops "
+                                "(drop_collection / drop_index / disable_service) unless "
+                                "--yes / MDB_CONFIRM=1 is set."
+                            ),
+                        },
+                        "docs_at_risk": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "description": (
+                                "Block apply when the estimated total document count across "
+                                "destructive ops is >= this value."
+                            ),
+                        },
+                        "protect_on_match": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "Glob patterns matched against destructive op target names. "
+                                "Any match forces explicit confirmation."
+                            ),
+                        },
+                    },
+                    "additionalProperties": False,
+                    "description": (
+                        "Safety thresholds that block large or sensitive applies until explicitly confirmed."
+                    ),
+                },
             },
             "additionalProperties": False,
             "description": (
