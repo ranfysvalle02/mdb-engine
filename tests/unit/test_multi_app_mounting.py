@@ -1263,13 +1263,15 @@ class TestWebSocketRoutesWithMountedApps:
 
         # Capture logs from root logger to catch all logs
         log_capture = []
-        handler = logging.Handler()
-        handler.emit = lambda record: log_capture.append(record.getMessage())
+        class CaptureHandler(logging.Handler):
+            def emit(self, record):
+                log_capture.append(record.getMessage())
+        handler = CaptureHandler()
 
-        # Add handler to root logger to catch all logs
-        root_logger = logging.getLogger()
-        root_logger.addHandler(handler)
-        root_logger.setLevel(logging.INFO)
+        # Add handler to mdb_engine.core.multi_app logger directly
+        app_logger = logging.getLogger("mdb_engine.core.multi_app")
+        app_logger.addHandler(handler)
+        app_logger.setLevel(logging.INFO)
 
         try:
             with patch.object(engine, "_connection_manager") as mock_conn:
@@ -1311,7 +1313,7 @@ class TestWebSocketRoutesWithMountedApps:
                             f"Captured logs: {log_capture[:20]}"  # Show first 20 logs
                         )
         finally:
-            root_logger.removeHandler(handler)
+            app_logger.removeHandler(handler)
 
     @pytest.mark.asyncio
     async def test_child_apps_skip_csrf_middleware(self, mock_mongo_database, tmp_path):
