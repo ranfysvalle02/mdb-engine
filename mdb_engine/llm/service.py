@@ -482,11 +482,29 @@ class _LLMProvider:
 
         # Thinking / reasoning
         if reasoning_effort:
-            level = _REASONING_EFFORT_MAP.get(reasoning_effort, reasoning_effort.upper())
-            config_kwargs["thinking_config"] = genai_types.ThinkingConfig(
-                thinking_level=level,
-                include_thoughts=True,
-            )
+            is_gemini_3 = "gemini-3" in model_name
+            
+            if is_gemini_3:
+                level = _REASONING_EFFORT_MAP.get(reasoning_effort, reasoning_effort.upper())
+                config_kwargs["thinking_config"] = genai_types.ThinkingConfig(
+                    thinking_level=level,
+                    include_thoughts=True,
+                )
+            else:
+                effort = reasoning_effort.lower()
+                if effort == "none":
+                    budget = 128 if "pro" in model_name else 0
+                elif effort == "low":
+                    budget = 1024
+                elif effort == "high":
+                    budget = 8192
+                else:
+                    budget = -1  # medium / dynamic
+                    
+                config_kwargs["thinking_config"] = genai_types.ThinkingConfig(
+                    thinking_budget=budget,
+                    include_thoughts=True,
+                )
 
         gc_config = genai_types.GenerateContentConfig(**config_kwargs)
 
