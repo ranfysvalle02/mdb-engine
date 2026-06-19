@@ -1200,14 +1200,20 @@ class TestWebSocketRoutesWithMountedApps:
             mock_conn.initialize = AsyncMock()
             mock_conn.shutdown = AsyncMock()
 
-            # Patch the WebSocket-specific factory rather than the global
-            # ``fastapi.APIRouter``: many modules legitimately create APIRouters
-            # at import time, so a global assertion is order-dependent and flaky
-            # under parallel (xdist) execution. ``create_websocket_endpoint`` is
-            # only invoked when an app actually declares WebSocket endpoints.
-            with patch(
-                "mdb_engine.routing.websockets.create_websocket_endpoint",
-            ) as mock_create_ws:
+            # Keep ``fastapi.APIRouter`` patched (as the sibling tests do) so
+            # create_multi_app can't mutate real/module-level routers and leak
+            # state across tests. But assert on the WebSocket-specific factory
+            # rather than on whether *any* APIRouter was created: many modules
+            # legitimately create APIRouters at import time, which made the old
+            # ``not mock_router_class.called`` assertion order-dependent and
+            # flaky under parallel (xdist) execution. ``create_websocket_endpoint``
+            # is only invoked when an app actually declares WebSocket endpoints.
+            with (
+                patch("fastapi.APIRouter"),
+                patch(
+                    "mdb_engine.routing.websockets.create_websocket_endpoint",
+                ) as mock_create_ws,
+            ):
                 app = engine.create_multi_app(
                     apps=[
                         {
