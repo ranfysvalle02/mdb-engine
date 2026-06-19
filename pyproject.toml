@@ -27,7 +27,12 @@ classifiers = [
 dependencies = [
     "motor>=3.0.0,<4.0.0",
     "pymongo>=4.0.0,<5.0.0",
-    "fastapi>=0.100.0,<1.0.0",
+    # Cap below FastAPI 0.137 / Starlette 1.0: those releases changed
+    # include_router() to store lazy `_IncludedRouter` markers in app.routes
+    # and reject re-including a router, which breaks our route iteration and
+    # multi-app mounting. Revisit when the framework supports the new model.
+    "fastapi>=0.100.0,<0.137.0",
+    "starlette>=0.46.0,<1.0.0",
     "pydantic>=2.0.0,<3.0.0",
     "pyjwt>=2.8.0",
     "jsonschema>=4.0.0",
