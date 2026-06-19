@@ -22,9 +22,11 @@ import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, TypeVar
+from urllib.parse import urlparse
 
 from ..exceptions import MongoDBEngineError
 from ..observability.tracing import create_span
+from .capabilities import ModelCapabilities, default_grounding_model, filter_registry, resolve_capabilities
 from .temperature import adjust_temperature_for_model
 
 # OpenAI SDK import (covers both OpenAI and Azure OpenAI)
@@ -110,14 +112,63 @@ class GroundedCompletion:
 
     Attributes:
         text: The generated response text.
-        citations: Grounding sources as ``[{"title": str, "uri": str}, ...]``.
+        citations: Grounding sources as
+            ``[{"title", "uri", "domain", "redirect_uri"}, ...]``.
             Empty when the response was not grounded.
         grounded: ``True`` when at least one grounding citation was returned.
+        model_used: The model that actually produced this answer. Differs from
+            the requested model when ``grounding_policy="auto"`` routed the turn
+            to a grounding-capable model.
+        finish_reason: The provider finish reason (e.g. ``"STOP"``,
+            ``"MAX_TOKENS"``, ``"SAFETY"``) when available, else ``None``.
     """
 
     text: str
     citations: list[dict[str, str]] = field(default_factory=list)
     grounded: bool = False
+    model_used: str | None = None
+    finish_reason: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Typed streaming events (alongside the legacy ``__REASONING__:`` /
+# ``__GROUNDING__:`` string sentinels emitted by ``chat_completion_stream``).
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class StreamEvent:
+    """Base class for typed streaming events yielded by ``LLMService.stream``."""
+
+
+@dataclass(frozen=True)
+class TextDelta(StreamEvent):
+    """A chunk of visible answer text."""
+
+    text: str
+
+
+@dataclass(frozen=True)
+class ReasoningDelta(StreamEvent):
+    """A chunk of model reasoning / thinking (render as a collapsible trace)."""
+
+    text: str
+
+
+@dataclass(frozen=True)
+class GroundingEvent(StreamEvent):
+    """Grounding citations for the response (emitted once, near the end)."""
+
+    citations: list[dict[str, str]] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class DoneEvent(StreamEvent):
+    """Terminal event with summary metadata."""
+
+    grounded: bool = False
+    model_used: str | None = None
+    citations: list[dict[str, str]] = field(default_factory=list)
 
 
 def _build_gemini_tools(enable_web_search: bool, raw_tools: list | None) -> list | None:
@@ -155,24 +206,76 @@ def _build_gemini_tools(enable_web_search: bool, raw_tools: list | None) -> list
     return tools or None
 
 
+def _domain_from_citation(title: str, uri: str) -> str:
+    """Best-effort clean domain for a grounding citation.
+
+    Google Search grounding returns ``web.uri`` as a
+    ``vertexaisearch.cloud.google.com/grounding-api-redirect/...`` *redirect*,
+    with the real publisher in ``web.title`` (often already a bare domain like
+    ``"livemint.com"``). Prefer the title when it looks like a domain, else fall
+    back to parsing the URI's host.
+    """
+    candidate = (title or "").strip().lower()
+    # A title like "livemint.com" or "www.bbc.co.uk" is itself the domain.
+    if candidate and " " not in candidate and "." in candidate and "/" not in candidate:
+        return candidate.removeprefix("www.")
+    host = urlparse(uri or "").netloc.lower()
+    return host.removeprefix("www.") if host else candidate
+
+
+def _normalize_citation(web: Any) -> dict[str, str] | None:
+    """Normalize a single ``grounding_chunks[*].web`` into a citation dict.
+
+    Returns ``{title, uri, domain, redirect_uri}`` or ``None`` when there is no
+    usable URI. ``uri`` is kept as the (redirect) link for backwards
+    compatibility; ``domain`` is the clean publisher for display.
+    """
+    uri = getattr(web, "uri", None)
+    if not uri:
+        return None
+    title = getattr(web, "title", "") or ""
+    domain = _domain_from_citation(title, uri)
+    return {
+        "title": title or domain or uri,
+        "uri": uri,
+        "domain": domain,
+        "redirect_uri": uri,
+    }
+
+
 def _extract_grounding_citations(response_or_chunk: Any) -> list[dict[str, str]]:
-    """Pull ``[{title, uri}]`` grounding citations from a Gemini response/chunk.
+    """Pull normalized grounding citations from a Gemini response/chunk.
 
     Reads ``candidate.grounding_metadata.grounding_chunks[*].web`` and dedupes
-    by URI. Fully ``getattr``-guarded so it tolerates partial chunks and
-    responses without any grounding metadata.
+    by URI. Each citation is ``{title, uri, domain, redirect_uri}``. Fully
+    ``getattr``-guarded so it tolerates partial chunks and responses without any
+    grounding metadata.
     """
     out: list[dict[str, str]] = []
     seen: set[str] = set()
     for cand in getattr(response_or_chunk, "candidates", None) or []:
         gm = getattr(cand, "grounding_metadata", None)
         for gc in getattr(gm, "grounding_chunks", None) or []:
-            web = getattr(gc, "web", None)
-            uri = getattr(web, "uri", None)
-            if uri and uri not in seen:
-                seen.add(uri)
-                out.append({"title": getattr(web, "title", "") or uri, "uri": uri})
+            citation = _normalize_citation(getattr(gc, "web", None))
+            if citation and citation["uri"] not in seen:
+                seen.add(citation["uri"])
+                out.append(citation)
     return out
+
+
+def _extract_finish_reason(response: Any) -> str | None:
+    """Return the first candidate's ``finish_reason`` as a string, if present.
+
+    Surfaces ``STOP`` / ``MAX_TOKENS`` / ``SAFETY`` / ``RECITATION`` so callers
+    can react (e.g. "answer truncated — raise the token budget") instead of
+    seeing a generic failure. Handles both enum and string finish reasons.
+    """
+    for cand in getattr(response, "candidates", None) or []:
+        reason = getattr(cand, "finish_reason", None)
+        if reason is None:
+            continue
+        return getattr(reason, "name", None) or str(reason)
+    return None
 
 
 def _clamp_thinking_budget(model_name: str, budget: int) -> int:
@@ -298,6 +401,15 @@ class LLMServiceError(MongoDBEngineError):
     pass
 
 
+class GroundingUnsupportedError(LLMServiceError):
+    """Raised when grounding is required but the resolved model can't ground.
+
+    Only raised under ``grounding_policy="require"``. Lets apps that *must*
+    return cited answers fail loudly instead of silently shipping zero
+    citations.
+    """
+
+
 def _detect_provider_from_env() -> str:
     """
     Detect provider from environment variables.
@@ -411,6 +523,76 @@ def _openai_messages_to_gemini_contents(
     return contents, system_instruction
 
 
+def _pkg_version(name: str) -> str | None:
+    """Return an installed package version, or ``None`` if not installed."""
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        return version(name)
+    except PackageNotFoundError:
+        return None
+
+
+def _aiohttp_readline_rejects_max_line_length() -> bool:
+    """Detect the known ``google-genai`` x ``aiohttp`` streaming incompatibility.
+
+    ``google-genai`` >= 2.4 calls ``StreamReader.readline(max_line_length=...)``,
+    a kwarg only accepted by ``aiohttp`` >= 3.14. On older aiohttp this raises
+    ``TypeError`` mid-stream. Returns ``True`` when aiohttp is installed *and*
+    its ``readline`` does NOT accept ``max_line_length`` (i.e. streaming via the
+    aiohttp transport is unsafe and we should force httpx).
+
+    Returns ``False`` when aiohttp is absent (genai already uses httpx) or when
+    aiohttp is new enough — both safe.
+    """
+    try:
+        import inspect
+
+        import aiohttp  # type: ignore[import-untyped]
+
+        sig = inspect.signature(aiohttp.StreamReader.readline)
+        return "max_line_length" not in sig.parameters
+    except ImportError:
+        return False
+    except (ValueError, TypeError):
+        # Couldn't introspect; assume safe rather than forcing a transport swap.
+        return False
+
+
+_SDK_SELFCHECK_DONE = False
+
+
+def _llm_sdk_versions() -> dict[str, str | None]:
+    """Snapshot of the relevant SDK versions for diagnostics."""
+    return {
+        "mdb-engine": _pkg_version("mdb-engine"),
+        "google-genai": _pkg_version("google-genai"),
+        "aiohttp": _pkg_version("aiohttp"),
+        "openai": _pkg_version("openai"),
+        "httpx": _pkg_version("httpx"),
+    }
+
+
+def _warn_on_known_bad_sdk_combo() -> None:
+    """Log SDK versions once and warn on combos known to break streaming."""
+    global _SDK_SELFCHECK_DONE
+    if _SDK_SELFCHECK_DONE:
+        return
+    _SDK_SELFCHECK_DONE = True
+    versions = _llm_sdk_versions()
+    logger.debug(f"LLM SDK versions: {versions}")
+    genai_v = versions.get("google-genai")
+    if genai_v and _aiohttp_readline_rejects_max_line_length():
+        logger.warning(
+            "Detected google-genai %s with an aiohttp (%s) whose StreamReader.readline "
+            "does not accept 'max_line_length'; async streaming via aiohttp would crash. "
+            "The engine will force the httpx transport for Gemini. To silence this, install "
+            "aiohttp>=3.14 (e.g. pip install 'mdb-engine[ai]').",
+            genai_v,
+            versions.get("aiohttp"),
+        )
+
+
 class _LLMProvider:
     """Internal LLM provider wrapper using native SDKs.
 
@@ -489,6 +671,9 @@ class _LLMProvider:
 
         self.default_temperature: float = config.get("temperature", 0.7)
         self.default_persona: str = config.get("persona", "helpful assistant")
+        # Capability-registry overrides + grounding routing target (manifest-driven).
+        self.model_overrides: dict[str, dict[str, Any]] = config.get("model_overrides", {}) or {}
+        self.grounding_model: str | None = config.get("grounding_model")
         self.config = config
 
         logger.info(f"LLM Provider initialized (model: {self.default_model}, sdk: {self._provider_type})")
@@ -545,9 +730,25 @@ class _LLMProvider:
                 api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview"),
             )
         if ptype == "gemini" and GENAI_AVAILABLE:
-            return genai.Client(
-                api_key=os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"),
-            )
+            _warn_on_known_bad_sdk_combo()
+            api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+            # Self-heal the google-genai x aiohttp streaming crash: when aiohttp
+            # is installed but too old to accept readline(max_line_length=...),
+            # force the httpx async transport so streaming doesn't TypeError.
+            if _aiohttp_readline_rejects_max_line_length():
+                try:  # nosemgrep - intentional broad fallback so transport setup never breaks streaming
+                    import httpx  # google-genai's own dependency
+
+                    return genai.Client(
+                        api_key=api_key,
+                        http_options=genai_types.HttpOptions(httpx_async_client=httpx.AsyncClient()),
+                    )
+                except Exception as e:  # noqa: BLE001 - fall back to default transport
+                    logger.warning(
+                        f"Could not force httpx transport for Gemini ({type(e).__name__}: {e}); "
+                        f"using the default transport. Install aiohttp>=3.14 if streaming crashes."
+                    )
+            return genai.Client(api_key=api_key)
         if ptype == "openai" and OPENAI_SDK_AVAILABLE:
             return AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         raise LLMServiceError(f"No SDK available for provider type '{ptype}'")
@@ -712,7 +913,14 @@ class _LLMProvider:
             raise
 
     def _extract_gemini_text(self, response: Any) -> str:
-        """Extract text content from a Gemini response, skipping thought parts."""
+        """Extract text content from a Gemini response, skipping thought parts.
+
+        Robust against empty/blocked/truncated candidates: a thinking model that
+        spends its whole token budget on thoughts returns a candidate whose
+        ``content.parts`` is explicitly ``None``. ``getattr(..., "parts", [])``
+        would return that ``None`` (the attribute exists) and crash on iteration,
+        so we coerce ``None`` to an empty list and return ``""`` cleanly.
+        """
         try:
             text = response.text
             if text:
@@ -721,13 +929,76 @@ class _LLMProvider:
             pass
         # Manual fallback
         parts_text: list[str] = []
-        for candidate in getattr(response, "candidates", []):
-            for part in getattr(getattr(candidate, "content", None), "parts", []):
+        for candidate in getattr(response, "candidates", None) or []:
+            content = getattr(candidate, "content", None)
+            for part in getattr(content, "parts", None) or []:
                 if getattr(part, "thought", False):
                     continue
                 if getattr(part, "text", None):
                     parts_text.append(part.text)
         return "".join(parts_text)
+
+    # ------------------------------------------------------------------
+    # Capability awareness + grounding negotiation
+    # ------------------------------------------------------------------
+
+    def capabilities(self, model: str | None = None) -> ModelCapabilities:
+        """Resolve capabilities for ``model`` (or this provider's default)."""
+        return resolve_capabilities(model or self.default_model, self.model_overrides)
+
+    def _grounding_target(self, provider_type: str) -> str | None:
+        """Return the configured/curated grounding-capable model for a provider."""
+        if self.grounding_model:
+            return self.grounding_model
+        return default_grounding_model(provider_type)
+
+    def negotiate_grounding(
+        self,
+        model: str,
+        enable_web_search: bool,
+        grounding_policy: str = "best_effort",
+    ) -> tuple[str, bool]:
+        """Reconcile a grounding request with the model's real capabilities.
+
+        Returns ``(model_to_use, attach_grounding)``. ``enable_web_search`` is
+        never a silent no-op:
+
+        - ``best_effort`` (default): attach grounding if supported, else log + skip.
+        - ``require``: raise :class:`GroundingUnsupportedError` if unsupported.
+        - ``auto``: route this turn to a grounding-capable model for the same
+          provider (recorded as ``model_used``); if none is available, log + skip.
+        """
+        if not enable_web_search:
+            return model, False
+
+        caps = self.capabilities(model)
+        if caps.web_search:
+            return model, True
+
+        policy = (grounding_policy or "best_effort").lower()
+        if policy == "require":
+            raise GroundingUnsupportedError(
+                f"Model '{model}' does not surface web-search grounding "
+                f"(grounding_policy='require'). Use a grounding-capable model "
+                f"(e.g. gemini/gemini-2.5-flash) or grounding_policy='auto'."
+            )
+        if policy == "auto":
+            target = self._grounding_target(caps.provider)
+            if target and resolve_capabilities(target, self.model_overrides).web_search:
+                logger.info(f"grounding_policy=auto: routing grounded turn from '{model}' to '{target}'.")
+                return target, True
+            logger.warning(
+                f"grounding_policy=auto: no grounding-capable model available to route "
+                f"'{model}'; continuing ungrounded."
+            )
+            return model, False
+
+        # best_effort
+        logger.warning(
+            f"Model '{model}' does not surface web-search grounding; continuing ungrounded "
+            f"(grounding_policy='best_effort')."
+        )
+        return model, False
 
     # ------------------------------------------------------------------
     # Public API
@@ -813,6 +1084,7 @@ class _LLMProvider:
                 web_search_warned = False
                 for try_model in models_to_try:
                     citations: list[dict[str, str]] = []
+                    finish_reason: str | None = None
                     try:
                         ptype, client = self._client_for_model(try_model)
 
@@ -829,6 +1101,7 @@ class _LLMProvider:
                                 tools=kwargs.get("tools"),
                             )
                             content = self._extract_gemini_text(response)
+                            finish_reason = _extract_finish_reason(response)
                             if enable_web_search or kwargs.get("tools") or return_metadata:
                                 citations = _extract_grounding_citations(response)
                         else:
@@ -851,6 +1124,9 @@ class _LLMProvider:
                                 **kwargs,
                             )
                             content = response.choices[0].message.content if response.choices else ""
+                            if response.choices:
+                                fr = getattr(response.choices[0], "finish_reason", None)
+                                finish_reason = str(fr) if fr is not None else None
 
                         # Record usage
                         usage = getattr(response, "usage", None) or getattr(response, "usage_metadata", None)
@@ -866,6 +1142,15 @@ class _LLMProvider:
 
                         actual_model = getattr(response, "model", try_model) or try_model
                         span.set_attribute("gen_ai.response.model", actual_model)
+                        if finish_reason:
+                            span.set_attribute("gen_ai.response.finish_reason", finish_reason)
+
+                        # Grounding observability: answers "is grounding actually
+                        # firing in prod?" as a dashboard query, not a manual dig.
+                        if enable_web_search or kwargs.get("tools"):
+                            span.set_attribute("gen_ai.grounding.enabled", True)
+                            span.set_attribute("gen_ai.grounding.citation_count", len(citations))
+                            span.set_attribute("gen_ai.grounding.model_used", actual_model)
 
                         if content:
                             duration = time.time() - start_time
@@ -880,11 +1165,23 @@ class _LLMProvider:
                             if try_model != model_to_use:
                                 logger.info(f"Used fallback model: {try_model} (requested: {model_to_use})")
                             if return_metadata:
-                                return GroundedCompletion(text=content, citations=citations, grounded=bool(citations))
+                                return GroundedCompletion(
+                                    text=content,
+                                    citations=citations,
+                                    grounded=bool(citations),
+                                    model_used=actual_model,
+                                    finish_reason=finish_reason,
+                                )
                             return content
 
                         if return_metadata:
-                            return GroundedCompletion(text=str(response), citations=citations, grounded=bool(citations))
+                            return GroundedCompletion(
+                                text=str(response),
+                                citations=citations,
+                                grounded=bool(citations),
+                                model_used=actual_model,
+                                finish_reason=finish_reason,
+                            )
                         return str(response)
 
                     except (
@@ -1068,6 +1365,10 @@ class _LLMProvider:
                 # Emit grounding citations (if any) as a single trailing event,
                 # mirroring the __REASONING__: convention. Callers that don't
                 # care can ignore it.
+                if grounding_requested:
+                    span.set_attribute("gen_ai.grounding.enabled", True)
+                    span.set_attribute("gen_ai.grounding.citation_count", len(grounding_citations))
+                    span.set_attribute("gen_ai.grounding.model_used", model_to_use or "")
                 if grounding_requested and grounding_citations:
                     yield "__GROUNDING__:" + json.dumps({"citations": list(grounding_citations.values())})
 
@@ -1155,12 +1456,22 @@ class LLMService:
         self.config = config
         self.providers: dict[str, _LLMProvider] = {}
 
+        # Capability-registry overrides + grounding routing target apply to every
+        # provider so apps configure them once in llm_config.
+        self.model_overrides: dict[str, dict[str, Any]] = config.get("model_overrides", {}) or {}
+        grounding_model = config.get("grounding_model")
+
         for provider_name, model_string in providers_config.items():
             if not isinstance(model_string, str):
                 raise LLMServiceError(
                     f"Provider '{provider_name}' must map to a model string, " f"got {type(model_string).__name__}"
                 )
-            provider_config = {"default_model": model_string}
+            provider_config: dict[str, Any] = {
+                "default_model": model_string,
+                "model_overrides": self.model_overrides,
+            }
+            if grounding_model:
+                provider_config["grounding_model"] = grounding_model
             self.providers[provider_name] = _LLMProvider(config=provider_config)
             logger.info(f"Initialized named provider '{provider_name}' with model '{model_string}'")
 
@@ -1185,6 +1496,7 @@ class LLMService:
         response_format: Any | None = None,
         reasoning_effort: str | None = None,
         enable_web_search: bool = False,
+        grounding_policy: str = "best_effort",
         return_metadata: bool = False,
         **kwargs,
     ) -> str | GroundedCompletion:
@@ -1203,16 +1515,25 @@ class LLMService:
             reasoning_effort: Optional reasoning/thinking effort for reasoning
                           models (``"none"``, ``"low"``, ``"medium"``, ``"high"``).
             enable_web_search: Provider-agnostic switch to enable Google Search
-                          grounding for Gemini (ignored with a warning for
-                          non-Gemini providers).
+                          grounding for Gemini.
+            grounding_policy: How to handle ``enable_web_search`` when the resolved
+                          model can't actually ground (see capability registry):
+                          ``"best_effort"`` (default — log + continue ungrounded),
+                          ``"require"`` (raise :class:`GroundingUnsupportedError`),
+                          or ``"auto"`` (transparently route the turn to a
+                          grounding-capable model for the same provider).
             return_metadata: When ``True``, return a :class:`GroundedCompletion`
-                          (``text``/``citations``/``grounded``) instead of a
-                          plain ``str``. Defaults to ``False``.
+                          (``text``/``citations``/``grounded``/``model_used``/
+                          ``finish_reason``) instead of a plain ``str``.
             **kwargs: Additional provider-specific parameters
 
         Returns:
             str: The generated response text (JSON string for structured output),
             or a :class:`GroundedCompletion` when ``return_metadata=True``.
+
+        Raises:
+            GroundingUnsupportedError: If ``grounding_policy="require"`` and the
+                resolved model does not surface web-search grounding.
         """
         try:
             provider_name = provider_name or self.default_provider_name
@@ -1220,17 +1541,28 @@ class LLMService:
             if temperature == 0.7:
                 temperature = provider.default_temperature
 
+            # Capability-aware grounding negotiation (never a silent no-op).
+            # Done here, outside the provider's resilience wrapper, so a
+            # ``require`` failure surfaces cleanly instead of being retried.
+            requested_model = model or provider.default_model
+            effective_model, attach_grounding = provider.negotiate_grounding(
+                requested_model, enable_web_search, grounding_policy
+            )
+
             return await provider.chat_completion(
                 messages=messages,
-                model=model,
+                model=effective_model,
                 temperature=temperature,
                 max_tokens=max_tokens,
                 response_format=response_format,
                 reasoning_effort=reasoning_effort,
-                enable_web_search=enable_web_search,
+                enable_web_search=attach_grounding,
                 return_metadata=return_metadata,
                 **kwargs,
             )
+        except GroundingUnsupportedError:
+            # Deliberate, deterministic signal — surface as-is (don't wrap/retry).
+            raise
         except (
             LLMServiceError,
             ValueError,
@@ -1252,6 +1584,7 @@ class LLMService:
         reasoning_effort: str | None = None,
         stream_reasoning: bool = True,
         enable_web_search: bool = False,
+        grounding_policy: str = "best_effort",
         **kwargs,
     ):
         """
@@ -1269,28 +1602,153 @@ class LLMService:
                           grounding for Gemini. When citations are found, a
                           single trailing ``__GROUNDING__:{json}`` event is
                           emitted (ignored with a warning for non-Gemini).
+            grounding_policy: ``"best_effort"`` | ``"require"`` | ``"auto"`` —
+                          see :meth:`chat_completion`.
             **kwargs: Additional provider-specific parameters
 
         Yields:
             str: Content chunks, reasoning chunks (``__REASONING__`` prefix), or
             a single trailing grounding event (``__GROUNDING__:`` prefix).
+
+        Raises:
+            GroundingUnsupportedError: If ``grounding_policy="require"`` and the
+                resolved model does not surface web-search grounding.
         """
         provider_name = provider_name or self.default_provider_name
         provider = self.get_provider(provider_name)
         if temperature == 0.7:
             temperature = provider.default_temperature
 
+        requested_model = model or provider.default_model
+        effective_model, attach_grounding = provider.negotiate_grounding(
+            requested_model, enable_web_search, grounding_policy
+        )
+
         async for chunk in provider.chat_completion_stream(
             messages=messages,
+            model=effective_model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            reasoning_effort=reasoning_effort,
+            stream_reasoning=stream_reasoning,
+            enable_web_search=attach_grounding,
+            **kwargs,
+        ):
+            yield chunk
+
+    async def stream(
+        self,
+        messages: list[dict[str, str]],
+        provider_name: str | None = None,
+        model: str | None = None,
+        temperature: float = 0.7,
+        max_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+        stream_reasoning: bool = True,
+        enable_web_search: bool = False,
+        grounding_policy: str = "best_effort",
+        **kwargs,
+    ):
+        """Typed streaming: yields :class:`StreamEvent` objects.
+
+        A structured alternative to :meth:`chat_completion_stream` that removes
+        ``startswith("__REASONING__")`` / ``startswith("__GROUNDING__")`` string
+        sniffing. Emits :class:`TextDelta`, :class:`ReasoningDelta`,
+        :class:`GroundingEvent`, and a terminal :class:`DoneEvent`.
+
+        Example::
+
+            async for ev in llm.stream(messages=[...], enable_web_search=True):
+                match ev:
+                    case TextDelta(text): ...
+                    case ReasoningDelta(text): ...
+                    case GroundingEvent(citations): ...
+                    case DoneEvent(grounded=g, model_used=m): ...
+        """
+        provider_name = provider_name or self.default_provider_name
+        provider = self.get_provider(provider_name)
+        requested_model = model or provider.default_model
+        effective_model, _attach = provider.negotiate_grounding(requested_model, enable_web_search, grounding_policy)
+
+        citations: list[dict[str, str]] = []
+        async for chunk in self.chat_completion_stream(
+            messages=messages,
+            provider_name=provider_name,
             model=model,
             temperature=temperature,
             max_tokens=max_tokens,
             reasoning_effort=reasoning_effort,
             stream_reasoning=stream_reasoning,
             enable_web_search=enable_web_search,
+            grounding_policy=grounding_policy,
             **kwargs,
         ):
-            yield chunk
+            if chunk in ("__REASONING_START__", "__REASONING_END__"):
+                continue
+            if chunk.startswith("__REASONING__:"):
+                yield ReasoningDelta(text=chunk[len("__REASONING__:") :])
+            elif chunk.startswith("__GROUNDING__:"):
+                try:
+                    payload = json.loads(chunk[len("__GROUNDING__:") :])
+                    citations = payload.get("citations", []) or []
+                except (ValueError, TypeError):
+                    citations = []
+                yield GroundingEvent(citations=citations)
+            else:
+                yield TextDelta(text=chunk)
+
+        yield DoneEvent(
+            grounded=bool(citations),
+            model_used=effective_model,
+            citations=citations,
+        )
+
+    # ------------------------------------------------------------------
+    # Capability registry accessors (single source of truth for apps)
+    # ------------------------------------------------------------------
+
+    def get_capabilities(self, model: str | None = None) -> ModelCapabilities:
+        """Resolve :class:`ModelCapabilities` for a model.
+
+        Args:
+            model: A ``provider/model`` (or bare) id. Defaults to the default
+                provider's configured model.
+        """
+        if model is None:
+            model = self.get_provider(self.default_provider_name).default_model
+        return resolve_capabilities(model, self.model_overrides)
+
+    def list_models(
+        self,
+        *,
+        provider: str | None = None,
+        web_search: bool | None = None,
+        thinking: bool | None = None,
+        vision: bool | None = None,
+    ) -> list[ModelCapabilities]:
+        """List curated models (with manifest overrides) matching the filters.
+
+        Apps build their model selector / web-search toggle from this instead of
+        hardcoding capability flags. Example::
+
+            grounding = service.list_models(provider="gemini", web_search=True)
+        """
+        return filter_registry(
+            provider=provider,
+            web_search=web_search,
+            thinking=thinking,
+            vision=vision,
+            overrides=self.model_overrides,
+        )
+
+    def supports(self, feature: str, model: str | None = None) -> bool:
+        """Return whether ``model`` supports ``feature``.
+
+        ``feature`` is one of ``"thinking"``, ``"web_search"``, ``"vision"``,
+        ``"structured_output"``.
+        """
+        caps = self.get_capabilities(model)
+        return bool(getattr(caps, feature, False))
 
 
 def get_llm_service(

@@ -25,18 +25,32 @@ Standalone Usage:
     )
 """
 
+from .capabilities import ModelCapabilities
 from .dependencies import get_llm_service_for_app
 from .service import (
+    DoneEvent,
     GroundedCompletion,
+    GroundingEvent,
+    GroundingUnsupportedError,
     LLMService,
     LLMServiceError,
+    ReasoningDelta,
+    StreamEvent,
+    TextDelta,
     get_llm_service,
 )
 
 __all__ = [
+    "DoneEvent",
     "GroundedCompletion",
+    "GroundingEvent",
+    "GroundingUnsupportedError",
     "LLMService",
     "LLMServiceError",
+    "ModelCapabilities",
+    "ReasoningDelta",
+    "StreamEvent",
+    "TextDelta",
     "get_llm_service",
     "get_llm_service_for_app",
 ]

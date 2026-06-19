@@ -19,7 +19,14 @@ import os
 
 import pytest
 
-from mdb_engine.llm import GroundedCompletion, get_llm_service
+from mdb_engine.llm import (
+    DoneEvent,
+    GroundedCompletion,
+    GroundingEvent,
+    GroundingUnsupportedError,
+    TextDelta,
+    get_llm_service,
+)
 
 pytestmark = [
     pytest.mark.integration,
@@ -32,7 +39,8 @@ pytestmark = [
 # A prompt that genuinely requires up-to-date web knowledge so grounding kicks in.
 _LIVE_PROMPT = "What are some notable AI developments that happened this week? Cite your sources."
 
-_GEMINI_MODEL = os.getenv("LIVE_GEMINI_MODEL", "gemini/gemini-3-flash-preview")
+# Default to a verified grounding-capable 2.5 model (the -latest aliases don't ground).
+_GEMINI_MODEL = os.getenv("LIVE_GEMINI_MODEL", "gemini/gemini-2.5-flash")
 
 
 @pytest.fixture
@@ -95,3 +103,74 @@ async def test_reasoning_effort_with_grounding(llm_service):
 
     assert isinstance(result, GroundedCompletion)
     assert result.text
+    assert result.model_used
+
+
+@pytest.mark.asyncio
+async def test_normalized_citations_have_clean_domain(llm_service):
+    """Citations should expose a clean domain alongside the redirect URI."""
+    result = await llm_service.chat_completion(
+        messages=[{"role": "user", "content": _LIVE_PROMPT}],
+        provider_name="chat",
+        enable_web_search=True,
+        return_metadata=True,
+    )
+    assert isinstance(result, GroundedCompletion)
+    assert result.grounded is True
+    for citation in result.citations:
+        assert citation["domain"]  # clean publisher host
+        assert citation["redirect_uri"].startswith("http")
+
+
+@pytest.mark.asyncio
+async def test_grounding_policy_auto_routes_latest_alias():
+    """`-latest` aliases don't ground; `auto` should route to a 2.5 model."""
+    service = get_llm_service(config={"providers": {"chat": "gemini/gemini-flash-latest"}})
+    result = await service.chat_completion(
+        messages=[{"role": "user", "content": _LIVE_PROMPT}],
+        enable_web_search=True,
+        grounding_policy="auto",
+        return_metadata=True,
+    )
+    assert isinstance(result, GroundedCompletion)
+    assert result.grounded is True
+    # The turn was routed away from the (non-grounding) -latest alias.
+    assert "latest" not in (result.model_used or "")
+
+
+@pytest.mark.asyncio
+async def test_grounding_policy_require_raises_on_latest_alias():
+    """`require` must fail loudly rather than ship empty citations."""
+    service = get_llm_service(config={"providers": {"chat": "gemini/gemini-flash-latest"}})
+    with pytest.raises(GroundingUnsupportedError):
+        await service.chat_completion(
+            messages=[{"role": "user", "content": _LIVE_PROMPT}],
+            enable_web_search=True,
+            grounding_policy="require",
+        )
+
+
+@pytest.mark.asyncio
+async def test_typed_stream_emits_text_and_grounding(llm_service):
+    """The typed stream API should yield TextDelta, GroundingEvent, and DoneEvent."""
+    text_parts: list[str] = []
+    grounding: list[GroundingEvent] = []
+    done: DoneEvent | None = None
+
+    async for ev in llm_service.stream(
+        messages=[{"role": "user", "content": _LIVE_PROMPT}],
+        provider_name="chat",
+        enable_web_search=True,
+    ):
+        if isinstance(ev, TextDelta):
+            text_parts.append(ev.text)
+        elif isinstance(ev, GroundingEvent):
+            grounding.append(ev)
+        elif isinstance(ev, DoneEvent):
+            done = ev
+
+    assert "".join(text_parts).strip()
+    assert len(grounding) == 1
+    assert done is not None
+    assert done.grounded is True
+    assert done.model_used

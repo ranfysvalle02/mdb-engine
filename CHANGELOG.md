@@ -1,5 +1,72 @@
 # Changelog
 
+## 0.15.0
+
+### Added — capability-aware grounding & future-proofing
+
+The `0.14.0` grounding plumbing was correct, but production surfaced three
+brittleness points: grounding is gated by the *model* (Gemini `2.5-*` ground,
+the `-latest` aliases do **not**), the `google-genai` 2.x async transport
+crashes on `aiohttp<3.14`, and `_extract_gemini_text` raised `TypeError` on
+empty/blocked candidates. `0.15.0` makes the engine the single source of truth
+so apps stop hardcoding model knowledge.
+
+- **Model Capability Registry** (`mdb_engine.llm.capabilities`) — A curated,
+  versioned map of what each model can actually do (`ModelCapabilities`:
+  `thinking`, `web_search`, `vision`, `structured_output`, `max_input_tokens`,
+  `default_reasoning`, …). New `LLMService` accessors:
+  - `get_capabilities(model=None)` — resolve any model (canonical id, bare id,
+    alias, or family heuristic; always returns a value).
+  - `list_models(provider=, web_search=, thinking=, vision=)` — build app model
+    selectors / toggles from the engine instead of hardcoded flags.
+  - `supports(feature, model=None)` — quick boolean check.
+  - Manifest overrides via `llm_config.model_overrides` self-heal the map
+    without an engine release. Seeded with the verified truths: `gemini-2.5-*`
+    → `web_search=True`, `gemini-flash-latest` / `gemini-pro-latest` →
+    `web_search=False`.
+
+- **`grounding_policy`** on `chat_completion` / `chat_completion_stream` /
+  `stream` — `enable_web_search=True` is **never** a silent no-op again:
+  - `"best_effort"` (default) — attach grounding if supported, else log + skip.
+  - `"require"` — raise `GroundingUnsupportedError` if the model can't ground.
+  - `"auto"` — transparently route the turn to a grounding-capable model for the
+    same provider (e.g. `gemini-flash-latest` → `gemini-2.5-flash`), recorded in
+    `GroundedCompletion.model_used`. Configurable via `llm_config.grounding_model`.
+
+- **Typed streaming events** — New `LLMService.stream()` yields `TextDelta`,
+  `ReasoningDelta`, `GroundingEvent`, and a terminal `DoneEvent` (with
+  `grounded` / `model_used` / `citations`), removing the
+  `startswith("__REASONING__")` / `startswith("__GROUNDING__")` string sniffing.
+  The legacy `__REASONING__:` / `__GROUNDING__:` sentinels remain for back-compat.
+
+- **Richer `GroundedCompletion`** — Now also carries `model_used` and
+  `finish_reason` (`STOP` / `MAX_TOKENS` / `SAFETY` / `RECITATION`).
+
+- **Normalized citations** — Each citation is now
+  `{title, uri, domain, redirect_uri}`. Google returns `web.uri` as a
+  `vertexaisearch.cloud.google.com/grounding-api-redirect/...` redirect with the
+  real publisher in `web.title`; `domain` is the clean host for display.
+
+- **OTel grounding attributes** — Spans now emit `gen_ai.grounding.enabled`,
+  `gen_ai.grounding.citation_count`, and `gen_ai.grounding.model_used` so "is
+  grounding firing in prod?" is a dashboard query.
+
+### Changed / Fixed
+
+- **`google-genai` x `aiohttp` streaming crash (self-healed)** — `google-genai`
+  ≥ 2.4 calls `StreamReader.readline(max_line_length=...)`, a kwarg only
+  accepted by `aiohttp` ≥ 3.14, so a clean install on `aiohttp` 3.11–3.13 would
+  `TypeError` mid-stream. The engine now detects this at client build time and
+  forces the httpx async transport, and logs a one-time SDK self-check warning.
+
+- **Packaging** — The `ai` / `all` extras now pin `google-genai>=2.8.0,<3.0.0`
+  and `aiohttp>=3.14.0` (overriding `google-genai`'s too-loose floor).
+
+- **Robust response parsing** — `_extract_gemini_text` no longer raises
+  `TypeError` when a thinking model returns a candidate with
+  `content.parts is None` (truncated/blocked); it returns `""` cleanly, and the
+  finish reason is surfaced on `GroundedCompletion` and the OTel span.
+
 ## 0.14.0
 
 ### Added — Gemini web-search grounding

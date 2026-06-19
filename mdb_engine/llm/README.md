@@ -196,9 +196,9 @@ cognitive_engine = CognitiveEngine(
 
 | Provider        | Example models | Web search grounding (`enable_web_search`) |
 |----------------|----------------|----------------|
-| **OpenAI**     | `openai/gpt-4o`, `openai/gpt-4o-mini`, `openai/gpt-4-turbo` | Not supported (ignored with a warning) |
-| **Azure OpenAI** | `azure/<deployment-name>` | Not supported (ignored with a warning) |
-| **Gemini**     | `gemini/gemini-3-flash-preview`, `gemini/gemini-2.5-flash`, etc. | Supported (Google Search grounding) |
+| **OpenAI**     | `openai/gpt-4o`, `openai/gpt-4o-mini`, `openai/gpt-4-turbo` | Not supported yet (policy logs/raises/routes) |
+| **Azure OpenAI** | `azure/<deployment-name>` | Not supported yet (policy logs/raises/routes) |
+| **Gemini**     | `gemini/gemini-2.5-flash`, `gemini/gemini-2.5-pro`, ... | Supported on `2.5-*`; **not** on `-latest` aliases — see the [capability registry](#model-capabilities-registry) and `grounding_policy` |
 
 ## Provider-Specific Notes
 
@@ -329,12 +329,19 @@ result = await llm_service.chat_completion(
     return_metadata=True,
 )
 assert isinstance(result, GroundedCompletion)
-result.text       # -> str
-result.citations  # -> [{"title": "...", "uri": "https://..."}, ...]
-result.grounded   # -> bool (True when >=1 citation was returned)
+result.text          # -> str
+result.citations     # -> [{"title", "uri", "domain", "redirect_uri"}, ...]
+result.grounded      # -> bool (True when >=1 citation was returned)
+result.model_used    # -> the model that actually answered (see grounding_policy)
+result.finish_reason # -> "STOP" | "MAX_TOKENS" | "SAFETY" | ... | None
 ```
 
 `return_metadata` defaults to `False`, so existing callers keep getting a `str`.
+
+Each citation is normalized: Google returns `uri` as a
+`vertexaisearch.cloud.google.com/grounding-api-redirect/...` redirect with the real publisher
+in `title`, so `domain` gives you the clean host (e.g. `livemint.com`) for display while
+`redirect_uri`/`uri` remain the working links.
 
 #### Citations while streaming
 
@@ -359,15 +366,116 @@ async for chunk in llm_service.chat_completion_stream(
     print(chunk, end="", flush=True)
 ```
 
+> [!IMPORTANT]
+> **Grounding is gated by the model, not just the engine.** The `gemini-2.5-*` family surfaces
+> Google Search grounding, but the `-latest` aliases (`gemini-flash-latest`, `gemini-pro-latest`)
+> **do not** — they return zero citations even when explicitly told to search. The engine encodes
+> this in its [capability registry](#model-capabilities-registry); use `grounding_policy` (below)
+> so `enable_web_search=True` is never a silent no-op.
+
 > [!NOTE]
-> - Grounding works on Gemini 2.x / 3.x. For **non-Gemini** providers (OpenAI/Azure),
->   `enable_web_search=True` is ignored with a warning (no crash) — there is no built-in
->   equivalent in the Chat Completions API.
+> - For **non-Gemini** providers (OpenAI/Azure), `enable_web_search=True` currently has no built-in
+>   equivalent; under the default `best_effort` policy it logs and continues ungrounded.
 > - Gemini does **not** allow grounding together with a JSON `response_format` (structured
 >   output). When both are requested, grounding is dropped (with a warning) so the structured
 >   call still succeeds.
 > - A model that rejects the grounding tool degrades gracefully: the request is retried once
 >   without tools instead of failing.
+> - **SDK/streaming:** `google-genai` 2.x async streaming crashes on `aiohttp < 3.14`. The `ai`/`all`
+>   extras pin `aiohttp>=3.14`, and the engine self-heals by forcing the httpx transport if an
+>   incompatible `aiohttp` is detected.
+
+### Grounding policy (capability-aware negotiation)
+
+`grounding_policy` decides what happens when `enable_web_search=True` but the resolved model
+can't actually ground:
+
+| Policy | Behavior when the model can't ground |
+| --- | --- |
+| `"best_effort"` (default) | Log a warning and continue **ungrounded** (back-compatible). |
+| `"require"` | Raise `GroundingUnsupportedError` — fail loudly instead of shipping empty citations. |
+| `"auto"` | Transparently **route this turn** to a grounding-capable model for the same provider (e.g. `gemini-flash-latest` → `gemini-2.5-flash`), reported in `GroundedCompletion.model_used`. |
+
+```python
+# Keep the "-latest feel" for normal chat, borrow a 2.5 model only for grounded turns.
+result = await llm_service.chat_completion(
+    messages=[{"role": "user", "content": "What happened in AI this week?"}],
+    model="gemini/gemini-flash-latest",
+    enable_web_search=True,
+    grounding_policy="auto",       # routes to gemini/gemini-2.5-flash for this turn
+    return_metadata=True,
+)
+result.model_used  # -> "gemini/gemini-2.5-flash" (or response model id)
+```
+
+Configure the routing target in your manifest `llm_config` (defaults to `gemini/gemini-2.5-flash`):
+
+```json
+{ "llm_config": { "grounding_model": "gemini/gemini-2.5-flash" } }
+```
+
+### Typed streaming events
+
+`stream()` is a structured alternative to `chat_completion_stream` that removes the
+`startswith("__REASONING__")` / `startswith("__GROUNDING__")` string-sniffing. The legacy
+sentinels remain for back-compat.
+
+```python
+from mdb_engine.llm import TextDelta, ReasoningDelta, GroundingEvent, DoneEvent
+
+async for ev in llm_service.stream(
+    messages=[{"role": "user", "content": "What happened in AI this week?"}],
+    enable_web_search=True,
+    grounding_policy="auto",
+):
+    match ev:
+        case ReasoningDelta(text):  ...  # optional thinking trace
+        case TextDelta(text):       print(text, end="", flush=True)
+        case GroundingEvent(citations): ...  # render source chips
+        case DoneEvent(grounded=g, model_used=m): ...  # "Answered with m · N sources"
+```
+
+## Model Capabilities Registry
+
+The engine is the **single source of truth** for what each model can do, so apps don't hardcode
+(and re-learn) model knowledge. Build your model selector, reasoning control, and web-search
+toggle from the registry instead of a hand-maintained catalog.
+
+```python
+# Which models can ground? (for a provider dropdown / toggle)
+for m in llm_service.list_models(provider="gemini", web_search=True):
+    print(m.model, m.default_reasoning, m.max_input_tokens)
+
+# Resolve any model (canonical id, bare id, alias, or unknown — always returns a value)
+caps = llm_service.get_capabilities("gemini/gemini-flash-latest")
+caps.web_search   # -> False (the -latest alias can't ground)
+caps.thinking     # -> True
+
+# Quick boolean checks
+llm_service.supports("web_search", "gemini/gemini-2.5-flash")  # -> True
+```
+
+`ModelCapabilities` fields: `model`, `family`, `provider`, `thinking`, `default_reasoning`,
+`web_search`, `vision`, `structured_output`, `max_input_tokens`, `aliases`, `notes`.
+
+**Curated grounding matrix (verified):**
+
+| Model | Grounds? |
+| --- | --- |
+| `gemini/gemini-2.5-flash` | ✅ |
+| `gemini/gemini-2.5-flash-lite` | ✅ |
+| `gemini/gemini-2.5-pro` | ✅ |
+| `gemini/gemini-2.0-flash` | ✅ |
+| `gemini/gemini-flash-latest` | ❌ |
+| `gemini/gemini-pro-latest` | ❌ |
+| `openai/*`, `azure/*` | ❌ (no built-in web search yet) |
+
+**Overrides:** correct or extend the map without an engine release via manifest
+`llm_config.model_overrides`:
+
+```json
+{ "llm_config": { "model_overrides": { "gemini/gemini-flash-latest": { "web_search": true } } } }
+```
 
 ### Temperature note for Gemini 3
 

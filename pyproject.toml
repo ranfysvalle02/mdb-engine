@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mdb-engine"
-version = "0.14.0"
+version = "0.15.0"
 description = "MongoDB Engine"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -49,7 +49,8 @@ mdb-engine = "mdb_engine.cli:main"
 [project.optional-dependencies]
 ai = [
     "openai>=1.0.0,<3.0.0",  # Embedding providers and memory service
-    "google-genai>=1.0.0",  # Google Gemini LLM support
+    "google-genai>=2.8.0,<3.0.0",  # Google Gemini LLM support (2.8 = verified grounding + streaming)
+    "aiohttp>=3.14.0",  # Override google-genai's too-loose floor; <3.14 crashes async streaming
     "voyageai>=0.3.0",  # VoyageAI embeddings
     "semantic-text-splitter>=0.9.0",  # Text chunking for memory extraction
 ]
@@ -114,7 +115,8 @@ docs = [
 ]
 all = [
     "openai>=1.0.0,<3.0.0",
-    "google-genai>=1.0.0",
+    "google-genai>=2.8.0,<3.0.0",
+    "aiohttp>=3.14.0",  # google-genai async streaming crashes on aiohttp<3.14
     "voyageai>=0.3.0",
     "semantic-text-splitter>=0.9.0",
     "casbin>=1.0.0",

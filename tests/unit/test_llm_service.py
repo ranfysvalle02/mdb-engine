@@ -20,12 +20,20 @@ import pytest
 
 from mdb_engine.llm import service as llm_service_module
 from mdb_engine.llm.service import (
+    DoneEvent,
     GroundedCompletion,
+    GroundingEvent,
+    GroundingUnsupportedError,
     LLMService,
     LLMServiceError,
+    ReasoningDelta,
+    TextDelta,
+    _aiohttp_readline_rejects_max_line_length,
     _build_gemini_tools,
     _build_thinking_config,
     _clamp_thinking_budget,
+    _domain_from_citation,
+    _extract_finish_reason,
     _extract_grounding_citations,
     _is_thinking_config_error,
     _is_tools_config_error,
@@ -728,8 +736,18 @@ class TestExtractGroundingCitations:
         )
         citations = _extract_grounding_citations(response)
         assert citations == [
-            {"title": "A", "uri": "https://a.example/1"},
-            {"title": "B", "uri": "https://b.example/2"},
+            {
+                "title": "A",
+                "uri": "https://a.example/1",
+                "domain": "a.example",
+                "redirect_uri": "https://a.example/1",
+            },
+            {
+                "title": "B",
+                "uri": "https://b.example/2",
+                "domain": "b.example",
+                "redirect_uri": "https://b.example/2",
+            },
         ]
 
     def test_uri_used_as_title_when_missing(self):
@@ -739,7 +757,15 @@ class TestExtractGroundingCitations:
             )
         )
         response = SimpleNamespace(candidates=[candidate])
-        assert _extract_grounding_citations(response) == [{"title": "https://x.example", "uri": "https://x.example"}]
+        # With no title, the clean domain is used as the display title.
+        assert _extract_grounding_citations(response) == [
+            {
+                "title": "x.example",
+                "uri": "https://x.example",
+                "domain": "x.example",
+                "redirect_uri": "https://x.example",
+            }
+        ]
 
     def test_no_candidates_returns_empty(self):
         assert _extract_grounding_citations(SimpleNamespace(candidates=[])) == []
@@ -806,7 +832,15 @@ class TestGeminiWebSearchGrounding:
         assert isinstance(result, GroundedCompletion)
         assert result.text == "Grounded answer"
         assert result.grounded is True
-        assert result.citations == [{"title": "News A", "uri": "https://news.example/a"}]
+        assert result.citations == [
+            {
+                "title": "News A",
+                "uri": "https://news.example/a",
+                "domain": "news.example",
+                "redirect_uri": "https://news.example/a",
+            }
+        ]
+        assert result.model_used is not None
 
     @pytest.mark.asyncio
     async def test_return_metadata_without_grounding(self, mock_openai_sdk, llm_config_multiple):
@@ -849,7 +883,8 @@ class TestGeminiWebSearchGrounding:
                 enable_web_search=True,
             )
 
-        assert any("not supported for provider 'openai'" in rec.message for rec in caplog.records)
+        # Capability-aware negotiation logs (best_effort) instead of silently no-op'ing.
+        assert any("does not surface web-search grounding" in rec.message for rec in caplog.records)
         # No grounding tool should leak into the OpenAI call.
         assert "tools" not in mock_openai_sdk.openai_create.call_args.kwargs
 
@@ -881,7 +916,14 @@ class TestGeminiWebSearchGrounding:
         grounding_events = [c for c in chunks if c.startswith("__GROUNDING__:")]
         assert len(grounding_events) == 1
         payload = json.loads(grounding_events[0][len("__GROUNDING__:") :])
-        assert payload["citations"] == [{"title": "Src", "uri": "https://src.example"}]
+        assert payload["citations"] == [
+            {
+                "title": "Src",
+                "uri": "https://src.example",
+                "domain": "src.example",
+                "redirect_uri": "https://src.example",
+            }
+        ]
 
     @pytest.mark.asyncio
     async def test_streaming_without_grounding_emits_no_event(self, mock_openai_sdk, llm_config_multiple):
@@ -956,3 +998,291 @@ class TestGeminiToolsGracefulFallback:
             )
 
         assert mock_openai_sdk.gemini_generate_content.call_count == 1
+
+
+class TestDomainFromCitation:
+    """Test clean-domain extraction from grounding citations."""
+
+    def test_title_that_is_a_domain_wins(self):
+        assert (
+            _domain_from_citation(
+                "livemint.com",
+                "https://vertexaisearch.cloud.google.com/grounding-api-redirect/abc",
+            )
+            == "livemint.com"
+        )
+
+    def test_www_prefix_stripped(self):
+        assert _domain_from_citation("www.bbc.co.uk", "https://anything/x") == "bbc.co.uk"
+
+    def test_falls_back_to_uri_host_when_title_has_spaces(self):
+        assert _domain_from_citation("Some Article Title", "https://example.com/path") == "example.com"
+
+    def test_empty_title_uses_uri_host(self):
+        assert _domain_from_citation("", "https://news.example.org/a") == "news.example.org"
+
+
+class TestExtractFinishReason:
+    """Test finish_reason extraction (enum, string, missing)."""
+
+    def test_enum_finish_reason(self):
+        resp = SimpleNamespace(candidates=[SimpleNamespace(finish_reason=SimpleNamespace(name="MAX_TOKENS"))])
+        assert _extract_finish_reason(resp) == "MAX_TOKENS"
+
+    def test_string_finish_reason(self):
+        resp = SimpleNamespace(candidates=[SimpleNamespace(finish_reason="STOP")])
+        assert _extract_finish_reason(resp) == "STOP"
+
+    def test_no_candidates_returns_none(self):
+        assert _extract_finish_reason(SimpleNamespace(candidates=[])) is None
+
+    def test_missing_finish_reason_returns_none(self):
+        assert _extract_finish_reason(SimpleNamespace(candidates=[SimpleNamespace(finish_reason=None)])) is None
+
+
+class TestRobustGeminiTextExtraction:
+    """Empty/blocked/truncated candidates must not raise TypeError."""
+
+    def _provider(self, mock_openai_sdk):
+        service = LLMService(config={"providers": {"chat": "gemini/gemini-2.5-flash"}})
+        return service.get_provider("chat")
+
+    def test_none_parts_returns_empty_string(self, mock_openai_sdk):
+        provider = self._provider(mock_openai_sdk)
+        # Thinking model that spent its whole budget: parts is explicitly None.
+        resp = SimpleNamespace(text=None, candidates=[SimpleNamespace(content=SimpleNamespace(parts=None))])
+        assert provider._extract_gemini_text(resp) == ""  # noqa: SLF001
+
+    def test_none_content_returns_empty_string(self, mock_openai_sdk):
+        provider = self._provider(mock_openai_sdk)
+        resp = SimpleNamespace(text=None, candidates=[SimpleNamespace(content=None)])
+        assert provider._extract_gemini_text(resp) == ""  # noqa: SLF001
+
+    def test_none_candidates_returns_empty_string(self, mock_openai_sdk):
+        provider = self._provider(mock_openai_sdk)
+        resp = SimpleNamespace(text=None, candidates=None)
+        assert provider._extract_gemini_text(resp) == ""  # noqa: SLF001
+
+
+class TestGroundingPolicy:
+    """Capability-aware grounding negotiation: best_effort / require / auto."""
+
+    def _latest_service(self):
+        # gemini-flash-latest does NOT surface grounding (per the curated registry).
+        return LLMService(config={"providers": {"chat": "gemini/gemini-flash-latest"}})
+
+    @pytest.mark.asyncio
+    async def test_best_effort_skips_grounding_on_non_grounding_model(self, mock_openai_sdk):
+        service = self._latest_service()
+        await service.chat_completion(
+            messages=[{"role": "user", "content": "news?"}],
+            enable_web_search=True,  # grounding_policy defaults to best_effort
+        )
+        config = mock_openai_sdk.gemini_generate_content.call_args.kwargs["config"]
+        assert not hasattr(config, "tools")  # grounding not attached
+
+    @pytest.mark.asyncio
+    async def test_require_raises_on_non_grounding_model(self, mock_openai_sdk):
+        service = self._latest_service()
+        with pytest.raises(GroundingUnsupportedError):
+            await service.chat_completion(
+                messages=[{"role": "user", "content": "news?"}],
+                enable_web_search=True,
+                grounding_policy="require",
+            )
+        # The SDK must never be called when grounding is required but unsupported.
+        assert mock_openai_sdk.gemini_generate_content.call_count == 0
+
+    @pytest.mark.asyncio
+    async def test_require_passes_on_grounding_model(self, mock_openai_sdk, llm_config_multiple):
+        service = LLMService(config=llm_config_multiple)
+        # analysis = gemini-3-flash-preview, which is grounding-capable.
+        await service.chat_completion(
+            messages=[{"role": "user", "content": "news?"}],
+            provider_name="analysis",
+            enable_web_search=True,
+            grounding_policy="require",
+        )
+        config = mock_openai_sdk.gemini_generate_content.call_args.kwargs["config"]
+        assert hasattr(config, "tools")
+
+    @pytest.mark.asyncio
+    async def test_auto_routes_to_grounding_capable_model(self, mock_openai_sdk):
+        service = self._latest_service()
+        await service.chat_completion(
+            messages=[{"role": "user", "content": "news?"}],
+            enable_web_search=True,
+            grounding_policy="auto",
+        )
+        call = mock_openai_sdk.gemini_generate_content.call_args
+        # Routed away from the -latest alias to the curated grounding model.
+        assert call.kwargs["model"] == "gemini-2.5-flash"
+        assert hasattr(call.kwargs["config"], "tools")
+
+    @pytest.mark.asyncio
+    async def test_auto_routes_via_configured_grounding_model(self, mock_openai_sdk):
+        service = LLMService(
+            config={
+                "providers": {"chat": "gemini/gemini-flash-latest"},
+                "grounding_model": "gemini/gemini-2.5-pro",
+            }
+        )
+        await service.chat_completion(
+            messages=[{"role": "user", "content": "news?"}],
+            enable_web_search=True,
+            grounding_policy="auto",
+        )
+        assert mock_openai_sdk.gemini_generate_content.call_args.kwargs["model"] == "gemini-2.5-pro"
+
+    @pytest.mark.asyncio
+    async def test_model_override_enables_grounding(self, mock_openai_sdk):
+        # An app corrects the registry without an engine release.
+        service = LLMService(
+            config={
+                "providers": {"chat": "gemini/gemini-flash-latest"},
+                "model_overrides": {"gemini/gemini-flash-latest": {"web_search": True}},
+            }
+        )
+        await service.chat_completion(
+            messages=[{"role": "user", "content": "news?"}],
+            enable_web_search=True,
+            grounding_policy="require",
+        )
+        config = mock_openai_sdk.gemini_generate_content.call_args.kwargs["config"]
+        assert hasattr(config, "tools")  # override made it grounding-capable
+
+
+class TestCapabilityAccessors:
+    """LLMService.get_capabilities / list_models / supports."""
+
+    def test_get_capabilities_default_model(self, mock_openai_sdk):
+        service = LLMService(config={"providers": {"chat": "gemini/gemini-2.5-flash"}})
+        caps = service.get_capabilities()
+        assert caps.web_search is True
+        assert caps.thinking is True
+        assert caps.provider == "gemini"
+
+    def test_get_capabilities_latest_alias_no_grounding(self, mock_openai_sdk):
+        service = LLMService(config={"providers": {"chat": "gemini/gemini-2.5-flash"}})
+        assert service.get_capabilities("gemini/gemini-flash-latest").web_search is False
+
+    def test_supports_feature(self, mock_openai_sdk):
+        service = LLMService(config={"providers": {"chat": "gemini/gemini-2.5-flash"}})
+        assert service.supports("web_search", "gemini/gemini-2.5-flash") is True
+        assert service.supports("web_search", "gemini/gemini-flash-latest") is False
+        assert service.supports("thinking", "openai/gpt-4o") is False
+
+    def test_list_models_filter_web_search(self, mock_openai_sdk):
+        service = LLMService(config={"providers": {"chat": "gemini/gemini-2.5-flash"}})
+        grounding = service.list_models(provider="gemini", web_search=True)
+        assert grounding  # non-empty
+        assert all(m.web_search and m.provider == "gemini" for m in grounding)
+        assert all("latest" not in m.model for m in grounding)
+
+    def test_list_models_honors_overrides(self, mock_openai_sdk):
+        service = LLMService(
+            config={
+                "providers": {"chat": "gemini/gemini-2.5-flash"},
+                "model_overrides": {"gemini/gemini-flash-latest": {"web_search": True}},
+            }
+        )
+        grounded_ids = {m.model for m in service.list_models(provider="gemini", web_search=True)}
+        assert "gemini/gemini-flash-latest" in grounded_ids
+
+
+class TestTypedStream:
+    """LLMService.stream() typed events."""
+
+    @pytest.mark.asyncio
+    async def test_stream_yields_typed_events(self, mock_openai_sdk):
+        service = LLMService(config={"providers": {"chat": "gemini/gemini-2.5-flash"}})
+
+        async def mock_gemini_stream():
+            yield SimpleNamespace(
+                candidates=[
+                    SimpleNamespace(content=SimpleNamespace(parts=[SimpleNamespace(thought=True, text="thinking")]))
+                ]
+            )
+            yield SimpleNamespace(
+                candidates=[
+                    SimpleNamespace(
+                        content=SimpleNamespace(parts=[SimpleNamespace(thought=False, text="answer")]),
+                        grounding_metadata=SimpleNamespace(
+                            grounding_chunks=[SimpleNamespace(web=SimpleNamespace(uri="https://s.example", title="S"))]
+                        ),
+                    )
+                ]
+            )
+
+        mock_openai_sdk.gemini_generate_content_stream.return_value = mock_gemini_stream()
+
+        events = []
+        async for ev in service.stream(
+            messages=[{"role": "user", "content": "news?"}],
+            enable_web_search=True,
+        ):
+            events.append(ev)
+
+        assert any(isinstance(e, ReasoningDelta) and e.text == "thinking" for e in events)
+        assert any(isinstance(e, TextDelta) and e.text == "answer" for e in events)
+        grounding = [e for e in events if isinstance(e, GroundingEvent)]
+        assert len(grounding) == 1
+        assert grounding[0].citations[0]["domain"] == "s.example"
+        assert isinstance(events[-1], DoneEvent)
+        assert events[-1].grounded is True
+        assert events[-1].model_used == "gemini/gemini-2.5-flash"
+
+    @pytest.mark.asyncio
+    async def test_stream_done_event_when_ungrounded(self, mock_openai_sdk):
+        service = LLMService(config={"providers": {"chat": "gemini/gemini-2.5-flash"}})
+
+        async def mock_gemini_stream():
+            yield SimpleNamespace(
+                candidates=[
+                    SimpleNamespace(content=SimpleNamespace(parts=[SimpleNamespace(thought=False, text="hello")]))
+                ]
+            )
+
+        mock_openai_sdk.gemini_generate_content_stream.return_value = mock_gemini_stream()
+
+        events = [ev async for ev in service.stream(messages=[{"role": "user", "content": "hi"}])]
+        assert [e for e in events if isinstance(e, TextDelta)]
+        done = events[-1]
+        assert isinstance(done, DoneEvent)
+        assert done.grounded is False
+        assert done.citations == []
+
+
+class TestTransportDetection:
+    """SDK transport-fallback detection (google-genai x aiohttp streaming cliff)."""
+
+    def test_returns_bool(self):
+        assert isinstance(_aiohttp_readline_rejects_max_line_length(), bool)
+
+    def test_true_when_readline_lacks_kwarg(self, monkeypatch):
+        import sys
+        import types as _types
+
+        fake = _types.ModuleType("aiohttp")
+
+        class _SR:
+            async def readline(self):  # no max_line_length kwarg -> incompatible
+                return b""
+
+        fake.StreamReader = _SR
+        monkeypatch.setitem(sys.modules, "aiohttp", fake)
+        assert _aiohttp_readline_rejects_max_line_length() is True
+
+    def test_false_when_readline_accepts_kwarg(self, monkeypatch):
+        import sys
+        import types as _types
+
+        fake = _types.ModuleType("aiohttp")
+
+        class _SR:
+            async def readline(self, max_line_length=None):  # compatible
+                return b""
+
+        fake.StreamReader = _SR
+        monkeypatch.setitem(sys.modules, "aiohttp", fake)
+        assert _aiohttp_readline_rejects_max_line_length() is False
