@@ -1200,7 +1200,14 @@ class TestWebSocketRoutesWithMountedApps:
             mock_conn.initialize = AsyncMock()
             mock_conn.shutdown = AsyncMock()
 
-            with patch("fastapi.APIRouter") as mock_router_class:
+            # Patch the WebSocket-specific factory rather than the global
+            # ``fastapi.APIRouter``: many modules legitimately create APIRouters
+            # at import time, so a global assertion is order-dependent and flaky
+            # under parallel (xdist) execution. ``create_websocket_endpoint`` is
+            # only invoked when an app actually declares WebSocket endpoints.
+            with patch(
+                "mdb_engine.routing.websockets.create_websocket_endpoint",
+            ) as mock_create_ws:
                 app = engine.create_multi_app(
                     apps=[
                         {
@@ -1213,8 +1220,8 @@ class TestWebSocketRoutesWithMountedApps:
 
                 # WebSocket routes are registered during lifespan, so run it
                 async with app.router.lifespan_context(app):
-                    # Should not create any routers for WebSocket routes
-                    assert not mock_router_class.called
+                    # An app without WebSocket config must not register endpoints.
+                    assert not mock_create_ws.called
 
     @pytest.mark.asyncio
     async def test_websocket_routes_import_error_handled(self, mock_mongo_database, temp_manifest_with_websocket):
@@ -1263,9 +1270,11 @@ class TestWebSocketRoutesWithMountedApps:
 
         # Capture logs from root logger to catch all logs
         log_capture = []
+
         class CaptureHandler(logging.Handler):
             def emit(self, record):
                 log_capture.append(record.getMessage())
+
         handler = CaptureHandler()
 
         # Add handler to mdb_engine.core.multi_app logger directly

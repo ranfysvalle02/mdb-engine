@@ -17,7 +17,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from mdb_engine.llm.service import LLMService, LLMServiceError, get_llm_service
+from mdb_engine.llm import service as llm_service_module
+from mdb_engine.llm.service import (
+    LLMService,
+    LLMServiceError,
+    _build_thinking_config,
+    _clamp_thinking_budget,
+    _is_thinking_config_error,
+    get_llm_service,
+)
 
 
 @pytest.fixture
@@ -407,3 +415,197 @@ class TestGetLLMService:
         """Test get_llm_service with only default_model (no providers) raises LLMServiceError."""
         with pytest.raises(LLMServiceError, match="providers"):
             get_llm_service(config=llm_config_single)
+
+
+@pytest.fixture
+def stub_genai_types():
+    """Patch ``genai_types`` so ``ThinkingConfig`` just records its kwargs.
+
+    Lets us exercise thinking-config logic without the optional ``google-genai``
+    dependency (which is not installed in the unit-test environment).
+    """
+    stub = SimpleNamespace(
+        ThinkingConfig=lambda **kw: SimpleNamespace(**kw),
+        GenerateContentConfig=lambda **kw: SimpleNamespace(**kw),
+    )
+    with patch.object(llm_service_module, "genai_types", stub):
+        yield stub
+
+
+class TestClampThinkingBudget:
+    """Test _clamp_thinking_budget model-aware clamping."""
+
+    def test_dynamic_budget_passes_through(self):
+        assert _clamp_thinking_budget("gemini-2.5-pro", -1) == -1
+        assert _clamp_thinking_budget("gemini-2.5-flash", -1) == -1
+
+    def test_pro_cannot_disable_thinking(self):
+        # Pro has a minimum of 128 and cannot be set to 0.
+        assert _clamp_thinking_budget("gemini-2.5-pro", 0) == 128
+        assert _clamp_thinking_budget("gemini-2.5-pro", 50) == 128
+
+    def test_pro_caps_at_max(self):
+        assert _clamp_thinking_budget("gemini-2.5-pro", 99999) == 32768
+
+    def test_flash_allows_zero_and_caps(self):
+        assert _clamp_thinking_budget("gemini-2.5-flash", 0) == 0
+        assert _clamp_thinking_budget("gemini-2.5-flash", 99999) == 24576
+        assert _clamp_thinking_budget("gemini-2.5-flash", 1024) == 1024
+
+
+class TestIsThinkingConfigError:
+    """Test the heuristic that detects thinking-config errors."""
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            "400 INVALID_ARGUMENT: thinkingBudget is out of range",
+            "thinking_level is not supported for this model",
+            "Unknown field: thinking_config",
+            "thoughts are not available",
+        ],
+    )
+    def test_thinking_errors_detected(self, message):
+        assert _is_thinking_config_error(ValueError(message)) is True
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            "401 Unauthorized: invalid API key",
+            "429 RESOURCE_EXHAUSTED: quota exceeded",
+            "connection reset by peer",
+        ],
+    )
+    def test_unrelated_errors_ignored(self, message):
+        assert _is_thinking_config_error(RuntimeError(message)) is False
+
+
+class TestBuildThinkingConfig:
+    """Test _build_thinking_config provider-correct mapping."""
+
+    def test_no_effort_returns_none(self, stub_genai_types):
+        assert _build_thinking_config("gemini-2.5-flash", None) is None
+
+    def test_sdk_unavailable_returns_none(self):
+        with patch.object(llm_service_module, "genai_types", None):
+            assert _build_thinking_config("gemini-2.5-flash", "high") is None
+
+    def test_gemini_25_uses_budget_not_level(self, stub_genai_types):
+        cfg = _build_thinking_config("gemini-2.5-flash", "low")
+        assert cfg.thinking_budget == 1024
+        assert cfg.include_thoughts is True
+        assert not hasattr(cfg, "thinking_level")
+
+    def test_gemini_25_none_disables_thinking_and_thoughts(self, stub_genai_types):
+        cfg = _build_thinking_config("gemini-2.5-flash", "none")
+        assert cfg.thinking_budget == 0
+        # Must not request thought summaries when thinking is disabled.
+        assert cfg.include_thoughts is False
+
+    def test_gemini_25_pro_none_clamped_to_minimum(self, stub_genai_types):
+        cfg = _build_thinking_config("gemini-2.5-pro", "none")
+        assert cfg.thinking_budget == 128
+        assert cfg.include_thoughts is True
+
+    def test_gemini_25_medium_is_dynamic(self, stub_genai_types):
+        cfg = _build_thinking_config("gemini-2.5-flash", "medium")
+        assert cfg.thinking_budget == -1
+        assert cfg.include_thoughts is True
+
+    def test_gemini_3_uses_level_not_budget(self, stub_genai_types):
+        cfg = _build_thinking_config("gemini-3-flash-preview", "high")
+        assert cfg.thinking_level == "HIGH"
+        assert cfg.include_thoughts is True
+        assert not hasattr(cfg, "thinking_budget")
+
+    def test_gemini_3_pro_none_uses_low(self, stub_genai_types):
+        # Pro does not support "minimal", so "none" maps to the lowest level.
+        cfg = _build_thinking_config("gemini-3-pro", "none")
+        assert cfg.thinking_level == "LOW"
+
+    def test_gemini_3_flash_none_uses_minimal(self, stub_genai_types):
+        cfg = _build_thinking_config("gemini-3-flash", "none")
+        assert cfg.thinking_level == "MINIMAL"
+
+    def test_construction_error_returns_none(self):
+        def _raising(**_kwargs):
+            raise TypeError("ThinkingConfig got an unexpected keyword argument")
+
+        stub = SimpleNamespace(ThinkingConfig=_raising)
+        with patch.object(llm_service_module, "genai_types", stub):
+            assert _build_thinking_config("gemini-2.5-flash", "high") is None
+
+
+class TestGeminiThinkingGracefulFallback:
+    """Test that a rejected thinking config degrades gracefully (retry without it).
+
+    These exercise ``_call_gemini`` directly so the resilience layer (which
+    wraps the public ``chat_completion``) doesn't add retries/backoff.
+    """
+
+    @pytest.mark.asyncio
+    async def test_retries_without_thinking_config_on_thinking_error(self, mock_openai_sdk, llm_config_multiple):
+        service = LLMService(config=llm_config_multiple)
+        provider = service.get_provider("analysis")
+        _ptype, client = provider._client_for_model("gemini/gemini-3-flash-preview")  # noqa: SLF001
+
+        recovered = MagicMock()
+        recovered.text = "Recovered answer"
+        # First call rejects the thinking config; second (without it) succeeds.
+        mock_openai_sdk.gemini_generate_content.side_effect = [
+            ValueError("400 INVALID_ARGUMENT: thinkingBudget not supported"),
+            recovered,
+        ]
+
+        response = await provider._call_gemini(  # noqa: SLF001
+            client,
+            "gemini/gemini-3-flash-preview",
+            [{"role": "user", "content": "Think hard"}],
+            0.7,
+            None,
+            reasoning_effort="high",
+        )
+
+        assert response is recovered
+        assert mock_openai_sdk.gemini_generate_content.call_count == 2
+        # First attempt carried the thinking config; the retry dropped it.
+        first_config = mock_openai_sdk.gemini_generate_content.call_args_list[0].kwargs["config"]
+        retry_config = mock_openai_sdk.gemini_generate_content.call_args_list[1].kwargs["config"]
+        assert hasattr(first_config, "thinking_config")
+        assert not hasattr(retry_config, "thinking_config")
+
+    @pytest.mark.asyncio
+    async def test_non_thinking_error_propagates_without_retry(self, mock_openai_sdk, llm_config_multiple):
+        service = LLMService(config=llm_config_multiple)
+        provider = service.get_provider("analysis")
+        _ptype, client = provider._client_for_model("gemini/gemini-3-flash-preview")  # noqa: SLF001
+
+        mock_openai_sdk.gemini_generate_content.side_effect = ValueError("401 Unauthorized: bad key")
+
+        with pytest.raises(ValueError, match="Unauthorized"):
+            await provider._call_gemini(  # noqa: SLF001
+                client,
+                "gemini/gemini-3-flash-preview",
+                [{"role": "user", "content": "Think hard"}],
+                0.7,
+                None,
+                reasoning_effort="high",
+            )
+
+        # Unrelated errors must not trigger the thinking-config retry.
+        assert mock_openai_sdk.gemini_generate_content.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_reasoning_effort_threads_into_non_streaming(self, mock_openai_sdk, llm_config_multiple):
+        """The non-streaming path must forward reasoning_effort to Gemini's thinking config."""
+        service = LLMService(config=llm_config_multiple)
+
+        await service.chat_completion(
+            messages=[{"role": "user", "content": "Analyze"}],
+            provider_name="analysis",
+            reasoning_effort="high",
+        )
+
+        config = mock_openai_sdk.gemini_generate_content.call_args.kwargs["config"]
+        assert hasattr(config, "thinking_config")
+        assert config.thinking_config.thinking_level == "HIGH"

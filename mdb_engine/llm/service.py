@@ -60,12 +60,83 @@ T = TypeVar("T", bound=BaseModel)
 
 logger = logging.getLogger(__name__)
 
-_REASONING_EFFORT_MAP = {
-    "none": "THINKING_LEVEL_UNSPECIFIED",
-    "low": "LOW",
-    "medium": "MEDIUM",
-    "high": "HIGH",
-}
+# Keywords used to detect when an API error is caused by an unsupported or
+# invalid thinking configuration, so we can transparently retry without it.
+_THINKING_ERROR_KEYWORDS = ("thinking", "thinkingbudget", "thinkinglevel", "thought")
+
+
+def _is_thinking_config_error(exc: Exception) -> bool:
+    """Heuristic check: did this error originate from the thinking config?
+
+    Used to decide whether a failed Gemini request is worth retrying without
+    the thinking config (vs. a genuine failure like auth/quota that should
+    propagate to the resilience layer).
+    """
+    msg = str(exc).lower()
+    return any(keyword in msg for keyword in _THINKING_ERROR_KEYWORDS)
+
+
+def _clamp_thinking_budget(model_name: str, budget: int) -> int:
+    """Clamp a Gemini 2.5 ``thinking_budget`` into the model's valid range.
+
+    Per Google's docs: 2.5 Pro accepts ``128``-``32768`` and *cannot* disable
+    thinking (a budget of ``0`` is invalid); Flash / Flash-Lite and other 2.5
+    models accept ``0``-``24576``. A budget of ``-1`` (dynamic thinking) is
+    always passed through untouched.
+    """
+    if budget == -1:
+        return budget
+    name = model_name.lower()
+    if "pro" in name:
+        # Pro cannot disable thinking; floor at the minimum supported budget.
+        return max(128, min(budget, 32768))
+    return max(0, min(budget, 24576))
+
+
+def _build_thinking_config(model_name: str, reasoning_effort: str | None) -> Any | None:
+    """Build a provider-correct ``ThinkingConfig`` for a Gemini model.
+
+    - Gemini 3.x uses ``thinking_level`` (``minimal``/``low``/``medium``/``high``).
+      Pro models do not support ``minimal`` and default to ``high``, so
+      ``"none"`` maps to the lowest level the model actually supports.
+    - Gemini 2.5 uses ``thinking_budget`` (a token ceiling), clamped to the
+      model's valid range.
+
+    Thought summaries (``include_thoughts``) are only requested when thinking is
+    actually enabled, because asking for thoughts while thinking is disabled
+    (budget ``0``) is contradictory and rejected by the API.
+
+    Returns ``None`` when no thinking config should be applied (no effort given,
+    SDK unavailable, or the config could not be constructed).
+    """
+    if not reasoning_effort or genai_types is None:
+        return None
+
+    effort = reasoning_effort.lower()
+    name = model_name.lower()
+
+    try:
+        if "gemini-3" in name:
+            is_pro = "pro" in name
+            level_map = {
+                "none": "LOW" if is_pro else "MINIMAL",
+                "low": "LOW",
+                "medium": "MEDIUM",
+                "high": "HIGH",
+            }
+            level = level_map.get(effort, "MEDIUM")
+            return genai_types.ThinkingConfig(thinking_level=level, include_thoughts=True)
+
+        # Gemini 2.5 family (and any other non-3.x thinking model) -> token budget.
+        budget_map = {"none": 0, "low": 1024, "medium": -1, "high": 8192}
+        budget = _clamp_thinking_budget(name, budget_map.get(effort, -1))
+        return genai_types.ThinkingConfig(thinking_budget=budget, include_thoughts=budget != 0)
+    except (TypeError, ValueError) as e:
+        logger.warning(
+            f"Could not build thinking config for model '{model_name}' "
+            f"(reasoning_effort={reasoning_effort!r}): {e}. Proceeding without it."
+        )
+        return None
 
 
 def _parse_structured_response(
@@ -437,6 +508,9 @@ class _LLMProvider:
             call_kwargs["tools"] = kwargs.pop("tools")
         if "tool_choice" in kwargs:
             call_kwargs["tool_choice"] = kwargs.pop("tool_choice")
+        # Opt-in: only forwarded when the caller explicitly set it (reasoning models).
+        if kwargs.get("reasoning_effort"):
+            call_kwargs["reasoning_effort"] = kwargs.pop("reasoning_effort")
 
         return await client.chat.completions.create(**call_kwargs)
 
@@ -480,40 +554,34 @@ class _LLMProvider:
                 config_kwargs["response_mime_type"] = "application/json"
                 config_kwargs["response_schema"] = response_format.model_json_schema()
 
-        # Thinking / reasoning
-        if reasoning_effort:
-            is_gemini_3 = "gemini-3" in model_name
-            
-            if is_gemini_3:
-                level = _REASONING_EFFORT_MAP.get(reasoning_effort, reasoning_effort.upper())
-                config_kwargs["thinking_config"] = genai_types.ThinkingConfig(
-                    thinking_level=level,
-                    include_thoughts=True,
-                )
-            else:
-                effort = reasoning_effort.lower()
-                if effort == "none":
-                    budget = 128 if "pro" in model_name else 0
-                elif effort == "low":
-                    budget = 1024
-                elif effort == "high":
-                    budget = 8192
-                else:
-                    budget = -1  # medium / dynamic
-                    
-                config_kwargs["thinking_config"] = genai_types.ThinkingConfig(
-                    thinking_budget=budget,
-                    include_thoughts=True,
-                )
+        # Thinking / reasoning (model-aware: thinking_level for 3.x, budget for 2.5)
+        thinking_config = _build_thinking_config(model_name, reasoning_effort)
+        if thinking_config is not None:
+            config_kwargs["thinking_config"] = thinking_config
 
-        gc_config = genai_types.GenerateContentConfig(**config_kwargs)
-
-        if stream:
-            return await client.aio.models.generate_content_stream(
-                model=model_name, contents=contents, config=gc_config
-            )
-        else:
+        async def _dispatch(cfg_kwargs: dict[str, Any]) -> Any:
+            gc_config = genai_types.GenerateContentConfig(**cfg_kwargs)
+            if stream:
+                return await client.aio.models.generate_content_stream(
+                    model=model_name, contents=contents, config=gc_config
+                )
             return await client.aio.models.generate_content(model=model_name, contents=contents, config=gc_config)
+
+        try:  # nosemgrep - broad catch is intentional; non-thinking errors are re-raised below
+            return await _dispatch(config_kwargs)
+        except Exception as e:  # noqa: BLE001 - re-raised below unless it's a recoverable thinking-config error
+            # Gracefully degrade: if the model rejected the thinking config
+            # (e.g. an older model that doesn't support it), retry once without
+            # it instead of failing the whole request. Genuine errors (auth,
+            # quota, network) don't match and propagate to the resilience layer.
+            if "thinking_config" in config_kwargs and _is_thinking_config_error(e):
+                logger.warning(
+                    f"Gemini model '{model_name}' rejected the thinking config "
+                    f"({type(e).__name__}: {e}); retrying without it."
+                )
+                fallback_kwargs = {k: v for k, v in config_kwargs.items() if k != "thinking_config"}
+                return await _dispatch(fallback_kwargs)
+            raise
 
     def _extract_gemini_text(self, response: Any) -> str:
         """Extract text content from a Gemini response, skipping thought parts."""
@@ -544,6 +612,7 @@ class _LLMProvider:
         temperature: float = 0.7,
         max_tokens: int | None = None,
         response_format: Any | None = None,
+        reasoning_effort: str | None = None,
         **kwargs,
     ) -> str:
         """
@@ -559,6 +628,10 @@ class _LLMProvider:
                            - Pydantic BaseModel class (for structured output)
                            - dict with ``"type": "json_object"`` (for JSON mode)
                            - None (for free-form text)
+            reasoning_effort: Optional reasoning/thinking effort for reasoning
+                           models (``"none"``, ``"low"``, ``"medium"``, ``"high"``).
+                           Mapped to Gemini ``thinking_config`` and passed
+                           through for OpenAI reasoning models.
             **kwargs: Additional provider-specific parameters
 
         Returns:
@@ -610,12 +683,15 @@ class _LLMProvider:
                                 messages_to_use,
                                 final_temperature,
                                 max_tokens,
+                                reasoning_effort=reasoning_effort,
                                 response_format=formatted_response_format,
                             )
                             content = self._extract_gemini_text(response)
                         else:
                             if formatted_response_format:
                                 kwargs["response_format"] = formatted_response_format
+                            if reasoning_effort and "reasoning_effort" not in kwargs:
+                                kwargs["reasoning_effort"] = reasoning_effort
                             response = await self._call_openai(
                                 client,
                                 try_model,
@@ -926,6 +1002,7 @@ class LLMService:
         temperature: float = 0.7,
         max_tokens: int | None = None,
         response_format: Any | None = None,
+        reasoning_effort: str | None = None,
         **kwargs,
     ) -> str:
         """
@@ -940,6 +1017,8 @@ class LLMService:
             temperature: Sampling temperature (0.0-2.0)
             max_tokens: Maximum tokens to generate
             response_format: Optional response format (Pydantic model, dict, or None)
+            reasoning_effort: Optional reasoning/thinking effort for reasoning
+                          models (``"none"``, ``"low"``, ``"medium"``, ``"high"``).
             **kwargs: Additional provider-specific parameters
 
         Returns:
@@ -957,6 +1036,7 @@ class LLMService:
                 temperature=temperature,
                 max_tokens=max_tokens,
                 response_format=response_format,
+                reasoning_effort=reasoning_effort,
                 **kwargs,
             )
         except (
