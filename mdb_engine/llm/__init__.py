@@ -27,12 +27,14 @@ Standalone Usage:
 
 from .dependencies import get_llm_service_for_app
 from .service import (
+    GroundedCompletion,
     LLMService,
     LLMServiceError,
     get_llm_service,
 )
 
 __all__ = [
+    "GroundedCompletion",
     "LLMService",
     "LLMServiceError",
     "get_llm_service",

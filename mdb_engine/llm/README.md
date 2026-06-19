@@ -194,11 +194,11 @@ cognitive_engine = CognitiveEngine(
 
 ## Supported Providers
 
-| Provider        | Example models |
-|----------------|----------------|
-| **OpenAI**     | `openai/gpt-4o`, `openai/gpt-4o-mini`, `openai/gpt-4-turbo` |
-| **Azure OpenAI** | `azure/<deployment-name>` |
-| **Gemini**     | `gemini/gemini-3-flash-preview`, `gemini/gemini-2.5-flash`, etc. |
+| Provider        | Example models | Web search grounding (`enable_web_search`) |
+|----------------|----------------|----------------|
+| **OpenAI**     | `openai/gpt-4o`, `openai/gpt-4o-mini`, `openai/gpt-4-turbo` | Not supported (ignored with a warning) |
+| **Azure OpenAI** | `azure/<deployment-name>` | Not supported (ignored with a warning) |
+| **Gemini**     | `gemini/gemini-3-flash-preview`, `gemini/gemini-2.5-flash`, etc. | Supported (Google Search grounding) |
 
 ## Provider-Specific Notes
 
@@ -295,6 +295,79 @@ async for chunk in llm_service.chat_completion_stream(
         continue
     print(chunk, end="", flush=True)
 ```
+
+### Web search / grounding (Gemini)
+
+Gemini models can answer with **live web search grounding** (Google Search) and return the
+source citations. Enable it with a single provider-agnostic flag — you never touch the
+`google-genai` SDK directly.
+
+```python
+from mdb_engine.llm import get_llm_service
+
+llm_service = get_llm_service(config={"providers": {"chat": "gemini/gemini-3-flash-preview"}})
+
+# Plain text (default return type unchanged)
+text = await llm_service.chat_completion(
+    messages=[{"role": "user", "content": "What happened in AI this week?"}],
+    provider_name="chat",
+    enable_web_search=True,
+)
+```
+
+#### Getting the citations back (non-streaming)
+
+Pass `return_metadata=True` to receive a `GroundedCompletion` instead of a plain `str`:
+
+```python
+from mdb_engine.llm import GroundedCompletion
+
+result = await llm_service.chat_completion(
+    messages=[{"role": "user", "content": "What happened in AI this week?"}],
+    provider_name="chat",
+    enable_web_search=True,
+    return_metadata=True,
+)
+assert isinstance(result, GroundedCompletion)
+result.text       # -> str
+result.citations  # -> [{"title": "...", "uri": "https://..."}, ...]
+result.grounded   # -> bool (True when >=1 citation was returned)
+```
+
+`return_metadata` defaults to `False`, so existing callers keep getting a `str`.
+
+#### Citations while streaming
+
+Streaming mirrors the `__REASONING__:` convention: when grounding is requested and citations
+are found, a single trailing `__GROUNDING__:{json}` event is emitted before the stream ends.
+Callers that don't care can ignore it.
+
+```python
+import json
+
+async for chunk in llm_service.chat_completion_stream(
+    messages=[{"role": "user", "content": "What happened in AI this week?"}],
+    provider_name="chat",
+    enable_web_search=True,
+):
+    if chunk.startswith("__GROUNDING__:"):
+        citations = json.loads(chunk[len("__GROUNDING__:"):])["citations"]
+        # render source chips / footnotes
+        continue
+    if chunk.startswith("__REASONING"):
+        continue  # optional thinking trace
+    print(chunk, end="", flush=True)
+```
+
+> [!NOTE]
+> - Grounding works on Gemini 2.x / 3.x. For **non-Gemini** providers (OpenAI/Azure),
+>   `enable_web_search=True` is ignored with a warning (no crash) — there is no built-in
+>   equivalent in the Chat Completions API.
+> - Gemini does **not** allow grounding together with a JSON `response_format` (structured
+>   output). When both are requested, grounding is dropped (with a warning) so the structured
+>   call still succeeds.
+> - A model that rejects the grounding tool degrades gracefully: the request is retried once
+>   without tools instead of failing.
 
 ### Temperature note for Gemini 3
 

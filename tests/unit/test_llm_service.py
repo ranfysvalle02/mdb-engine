@@ -12,6 +12,7 @@ replacing the former litellm dependency. Coverage includes:
 - Error handling when the OpenAI SDK is unavailable
 """
 
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -19,13 +20,46 @@ import pytest
 
 from mdb_engine.llm import service as llm_service_module
 from mdb_engine.llm.service import (
+    GroundedCompletion,
     LLMService,
     LLMServiceError,
+    _build_gemini_tools,
     _build_thinking_config,
     _clamp_thinking_budget,
+    _extract_grounding_citations,
     _is_thinking_config_error,
+    _is_tools_config_error,
     get_llm_service,
 )
+
+
+class _FakeGoogleSearch:
+    """Stand-in for ``google.genai.types.GoogleSearch`` in unit tests."""
+
+
+class _FakeTool:
+    """Stand-in for ``google.genai.types.Tool`` that records its kwargs.
+
+    A real class (not a lambda) so ``isinstance(x, genai_types.Tool)`` works
+    inside ``_build_gemini_tools``.
+    """
+
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
+
+
+def _make_citation_response(text: str, uris: list[tuple[str, str]]):
+    """Build a Gemini-like response carrying grounding metadata.
+
+    ``uris`` is a list of ``(uri, title)`` tuples. Returns a ``SimpleNamespace``
+    that mimics the attribute graph ``_extract_grounding_citations`` walks.
+    """
+    grounding_chunks = [SimpleNamespace(web=SimpleNamespace(uri=uri, title=title)) for uri, title in uris]
+    candidate = SimpleNamespace(
+        content=SimpleNamespace(parts=[SimpleNamespace(thought=False, text=text)]),
+        grounding_metadata=SimpleNamespace(grounding_chunks=grounding_chunks),
+    )
+    return SimpleNamespace(text=text, candidates=[candidate])
 
 
 @pytest.fixture
@@ -77,6 +111,9 @@ def mock_openai_sdk():
     mock_genai_types = MagicMock()
     mock_genai_types.GenerateContentConfig = lambda **kw: SimpleNamespace(**kw)
     mock_genai_types.ThinkingConfig = lambda **kw: SimpleNamespace(**kw)
+    # Tool/GoogleSearch are real classes so isinstance() works in the tool builder.
+    mock_genai_types.Tool = _FakeTool
+    mock_genai_types.GoogleSearch = _FakeGoogleSearch
 
     with (
         patch("mdb_engine.llm.service.OPENAI_SDK_AVAILABLE", True),
@@ -427,6 +464,8 @@ def stub_genai_types():
     stub = SimpleNamespace(
         ThinkingConfig=lambda **kw: SimpleNamespace(**kw),
         GenerateContentConfig=lambda **kw: SimpleNamespace(**kw),
+        Tool=_FakeTool,
+        GoogleSearch=_FakeGoogleSearch,
     )
     with patch.object(llm_service_module, "genai_types", stub):
         yield stub
@@ -609,3 +648,311 @@ class TestGeminiThinkingGracefulFallback:
         config = mock_openai_sdk.gemini_generate_content.call_args.kwargs["config"]
         assert hasattr(config, "thinking_config")
         assert config.thinking_config.thinking_level == "HIGH"
+
+
+class TestBuildGeminiTools:
+    """Test _build_gemini_tools translation of framework tool requests."""
+
+    def test_enable_web_search_builds_one_grounding_tool(self, stub_genai_types):
+        tools = _build_gemini_tools(True, None)
+        assert tools is not None
+        assert len(tools) == 1
+        assert isinstance(tools[0], _FakeTool)
+        assert isinstance(tools[0].google_search, _FakeGoogleSearch)
+
+    def test_legacy_camelcase_dict_translates(self, stub_genai_types):
+        tools = _build_gemini_tools(False, [{"googleSearch": {}}])
+        assert tools is not None
+        assert len(tools) == 1
+        assert isinstance(tools[0].google_search, _FakeGoogleSearch)
+
+    def test_legacy_snakecase_dict_translates(self, stub_genai_types):
+        tools = _build_gemini_tools(False, [{"google_search": {}}])
+        assert tools is not None
+        assert len(tools) == 1
+
+    def test_prebuilt_tool_passthrough(self, stub_genai_types):
+        prebuilt = _FakeTool(google_search=_FakeGoogleSearch())
+        tools = _build_gemini_tools(False, [prebuilt])
+        assert tools == [prebuilt]
+
+    def test_unknown_dict_is_skipped(self, stub_genai_types):
+        assert _build_gemini_tools(False, [{"unknownTool": {}}]) is None
+
+    def test_nothing_requested_returns_none(self, stub_genai_types):
+        assert _build_gemini_tools(False, None) is None
+
+    def test_sdk_unavailable_returns_none(self):
+        with patch.object(llm_service_module, "genai_types", None):
+            assert _build_gemini_tools(True, None) is None
+
+
+class TestIsToolsConfigError:
+    """Test the heuristic that detects tools/grounding-config errors."""
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            "400 INVALID_ARGUMENT: Tool use is not supported for this model",
+            "google_search is not enabled for this project",
+            "grounding is unavailable in this region",
+            "Unknown field: function_declarations",
+        ],
+    )
+    def test_tools_errors_detected(self, message):
+        assert _is_tools_config_error(ValueError(message)) is True
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            "401 Unauthorized: invalid API key",
+            "429 RESOURCE_EXHAUSTED: quota exceeded",
+            "connection reset by peer",
+        ],
+    )
+    def test_unrelated_errors_ignored(self, message):
+        assert _is_tools_config_error(RuntimeError(message)) is False
+
+
+class TestExtractGroundingCitations:
+    """Test _extract_grounding_citations metadata parsing."""
+
+    def test_extracts_and_dedupes_by_uri(self):
+        response = _make_citation_response(
+            "answer",
+            [
+                ("https://a.example/1", "A"),
+                ("https://b.example/2", "B"),
+                ("https://a.example/1", "A dup"),  # duplicate uri -> ignored
+            ],
+        )
+        citations = _extract_grounding_citations(response)
+        assert citations == [
+            {"title": "A", "uri": "https://a.example/1"},
+            {"title": "B", "uri": "https://b.example/2"},
+        ]
+
+    def test_uri_used_as_title_when_missing(self):
+        candidate = SimpleNamespace(
+            grounding_metadata=SimpleNamespace(
+                grounding_chunks=[SimpleNamespace(web=SimpleNamespace(uri="https://x.example", title=""))]
+            )
+        )
+        response = SimpleNamespace(candidates=[candidate])
+        assert _extract_grounding_citations(response) == [{"title": "https://x.example", "uri": "https://x.example"}]
+
+    def test_no_candidates_returns_empty(self):
+        assert _extract_grounding_citations(SimpleNamespace(candidates=[])) == []
+
+    def test_missing_grounding_metadata_returns_empty(self):
+        response = SimpleNamespace(candidates=[SimpleNamespace(grounding_metadata=None)])
+        assert _extract_grounding_citations(response) == []
+
+
+class TestGeminiWebSearchGrounding:
+    """Test enable_web_search / grounding behavior end-to-end (mocked SDK)."""
+
+    @pytest.mark.asyncio
+    async def test_enable_web_search_attaches_tools_non_streaming(self, mock_openai_sdk, llm_config_multiple):
+        service = LLMService(config=llm_config_multiple)
+
+        await service.chat_completion(
+            messages=[{"role": "user", "content": "What happened this week?"}],
+            provider_name="analysis",
+            enable_web_search=True,
+        )
+
+        config = mock_openai_sdk.gemini_generate_content.call_args.kwargs["config"]
+        assert hasattr(config, "tools")
+        assert len(config.tools) == 1
+        assert isinstance(config.tools[0].google_search, _FakeGoogleSearch)
+
+    @pytest.mark.asyncio
+    async def test_response_format_conflict_drops_grounding(self, mock_openai_sdk, llm_config_multiple, caplog):
+        service = LLMService(config=llm_config_multiple)
+        provider = service.get_provider("analysis")
+        _ptype, client = provider._client_for_model("gemini/gemini-3-flash-preview")  # noqa: SLF001
+
+        with caplog.at_level("WARNING"):
+            await provider._call_gemini(  # noqa: SLF001
+                client,
+                "gemini/gemini-3-flash-preview",
+                [{"role": "user", "content": "Extract"}],
+                0.7,
+                None,
+                response_format={"response_schema": {"type": "object"}},
+                enable_web_search=True,
+            )
+
+        config = mock_openai_sdk.gemini_generate_content.call_args.kwargs["config"]
+        assert not hasattr(config, "tools")
+        assert config.response_mime_type == "application/json"
+        assert any("response_format" in rec.message for rec in caplog.records)
+
+    @pytest.mark.asyncio
+    async def test_return_metadata_returns_grounded_completion(self, mock_openai_sdk, llm_config_multiple):
+        service = LLMService(config=llm_config_multiple)
+        mock_openai_sdk.gemini_generate_content.return_value = _make_citation_response(
+            "Grounded answer", [("https://news.example/a", "News A")]
+        )
+
+        result = await service.chat_completion(
+            messages=[{"role": "user", "content": "What happened this week?"}],
+            provider_name="analysis",
+            enable_web_search=True,
+            return_metadata=True,
+        )
+
+        assert isinstance(result, GroundedCompletion)
+        assert result.text == "Grounded answer"
+        assert result.grounded is True
+        assert result.citations == [{"title": "News A", "uri": "https://news.example/a"}]
+
+    @pytest.mark.asyncio
+    async def test_return_metadata_without_grounding(self, mock_openai_sdk, llm_config_multiple):
+        service = LLMService(config=llm_config_multiple)
+        mock_openai_sdk.gemini_generate_content.return_value = SimpleNamespace(text="Plain answer", candidates=[])
+
+        result = await service.chat_completion(
+            messages=[{"role": "user", "content": "Hi"}],
+            provider_name="analysis",
+            return_metadata=True,
+        )
+
+        assert isinstance(result, GroundedCompletion)
+        assert result.text == "Plain answer"
+        assert result.grounded is False
+        assert result.citations == []
+
+    @pytest.mark.asyncio
+    async def test_default_return_type_unchanged(self, mock_openai_sdk, llm_config_multiple):
+        """Without return_metadata, the return type stays a plain str."""
+        service = LLMService(config=llm_config_multiple)
+
+        result = await service.chat_completion(
+            messages=[{"role": "user", "content": "Hi"}],
+            provider_name="analysis",
+            enable_web_search=True,
+        )
+
+        assert isinstance(result, str)
+        assert result == "Test response"
+
+    @pytest.mark.asyncio
+    async def test_enable_web_search_warns_for_openai(self, mock_openai_sdk, llm_config_multiple, caplog):
+        service = LLMService(config=llm_config_multiple)
+
+        with caplog.at_level("WARNING"):
+            await service.chat_completion(
+                messages=[{"role": "user", "content": "Hi"}],
+                provider_name="chat",  # openai
+                enable_web_search=True,
+            )
+
+        assert any("not supported for provider 'openai'" in rec.message for rec in caplog.records)
+        # No grounding tool should leak into the OpenAI call.
+        assert "tools" not in mock_openai_sdk.openai_create.call_args.kwargs
+
+    @pytest.mark.asyncio
+    async def test_streaming_emits_grounding_event(self, mock_openai_sdk, llm_config_multiple):
+        service = LLMService(config=llm_config_multiple)
+
+        async def mock_gemini_stream():
+            part = SimpleNamespace(thought=False, text="chunk")
+            candidate = SimpleNamespace(
+                content=SimpleNamespace(parts=[part]),
+                grounding_metadata=SimpleNamespace(
+                    grounding_chunks=[SimpleNamespace(web=SimpleNamespace(uri="https://src.example", title="Src"))]
+                ),
+            )
+            yield SimpleNamespace(candidates=[candidate])
+
+        mock_openai_sdk.gemini_generate_content_stream.return_value = mock_gemini_stream()
+
+        chunks = []
+        async for chunk in service.chat_completion_stream(
+            messages=[{"role": "user", "content": "What happened?"}],
+            provider_name="analysis",
+            enable_web_search=True,
+        ):
+            chunks.append(chunk)
+
+        assert "chunk" in chunks
+        grounding_events = [c for c in chunks if c.startswith("__GROUNDING__:")]
+        assert len(grounding_events) == 1
+        payload = json.loads(grounding_events[0][len("__GROUNDING__:") :])
+        assert payload["citations"] == [{"title": "Src", "uri": "https://src.example"}]
+
+    @pytest.mark.asyncio
+    async def test_streaming_without_grounding_emits_no_event(self, mock_openai_sdk, llm_config_multiple):
+        """A non-grounded Gemini stream must not emit a __GROUNDING__: event."""
+        service = LLMService(config=llm_config_multiple)
+
+        async def mock_gemini_stream():
+            part = SimpleNamespace(thought=False, text="chunk")
+            candidate = SimpleNamespace(content=SimpleNamespace(parts=[part]))
+            yield SimpleNamespace(candidates=[candidate])
+
+        mock_openai_sdk.gemini_generate_content_stream.return_value = mock_gemini_stream()
+
+        chunks = []
+        async for chunk in service.chat_completion_stream(
+            messages=[{"role": "user", "content": "Hi"}],
+            provider_name="analysis",
+        ):
+            chunks.append(chunk)
+
+        assert chunks == ["chunk"]
+        assert not any(c.startswith("__GROUNDING__:") for c in chunks)
+
+
+class TestGeminiToolsGracefulFallback:
+    """Test that a rejected tools/grounding config degrades gracefully."""
+
+    @pytest.mark.asyncio
+    async def test_retries_without_tools_on_tools_error(self, mock_openai_sdk, llm_config_multiple):
+        service = LLMService(config=llm_config_multiple)
+        provider = service.get_provider("analysis")
+        _ptype, client = provider._client_for_model("gemini/gemini-3-flash-preview")  # noqa: SLF001
+
+        recovered = SimpleNamespace(text="Ungrounded answer", candidates=[])
+        mock_openai_sdk.gemini_generate_content.side_effect = [
+            ValueError("400 INVALID_ARGUMENT: Tool use is not supported for this model"),
+            recovered,
+        ]
+
+        response = await provider._call_gemini(  # noqa: SLF001
+            client,
+            "gemini/gemini-3-flash-preview",
+            [{"role": "user", "content": "What happened?"}],
+            0.7,
+            None,
+            enable_web_search=True,
+        )
+
+        assert response is recovered
+        assert mock_openai_sdk.gemini_generate_content.call_count == 2
+        first_config = mock_openai_sdk.gemini_generate_content.call_args_list[0].kwargs["config"]
+        retry_config = mock_openai_sdk.gemini_generate_content.call_args_list[1].kwargs["config"]
+        assert hasattr(first_config, "tools")
+        assert not hasattr(retry_config, "tools")
+
+    @pytest.mark.asyncio
+    async def test_non_tools_error_propagates_without_retry(self, mock_openai_sdk, llm_config_multiple):
+        service = LLMService(config=llm_config_multiple)
+        provider = service.get_provider("analysis")
+        _ptype, client = provider._client_for_model("gemini/gemini-3-flash-preview")  # noqa: SLF001
+
+        mock_openai_sdk.gemini_generate_content.side_effect = ValueError("401 Unauthorized: bad key")
+
+        with pytest.raises(ValueError, match="Unauthorized"):
+            await provider._call_gemini(  # noqa: SLF001
+                client,
+                "gemini/gemini-3-flash-preview",
+                [{"role": "user", "content": "What happened?"}],
+                0.7,
+                None,
+                enable_web_search=True,
+            )
+
+        assert mock_openai_sdk.gemini_generate_content.call_count == 1

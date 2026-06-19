@@ -20,6 +20,7 @@ import logging
 import os
 import re
 import time
+from dataclasses import dataclass, field
 from typing import Any, TypeVar
 
 from ..exceptions import MongoDBEngineError
@@ -64,6 +65,17 @@ logger = logging.getLogger(__name__)
 # invalid thinking configuration, so we can transparently retry without it.
 _THINKING_ERROR_KEYWORDS = ("thinking", "thinkingbudget", "thinkinglevel", "thought")
 
+# Keywords used to detect when an API error is caused by an unsupported or
+# invalid tools/grounding configuration, so we can transparently retry without
+# the tools (e.g. a model that doesn't support Google Search grounding).
+_TOOLS_ERROR_KEYWORDS = (
+    "tool",
+    "google_search",
+    "googlesearch",
+    "grounding",
+    "function_declarations",
+)
+
 
 def _is_thinking_config_error(exc: Exception) -> bool:
     """Heuristic check: did this error originate from the thinking config?
@@ -74,6 +86,93 @@ def _is_thinking_config_error(exc: Exception) -> bool:
     """
     msg = str(exc).lower()
     return any(keyword in msg for keyword in _THINKING_ERROR_KEYWORDS)
+
+
+def _is_tools_config_error(exc: Exception) -> bool:
+    """Heuristic check: did this error originate from the tools/grounding config?
+
+    Used to decide whether a failed Gemini request is worth retrying without
+    the tools (e.g. an older model that doesn't support Google Search
+    grounding) vs. a genuine failure like auth/quota that should propagate to
+    the resilience layer.
+    """
+    msg = str(exc).lower()
+    return any(keyword in msg for keyword in _TOOLS_ERROR_KEYWORDS)
+
+
+@dataclass(frozen=True)
+class GroundedCompletion:
+    """Structured result for a (optionally) grounded chat completion.
+
+    Returned by ``chat_completion`` when ``return_metadata=True`` so callers
+    can access grounding citations alongside the generated text without
+    breaking the default ``str`` return type.
+
+    Attributes:
+        text: The generated response text.
+        citations: Grounding sources as ``[{"title": str, "uri": str}, ...]``.
+            Empty when the response was not grounded.
+        grounded: ``True`` when at least one grounding citation was returned.
+    """
+
+    text: str
+    citations: list[dict[str, str]] = field(default_factory=list)
+    grounded: bool = False
+
+
+def _build_gemini_tools(enable_web_search: bool, raw_tools: list | None) -> list | None:
+    """Translate framework-level tool requests into ``google-genai`` Tool objects.
+
+    Args:
+        enable_web_search: When ``True``, append the Google Search grounding
+            tool (Gemini 2.x / 3.x ``Tool(google_search=GoogleSearch())``).
+        raw_tools: Optional list of already-built ``Tool`` objects or legacy
+            dicts (e.g. ``{"googleSearch": {}}``) to translate.
+
+    Returns:
+        A list of ``Tool`` objects, or ``None`` when the SDK is unavailable or
+        nothing usable was requested.
+    """
+    if genai_types is None:
+        return None
+
+    tools: list = []
+    if enable_web_search:
+        # Gemini 2.x / 3.x grounding tool. (1.5 used google_search_retrieval,
+        # which is intentionally out of scope here.)
+        tools.append(genai_types.Tool(google_search=genai_types.GoogleSearch()))
+
+    for tool in raw_tools or []:
+        if isinstance(tool, genai_types.Tool):
+            tools.append(tool)
+        elif isinstance(tool, dict) and ("googleSearch" in tool or "google_search" in tool):
+            # Legacy alias: translate the dead {"googleSearch": {}} dict into a
+            # real grounding tool instead of silently dropping it.
+            tools.append(genai_types.Tool(google_search=genai_types.GoogleSearch()))
+        else:
+            logger.debug(f"Skipping unrecognized Gemini tool spec: {tool!r}")
+
+    return tools or None
+
+
+def _extract_grounding_citations(response_or_chunk: Any) -> list[dict[str, str]]:
+    """Pull ``[{title, uri}]`` grounding citations from a Gemini response/chunk.
+
+    Reads ``candidate.grounding_metadata.grounding_chunks[*].web`` and dedupes
+    by URI. Fully ``getattr``-guarded so it tolerates partial chunks and
+    responses without any grounding metadata.
+    """
+    out: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for cand in getattr(response_or_chunk, "candidates", None) or []:
+        gm = getattr(cand, "grounding_metadata", None)
+        for gc in getattr(gm, "grounding_chunks", None) or []:
+            web = getattr(gc, "web", None)
+            uri = getattr(web, "uri", None)
+            if uri and uri not in seen:
+                seen.add(uri)
+                out.append({"title": getattr(web, "title", "") or uri, "uri": uri})
+    return out
 
 
 def _clamp_thinking_budget(model_name: str, budget: int) -> int:
@@ -524,6 +623,8 @@ class _LLMProvider:
         stream: bool = False,
         reasoning_effort: str | None = None,
         response_format: Any | None = None,
+        enable_web_search: bool = False,
+        tools: Any | None = None,
         **kwargs,
     ) -> Any:
         """Dispatch to Google GenAI SDK."""
@@ -554,6 +655,21 @@ class _LLMProvider:
                 config_kwargs["response_mime_type"] = "application/json"
                 config_kwargs["response_schema"] = response_format.model_json_schema()
 
+        # Web search grounding / tools. Gemini rejects tools together with a
+        # JSON response_schema, so structured output wins and grounding is
+        # dropped with a warning rather than failing the request.
+        grounding_requested = enable_web_search or bool(tools)
+        if grounding_requested and response_format:
+            logger.warning(
+                "Gemini does not support tools/grounding together with a JSON response_format; "
+                "ignoring grounding for this structured-output call."
+            )
+            grounding_requested = False
+        if grounding_requested:
+            gemini_tools = _build_gemini_tools(enable_web_search, tools)
+            if gemini_tools:
+                config_kwargs["tools"] = gemini_tools
+
         # Thinking / reasoning (model-aware: thinking_level for 3.x, budget for 2.5)
         thinking_config = _build_thinking_config(model_name, reasoning_effort)
         if thinking_config is not None:
@@ -567,19 +683,31 @@ class _LLMProvider:
                 )
             return await client.aio.models.generate_content(model=model_name, contents=contents, config=gc_config)
 
-        try:  # nosemgrep - broad catch is intentional; non-thinking errors are re-raised below
+        try:  # nosemgrep - broad catch is intentional; non-recoverable errors are re-raised below
             return await _dispatch(config_kwargs)
-        except Exception as e:  # noqa: BLE001 - re-raised below unless it's a recoverable thinking-config error
-            # Gracefully degrade: if the model rejected the thinking config
-            # (e.g. an older model that doesn't support it), retry once without
-            # it instead of failing the whole request. Genuine errors (auth,
-            # quota, network) don't match and propagate to the resilience layer.
-            if "thinking_config" in config_kwargs and _is_thinking_config_error(e):
+        except Exception as e:  # noqa: BLE001 - re-raised below unless it's a recoverable config error
+            # Gracefully degrade: if the model rejected the thinking config or
+            # the tools/grounding config (e.g. an older model that doesn't
+            # support them), retry once without the offending key instead of
+            # failing the whole request. Genuine errors (auth, quota, network)
+            # don't match and propagate to the resilience layer.
+            fallback_kwargs = dict(config_kwargs)
+            recovered = False
+            if "thinking_config" in fallback_kwargs and _is_thinking_config_error(e):
                 logger.warning(
                     f"Gemini model '{model_name}' rejected the thinking config "
                     f"({type(e).__name__}: {e}); retrying without it."
                 )
-                fallback_kwargs = {k: v for k, v in config_kwargs.items() if k != "thinking_config"}
+                fallback_kwargs.pop("thinking_config")
+                recovered = True
+            if "tools" in fallback_kwargs and _is_tools_config_error(e):
+                logger.warning(
+                    f"Gemini model '{model_name}' rejected the tools/grounding config "
+                    f"({type(e).__name__}: {e}); retrying without it (ungrounded)."
+                )
+                fallback_kwargs.pop("tools")
+                recovered = True
+            if recovered:
                 return await _dispatch(fallback_kwargs)
             raise
 
@@ -613,8 +741,10 @@ class _LLMProvider:
         max_tokens: int | None = None,
         response_format: Any | None = None,
         reasoning_effort: str | None = None,
+        enable_web_search: bool = False,
+        return_metadata: bool = False,
         **kwargs,
-    ) -> str:
+    ) -> str | GroundedCompletion:
         """
         Generate a chat completion response.
 
@@ -632,10 +762,18 @@ class _LLMProvider:
                            models (``"none"``, ``"low"``, ``"medium"``, ``"high"``).
                            Mapped to Gemini ``thinking_config`` and passed
                            through for OpenAI reasoning models.
+            enable_web_search: Provider-agnostic switch to enable Google Search
+                           grounding for Gemini. Ignored (with a warning) for
+                           non-Gemini providers. Cannot be combined with a JSON
+                           ``response_format`` (grounding is dropped if so).
+            return_metadata: When ``True``, return a :class:`GroundedCompletion`
+                           with ``text``/``citations``/``grounded`` instead of a
+                           plain ``str``. Defaults to ``False`` (unchanged API).
             **kwargs: Additional provider-specific parameters
 
         Returns:
-            str: The generated response text
+            str: The generated response text (default), or a
+            :class:`GroundedCompletion` when ``return_metadata=True``.
         """
         start_time = time.time()
         model_to_use = model or self.default_model
@@ -672,7 +810,9 @@ class _LLMProvider:
                 models_to_try = [model_to_use] + list(self.fallbacks)
 
                 last_error: Exception | None = None
+                web_search_warned = False
                 for try_model in models_to_try:
+                    citations: list[dict[str, str]] = []
                     try:
                         ptype, client = self._client_for_model(try_model)
 
@@ -685,9 +825,19 @@ class _LLMProvider:
                                 max_tokens,
                                 reasoning_effort=reasoning_effort,
                                 response_format=formatted_response_format,
+                                enable_web_search=enable_web_search,
+                                tools=kwargs.get("tools"),
                             )
                             content = self._extract_gemini_text(response)
+                            if enable_web_search or kwargs.get("tools") or return_metadata:
+                                citations = _extract_grounding_citations(response)
                         else:
+                            if enable_web_search and not web_search_warned:
+                                logger.warning(
+                                    f"enable_web_search=True is not supported for provider '{ptype}'; "
+                                    f"continuing without grounding."
+                                )
+                                web_search_warned = True
                             if formatted_response_format:
                                 kwargs["response_format"] = formatted_response_format
                             if reasoning_effort and "reasoning_effort" not in kwargs:
@@ -729,8 +879,12 @@ class _LLMProvider:
                             )
                             if try_model != model_to_use:
                                 logger.info(f"Used fallback model: {try_model} (requested: {model_to_use})")
+                            if return_metadata:
+                                return GroundedCompletion(text=content, citations=citations, grounded=bool(citations))
                             return content
 
+                        if return_metadata:
+                            return GroundedCompletion(text=str(response), citations=citations, grounded=bool(citations))
                         return str(response)
 
                     except (
@@ -771,6 +925,7 @@ class _LLMProvider:
         max_tokens: int | None = None,
         reasoning_effort: str | None = None,
         stream_reasoning: bool = True,
+        enable_web_search: bool = False,
         **kwargs,
     ):
         """
@@ -792,14 +947,22 @@ class _LLMProvider:
                              Options: ``"none"``, ``"low"``, ``"medium"``, ``"high"``
             stream_reasoning: If True (default), yields reasoning as separate
                              chunks prefixed with ``__REASONING__:``
+            enable_web_search: Provider-agnostic switch to enable Google Search
+                             grounding for Gemini. Ignored (with a warning) for
+                             non-Gemini providers. When grounding citations are
+                             found, a single trailing ``__GROUNDING__:{json}``
+                             event is emitted before the stream ends.
             **kwargs: Additional provider-specific parameters
 
         Yields:
-            str: Content chunks (plain text) OR reasoning chunks
+            str: Content chunks (plain text), reasoning chunks (``__REASONING__:``
+            prefix), or a single trailing grounding event (``__GROUNDING__:``).
         """
         model_to_use = model or self.default_model
         reasoning_buffer: list[str] = []
         reasoning_started = False
+        grounding_requested = bool(enable_web_search or kwargs.get("tools"))
+        grounding_citations: dict[str, dict[str, str]] = {}
 
         with create_span(
             "gen_ai.chat_completion_stream",
@@ -839,8 +1002,15 @@ class _LLMProvider:
                         max_tokens,
                         stream=True,
                         reasoning_effort=reasoning_effort,
+                        enable_web_search=enable_web_search,
+                        tools=kwargs.get("tools"),
                     )
                     async for chunk in stream:
+                        # Only inspect grounding metadata when grounding was
+                        # requested, so non-grounded streams aren't affected.
+                        if grounding_requested:
+                            for citation in _extract_grounding_citations(chunk):
+                                grounding_citations.setdefault(citation["uri"], citation)
                         for candidate in getattr(chunk, "candidates", []):
                             for part in getattr(getattr(candidate, "content", None), "parts", []):
                                 if getattr(part, "thought", False) and getattr(part, "text", None):
@@ -858,6 +1028,11 @@ class _LLMProvider:
 
                 else:
                     # OpenAI / Azure — use native streaming
+                    if enable_web_search:
+                        logger.warning(
+                            f"enable_web_search=True is not supported for provider '{ptype}'; "
+                            f"continuing without grounding."
+                        )
                     if reasoning_effort and model_to_use:
                         kwargs["reasoning_effort"] = reasoning_effort
                     response = await self._call_openai(
@@ -889,6 +1064,12 @@ class _LLMProvider:
 
                 if reasoning_started and stream_reasoning:
                     yield "__REASONING_END__"
+
+                # Emit grounding citations (if any) as a single trailing event,
+                # mirroring the __REASONING__: convention. Callers that don't
+                # care can ignore it.
+                if grounding_requested and grounding_citations:
+                    yield "__GROUNDING__:" + json.dumps({"citations": list(grounding_citations.values())})
 
                 if reasoning_buffer:
                     full_reasoning = "".join(reasoning_buffer)
@@ -1003,8 +1184,10 @@ class LLMService:
         max_tokens: int | None = None,
         response_format: Any | None = None,
         reasoning_effort: str | None = None,
+        enable_web_search: bool = False,
+        return_metadata: bool = False,
         **kwargs,
-    ) -> str:
+    ) -> str | GroundedCompletion:
         """
         Generate a chat completion response.
 
@@ -1019,10 +1202,17 @@ class LLMService:
             response_format: Optional response format (Pydantic model, dict, or None)
             reasoning_effort: Optional reasoning/thinking effort for reasoning
                           models (``"none"``, ``"low"``, ``"medium"``, ``"high"``).
+            enable_web_search: Provider-agnostic switch to enable Google Search
+                          grounding for Gemini (ignored with a warning for
+                          non-Gemini providers).
+            return_metadata: When ``True``, return a :class:`GroundedCompletion`
+                          (``text``/``citations``/``grounded``) instead of a
+                          plain ``str``. Defaults to ``False``.
             **kwargs: Additional provider-specific parameters
 
         Returns:
-            str: The generated response text (JSON string for structured output)
+            str: The generated response text (JSON string for structured output),
+            or a :class:`GroundedCompletion` when ``return_metadata=True``.
         """
         try:
             provider_name = provider_name or self.default_provider_name
@@ -1037,6 +1227,8 @@ class LLMService:
                 max_tokens=max_tokens,
                 response_format=response_format,
                 reasoning_effort=reasoning_effort,
+                enable_web_search=enable_web_search,
+                return_metadata=return_metadata,
                 **kwargs,
             )
         except (
@@ -1059,6 +1251,7 @@ class LLMService:
         max_tokens: int | None = None,
         reasoning_effort: str | None = None,
         stream_reasoning: bool = True,
+        enable_web_search: bool = False,
         **kwargs,
     ):
         """
@@ -1072,10 +1265,15 @@ class LLMService:
             max_tokens: Maximum tokens to generate
             reasoning_effort: Reasoning effort level (``"none"``, ``"low"``, ``"medium"``, ``"high"``)
             stream_reasoning: If True, streams reasoning as separate chunks
+            enable_web_search: Provider-agnostic switch to enable Google Search
+                          grounding for Gemini. When citations are found, a
+                          single trailing ``__GROUNDING__:{json}`` event is
+                          emitted (ignored with a warning for non-Gemini).
             **kwargs: Additional provider-specific parameters
 
         Yields:
-            str: Content chunks OR reasoning chunks (with ``__REASONING__`` prefix)
+            str: Content chunks, reasoning chunks (``__REASONING__`` prefix), or
+            a single trailing grounding event (``__GROUNDING__:`` prefix).
         """
         provider_name = provider_name or self.default_provider_name
         provider = self.get_provider(provider_name)
@@ -1089,6 +1287,7 @@ class LLMService:
             max_tokens=max_tokens,
             reasoning_effort=reasoning_effort,
             stream_reasoning=stream_reasoning,
+            enable_web_search=enable_web_search,
             **kwargs,
         ):
             yield chunk

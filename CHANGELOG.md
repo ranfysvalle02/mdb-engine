@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.14.0
+
+### Added — Gemini web-search grounding
+
+- **`enable_web_search` flag** — A new provider-agnostic keyword on
+  `LLMService.chat_completion` and `LLMService.chat_completion_stream` (and the
+  underlying `_LLMProvider` methods) enables **Google Search grounding** for
+  Gemini models. It attaches `Tool(google_search=GoogleSearch())` to the
+  Gemini request so answers are grounded in live web results — without callers
+  ever touching the `google-genai` SDK directly.
+
+- **Grounding citations** — Sources are returned as `[{"title", "uri"}]`:
+  - Non-streaming: pass `return_metadata=True` to receive a new
+    `GroundedCompletion` dataclass (`text` / `citations` / `grounded`) instead
+    of a plain `str`. `return_metadata` defaults to `False`, so the default
+    return type is unchanged.
+  - Streaming: a single trailing `__GROUNDING__:{json}` event is emitted before
+    the stream ends (mirroring the existing `__REASONING__:` convention).
+
+- **Raw `tools` forwarding for Gemini** — `_call_gemini` now reads `tools` and
+  the Gemini branches of both public methods forward `**kwargs`, so configured
+  tools and the legacy `tools=[{"googleSearch": {}}]` dict (previously a silent
+  no-op for Gemini) are translated into real grounding tools.
+
+- **`GroundedCompletion`** — Exported from `mdb_engine.llm` for typed access to
+  grounded results.
+
+### Changed
+
+- **Structured-output guard** — Gemini does not allow tools/grounding together
+  with a JSON `response_format`; when both are requested, grounding is dropped
+  with a warning so the structured call still succeeds.
+
+- **Graceful degradation** — A model that rejects the tools/grounding config is
+  retried once without tools (ungrounded) instead of failing the request,
+  matching the existing thinking-config fallback behavior.
+
+- **Non-Gemini providers** — `enable_web_search=True` is ignored with a clear
+  warning for OpenAI/Azure (no built-in equivalent; no crash).
+
 ## 0.12.4
 
 ### Fixed
