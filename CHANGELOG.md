@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.15.1
+
+### Fixed — chat service / Short-Term Memory correctness
+
+A cluster of subtle STM (Short-Term Memory) and chat-orchestration bugs that
+silently degraded conversational continuity once a session grew past the
+`stm_context_limit`. None of these change public signatures.
+
+- **`ChatHistoryService.get_context` returned the oldest messages, not the
+  newest.** It sorted `created_at` ASCENDING before applying `.limit()`, so a
+  session longer than the limit fed the LLM messages 1..N and dropped all
+  recent turns. It now sorts DESCENDING + limit (newest window) and reverses
+  back to chronological (oldest -> newest) order for the prompt.
+- **`chat()` result `stm_summary` was always `None`.** The summary actually used
+  to build the prompt is now threaded into `prompt_meta` and surfaced on the
+  returned dict, so callers can read `result["stm_summary"]`.
+- **`summarize_session` corrupted the STM summary cache.** Its query did not
+  exclude `type="stm_summary"`, so the cache doc could be fed into the
+  summarizer and then deleted. It now excludes the cache doc.
+- **`delete_old_messages` could evict a real message.** Neither the keep-find
+  nor the delete query excluded the `stm_summary` cache doc, letting it occupy
+  a retained slot. Both queries now exclude it explicitly.
+- **`get_cached_summary` ignored `user_id`.** The summary cache is now scoped by
+  `user_id` on both read and upsert, preventing cross-user leakage when a
+  `session_id` is shared. `user_id` is optional, so existing calls are
+  unaffected.
+
+### Improved — chat service internals
+
+- `_ensure_ready` index creation is now guarded by an `asyncio.Lock`
+  (double-checked) to avoid redundant `create_index` calls under concurrent
+  first-use.
+- `ChatHistoryService.get_session_count` now delegates to `get_message_count`
+  (they were duplicate implementations).
+- Hoisted the per-call `ProceduralMemory` import off the chat hot path to
+  module level in the orchestrator.
+- Aligned the standalone `ContextEngineer.stm_raw_window` default (was `4`) with
+  `CognitiveEngine`'s `5` so a directly-constructed `ContextEngineer` matches
+  the orchestrator-built one.
+
 ## 0.15.0
 
 ### Added — capability-aware grounding & future-proofing

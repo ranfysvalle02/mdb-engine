@@ -69,22 +69,61 @@ class TestChatHistoryService:
     @pytest.mark.asyncio
     async def test_get_context(self, chat_history_service, mock_collection):
         """Test retrieving chat context."""
+        # MongoDB returns newest-first because get_context sorts DESCENDING + limit.
         mock_cursor = MagicMock()
         mock_cursor.sort.return_value = mock_cursor
         mock_cursor.limit.return_value = mock_cursor
         mock_cursor.to_list = AsyncMock(
             return_value=[
-                {"role": "user", "content": "Hello", "created_at": datetime.now(timezone.utc)},
-                {"role": "assistant", "content": "Hi!", "created_at": datetime.now(timezone.utc)},
+                {
+                    "role": "assistant",
+                    "content": "Hi!",
+                    "created_at": datetime(2026, 6, 28, 12, 1, tzinfo=timezone.utc),
+                },
+                {"role": "user", "content": "Hello", "created_at": datetime(2026, 6, 28, 12, 0, tzinfo=timezone.utc)},
             ]
         )
         mock_collection.find.return_value = mock_cursor
 
         context = await chat_history_service.get_context("session123", limit=10)
 
+        # Reversed back into chronological order (oldest -> newest) for the LLM.
         assert len(context) == 2
         assert context[0]["role"] == "user"
         assert context[1]["role"] == "assistant"
+
+    @pytest.mark.asyncio
+    async def test_get_context_returns_newest_in_chronological_order(self, chat_history_service, mock_collection):
+        """STM context must select the NEWEST messages and return them oldest -> newest.
+
+        Regression: a session longer than ``limit`` previously returned the OLDEST
+        messages (ASCENDING sort + limit), silently dropping recent context. The
+        query must sort DESCENDING (newest first), apply the limit, then reverse so
+        the LLM still receives chronological order.
+        """
+        from pymongo import DESCENDING
+
+        # MongoDB returns these newest-first because of the DESCENDING sort + limit.
+        # For a session with messages 1..15 and limit=3, the newest window is 15,14,13.
+        newest_first = [
+            {"role": "user", "content": "msg 15", "created_at": datetime(2026, 6, 28, 15, 0, tzinfo=timezone.utc)},
+            {"role": "assistant", "content": "msg 14", "created_at": datetime(2026, 6, 28, 14, 0, tzinfo=timezone.utc)},
+            {"role": "user", "content": "msg 13", "created_at": datetime(2026, 6, 28, 13, 0, tzinfo=timezone.utc)},
+        ]
+        mock_cursor = MagicMock()
+        mock_cursor.sort.return_value = mock_cursor
+        mock_cursor.limit.return_value = mock_cursor
+        mock_cursor.to_list = AsyncMock(return_value=list(newest_first))
+        mock_collection.find.return_value = mock_cursor
+
+        context = await chat_history_service.get_context("session123", limit=3)
+
+        # Newest messages are selected via DESCENDING sort + limit.
+        mock_cursor.sort.assert_called_once_with("created_at", DESCENDING)
+        mock_cursor.limit.assert_called_once_with(3)
+
+        # Returned to the LLM oldest -> newest (reversed from the DESCENDING result).
+        assert [m["content"] for m in context] == ["msg 13", "msg 14", "msg 15"]
 
     @pytest.mark.asyncio
     async def test_get_message_count(self, chat_history_service, mock_collection):
@@ -167,6 +206,46 @@ class TestCognitiveEnginePublicAPI:
         assert engine.app_slug == "test_app"
         assert engine.ltm == mock_memory_service
         assert engine.llm_service == mock_llm_service
+
+    def test_build_chat_result_threads_stm_summary(self):
+        """Regression: result['stm_summary'] must reflect the summary used, not always be None."""
+        mock_memory_service = MagicMock()
+        mock_memory_service._neuroplasticity_engine = None
+        mock_chat_collection = MagicMock()
+
+        with (
+            patch("mdb_engine.memory.chat_history.ASCENDING", 1),
+            patch("mdb_engine.memory.chat_history.DESCENDING", -1),
+        ):
+            engine = CognitiveEngine(
+                app_slug="test_app",
+                memory_service=mock_memory_service,
+                chat_history_collection=mock_chat_collection,
+                enable_context_engineering=True,
+            )
+
+        prompt_meta = {
+            "persona_used": {"role": "assistant"},
+            "entity_facts": {"Name": "Alice"},
+            "dynamic_instructions": "Be concise.",
+            "system_prompt": "...",
+            "stm_summary": "Earlier the user discussed project timelines.",
+        }
+
+        result = engine._build_chat_result(
+            ai_response="hi",
+            stm_context=[],
+            relevant_memories=[],
+            graph_results=None,
+            skills_results=[],
+            session_message_count=3,
+            memories_stored=[],
+            prompt_meta=prompt_meta,
+            user_id="user_1",
+            adaptations=[],
+        )
+
+        assert result["stm_summary"] == "Earlier the user discussed project timelines."
 
     # --- Collection type safety tests (regression prevention) ---
 

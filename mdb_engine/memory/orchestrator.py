@@ -24,6 +24,7 @@ from .base import BaseMemoryService
 from .chat_history import ChatHistoryService
 from .cognitive import CognitiveMemoryService, CognitiveMemoryServiceError
 from .context_engineering import ContextEngineer
+from .procedural import ProceduralMemory
 
 try:
     from pymongo import ASCENDING
@@ -793,8 +794,6 @@ class CognitiveEngine:
             logger.info("%d prospective triggers fired", len(triggers))
 
         # Skills
-        from .procedural import ProceduralMemory
-
         skills_text = ProceduralMemory.format_for_prompt(skills) if skills else ""
 
         # Graph (deduplicate + format)
@@ -948,6 +947,9 @@ class CognitiveEngine:
             "entity_facts": {},
             "dynamic_instructions": "",
             "system_prompt": "",
+            # Surface the STM summary actually used so callers can read it from
+            # the chat() result (previously this key was never populated).
+            "stm_summary": formatted.stm_summary,
         }
 
         if system_prompt_override:
@@ -1189,8 +1191,9 @@ class CognitiveEngine:
             logger.warning("No LLM service available for summarization")
             return None
 
-        # Get oldest messages
-        query = {"session_id": session_id, "user_id": str(user_id)}
+        # Get oldest messages (excluding the stm_summary cache doc, which must
+        # not be fed into the summarizer nor deleted by the cleanup below).
+        query = {"session_id": session_id, "user_id": str(user_id), "type": {"$ne": "stm_summary"}}
         cursor = self.stm.collection.find(query).sort("created_at", ASCENDING).limit(messages_to_summarize)
         old_messages = await cursor.to_list(length=messages_to_summarize)
 

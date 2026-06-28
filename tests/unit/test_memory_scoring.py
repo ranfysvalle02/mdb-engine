@@ -456,8 +456,8 @@ class TestSTMSummaryCache:
         )
         mock_collection.update_one.assert_called_once()
         call_args = mock_collection.update_one.call_args
-        # Check filter
-        assert call_args[0][0] == {"session_id": "session_123", "type": "stm_summary"}
+        # Check filter (scoped by user_id so summaries never leak across users)
+        assert call_args[0][0] == {"session_id": "session_123", "type": "stm_summary", "user_id": "user_456"}
         # Check upsert=True
         assert call_args[1]["upsert"] is True
         # Check stored doc has summary
@@ -491,6 +491,74 @@ class TestSTMSummaryCache:
         count_call = mock_collection.count_documents.call_args[0][0]
         assert count_call.get("type") == {"$ne": "stm_summary"}
         assert result == 15
+
+    @pytest.mark.asyncio
+    async def test_get_session_count_excludes_summary_docs(self, chat_service, mock_collection):
+        """get_session_count() delegates to get_message_count and excludes summary docs."""
+        mock_collection.count_documents = AsyncMock(return_value=7)
+
+        result = await chat_service.get_session_count("session_123", user_id="user_1")
+
+        count_call = mock_collection.count_documents.call_args[0][0]
+        assert count_call.get("type") == {"$ne": "stm_summary"}
+        assert count_call.get("user_id") == "user_1"
+        assert result == 7
+
+    @pytest.mark.asyncio
+    async def test_get_cached_summary_scopes_by_user_id(self, chat_service, mock_collection):
+        """get_cached_summary(user_id=...) must scope the lookup to that user."""
+        mock_collection.find_one = AsyncMock(return_value=None)
+
+        await chat_service.get_cached_summary("session_123", user_id="user_1")
+
+        find_query = mock_collection.find_one.call_args[0][0]
+        assert find_query.get("session_id") == "session_123"
+        assert find_query.get("type") == "stm_summary"
+        assert find_query.get("user_id") == "user_1"
+
+    @pytest.mark.asyncio
+    async def test_get_cached_summary_unscoped_when_no_user(self, chat_service, mock_collection):
+        """Without user_id the lookup stays backwards-compatible (no user_id filter)."""
+        mock_collection.find_one = AsyncMock(return_value=None)
+
+        await chat_service.get_cached_summary("session_123")
+
+        find_query = mock_collection.find_one.call_args[0][0]
+        assert "user_id" not in find_query
+
+    @pytest.mark.asyncio
+    async def test_store_cached_summary_scopes_cache_key_by_user_id(self, chat_service, mock_collection):
+        """store_cached_summary upsert key must include user_id so get/store stay aligned."""
+        mock_collection.update_one = AsyncMock()
+
+        await chat_service.store_cached_summary(
+            session_id="session_123",
+            summary_text="A summary.",
+            message_count=12,
+            user_id="user_1",
+        )
+
+        upsert_key = mock_collection.update_one.call_args[0][0]
+        assert upsert_key == {"session_id": "session_123", "type": "stm_summary", "user_id": "user_1"}
+
+    @pytest.mark.asyncio
+    async def test_delete_old_messages_excludes_summary_doc(self, chat_service, mock_collection):
+        """delete_old_messages must never keep or delete the stm_summary cache doc."""
+        mock_cursor = MagicMock()
+        mock_cursor.sort.return_value = mock_cursor
+        mock_cursor.limit.return_value = mock_cursor
+        mock_cursor.to_list = AsyncMock(return_value=[{"_id": "keep1"}, {"_id": "keep2"}])
+        mock_collection.find = MagicMock(return_value=mock_cursor)
+        mock_collection.delete_many = AsyncMock(return_value=MagicMock(deleted_count=3))
+
+        await chat_service.delete_old_messages("session_123", keep_count=2, user_id="user_1")
+
+        keep_query = mock_collection.find.call_args[0][0]
+        assert keep_query.get("type") == {"$ne": "stm_summary"}
+
+        delete_query = mock_collection.delete_many.call_args[0][0]
+        assert delete_query.get("type") == {"$ne": "stm_summary"}
+        assert delete_query.get("_id") == {"$nin": ["keep1", "keep2"]}
 
     @pytest.mark.asyncio
     async def test_optimize_stm_cache_hit(self):

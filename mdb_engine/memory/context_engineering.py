@@ -49,7 +49,9 @@ class ContextEngineer:
         self._profile_service = profile_service
         # Copy config values these methods reference
         self.enable_context_engineering = config.get("enable_context_engineering", True)
-        self.stm_raw_window = config.get("stm_raw_window", 4)
+        # Default aligned with CognitiveEngine.stm_raw_window (5) so a standalone
+        # ContextEngineer behaves identically to one built by the orchestrator.
+        self.stm_raw_window = config.get("stm_raw_window", 5)
         self.enable_entity_extraction = config.get("enable_entity_extraction", True)
         self.enable_dynamic_persona = config.get("enable_dynamic_persona", True)
         self.graph_min_hop_distance = config.get("graph_min_hop_distance", 0)
@@ -279,7 +281,7 @@ class ContextEngineer:
         expertise = entity_facts.get("Expertise", "").lower()
         if expertise == "expert":
             instructions.append(
-                "User is an expert. Be concise and technical. Skip basic explanations. " "Assume advanced knowledge."
+                "User is an expert. Be concise and technical. Skip basic explanations. Assume advanced knowledge."
             )
         elif expertise == "beginner":
             instructions.append(
@@ -391,9 +393,9 @@ class ContextEngineer:
         if not older_messages:
             return (recent_messages, None)
 
-        # Check cached summary
+        # Check cached summary (scoped by user to avoid cross-user leakage)
         current_count = len(stm_context)
-        cached = await self.stm.get_cached_summary(session_id)
+        cached = await self.stm.get_cached_summary(session_id, user_id)
 
         if cached is not None:
             cached_summary, cached_count = cached
@@ -878,7 +880,7 @@ class ContextEngineer:
 
             except (TypeError, ValueError, AttributeError) as exc:
                 logger.warning(
-                    "TokenBudget assembly failed (%s); " "falling back to unbounded prompt assembly",
+                    "TokenBudget assembly failed (%s); falling back to unbounded prompt assembly",
                     exc,
                 )
 

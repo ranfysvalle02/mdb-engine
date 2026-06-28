@@ -8,6 +8,7 @@ AsyncIOMotorCollection without thread-pool wrappers.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
@@ -71,48 +72,60 @@ class ChatHistoryService:
         self.collection = collection
         self._collection_name = collection_name
         self._indexes_ensured = False
+        # Guards the lazy index-creation path so concurrent first-callers don't
+        # all race into create_index() (idempotent in Mongo, but wasteful).
+        self._ready_lock = asyncio.Lock()
         logger.info(f"Chat History Service using MDB-Engine collection: {collection_name}")
 
     async def _ensure_ready(self) -> None:
         """Lazily create indexes on first operation (not in __init__)."""
         if self._indexes_ensured:
             return
-        try:
-            await self.collection.create_index([("session_id", ASCENDING), ("created_at", DESCENDING)])
-            await self.collection.create_index([("user_id", ASCENDING), ("created_at", DESCENDING)])
-
-            # TTL index for working memory (24 hours default)
+        async with self._ready_lock:
+            # Double-checked: another coroutine may have finished while we waited.
+            if self._indexes_ensured:
+                return
             try:
-                ttl_seconds = 24 * 3600
-                await self.collection.create_index(
-                    [("created_at", ASCENDING)],
-                    name="working_memory_ttl_idx",
-                    expireAfterSeconds=ttl_seconds,
-                )
-            except (PyMongoError, AttributeError, TypeError) as e:
-                logger.debug(f"TTL index creation: {e}")
+                await self.collection.create_index([("session_id", ASCENDING), ("created_at", DESCENDING)])
+                await self.collection.create_index([("user_id", ASCENDING), ("created_at", DESCENDING)])
 
-            logger.info(f"Chat history indexes created for {self._collection_name}")
-        except PyMongoError as e:
-            logger.warning(f"Failed to create chat history indexes: {e}")
-        finally:
-            self._indexes_ensured = True
+                # TTL index for working memory (24 hours default)
+                try:
+                    ttl_seconds = 24 * 3600
+                    await self.collection.create_index(
+                        [("created_at", ASCENDING)],
+                        name="working_memory_ttl_idx",
+                        expireAfterSeconds=ttl_seconds,
+                    )
+                except (PyMongoError, AttributeError, TypeError) as e:
+                    logger.debug(f"TTL index creation: {e}")
+
+                logger.info(f"Chat history indexes created for {self._collection_name}")
+            except PyMongoError as e:
+                logger.warning(f"Failed to create chat history indexes: {e}")
+            finally:
+                self._indexes_ensured = True
 
     # --- STM Summary Cache ---
 
-    async def get_cached_summary(self, session_id: str) -> tuple[str, int] | None:
+    async def get_cached_summary(self, session_id: str, user_id: str | None = None) -> tuple[str, int] | None:
         """
         Look up a cached STM summary for a session.
 
         Args:
             session_id: Session identifier
+            user_id: Optional user ID. When provided, the lookup is scoped to that
+                user so a summary can never leak across users sharing a session_id.
 
         Returns:
             Tuple of (summary_text, message_count_at_time_of_summary) or None
         """
         await self._ensure_ready()
+        query: dict[str, Any] = {"session_id": session_id, "type": "stm_summary"}
+        if user_id:
+            query["user_id"] = str(user_id)
         doc = await self.collection.find_one(
-            {"session_id": session_id, "type": "stm_summary"},
+            query,
             sort=[("created_at", DESCENDING)],
         )
         if doc and doc.get("summary"):
@@ -133,7 +146,8 @@ class ChatHistoryService:
             session_id: Session identifier
             summary_text: The generated summary
             message_count: Number of messages at time of summary generation
-            user_id: Optional user ID
+            user_id: Optional user ID. When provided, the cache key is scoped to
+                the user so each user keeps an independent summary per session.
         """
         await self._ensure_ready()
         doc = {
@@ -143,11 +157,14 @@ class ChatHistoryService:
             "message_count": message_count,
             "created_at": datetime.now(timezone.utc),
         }
+        # Keep the upsert key aligned with get_cached_summary's scoping.
+        cache_key: dict[str, Any] = {"session_id": session_id, "type": "stm_summary"}
         if user_id:
             doc["user_id"] = str(user_id)
+            cache_key["user_id"] = str(user_id)
 
         await self.collection.update_one(
-            {"session_id": session_id, "type": "stm_summary"},
+            cache_key,
             {"$set": doc},
             upsert=True,
         )
@@ -231,8 +248,13 @@ class ChatHistoryService:
         if user_id:
             query["user_id"] = str(user_id)
 
-        cursor = self.collection.find(query).sort("created_at", ASCENDING).limit(limit)
+        # Sort DESCENDING + limit to select the NEWEST messages, then reverse
+        # so the LLM receives them in chronological order (oldest -> newest).
+        # Sorting ASCENDING before limit would return the OLDEST messages and
+        # drop recent context once a session exceeds ``limit`` messages.
+        cursor = self.collection.find(query).sort("created_at", DESCENDING).limit(limit)
         history = await cursor.to_list(length=limit)
+        history.reverse()
 
         return [{"role": h["role"], "content": h["content"]} for h in history]
 
@@ -265,12 +287,11 @@ class ChatHistoryService:
         return await cursor.to_list(length=limit)
 
     async def get_session_count(self, session_id: str, user_id: str | None = None) -> int:
-        """Get the number of messages in a session (excludes cache docs)."""
-        await self._ensure_ready()
-        query: dict[str, Any] = {"session_id": session_id, "type": {"$ne": "stm_summary"}}
-        if user_id:
-            query["user_id"] = str(user_id)
-        return await self.collection.count_documents(query)
+        """Get the number of messages in a session (excludes cache docs).
+
+        Alias for :meth:`get_message_count`; kept for backwards compatibility.
+        """
+        return await self.get_message_count(session_id, user_id)
 
     async def clear_session(self, session_id: str, user_id: str | None = None) -> None:
         """
@@ -307,7 +328,9 @@ class ChatHistoryService:
             Number of messages deleted
         """
         await self._ensure_ready()
-        query: dict[str, Any] = {"session_id": session_id}
+        # Never let the stm_summary cache doc occupy a "keep" slot or be deleted
+        # as if it were a real message.
+        query: dict[str, Any] = {"session_id": session_id, "type": {"$ne": "stm_summary"}}
         if user_id:
             query["user_id"] = str(user_id)
 
@@ -316,8 +339,12 @@ class ChatHistoryService:
         keep_messages = await cursor.to_list(length=keep_count)
         keep_ids = [msg["_id"] for msg in keep_messages]
 
-        # Delete all others
-        delete_query: dict[str, Any] = {"session_id": session_id, "_id": {"$nin": keep_ids}}
+        # Delete all others (excluding the summary cache doc)
+        delete_query: dict[str, Any] = {
+            "session_id": session_id,
+            "type": {"$ne": "stm_summary"},
+            "_id": {"$nin": keep_ids},
+        }
         if user_id:
             delete_query["user_id"] = str(user_id)
 
